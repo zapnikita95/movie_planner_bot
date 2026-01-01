@@ -3183,10 +3183,26 @@ def handle_message(message):
     if message.reply_to_message and message.from_user.id in user_settings_state:
         state = user_settings_state.get(message.from_user.id, {})
         if state.get('settings_msg_id') and message.reply_to_message.message_id == state.get('settings_msg_id'):
-            logger.debug(f"[HANDLER] Пропускаем сообщение - это реплай на settings для пользователя {message.from_user.id}")
+            logger.info(f"[HANDLER] Пропускаем сообщение - это реплай на settings для пользователя {message.from_user.id}, message_id={message.reply_to_message.message_id}")
             return
     
+    # Проверяем, что в entities есть ссылки (url), иначе пропускаем
     if not message.entities:
+        return
+    
+    has_url = False
+    for entity in message.entities:
+        if entity.type == 'url':
+            has_url = True
+            break
+    
+    if not has_url:
+        # Если нет ссылок, но есть реплай на settings, пропускаем
+        if message.reply_to_message and message.from_user.id in user_settings_state:
+            state = user_settings_state.get(message.from_user.id, {})
+            if state.get('settings_msg_id') and message.reply_to_message.message_id == state.get('settings_msg_id'):
+                logger.info(f"[HANDLER] Пропускаем сообщение без ссылок - это реплай на settings для пользователя {message.from_user.id}")
+                return
         return
     added_count = 0
     links = []
