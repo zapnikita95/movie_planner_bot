@@ -2179,7 +2179,11 @@ def settings_command(message):
         markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
         
         settings_msg = bot.reply_to(message, f"⚙️ <b>Настройки реакций</b>\n\nТекущие реакции для просмотренных: {current}\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
-        user_settings_state[user_id] = {'waiting_action': True, 'settings_msg_id': settings_msg.message_id}
+        user_settings_state[user_id] = {
+            'waiting_action': True, 
+            'settings_msg_id': settings_msg.message_id,
+            'chat_id': chat_id
+        }
         logger.info(f"Настройки открыты для пользователя {user_id}, message_id: {settings_msg.message_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
@@ -2230,21 +2234,31 @@ def handle_settings_callback(call):
         except:
             pass
 
-@bot.message_handler(func=lambda m: user_settings_state.get(m.from_user.id, {}).get('adding_reactions'))
+# Обработка ответа с эмодзи на сообщение /settings
+@bot.message_handler(func=lambda message: (
+    message.reply_to_message and 
+    message.from_user.id in user_settings_state and 
+    user_settings_state[message.from_user.id].get('adding_reactions') and
+    message.reply_to_message.message_id == user_settings_state[message.from_user.id].get('settings_msg_id')
+))
 def add_reactions(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     
-    # Проверяем, что это ответ на сообщение settings
+    # Получаем состояние
     state = user_settings_state.get(user_id, {})
     settings_msg_id = state.get('settings_msg_id')
     action = state.get('action', 'replace')  # По умолчанию replace
     
+    logger.info(f"[SETTINGS] add_reactions вызван для user_id={user_id}, reply_to_message={message.reply_to_message is not None}, settings_msg_id={settings_msg_id}, action={action}")
+    
     if not message.reply_to_message:
+        logger.warning(f"[SETTINGS] Нет reply_to_message для user_id={user_id}")
         bot.reply_to(message, "⚠️ Пожалуйста, отправьте эмодзи в ответ на сообщение бота о настройках.")
         return
     
     if settings_msg_id and message.reply_to_message.message_id != settings_msg_id:
+        logger.warning(f"[SETTINGS] Несоответствие message_id: reply_to={message.reply_to_message.message_id}, expected={settings_msg_id}")
         bot.reply_to(message, "⚠️ Пожалуйста, отправьте эмодзи в ответ на сообщение бота о настройках.")
         return
     
