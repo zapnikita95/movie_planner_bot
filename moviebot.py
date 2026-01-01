@@ -5991,6 +5991,14 @@ def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
+        
+        # Логируем информацию о реплае для отладки
+        if update.message and update.message.reply_to_message:
+            logger.info(f"[WEBHOOK] Update содержит reply_to_message: message_id={update.message.reply_to_message.message_id}")
+        elif update.message:
+            logger.info(f"[WEBHOOK] Update.message есть, но reply_to_message отсутствует")
+            logger.info(f"[WEBHOOK] message.text='{update.message.text[:100] if update.message.text else None}'")
+        
         bot.process_new_updates([update])
         return ''
     else:
