@@ -2221,15 +2221,14 @@ def random_genre(call):
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
             
             try:
-                bot.edit_message_text("🎬 Выберите жанр:", call.message.chat.id, call.message.message_id, reply_markup=markup)
-                bot.answer_callback_query(call.id)  # Подтверждаем нажатие кнопки
+                bot.edit_message_text("🎬 Выберите жанр:", chat_id, call.message.message_id, reply_markup=markup)
                 logger.info(f"[RANDOM] Переход к выбору жанра для user_id={user_id}")
             except Exception as e:
-                logger.error(f"[RANDOM] Ошибка при переходе к выбору жанра: {e}", exc_info=True)
+                logger.error(f"[RANDOM] Ошибка при редактировании сообщения (выбор жанра): {e}", exc_info=True)
                 try:
-                    bot.answer_callback_query(call.id, "Ошибка при переходе к выбору жанра", show_alert=True)
-                except:
-                    pass
+                    bot.send_message(chat_id, "🎬 Выберите жанр:", reply_markup=markup)
+                except Exception as send_error:
+                    logger.error(f"[RANDOM] Ошибка при отправке сообщения: {send_error}", exc_info=True)
         except Exception as e:
             logger.error(f"[RANDOM] Критическая ошибка в random_genre: {e}", exc_info=True)
             try:
