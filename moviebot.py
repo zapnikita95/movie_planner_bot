@@ -3015,7 +3015,8 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
     if 'сегодня' in day_lower:
         plan_date = now.date()
         if plan_type == 'home':
-            hour = 19 if now.weekday() == 4 else 10
+            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+            hour = 19 if now.weekday() < 5 else 10
         else:
             hour = 9
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
