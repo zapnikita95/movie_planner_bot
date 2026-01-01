@@ -3516,14 +3516,10 @@ if IS_RENDER:
     port = int(PORT or 10000)
     logger.info(f"Запуск Flask сервера на порту {port} (IS_RENDER={IS_RENDER}, PORT={PORT})")
     
-    # Запускаем Flask в отдельном потоке, чтобы не блокировать выполнение
-    import threading
-    def run_flask():
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-    
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    logger.info(f"Flask сервер запущен в отдельном потоке на порту {port}")
+    # Запускаем Flask сервер (блокирующий вызов, чтобы скрипт не завершился)
+    # На Render это будет основной процесс
+    logger.info(f"Flask сервер запускается на 0.0.0.0:{port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
     if IS_RENDER:
