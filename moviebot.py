@@ -1603,7 +1603,17 @@ def handle_random_plan_reply(message):
         logger.info(f"[RANDOM PLAN] plan_type={plan_type}")
         
         if not plan_type:
-            bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+            error_msg = bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+            # Сохраняем состояние для обработки ответа
+            if error_msg:
+                plan_error_messages[error_msg.message_id] = {
+                    'user_id': user_id,
+                    'chat_id': chat_id,
+                    'link': link,
+                    'plan_type': None,
+                    'day_or_date': None,
+                    'missing': 'plan_type'
+                }
             return
         
         # Парсим дату/день недели используя ту же логику, что и в plan_handler
@@ -1637,8 +1647,18 @@ def handle_random_plan_reply(message):
                         logger.info(f"[RANDOM PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         if not day_or_date:
-            bot.reply_to(message, "Не указан день/дата. Для дома укажите день недели (пн, вт, ср, чт, пт, сб, вс или 'в сб'), для кино - день недели или дату (15 января).")
+            error_msg = bot.reply_to(message, "Не указан день/дата. Для дома укажите день недели (пн, вт, ср, чт, пт, сб, вс или 'в сб'), для кино - день недели или дату (15 января).")
             logger.warning(f"[RANDOM PLAN] Day/date not found in text: '{text}'")
+            # Сохраняем состояние для обработки ответа
+            if error_msg:
+                plan_error_messages[error_msg.message_id] = {
+                    'user_id': user_id,
+                    'chat_id': chat_id,
+                    'link': link,
+                    'plan_type': plan_type,
+                    'day_or_date': None,
+                    'missing': 'day_or_date'
+                }
             return
         
         logger.info(f"[RANDOM PLAN] Parsed: plan_type={plan_type}, day_or_date={day_or_date}")
@@ -3687,6 +3707,110 @@ def get_plan_day_or_date(message):
         )
 
         del user_plan_state[user_id]
+
+# Обработка ответов на сообщения об ошибках планирования
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in plan_error_messages)
+def handle_plan_error_reply(message):
+    """Обрабатывает ответы на сообщения об ошибках планирования для дополнения недостающих данных"""
+    try:
+        reply_msg_id = message.reply_to_message.message_id
+        error_data = plan_error_messages.get(reply_msg_id)
+        
+        if not error_data:
+            return
+        
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        # Проверяем, что это тот же пользователь
+        if error_data['user_id'] != user_id:
+            return
+        
+        text = (message.text or '').strip().lower()
+        logger.info(f"[PLAN ERROR REPLY] Reply received: text='{text}', missing={error_data['missing']}")
+        
+        link = error_data['link']
+        plan_type = error_data['plan_type']
+        day_or_date = error_data['day_or_date']
+        missing = error_data['missing']
+        
+        # Дополняем недостающие данные
+        if missing == 'plan_type':
+            # Определяем тип из ответа
+            if 'дома' in text:
+                plan_type = 'home'
+            elif 'в кино' in text or 'кино' in text:
+                plan_type = 'cinema'
+            else:
+                # Пробуем определить по контексту
+                if 'кино' in text:
+                    plan_type = 'cinema'
+                else:
+                    plan_type = 'home'  # По умолчанию
+            
+            if not plan_type:
+                bot.reply_to(message, "Не удалось определить тип просмотра. Укажите 'дома' или 'в кино'.")
+                return
+            
+            logger.info(f"[PLAN ERROR REPLY] plan_type determined: {plan_type}")
+        
+        elif missing == 'day_or_date':
+            # Парсим дату/день недели из ответа
+            # Сначала ищем день недели
+            sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
+            for phrase in sorted_phrases:
+                if phrase in text:
+                    day_or_date = phrase
+                    break
+            
+            # Если день недели не найден, ищем дату
+            if not day_or_date:
+                # Пробуем разные форматы даты
+                date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
+                if date_match:
+                    day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+                else:
+                    # Формат "15.01", "15/01", "15.01.25", "15.01.2025"
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
+            
+            if not day_or_date:
+                bot.reply_to(message, "Не удалось определить день/дату. Укажите день недели или дату.")
+                return
+            
+            logger.info(f"[PLAN ERROR REPLY] day_or_date determined: {day_or_date}")
+        
+        # Теперь у нас есть все данные, пытаемся планировать
+        if link and plan_type and day_or_date:
+            # Получаем время сообщения в UTC
+            message_date_utc = None
+            if message.date:
+                message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc)
+            
+            # Удаляем из plan_error_messages
+            del plan_error_messages[reply_msg_id]
+            
+            # Вызываем process_plan
+            result = process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_utc)
+            if result == 'NEEDS_TIMEZONE':
+                show_timezone_selection(chat_id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+            elif not result:
+                bot.reply_to(message, "❌ Ошибка при планировании. Проверьте формат даты.")
+        else:
+            logger.warning(f"[PLAN ERROR REPLY] Still missing data: link={bool(link)}, plan_type={plan_type}, day_or_date={day_or_date}")
+    
+    except Exception as e:
+        logger.error(f"[PLAN ERROR REPLY] Error processing error reply: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Ошибка при обработке ответа.")
+        except:
+            pass
 
 # /schedule — список запланированных просмотров
 @bot.message_handler(commands=['schedule'])
