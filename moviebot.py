@@ -224,20 +224,48 @@ try:
 except Exception as e:
     logger.debug(f"Миграция cinema_votes: {e}")
 
-# Пересоздаём уникальные индексы после миграции (на случай, если они были потеряны)
+# Ключевой блок: очистка дубликатов и создание уникального индекса
 try:
-    # Удаляем старый индекс, если он существует
+    # Удаляем старые индексы и constraints, если они существуют
     cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_key')
     cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_idx')
-    # Создаём уникальный индекс заново
+    cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_unique')
+    try:
+        cursor.execute('ALTER TABLE movies DROP CONSTRAINT IF EXISTS movies_chat_id_kp_id_unique')
+    except:
+        pass  # Constraint может не существовать
+    
+    # Удаляем дубликаты, оставляя только одну запись (с наименьшим id)
+    cursor.execute("""
+        DELETE FROM movies a USING (
+            SELECT MIN(id) as keep_id, chat_id, kp_id
+            FROM movies 
+            GROUP BY chat_id, kp_id 
+            HAVING COUNT(*) > 1
+        ) b
+        WHERE a.chat_id = b.chat_id AND a.kp_id = b.kp_id AND a.id != b.keep_id
+    """)
+    deleted_count = cursor.rowcount
+    if deleted_count > 0:
+        logger.info(f"Удалено дубликатов фильмов: {deleted_count}")
+        conn.commit()
+    
+    # Теперь безопасно создаём уникальный индекс
+    # Используем обычный CREATE UNIQUE INDEX (CONCURRENTLY не работает в транзакции)
     cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS movies_chat_id_kp_id_unique ON movies (chat_id, kp_id)')
-    logger.info("Уникальный индекс movies(chat_id, kp_id) пересоздан")
+    logger.info("Уникальный индекс на movies(chat_id, kp_id) успешно создан")
+    conn.commit()
 except Exception as e:
-    logger.warning(f"Ошибка при пересоздании уникального индекса movies: {e}")
-    # Если индекс не создался, пробуем создать constraint напрямую
+    logger.warning(f"Ошибка при очистке дубликатов или создании уникального индекса: {e}", exc_info=True)
+    try:
+        conn.rollback()
+    except:
+        pass
+    # Пробуем создать constraint как fallback
     try:
         cursor.execute('ALTER TABLE movies ADD CONSTRAINT movies_chat_id_kp_id_unique UNIQUE (chat_id, kp_id)')
-        logger.info("Уникальный constraint movies(chat_id, kp_id) создан")
+        conn.commit()
+        logger.info("Уникальный constraint movies(chat_id, kp_id) создан как fallback")
     except Exception as e2:
         logger.debug(f"Constraint уже существует или ошибка: {e2}")
 
@@ -659,43 +687,49 @@ def add_and_announce(link, chat_id):
     inserted = False
     try:
         with db_lock:
+            # Проверяем, не в состоянии ли ошибки транзакция
             try:
-                # Проверяем, не в состоянии ли ошибки транзакция
-                try:
-                    cursor.execute('SELECT 1')
-                    cursor.fetchone()
-                except:
-                    # Если транзакция в состоянии ошибки, откатываем
-                    conn.rollback()
-                    logger.debug("Транзакция была в состоянии ошибки, выполнен rollback")
-                
-                # Проверяем, существует ли фильм до вставки
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
-                exists_before = cursor.fetchone() is not None
-                
-                cursor.execute('''
-                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
-                conn.commit()
-                
-                # Фильм был добавлен только если его не было до вставки
-                inserted = not exists_before
-                logger.info(f"Попытка вставки фильма: exists_before={exists_before}, rowcount={cursor.rowcount}, inserted={inserted}, kp_id={info['kp_id']}, title={info['title']}")
-            except Exception as db_error:
+                cursor.execute('SELECT 1')
+                cursor.fetchone()
+            except:
+                # Если транзакция в состоянии ошибки, откатываем
                 conn.rollback()
-                logger.error(f"Ошибка при добавлении фильма в БД: {db_error}", exc_info=True)
-                # Продолжаем выполнение, чтобы отправить сообщение даже при ошибке БД
-                inserted = True  # Считаем, что нужно отправить сообщение
+                logger.debug("Транзакция была в состоянии ошибки, выполнен rollback")
+            
+            # Проверяем, существует ли фильм до вставки
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
+            exists_before = cursor.fetchone() is not None
+            
+            if exists_before:
+                logger.info(f"Фильм с kp_id={info['kp_id']} уже существует в базе, пропускаем вставку")
+                inserted = False
+            else:
+                try:
+                    cursor.execute('''
+                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                    ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                    conn.commit()
+                    inserted = True
+                    logger.info(f"Фильм успешно добавлен в БД: kp_id={info['kp_id']}, title={info['title']}")
+                except Exception as db_error:
+                    conn.rollback()
+                    logger.error(f"Ошибка при добавлении фильма в БД: {db_error}", exc_info=True)
+                    inserted = False
     except Exception as e:
         logger.error(f"Критическая ошибка при работе с БД: {e}", exc_info=True)
-        # Продолжаем выполнение, чтобы отправить сообщение
-        inserted = True  # Отправляем сообщение даже при ошибке
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
+        inserted = False
     
-    logger.info(f"Готовимся отправить сообщение: inserted={inserted}, title={info['title']}")
+    logger.info(f"Результат вставки: inserted={inserted}, title={info['title']}")
     
     if inserted:
+        # Только если реально добавили в БД — отправляем сообщение и сохраняем message_id
         text = f"🎬 <b>Добавлено в базу!</b>\n\n"
         text += f"<b>{info['title']}</b> ({info['year'] or '—'})\n"
         text += f"<i>Режиссёр:</i> {info['director']}\n"
@@ -707,14 +741,20 @@ def add_and_announce(link, chat_id):
         try:
             logger.info(f"Отправляем сообщение в чат {chat_id}")
             msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
-            bot_messages[msg.message_id] = link  # запоминаем для реакции
-            logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}")
+            # Только если сообщение отправлено успешно и фильм добавлен в БД — сохраняем для реакций
+            bot_messages[msg.message_id] = link
+            logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}, message_id={msg.message_id}")
             return True
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке сообщения: {e}", exc_info=True)
             return False
     else:
-        logger.warning(f"Фильм не был вставлен (возможно, уже существует), сообщение не отправляется")
+        # Фильм не был добавлен в БД — отправляем предупреждение
+        try:
+            bot.send_message(chat_id, "⚠️ Карточка не отправлена, фильм НЕ сохранён в базу из-за ошибки. Проверь логи.")
+            logger.warning(f"Фильм не был вставлен в БД, отправлено предупреждение пользователю")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке предупреждения: {e}", exc_info=True)
     return False
 
 # /start — приветственное сообщение
