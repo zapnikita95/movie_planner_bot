@@ -2211,13 +2211,23 @@ def add_reactions(message):
     chat_id = message.chat.id
     state = user_settings_state.get(user_id, {})
     
+    logger.info(f"[SETTINGS] add_reactions вызван для пользователя {user_id}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}, state={state}")
+    
     # Проверяем, что это реплай на системное сообщение settings
     if not state.get('settings_msg_id'):
+        logger.warning(f"[SETTINGS] Нет settings_msg_id в состоянии для пользователя {user_id}")
+        return
+    
+    if not message.reply_to_message:
+        logger.warning(f"[SETTINGS] Нет reply_to_message для пользователя {user_id}")
         return
     
     if message.reply_to_message.message_id != state.get('settings_msg_id'):
+        logger.warning(f"[SETTINGS] message_id не совпадает: ожидалось {state.get('settings_msg_id')}, получено {message.reply_to_message.message_id}")
         bot.reply_to(message, "❌ Пожалуйста, отправьте эмодзи в ответ на системное сообщение с настройками.")
         return
+    
+    logger.info(f"[SETTINGS] Начинаем обработку эмодзи для пользователя {user_id}, текст: {message.text[:50] if message.text else 'нет текста'}")
     
     action = state.get('action')
     if not action:
@@ -3165,6 +3175,14 @@ def clean_confirm_execute(message):
 @bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities)
 def handle_message(message):
     logger.info(f"[HANDLER] handle_message вызван для сообщения от {message.from_user.id}")
+    
+    # Пропускаем сообщения, которые являются реплаями на settings (обрабатываются add_reactions)
+    if message.reply_to_message and message.from_user.id in user_settings_state:
+        state = user_settings_state.get(message.from_user.id, {})
+        if state.get('settings_msg_id') and message.reply_to_message.message_id == state.get('settings_msg_id'):
+            logger.debug(f"[HANDLER] Пропускаем сообщение - это реплай на settings для пользователя {message.from_user.id}")
+            return
+    
     if not message.entities:
         return
     added_count = 0
