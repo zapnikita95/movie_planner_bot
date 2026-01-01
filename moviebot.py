@@ -3939,7 +3939,11 @@ def _show_genre_step(call, chat_id, user_id):
                 AND genres IS NOT NULL AND genres != '' AND genres != '—'
             """, (chat_id,))
             rows = cursor.fetchall()
-            genres = [row[0] if isinstance(row, dict) else row[0] for row in rows if row[0] and row[0].strip()]
+            genres = []
+            for row in rows:
+                genre = row.get('genre') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                if genre and genre.strip():
+                    genres.append(genre.strip())
             logger.info(f"[RANDOM] Genres found: {len(genres)}")
         
         markup = InlineKeyboardMarkup(row_width=2)
@@ -4012,7 +4016,11 @@ def _show_director_step(call, chat_id, user_id):
                 LIMIT 10
             """, (chat_id,))
             rows = cursor.fetchall()
-            directors = [row[0] if isinstance(row, dict) else row[0] for row in rows if row[0]]
+            directors = []
+            for row in rows:
+                director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                if director:
+                    directors.append(director)
             logger.info(f"[RANDOM] Directors found: {len(directors)}")
         
         markup = InlineKeyboardMarkup(row_width=2)
@@ -4073,33 +4081,24 @@ def _show_actor_step(call, chat_id, user_id):
     """Показывает шаг выбора актёра"""
     try:
         logger.info(f"[RANDOM] Showing actor step for user {user_id}")
+        # Берем топ актёров по частоте
+        actor_counts = {}
         with db_lock:
             cursor.execute("""
-                SELECT DISTINCT TRIM(UNNEST(string_to_array(actors, ', '))) as actor
-                FROM movies
-                WHERE chat_id = %s AND watched = 0 
-                AND actors IS NOT NULL AND actors != '' AND actors != '—'
+                SELECT actors FROM movies
+                WHERE chat_id = %s AND watched = 0 AND actors IS NOT NULL AND actors != '' AND actors != '—'
             """, (chat_id,))
-            rows = cursor.fetchall()
-            actors = [row[0] if isinstance(row, dict) else row[0] for row in rows if row[0] and row[0].strip()]
-            logger.info(f"[RANDOM] Actors found: {len(actors)}")
+            for row in cursor.fetchall():
+                actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                if actors_str:
+                    for actor in actors_str.split(', '):
+                        actor = actor.strip()
+                        if actor:
+                            actor_counts[actor] = actor_counts.get(actor, 0) + 1
+            logger.info(f"[RANDOM] Unique actors found: {len(actor_counts)}")
         
         markup = InlineKeyboardMarkup(row_width=2)
-        if actors:
-            # Берем топ актёров по частоте
-            actor_counts = {}
-            with db_lock:
-                cursor.execute("""
-                    SELECT actors FROM movies
-                    WHERE chat_id = %s AND watched = 0 AND actors IS NOT NULL AND actors != '' AND actors != '—'
-                """, (chat_id,))
-                for row in cursor.fetchall():
-                    actors_str = row[0] if isinstance(row, dict) else row[0]
-                    if actors_str:
-                        for actor in actors_str.split(', '):
-                            actor = actor.strip()
-                            if actor:
-                                actor_counts[actor] = actor_counts.get(actor, 0) + 1
+        if actor_counts:
             
             top_actors = sorted(actor_counts.items(), key=lambda x: x[1], reverse=True)[:10]
             for actor, _ in top_actors:
@@ -4244,10 +4243,17 @@ def _random_final(call, chat_id, user_id):
             return
         
         movie = random.choice(candidates)
-        film_id = movie[0] if isinstance(movie, tuple) else movie.get('id')
-        title = movie[1] if isinstance(movie, tuple) else movie.get('title')
-        year = movie[2] if isinstance(movie, tuple) else movie.get('year') or '—'
-        link = movie[7] if isinstance(movie, tuple) else movie.get('link')
+        if isinstance(movie, dict):
+            film_id = movie.get('id')
+            title = movie.get('title')
+            year = movie.get('year') or '—'
+            link = movie.get('link')
+        else:
+            # Кортеж
+            film_id = movie[0] if len(movie) > 0 else None
+            title = movie[1] if len(movie) > 1 else None
+            year = movie[2] if len(movie) > 2 else '—'
+            link = movie[7] if len(movie) > 7 else None
         
         text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
         
