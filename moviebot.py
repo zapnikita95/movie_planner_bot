@@ -3599,16 +3599,8 @@ def clean_confirm_execute(message):
 def handle_message(message):
     logger.info(f"[HANDLER] handle_message вызван для сообщения от {message.from_user.id}")
     
-    # Пропускаем сообщения, которые являются ответами на настройки
-    if message.reply_to_message and message.from_user.id in user_settings_state:
-        state = user_settings_state.get(message.from_user.id, {})
-        if state.get('adding_reactions') and message.reply_to_message.message_id == state.get('settings_msg_id'):
-            logger.info(f"[HANDLER] Пропускаем сообщение - это ответ на settings (должен обработать add_reactions)")
-            return
-        # Также пропускаем, если это просто ответ на settings (без режима)
-        if message.reply_to_message.message_id == state.get('settings_msg_id'):
-            logger.info(f"[HANDLER] Пропускаем сообщение - это ответ на settings (должен обработать handle_settings_reply)")
-            return
+    # НЕ пропускаем сообщения - пусть обработчики settings сами решают, обрабатывать ли их
+    # Это позволяет handle_settings_emojis корректно обработать ответы на settings
     
     if not message.entities:
         return
