@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv('BOT_TOKEN')
 bot = telebot.TeleBot(TOKEN)
+bot.remove_webhook()  # очищает старые webhook, если были
 
 # Токен Kinopoisk API
 KP_TOKEN = os.getenv('KP_TOKEN')
@@ -87,11 +88,16 @@ bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
 DATABASE_URL = os.getenv('DATABASE_URL')
 
 if not DATABASE_URL:
-    logger.error("DATABASE_URL не задан в environment variables!")
-    raise ValueError("Добавьте DATABASE_URL в Render environment")
+    logger.error("DATABASE_URL не задан! Бот не может подключиться к БД.")
+    raise ValueError("Добавьте DATABASE_URL в Render environment variables")
 
-conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-cursor = conn.cursor()
+try:
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    cursor = conn.cursor()
+    logger.info("Подключение к PostgreSQL успешно!")
+except Exception as e:
+    logger.error(f"Не удалось подключиться к БД: {e}")
+    raise
 # Блокировка для синхронизации доступа к БД из разных потоков
 db_lock = threading.Lock()
 cursor.execute('''
