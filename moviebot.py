@@ -3507,13 +3507,15 @@ def webhook():
     else:
         abort(403)
 
-@app.route('/')
+@app.route('/', methods=['GET'])
 def root():
+    logger.info("[ROOT] Root запрос получен")
     return jsonify({'status': 'ok', 'service': 'moviebot'}), 200
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok'}), 200
+    logger.info("[HEALTH] Health check запрос получен")
+    return jsonify({'status': 'ok', 'bot': 'running'}), 200
 
 # Логируем зарегистрированные маршруты после их определения
 logger.info(f"[DEBUG] Flask маршруты зарегистрированы: {[str(rule) for rule in app.url_map.iter_rules()]}")
