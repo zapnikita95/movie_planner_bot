@@ -198,7 +198,7 @@ conn.commit()
 def get_watched_emoji(chat_id):
     """Возвращает строку с эмодзи для отметки просмотренных (может быть несколько) для конкретного чата"""
     with db_lock:
-        cursor.execute('SELECT value FROM settings WHERE chat_id = %s AND key = "watched_emoji"', (chat_id,))
+        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
         row = cursor.fetchone()
         if row:
             return row[0]
@@ -214,7 +214,7 @@ def is_watched_emoji(reaction_emoji, chat_id):
 def get_watched_reactions(chat_id):
     """Возвращает словарь с обычными и кастомными эмодзи для реакций"""
     with db_lock:
-        cursor.execute('SELECT value FROM settings WHERE chat_id = %s AND key = "watched_reactions"', (chat_id,))
+        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
         row = cursor.fetchone()
         if row and row[0]:
             try:
@@ -895,7 +895,11 @@ def list_movies(message):
                 # Рассчитываем среднее из ratings
                 cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                 avg_result = cursor.fetchone()
-                avg = avg_result[0] if avg_result and avg_result[0] else None
+                # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+                if avg_result:
+                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else (avg_result[0] if len(avg_result) > 0 else None)
+                else:
+                    avg = None
                 rate_str = f" 🌟 {avg:.1f}/10" if avg else ""
                 text += f"• <b>{title}</b> ({year}){rate_str}\n{link}\n\n"
         
@@ -1521,7 +1525,7 @@ def settings_command(message):
         # Проверяем на reset
         if message.text and 'reset' in message.text.lower():
             with db_lock:
-                cursor.execute('DELETE FROM settings WHERE chat_id = %s AND key = "watched_reactions"', (chat_id,))
+                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
                 conn.commit()
             bot.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
             logger.info(f"Реакции сброшены для чата {chat_id}")
