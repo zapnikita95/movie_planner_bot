@@ -493,7 +493,7 @@ def start_cinema_votes():
             SELECT p.id, p.film_id, p.chat_id, m.title, m.link
             FROM plans p
             JOIN movies m ON p.film_id = m.id AND m.chat_id = p.chat_id
-            WHERE p.plan_type = 'cinema' AND datetime(p.plan_datetime) < NOW()
+            WHERE p.plan_type = 'cinema' AND p.plan_datetime < NOW()
         ''')
         rows = cursor.fetchall()
         
