@@ -3935,8 +3935,31 @@ def clean_action_choice(call):
         user_tz = get_user_timezone_or_default(user_id)
         
         markup = InlineKeyboardMarkup(row_width=1)
-        for plan_id, title, plan_type, plan_dt_value in plans:
+        for row in plans:
             try:
+                # Обрабатываем RealDictCursor (словари) или обычные кортежи
+                if isinstance(row, dict):
+                    plan_id = row.get('id')
+                    title = row.get('title')
+                    plan_type = row.get('plan_type')
+                    plan_dt_value = row.get('plan_datetime')
+                else:
+                    plan_id = row[0]
+                    title = row[1]
+                    plan_type = row[2]
+                    plan_dt_value = row[3] if len(row) > 3 else None
+                
+                if not plan_dt_value:
+                    logger.warning(f"[CLEAN] plan_datetime is None for plan {plan_id}")
+                    # Fallback без даты
+                    type_text = "🎦" if plan_type == 'cinema' else "🏠"
+                    button_text = f"{title} {type_text}"
+                    if len(button_text) > 60:
+                        short_title = title[:55] + "..."
+                        button_text = f"{short_title} {type_text}"
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_plan:{plan_id}"))
+                    continue
+                
                 # psycopg2 возвращает объект datetime для TIMESTAMP WITH TIME ZONE
                 if isinstance(plan_dt_value, datetime):
                     if plan_dt_value.tzinfo is None:
@@ -3969,14 +3992,18 @@ def clean_action_choice(call):
                 
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_plan:{plan_id}"))
             except Exception as e:
-                logger.error(f"[CLEAN] Ошибка форматирования плана {plan_id}: {e}", exc_info=True)
+                logger.error(f"[CLEAN] Ошибка форматирования плана: {e}", exc_info=True)
+                logger.error(f"[CLEAN] row data: {row}, plan_id={plan_id if 'plan_id' in locals() else 'N/A'}, title={title if 'title' in locals() else 'N/A'}")
                 # Fallback: показываем хотя бы название и тип в том же формате
-                type_text = "🎦" if plan_type == 'cinema' else "🏠"
-                button_text = f"{title} {type_text}"
-                if len(button_text) > 60:
-                    short_title = title[:55] + "..."
-                    button_text = f"{short_title} {type_text}"
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_plan:{plan_id}"))
+                if 'title' in locals() and 'plan_type' in locals():
+                    type_text = "🎦" if plan_type == 'cinema' else "🏠"
+                    button_text = f"{title} {type_text}"
+                    if len(button_text) > 60:
+                        short_title = title[:55] + "..."
+                        button_text = f"{short_title} {type_text}"
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_plan:{plan_id}"))
+                else:
+                    logger.error(f"[CLEAN] Не удалось создать кнопку для плана из-за отсутствия данных")
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
         
         bot.edit_message_text("📅 <b>Выберите план для удаления:</b>", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
