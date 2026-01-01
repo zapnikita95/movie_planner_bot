@@ -823,9 +823,12 @@ def add_and_announce(link, chat_id):
     if not info:
         logger.warning(f"Не удалось извлечь информацию о фильме: {link}")
         return False
+    
+    duplicate_data = None  # Для хранения данных о дубликате, найденном во второй проверке
 
     # Проверяем, существует ли уже фильм в этом чате по kp_id (не по ссылке, так как ссылки могут отличаться)
     kp_id = info.get('kp_id')
+    logger.info(f"[DUPLICATE CHECK] Проверяем фильм kp_id={kp_id}, title={info.get('title')}, chat_id={chat_id}")
     with db_lock:
         cursor.execute('SELECT id, title, watched, rating FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
         existing = cursor.fetchone()
@@ -835,6 +838,8 @@ def add_and_announce(link, chat_id):
         film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
         existing_title = existing.get('title') if isinstance(existing, dict) else existing[1]
         watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
+        
+        logger.info(f"[DUPLICATE FOUND] Фильм уже в базе: id={film_id}, title={existing_title}, watched={watched}")
         
         # Фильм уже есть в базе
         text = f"🎞️ <b>Уже добавлено ранее в базу!</b>\n\n"
@@ -857,10 +862,11 @@ def add_and_announce(link, chat_id):
         
         text += f"\n<a href='{link}'>Кинопоиск</a>"
         try:
+            logger.info(f"[DUPLICATE] Отправляем сообщение о дубликате в чат {chat_id}")
             bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
-            logger.info(f"Сообщение отправлено: фильм уже в базе - {existing_title}")
+            logger.info(f"✅ Сообщение отправлено: фильм уже в базе - {existing_title}")
         except Exception as e:
-            logger.error(f"Ошибка при отправке сообщения (фильм уже в базе): {e}", exc_info=True)
+            logger.error(f"❌ Ошибка при отправке сообщения (фильм уже в базе): {e}", exc_info=True)
         return False
     
     # Новый фильм - добавляем
@@ -877,13 +883,34 @@ def add_and_announce(link, chat_id):
                 logger.debug("Транзакция была в состоянии ошибки, выполнен rollback")
             
             # Проверяем, существует ли фильм до вставки
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
-            exists_before = cursor.fetchone() is not None
+            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
+            existing_row = cursor.fetchone()
+            exists_before = existing_row is not None
             
             if exists_before:
-                logger.info(f"Фильм с kp_id={info['kp_id']} уже существует в базе, пропускаем вставку")
+                logger.info(f"[DUPLICATE CHECK 2] Фильм с kp_id={info['kp_id']} уже существует в базе, отправляем сообщение о дубликате")
+                # Получаем данные о существующем фильме
+                film_id = existing_row.get('id') if isinstance(existing_row, dict) else existing_row[0]
+                existing_title = existing_row.get('title') if isinstance(existing_row, dict) else existing_row[1]
+                watched = existing_row.get('watched') if isinstance(existing_row, dict) else existing_row[2]
+                
+                # Получаем среднюю оценку, если фильм просмотрен
+                avg = None
+                if watched:
+                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                    avg_result = cursor.fetchone()
+                    avg = avg_result[0] if avg_result and avg_result[0] else None
+                
+                # Сохраняем данные для отправки сообщения после выхода из db_lock
+                duplicate_data = {
+                    'title': existing_title,
+                    'watched': watched,
+                    'avg': avg,
+                    'link': link
+                }
                 inserted = False
             else:
+                duplicate_data = None
                 try:
                     cursor.execute('''
                         INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
@@ -905,8 +932,33 @@ def add_and_announce(link, chat_id):
         except:
             pass
         inserted = False
+        duplicate_data = None
     
     logger.info(f"Результат вставки: inserted={inserted}, title={info['title']}")
+    
+    # Если фильм был найден как дубликат во второй проверке, отправляем сообщение
+    if not inserted and duplicate_data:
+        text = f"🎞️ <b>Уже добавлено ранее в базу!</b>\n\n"
+        text += f"<b>{duplicate_data['title']}</b>\n"
+        
+        if duplicate_data['watched']:
+            text += f"\n✅ <b>Просмотрено</b>\n"
+            if duplicate_data['avg']:
+                text += f"⭐ <b>Средняя оценка: {duplicate_data['avg']:.1f}/10</b>\n"
+            else:
+                text += f"⭐ <b>Оценка не указана</b>\n"
+        else:
+            text += f"\n⏳ <b>Ещё не просмотрено</b>\n"
+        
+        text += f"\n<a href='{duplicate_data['link']}'>Кинопоиск</a>"
+        
+        try:
+            logger.info(f"[DUPLICATE] Отправляем сообщение о дубликате (вторая проверка) в чат {chat_id}")
+            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            logger.info(f"✅ Сообщение отправлено: фильм уже в базе - {duplicate_data['title']}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка при отправке сообщения о дубликате: {e}", exc_info=True)
+        return False
     
     if inserted:
         # Только если реально добавили в БД — отправляем сообщение и сохраняем message_id
