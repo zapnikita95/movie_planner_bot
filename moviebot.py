@@ -90,7 +90,13 @@ clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': 
 plans_tz = pytz.timezone('Europe/Moscow')
 months_map = {
     'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
-    'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
+    'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12,
+    # Сокращенные названия месяцев
+    'янв': 1, 'фев': 2, 'мар': 3, 'апр': 4, 'май': 5, 'июн': 6,
+    'июл': 7, 'авг': 8, 'сен': 9, 'сент': 9, 'окт': 10, 'ноя': 11, 'дек': 12,
+    # Названия месяцев в именительном падеже (для "в марте")
+    'январь': 1, 'февраль': 2, 'март': 3, 'апрель': 4, 'май': 5, 'июнь': 6,
+    'июль': 7, 'август': 8, 'сентябрь': 9, 'октябрь': 10, 'ноябрь': 11, 'декабрь': 12
 }
 # Расширенный маппинг дней недели
 days_full = {
@@ -3111,8 +3117,10 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
     user_tz = get_user_timezone_or_default(user_id)
     now = datetime.now(user_tz)
     
-    # Обработка "сегодня"
+    # Обработка специальных случаев
     day_lower = day_or_date.lower().strip()
+    
+    # Обработка "сегодня"
     if 'сегодня' in day_lower:
         plan_date = now.date()
         if plan_type == 'home':
@@ -3126,10 +3134,49 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
             # Если время уже прошло, переносим на завтра
             plan_dt = plan_dt + timedelta(days=1)
     
-    # Ищем день недели в расширенном словаре
+    # Обработка "завтра" (только для кино)
+    elif 'завтра' in day_lower and plan_type == 'cinema':
+        plan_date = (now.date() + timedelta(days=1))
+        hour = 9
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = user_tz.localize(plan_dt)
+    
+    # Обработка "следующая неделя" (только для кино - напоминание в четверг, день премьер)
+    elif ('следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower) and plan_type == 'cinema':
+        # Находим следующий четверг (3 - это четверг)
+        current_wd = now.weekday()
+        days_until_thursday = (3 - current_wd + 7) % 7
+        if days_until_thursday == 0:
+            # Если сегодня четверг, берем следующий четверг
+            days_until_thursday = 7
+        plan_date = now.date() + timedelta(days=days_until_thursday)
+        hour = 9
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = user_tz.localize(plan_dt)
+    
+    # Обработка "в марте", "в апреле" и т.д. (только для кино - напоминание 1 числа месяца)
+    elif plan_type == 'cinema' and re.search(r'в\s+([а-яё]+)', day_lower):
+        month_match = re.search(r'в\s+([а-яё]+)', day_lower)
+        if month_match:
+            month_str = month_match.group(1)
+            month = months_map.get(month_str)
+            if month:
+                year = now.year
+                # Проверяем, не прошел ли уже этот месяц
+                candidate_date = datetime(year, month, 1).date()
+                if candidate_date < now.date():
+                    # Месяц уже прошел, берем следующий год
+                    year += 1
+                plan_date = datetime(year, month, 1)
+                hour = 9
+                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+    
+    # Ищем день недели в расширенном словаре (для обоих режимов)
     if not plan_dt:
         target_weekday = None
-        for phrase, wd in days_full.items():
+        # Сортируем фразы по длине (от длинных к коротким), чтобы сначала находить более специфичные варианты
+        sorted_phrases = sorted(days_full.items(), key=lambda x: len(x[0]), reverse=True)
+        for phrase, wd in sorted_phrases:
             if phrase in day_lower:
                 target_weekday = wd
                 break
@@ -3163,15 +3210,20 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
     
     else:
         # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
-        # Формат "15 января" или "15 янв"
-        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', day_lower)
+        # Формат "15 января", "15 янв", "15 января 2025"
+        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?', day_lower)
         if date_match:
             day_num = int(date_match.group(1))
             month_str = date_match.group(2)
+            year_str = date_match.group(3) if date_match.group(3) else None
             month = months_map.get(month_str)
             if month:
                 try:
-                    year = now.year
+                    # Используем указанный год или текущий/следующий
+                    if year_str:
+                        year = int(year_str)
+                    else:
+                        year = now.year
                     candidate_date = datetime(year, month, day_num).date()
                     candidate_dt = user_tz.localize(datetime(year, month, day_num))
                     
