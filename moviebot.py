@@ -2256,13 +2256,13 @@ def total_stats(message):
         logger.info(f"Команда /total от пользователя {message.from_user.id}")
         chat_id = message.chat.id
         with db_lock:
-            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
+            cursor.execute('SELECT COUNT(*) as count FROM movies WHERE chat_id = %s', (chat_id,))
             total_row = cursor.fetchone()
-            total = total_row[0] if total_row and total_row[0] else 0
+            total = total_row.get('count') if isinstance(total_row, dict) else (total_row[0] if total_row and len(total_row) > 0 else 0)
             
-            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            cursor.execute('SELECT COUNT(*) as count FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
             watched_row = cursor.fetchone()
-            watched = watched_row[0] if watched_row and watched_row[0] else 0
+            watched = watched_row.get('count') if isinstance(watched_row, dict) else (watched_row[0] if watched_row and len(watched_row) > 0 else 0)
             unwatched = total - watched
             
             # Если нет данных, отправляем сообщение
@@ -2298,8 +2298,8 @@ def total_stats(message):
             cursor.execute('SELECT actors, rating FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
             actor_stats = {}
             for row in cursor.fetchall():
-                actors_str = row.get('actors') if isinstance(row, dict) else row[0]
-                r = row.get('rating') if isinstance(row, dict) else row[1]
+                actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                r = row.get('rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
                 if actors_str:
                     for a in actors_str.split(', '):
                         a = a.strip()
