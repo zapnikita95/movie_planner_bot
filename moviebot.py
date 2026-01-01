@@ -3440,6 +3440,16 @@ def webhook():
     else:
         abort(403)
 
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint для Render"""
+    return {'status': 'ok'}, 200
+
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint"""
+    return {'status': 'ok', 'service': 'moviebot'}, 200
+
 # Определяем, где запускается бот: на Render или локально
 # Проверяем несколько признаков Render окружения
 RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
@@ -3501,13 +3511,19 @@ if IS_RENDER:
         logger.warning("RENDER_EXTERNAL_URL не установлен! Webhook не будет установлен.")
         logger.warning("Убедитесь, что переменная RENDER_EXTERNAL_URL установлена в настройках Render.")
     
-    # Запускаем Flask сервер только если запускается напрямую
-    # Если запускается через gunicorn/uvicorn, они сами запустят app
-    if __name__ == '__main__':
-        logger.info(f"Запуск Flask сервера на порту {PORT or 10000}")
-        app.run(host='0.0.0.0', port=int(PORT or 10000))
-    else:
-        logger.info("Приложение запущено через WSGI сервер (gunicorn/uvicorn)")
+    # На Render всегда запускаем Flask сервер
+    # Render ожидает, что приложение будет слушать на порту из переменной PORT
+    port = int(PORT or 10000)
+    logger.info(f"Запуск Flask сервера на порту {port} (IS_RENDER={IS_RENDER}, PORT={PORT})")
+    
+    # Запускаем Flask в отдельном потоке, чтобы не блокировать выполнение
+    import threading
+    def run_flask():
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info(f"Flask сервер запущен в отдельном потоке на порту {port}")
 else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
     if IS_RENDER:
