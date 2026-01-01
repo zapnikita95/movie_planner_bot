@@ -2055,7 +2055,7 @@ def clean_command(message):
     markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
     markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
     
-    bot.reply_to(message, "🧹 <b>Что вы хотите удалить%s</b>\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, "🧹 <b>Что вы хотите удалить?</b>\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("clean:"))
 def clean_action_choice(call):
@@ -2181,12 +2181,12 @@ def clean_action_choice(call):
                 bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
         else:
             # В личном чате можно сразу удалить
-            bot.edit_message_text("⚠️ Вы уверены, что хотите обнулить всю базу данных%s Это действие необратимо!\n\nОтправьте 'ДА, УДАЛИТЬ' для подтверждения.", call.message.chat.id, call.message.message_id)
+            bot.edit_message_text("⚠️ Вы уверены, что хотите обнулить всю базу данных? Это действие необратимо!\n\nОтправьте 'ДА, УДАЛИТЬ' для подтверждения.", call.message.chat.id, call.message.message_id)
             user_clean_state[user_id]['confirm_needed'] = True
     
     elif action == 'user_db':
         # Обнуление базы пользователя
-        bot.edit_message_text("⚠️ Вы уверены, что хотите удалить все ваши данные из базы%s\n\nЭто удалит:\n• Все ваши оценки\n• Все ваши планы\n\nОтправьте 'ДА, УДАЛИТЬ' для подтверждения.", call.message.chat.id, call.message.message_id)
+        bot.edit_message_text("⚠️ Вы уверены, что хотите удалить все ваши данные из базы?\n\nЭто удалит:\n• Все ваши оценки\n• Все ваши планы\n\nОтправьте 'ДА, УДАЛИТЬ' для подтверждения.", call.message.chat.id, call.message.message_id)
         user_clean_state[user_id]['confirm_needed'] = True
     
     elif action == 'cancel':
@@ -2267,30 +2267,43 @@ def clean_confirm_execute(message):
     state = user_clean_state.get(user_id, {})
     action = state.get('action')
     
-    if action == 'chat_db':
-        # Удаляем все данные чата
-        with db_lock:
-            cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
-            cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
-            cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
-            cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
-            cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
-            cursor.execute('DELETE FROM cinema_votes WHERE chat_id = %s', (chat_id,))
-            conn.commit()
+    try:
+        if action == 'chat_db':
+            # Удаляем все данные чата
+            with db_lock:
+                try:
+                    cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM cinema_votes WHERE chat_id = %s', (chat_id,))
+                    conn.commit()
+                    bot.reply_to(message, "✅ База данных чата полностью обнулена.")
+                    logger.info(f"База данных чата {chat_id} обнулена пользователем {user_id}")
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"Ошибка при удалении данных чата: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Произошла ошибка при удалении данных. Попробуйте позже.")
+                    raise
         
-        bot.reply_to(message, "✅ База данных чата полностью обнулена.")
-        logger.info(f"База данных чата {chat_id} обнулена пользователем {user_id}")
-    
-    elif action == 'user_db':
-        # Удаляем все данные пользователя
-        with db_lock:
-            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-            cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-            conn.commit()
-        
-        bot.reply_to(message, "✅ Все ваши данные удалены из базы.")
-        logger.info(f"Данные пользователя {user_id} удалены из чата {chat_id}")
+        elif action == 'user_db':
+            # Удаляем все данные пользователя
+            with db_lock:
+                try:
+                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    conn.commit()
+                    bot.reply_to(message, "✅ Все ваши данные удалены из базы.")
+                    logger.info(f"Данные пользователя {user_id} удалены из чата {chat_id}")
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"Ошибка при удалении данных пользователя: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Произошла ошибка при удалении данных. Попробуйте позже.")
+                    raise
+    except Exception as e:
+        logger.error(f"Критическая ошибка в clean_confirm_execute: {e}", exc_info=True)
     
     if user_id in user_clean_state:
         del user_clean_state[user_id]
