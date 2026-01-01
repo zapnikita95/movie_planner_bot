@@ -782,6 +782,8 @@ def handle_reaction(update):
                     match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
                     if match:
                         kp_id = match.group(2)
+                        film_id = None
+                        title = None
                         with db_lock:
                             cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                             conn.commit()
@@ -797,11 +799,16 @@ def handle_reaction(update):
                     else:
                         logger.warning(f"[REACTION] Не удалось извлечь kp_id из ссылки: {link}")
                     
-                    user_name = update.user.first_name if update.user else "Кто-то"
-                    msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
-                    # Сохраняем связь message_id -> film_id для обработки оценки
-                    if row:
-                        rating_messages[msg.message_id] = film_id
+                    # Отправляем сообщение только если фильм найден
+                    if film_id and title:
+                        user_name = update.user.first_name if update.user else "Кто-то"
+                        try:
+                            msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
+                            # Сохраняем связь message_id -> film_id для обработки оценки
+                            rating_messages[msg.message_id] = film_id
+                            logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}")
+                        except Exception as send_error:
+                            logger.error(f"[REACTION] Ошибка при отправке сообщения: {send_error}", exc_info=True)
                 except Exception as e:
                     logger.error(f"Ошибка реакции: {e}", exc_info=True)
 
@@ -940,6 +947,7 @@ def list_movies(message):
                 title = row.get('title') if isinstance(row, dict) else row[1]
                 year = row.get('year') if isinstance(row, dict) else row[2]
                 link = row.get('link') if isinstance(row, dict) else row[3]
+                kp_id = row.get('kp_id') if isinstance(row, dict) else (row[4] if len(row) > 4 else None)
                 
                 # Рассчитываем среднее из ratings
                 cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
@@ -950,7 +958,8 @@ def list_movies(message):
                 else:
                     avg = None
                 rate_str = f" 🌟 {avg:.1f}/10" if avg else ""
-                text += f"• <b>{title}</b> ({year}){rate_str} [ID: {film_id}]\n{link}\n\n"
+                # Используем kp_id вместо film_id для единообразия с /rate
+                text += f"• <b>{title}</b> ({year}){rate_str} [ID: {kp_id or film_id}]\n{link}\n\n"
         
         text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
         msg = bot.reply_to(message, text, parse_mode='HTML', disable_web_page_preview=True)
@@ -973,22 +982,22 @@ def handle_list_reply(message):
         if not chat_id:
             return
         
-        # Парсим ID фильмов из сообщения (могут быть через запятую, пробел, перенос строки)
+        # Парсим ID фильмов из сообщения (используем kp_id, как в /rate)
         text = message.text.strip()
-        # Извлекаем все числа из текста
-        film_ids = re.findall(r'\d+', text)
+        # Извлекаем все числа из текста (это будут kp_id)
+        kp_ids = re.findall(r'\d+', text)
         
-        if not film_ids:
-            bot.reply_to(message, "Не найдены ID фильмов. Отправьте список ID через запятую или пробел.")
+        if not kp_ids:
+            bot.reply_to(message, "Не найдены ID фильмов. Отправьте список ID кинопоиска через запятую или пробел.")
             return
         
         marked_count = 0
         with db_lock:
-            for film_id_str in film_ids:
+            for kp_id_str in kp_ids:
                 try:
-                    film_id = int(film_id_str)
-                    # Проверяем, что фильм существует и не просмотрен
-                    cursor.execute('SELECT id, title, watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    kp_id = kp_id_str.strip()
+                    # Проверяем, что фильм существует и не просмотрен по kp_id
+                    cursor.execute('SELECT id, title, watched FROM movies WHERE kp_id = %s AND chat_id = %s', (kp_id, chat_id))
                     row = cursor.fetchone()
                     if row:
                         film_id_db = row.get('id') if isinstance(row, dict) else row[0]
@@ -996,9 +1005,9 @@ def handle_list_reply(message):
                         watched = row.get('watched') if isinstance(row, dict) else row[2]
                         
                         if not watched:
-                            cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id_db, chat_id))
+                            cursor.execute('UPDATE movies SET watched = 1 WHERE kp_id = %s AND chat_id = %s', (kp_id, chat_id))
                             marked_count += 1
-                            logger.info(f"Фильм {film_id_db} ({title}) отмечен как просмотренный в чате {chat_id}")
+                            logger.info(f"Фильм {film_id_db} ({title}, kp_id: {kp_id}) отмечен как просмотренный в чате {chat_id}")
                 except ValueError:
                     continue
                 except Exception as e:
@@ -1939,9 +1948,20 @@ def plan_handler(message):
                     day_or_date = phrase
                     break
             if not day_or_date:
+                # Пробуем разные форматы даты: "15 января", "15.01", "15/01"
                 date_match = re.search(r'(\d+)\s*([а-яё]+)', text)
                 if date_match:
                     day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+                else:
+                    # Формат "15.01" или "15/01"
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
         
         if link and plan_type and day_or_date:
             try:
