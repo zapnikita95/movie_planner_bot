@@ -112,10 +112,11 @@ except Exception as e:
     raise
 # Блокировка для синхронизации доступа к БД из разных потоков
 db_lock = threading.Lock()
+# Создаём таблицы с BIGINT для chat_id (Telegram группы могут иметь очень большие отрицательные ID)
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS movies (
         id SERIAL PRIMARY KEY,
-        chat_id INTEGER,
+        chat_id BIGINT,
         link TEXT,
         kp_id TEXT,
         title TEXT,
@@ -132,7 +133,7 @@ cursor.execute('''
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS settings (
         id SERIAL PRIMARY KEY,
-        chat_id INTEGER,
+        chat_id BIGINT,
         key TEXT,
         value TEXT,
         UNIQUE(chat_id, key)
@@ -142,29 +143,29 @@ cursor.execute('INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, %s) O
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS plans (
         id SERIAL PRIMARY KEY,
-        chat_id INTEGER,
+        chat_id BIGINT,
         film_id INTEGER,
         plan_type TEXT,
         plan_datetime TEXT,
-        user_id INTEGER
+        user_id BIGINT
     )
 ''')
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS stats (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER,
+        user_id BIGINT,
         username TEXT,
         command_or_action TEXT,
         timestamp TEXT,
-        chat_id INTEGER
+        chat_id BIGINT
     )
 ''')
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS ratings (
         id SERIAL PRIMARY KEY,
-        chat_id INTEGER,
+        chat_id BIGINT,
         film_id INTEGER,
-        user_id INTEGER,
+        user_id BIGINT,
         rating INTEGER CHECK(rating BETWEEN 1 AND 10),
         UNIQUE(chat_id, film_id, user_id)
     )
@@ -172,14 +173,56 @@ cursor.execute('''
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS cinema_votes (
         id SERIAL PRIMARY KEY,
-        chat_id INTEGER,
+        chat_id BIGINT,
         film_id INTEGER,
         deadline TEXT,
-        message_id INTEGER,
+        message_id BIGINT,
         yes_users TEXT DEFAULT '[]',
         no_users TEXT DEFAULT '[]'
     )
 ''')
+
+# Миграция: изменяем тип данных для существующих таблиц (если они уже созданы с INTEGER)
+# Это безопасно - если колонка уже BIGINT, команда не изменит ничего
+try:
+    cursor.execute('ALTER TABLE movies ALTER COLUMN chat_id TYPE BIGINT')
+    logger.info("Миграция: movies.chat_id изменён на BIGINT")
+except Exception as e:
+    logger.debug(f"Миграция movies.chat_id: {e}")
+
+try:
+    cursor.execute('ALTER TABLE settings ALTER COLUMN chat_id TYPE BIGINT')
+    logger.info("Миграция: settings.chat_id изменён на BIGINT")
+except Exception as e:
+    logger.debug(f"Миграция settings.chat_id: {e}")
+
+try:
+    cursor.execute('ALTER TABLE plans ALTER COLUMN chat_id TYPE BIGINT')
+    cursor.execute('ALTER TABLE plans ALTER COLUMN user_id TYPE BIGINT')
+    logger.info("Миграция: plans.chat_id и plans.user_id изменены на BIGINT")
+except Exception as e:
+    logger.debug(f"Миграция plans: {e}")
+
+try:
+    cursor.execute('ALTER TABLE stats ALTER COLUMN chat_id TYPE BIGINT')
+    cursor.execute('ALTER TABLE stats ALTER COLUMN user_id TYPE BIGINT')
+    logger.info("Миграция: stats.chat_id и stats.user_id изменены на BIGINT")
+except Exception as e:
+    logger.debug(f"Миграция stats: {e}")
+
+try:
+    cursor.execute('ALTER TABLE ratings ALTER COLUMN chat_id TYPE BIGINT')
+    cursor.execute('ALTER TABLE ratings ALTER COLUMN user_id TYPE BIGINT')
+    logger.info("Миграция: ratings.chat_id и ratings.user_id изменены на BIGINT")
+except Exception as e:
+    logger.debug(f"Миграция ratings: {e}")
+
+try:
+    cursor.execute('ALTER TABLE cinema_votes ALTER COLUMN chat_id TYPE BIGINT')
+    cursor.execute('ALTER TABLE cinema_votes ALTER COLUMN message_id TYPE BIGINT')
+    logger.info("Миграция: cinema_votes.chat_id и cinema_votes.message_id изменены на BIGINT")
+except Exception as e:
+    logger.debug(f"Миграция cinema_votes: {e}")
 
 # Индексы для скорости
 cursor.execute('CREATE INDEX IF NOT EXISTS idx_movies_chat_id ON movies (chat_id)')
