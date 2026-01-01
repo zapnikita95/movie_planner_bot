@@ -232,14 +232,27 @@ def log_request(user_id, username, command_or_action, chat_id=None):
     try:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with db_lock:
-            cursor.execute('''
-                INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
-                VALUES (%s, %s, %s, %s, %s)
-            ''', (user_id, username, command_or_action, timestamp, chat_id))
-            conn.commit()
+            try:
+                # Проверяем, не в состоянии ли ошибки транзакция
+                try:
+                    cursor.execute('SELECT 1')
+                    cursor.fetchone()
+                except:
+                    # Если транзакция в состоянии ошибки, откатываем
+                    conn.rollback()
+                
+                cursor.execute('''
+                    INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                ''', (user_id, username, command_or_action, timestamp, chat_id))
+                conn.commit()
+            except Exception as db_error:
+                # КРИТИЧНО: откатываем транзакцию при ошибке
+                conn.rollback()
+                raise db_error
     except Exception as e:
         logger.error(f"Ошибка логирования запроса: {e}")
-        # КРИТИЧНО: откатываем транзакцию при ошибке, иначе все последующие запросы будут игнорироваться
+        # Убеждаемся, что транзакция откачена
         try:
             with db_lock:
                 conn.rollback()
@@ -444,39 +457,17 @@ def extract_movie_info(link):
         description = data_main.get('description') or data_main.get('shortDescription') or "Нет описания"
 
         # Отдельный запрос на staff (режиссёр и актёры)
-        # Используем v2.2 endpoint, так как основной запрос тоже использует v2.2
-        url_staff = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/staff"
+        # Используем v1 endpoint как основной, так как v2.2 не работает
+        url_staff = f"https://kinopoiskapiunofficial.tech/api/v1/staff?filmId={kp_id}"
         logger.debug(f"Staff запрос URL: {url_staff}")
         response_staff = requests.get(url_staff, headers=headers, timeout=15)
         staff = []
         if response_staff.status_code == 200:
-            staff_data = response_staff.json()
-            # Проверяем формат ответа - может быть список или объект
-            if isinstance(staff_data, list):
-                staff = staff_data
-            elif isinstance(staff_data, dict) and 'staff' in staff_data:
-                staff = staff_data['staff']
-            elif isinstance(staff_data, dict):
-                # Может быть объект с другими полями
-                staff = staff_data.get('items', staff_data.get('staff', []))
-            else:
-                staff = []
+            staff = response_staff.json()
             logger.debug(f"Staff ответ получен, количество записей: {len(staff) if isinstance(staff, list) else 'не список'}")
         else:
             logger.warning(f"Staff запрос ошибка {response_staff.status_code} — режиссёр/актёры не загружены")
             logger.warning(f"Staff ответ: {response_staff.text[:200] if response_staff.text else 'нет текста'}")
-            # Пробуем старый v1 endpoint как fallback
-            try:
-                url_staff_alt = f"https://kinopoiskapiunofficial.tech/api/v1/staff?filmId={kp_id}"
-                logger.debug(f"Пробуем альтернативный URL (v1): {url_staff_alt}")
-                response_staff_alt = requests.get(url_staff_alt, headers=headers, timeout=15)
-                if response_staff_alt.status_code == 200:
-                    staff = response_staff_alt.json()
-                    logger.info(f"Альтернативный endpoint (v1) сработал, получено {len(staff) if isinstance(staff, list) else 'не список'} записей")
-                else:
-                    logger.warning(f"Альтернативный endpoint (v1) тоже вернул {response_staff_alt.status_code}")
-            except Exception as e:
-                logger.warning(f"Ошибка при попытке альтернативного endpoint: {e}")
 
         # Режиссёр
         director = "Не указан"
@@ -564,15 +555,35 @@ def add_and_announce(link, chat_id):
         return False
     
     # Новый фильм - добавляем
-    with db_lock:
-        cursor.execute('''
-            INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (chat_id, link) DO NOTHING
-        ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
-        conn.commit()
+    inserted = False
+    try:
+        with db_lock:
+            try:
+                # Проверяем, не в состоянии ли ошибки транзакция
+                try:
+                    cursor.execute('SELECT 1')
+                    cursor.fetchone()
+                except:
+                    # Если транзакция в состоянии ошибки, откатываем
+                    conn.rollback()
+                
+                cursor.execute('''
+                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (chat_id, link) DO NOTHING
+                ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                conn.commit()
+                inserted = cursor.rowcount == 1
+            except Exception as db_error:
+                conn.rollback()
+                logger.error(f"Ошибка при добавлении фильма в БД: {db_error}")
+                # Продолжаем выполнение, чтобы отправить сообщение даже при ошибке БД
+                inserted = True  # Считаем, что нужно отправить сообщение
+    except Exception as e:
+        logger.error(f"Критическая ошибка при работе с БД: {e}")
+        # Продолжаем выполнение, чтобы отправить сообщение
     
-    if cursor.rowcount == 1:
+    if inserted:
         text = f"🎬 <b>Добавлено в базу!</b>\n\n"
         text += f"<b>{info['title']}</b> ({info['year'] or '—'})\n"
         text += f"<i>Режиссёр:</i> {info['director']}\n"
@@ -581,10 +592,14 @@ def add_and_announce(link, chat_id):
         text += f"<i>Кратко:</i> {info['description']}\n\n"
         text += f"<a href='{link}'>Кинопоиск</a>"
         
-        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
-        bot_messages[msg.message_id] = link  # запоминаем для реакции
-        logger.info(f"Новый фильм добавлен: {info['title']}")
-        return True
+        try:
+            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            bot_messages[msg.message_id] = link  # запоминаем для реакции
+            logger.info(f"Новый фильм добавлен: {info['title']}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения: {e}")
+            return False
     return False
 
 # /start — приветственное сообщение
