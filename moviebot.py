@@ -2414,8 +2414,19 @@ def clean_action_choice(call):
                 bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
         else:
             # В личном чате можно сразу удалить
-            bot.edit_message_text("⚠️ Вы уверены, что хотите обнулить всю базу данных? Это действие необратимо!\n\nОтправьте 'ДА, УДАЛИТЬ' для подтверждения.", call.message.chat.id, call.message.message_id)
+            bot.edit_message_text(
+                "⚠️ <b>Обнуление базы данных чата</b>\n\n"
+                "Это удалит <b>ВСЕ данные чата</b>:\n"
+                "• Все фильмы\n"
+                "• Все оценки\n"
+                "• Все планы\n"
+                "• Все настройки\n\n"
+                "Это действие необратимо!\n\n"
+                "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+                call.message.chat.id, call.message.message_id, parse_mode='HTML'
+            )
             user_clean_state[user_id]['confirm_needed'] = True
+            user_clean_state[user_id]['target'] = 'chat'
     
     elif action == 'user_db':
         # Обнуление базы пользователя - удаляет только данные конкретного пользователя
