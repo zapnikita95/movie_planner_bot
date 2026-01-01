@@ -444,13 +444,39 @@ def extract_movie_info(link):
         description = data_main.get('description') or data_main.get('shortDescription') or "Нет описания"
 
         # Отдельный запрос на staff (режиссёр и актёры)
-        url_staff = f"https://kinopoiskapiunofficial.tech/api/v1/staff?filmId={kp_id}"
+        # Используем v2.2 endpoint, так как основной запрос тоже использует v2.2
+        url_staff = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/staff"
+        logger.debug(f"Staff запрос URL: {url_staff}")
         response_staff = requests.get(url_staff, headers=headers, timeout=15)
         staff = []
         if response_staff.status_code == 200:
-            staff = response_staff.json()
+            staff_data = response_staff.json()
+            # Проверяем формат ответа - может быть список или объект
+            if isinstance(staff_data, list):
+                staff = staff_data
+            elif isinstance(staff_data, dict) and 'staff' in staff_data:
+                staff = staff_data['staff']
+            elif isinstance(staff_data, dict):
+                # Может быть объект с другими полями
+                staff = staff_data.get('items', staff_data.get('staff', []))
+            else:
+                staff = []
+            logger.debug(f"Staff ответ получен, количество записей: {len(staff) if isinstance(staff, list) else 'не список'}")
         else:
             logger.warning(f"Staff запрос ошибка {response_staff.status_code} — режиссёр/актёры не загружены")
+            logger.warning(f"Staff ответ: {response_staff.text[:200] if response_staff.text else 'нет текста'}")
+            # Пробуем старый v1 endpoint как fallback
+            try:
+                url_staff_alt = f"https://kinopoiskapiunofficial.tech/api/v1/staff?filmId={kp_id}"
+                logger.debug(f"Пробуем альтернативный URL (v1): {url_staff_alt}")
+                response_staff_alt = requests.get(url_staff_alt, headers=headers, timeout=15)
+                if response_staff_alt.status_code == 200:
+                    staff = response_staff_alt.json()
+                    logger.info(f"Альтернативный endpoint (v1) сработал, получено {len(staff) if isinstance(staff, list) else 'не список'} записей")
+                else:
+                    logger.warning(f"Альтернативный endpoint (v1) тоже вернул {response_staff_alt.status_code}")
+            except Exception as e:
+                logger.warning(f"Ошибка при попытке альтернативного endpoint: {e}")
 
         # Режиссёр
         director = "Не указан"
