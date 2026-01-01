@@ -2309,8 +2309,22 @@ def handle_settings_reply(message):
     user_id = message.from_user.id
     state = user_settings_state.get(user_id)
     
-    if not state or message.reply_to_message.message_id != state.get('settings_msg_id'):
+    logger.info(f"[SETTINGS REPLY] Получено сообщение от {user_id}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}, state={state}")
+    
+    if not state:
+        logger.warning(f"[SETTINGS REPLY] Нет состояния для user_id={user_id}")
         return
+    
+    if not message.reply_to_message:
+        logger.warning(f"[SETTINGS REPLY] Нет reply_to_message для user_id={user_id}")
+        return
+    
+    expected_msg_id = state.get('settings_msg_id')
+    if expected_msg_id and message.reply_to_message.message_id != expected_msg_id:
+        logger.warning(f"[SETTINGS REPLY] Несоответствие message_id: reply_to={message.reply_to_message.message_id}, expected={expected_msg_id}")
+        return
+    
+    logger.info(f"[SETTINGS REPLY] Проверка пройдена, обрабатываем эмодзи для user_id={user_id}")
     
     # Извлекаем эмодзи (упрощенная версия)
     if not message.text:
