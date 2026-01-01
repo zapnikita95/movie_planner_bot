@@ -3171,38 +3171,33 @@ def plan_handler(message):
         logger.info(f"[PLAN] plan_type={plan_type}, text={text}")
         
         day_or_date = None
-        if plan_type == 'home':
-            # Ищем любой день недели из расширенного словаря (сначала длинные фразы)
-            sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
-            for phrase in sorted_phrases:
-                if phrase in text:
-                    day_or_date = phrase
-                    break
-        elif plan_type == 'cinema':
-            # Ищем день недели или дату
-            sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
-            for phrase in sorted_phrases:
-                if phrase in text:
-                    day_or_date = phrase
-                    break
-            if not day_or_date:
-                # Пробуем разные форматы даты: "15 января", "с 20 февраля", "15.01", "15/01"
-                # Убираем предлоги "с", "на" и т.д. перед датой
-                date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
+        
+        # Сначала ищем день недели (для обоих режимов)
+        sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
+        for phrase in sorted_phrases:
+            if phrase in text:
+                day_or_date = phrase
+                break
+        
+        # Если день недели не найден, ищем дату (для обоих режимов)
+        if not day_or_date:
+            # Пробуем разные форматы даты: "15 января", "с 20 февраля", "15.01", "15/01", "15.01.25", "15.01.2025"
+            # Убираем предлоги "с", "на" и т.д. перед датой
+            date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
+            if date_match:
+                day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+                logger.info(f"[PLAN] Найдена дата (текстовый формат): {day_or_date}")
+            else:
+                # Формат "15.01", "15/01", "15.01.25", "15.01.2025", "15/01/25", "15/01/2025"
+                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
                 if date_match:
-                    day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
-                    logger.info(f"[PLAN] Найдена дата: {day_or_date}")
-                else:
-                    # Формат "15.01" или "15/01"
-                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})', text)
-                    if date_match:
-                        day_num = int(date_match.group(1))
-                        month_num = int(date_match.group(2))
-                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
-                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
-                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+                    day_num = int(date_match.group(1))
+                    month_num = int(date_match.group(2))
+                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         logger.info(f"[PLAN] link={link}, plan_type={plan_type}, day_or_date={day_or_date}")
         
