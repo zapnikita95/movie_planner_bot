@@ -1540,18 +1540,27 @@ def handle_reaction(reaction):
 def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
     try:
-        link_match = re.search(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
-        if link_match:
-            link = link_match.group(1)
+        # Ищем все ссылки на Кинопоиск в сообщении
+        links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
+        if links:
             chat_id = message.chat.id
-            logger.info(f"[SAVE MESSAGE] Найдена ссылка на фильм: {link}, chat_id={chat_id}")
+            username = message.from_user.username or f"user_{message.from_user.id}"
+            log_request(message.from_user.id, username, 'add_movie', chat_id)
+            logger.info(f"[SAVE MESSAGE] Найдено ссылок на фильмы: {len(links)}, chat_id={chat_id}")
             
-            # Сохраняем ссылку для обработки реакций
-            bot_messages[message.message_id] = link
+            added_count = 0
+            for link in links:
+                # Сохраняем первую ссылку для обработки реакций (если нужно)
+                if added_count == 0:
+                    bot_messages[message.message_id] = link
+                
+                # Добавляем фильм в базу и отправляем карточку
+                if add_and_announce(link, chat_id):
+                    added_count += 1
+                    logger.info(f"[SAVE MESSAGE] Фильм обработан: {link}")
             
-            # Добавляем фильм в базу и отправляем карточку
-            add_and_announce(link, chat_id)
-            logger.info(f"[SAVE MESSAGE] Фильм обработан: {link}")
+            if added_count > 1:
+                bot.send_message(chat_id, f"🎉 Добавлено {added_count} новых фильмов в базу!")
     except Exception as e:
         logger.warning(f"[SAVE MESSAGE] Ошибка при обработке сообщения с фильмом: {e}", exc_info=True)
 
