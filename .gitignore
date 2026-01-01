@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+movies/  # твой venv
+pip-delete-this-directory.txt
+.pip-cache/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# БД и секреты
+movies.db
+*.db
+.env
+
+# Логи
+*.log
+
+# ОС
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+

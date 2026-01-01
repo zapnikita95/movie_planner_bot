@@ -1,0 +1,9 @@
+pyTelegramBotAPI
+requests
+beautifulsoup4
+apscheduler
+pytz
+python-dateutil
+flask
+psycopg2-binary
+python-dotenv
