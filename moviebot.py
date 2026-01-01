@@ -4663,9 +4663,12 @@ def _random_final(call, chat_id, user_id):
         state = user_random_state.get(user_id, {})
         logger.info(f"[RANDOM] State: {state}")
         
-        # Формируем запрос
-        query = "SELECT id, title, year, genres, director, actors, description, link FROM movies WHERE chat_id = %s AND watched = 0"
-        params = [chat_id]
+        # Формируем запрос - исключаем фильмы, которые уже запланированы
+        query = """SELECT m.id, m.title, m.year, m.genres, m.director, m.actors, m.description, m.link 
+                   FROM movies m 
+                   WHERE m.chat_id = %s AND m.watched = 0 
+                   AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s)"""
+        params = [chat_id, chat_id]
         
         # Фильтр по периодам
         periods = state.get('periods', [])
@@ -4718,12 +4721,84 @@ def _random_final(call, chat_id, user_id):
             logger.info(f"[RANDOM] Candidates found: {len(candidates)}")
         
         if not candidates:
+            # Ищем похожие фильмы из запланированных
+            similar_query = """SELECT m.title, m.year, m.link 
+                               FROM movies m 
+                               JOIN plans p ON m.id = p.film_id 
+                               WHERE m.chat_id = %s AND m.watched = 0"""
+            similar_params = [chat_id]
+            
+            # Применяем те же фильтры для поиска похожих
+            if periods:
+                period_conditions = []
+                for p in periods:
+                    if p == "До 1980":
+                        period_conditions.append("m.year < 1980")
+                    elif p == "1980–1990":
+                        period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
+                    elif p == "1990–2000":
+                        period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
+                    elif p == "2000–2010":
+                        period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
+                    elif p == "2010–2020":
+                        period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
+                    elif p == "2020–сейчас":
+                        period_conditions.append("m.year >= 2020")
+                if period_conditions:
+                    similar_query += " AND (" + " OR ".join(period_conditions) + ")"
+            
+            if genre:
+                similar_query += " AND m.genres ILIKE %s"
+                similar_params.append(f"%{genre}%")
+            
+            if director:
+                similar_query += " AND m.director = %s"
+                similar_params.append(director)
+            
+            if actors:
+                actor_conditions = []
+                for actor in actors:
+                    actor_conditions.append("m.actors ILIKE %s")
+                    similar_params.append(f"%{actor}%")
+                if actor_conditions:
+                    similar_query += " AND (" + " OR ".join(actor_conditions) + ")"
+            
+            similar_query += " LIMIT 10"
+            
+            with db_lock:
+                cursor.execute(similar_query, similar_params)
+                similar_movies = cursor.fetchall()
+            
+            if similar_movies:
+                # Формируем список похожих фильмов
+                similar_list = []
+                for movie in similar_movies:
+                    if isinstance(movie, dict):
+                        title = movie.get('title')
+                        year = movie.get('year') or '—'
+                        link = movie.get('link')
+                    else:
+                        title = movie[0] if len(movie) > 0 else None
+                        year = movie[1] if len(movie) > 1 else '—'
+                        link = movie[2] if len(movie) > 2 else None
+                    
+                    if title and link:
+                        similar_list.append(f"• <a href='{link}'>{title}</a> ({year})")
+                
+                if similar_list:
+                    similar_text = "\n".join(similar_list)
+                    message_text = f"😔 Таких фильмов в базе не найдено! Но есть похожие из запланированных:\n\n{similar_text}"
+                else:
+                    message_text = "😔 Таких фильмов в базе не найдено!"
+            else:
+                message_text = "😔 Таких фильмов в базе не найдено!"
+            
             try:
-                bot.edit_message_text("😔 Нет фильмов по вашим фильтрам.\n\nПопробуйте изменить критерии поиска.", 
-                                    chat_id, call.message.message_id, parse_mode='HTML')
+                bot.edit_message_text(message_text, 
+                                    chat_id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
                 bot.answer_callback_query(call.id)
             except:
-                bot.send_message(chat_id, "😔 Нет фильмов по вашим фильтрам.\n\nПопробуйте изменить критерии поиска.")
+                bot.send_message(chat_id, message_text, parse_mode='HTML', disable_web_page_preview=False)
             del user_random_state[user_id]
             return
         
