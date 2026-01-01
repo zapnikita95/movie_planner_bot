@@ -1261,10 +1261,9 @@ def rate_movie(message):
             text += f"   ✅ Все оценили\n"
         text += "\n"
     
-    # Сохраняем message_id для обработки реплая
-    rate_list_messages[message.chat.id] = message.message_id + 1  # Будет ID следующего сообщения
-    
-    bot.reply_to(message, text, parse_mode='HTML')
+    # Отправляем сообщение и сохраняем его message_id для обработки реплая
+    sent_msg = bot.reply_to(message, text, parse_mode='HTML')
+    rate_list_messages[message.chat.id] = sent_msg.message_id
 
 # Обработка реплая на список фильмов с оценками
 rate_list_messages = {}  # chat_id: message_id (сообщение со списком фильмов)
@@ -1275,11 +1274,14 @@ def handle_rate_list_reply(message):
     user_id = message.from_user.id
     
     # Проверяем, что это реплай на список фильмов
-    if message.reply_to_message.message_id not in [rate_list_messages.get(chat_id, 0)]:
-        # Проверяем, есть ли в тексте реплая упоминание о списке фильмов
-        reply_text = message.reply_to_message.text or ""
-        if "Список просмотренных фильмов для оценки" not in reply_text:
-            return
+    reply_text = message.reply_to_message.text or ""
+    if "Список просмотренных фильмов для оценки" not in reply_text:
+        return
+    
+    # Дополнительная проверка по message_id
+    expected_msg_id = rate_list_messages.get(chat_id)
+    if expected_msg_id and message.reply_to_message.message_id != expected_msg_id:
+        return
     
     text = message.text.strip()
     if not text:
