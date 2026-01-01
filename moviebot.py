@@ -1830,11 +1830,11 @@ def random_show_movie(call):
                     except:
                         pass
             except Exception as e:
-            logger.error(f"Ошибка при автоматическом планировании фильма: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, f"Ошибка при планировании: {str(e)[:50]}", show_alert=True)
-            except:
-                pass
+                logger.error(f"Ошибка при автоматическом планировании фильма: {e}", exc_info=True)
+                try:
+                    bot.answer_callback_query(call.id, "Ошибка при планировании фильма", show_alert=True)
+                except:
+                    pass
     
     del user_random_state[user_id]
 
