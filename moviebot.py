@@ -1771,7 +1771,7 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
         
         with db_lock:
             # Получаем все непросмотренные фильмы, отсортированные по алфавиту
-            cursor.execute('SELECT title, year, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
+            cursor.execute('SELECT id, kp_id, title, year, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
             rows = cursor.fetchall()
         
         if not rows:
@@ -1790,10 +1790,14 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
             # Формируем текст страницы
             text = f"⏳ Непросмотренные фильмы (страница {page}/{total_pages}):\n\n"
             for row in page_movies:
-                title = row.get('title') if isinstance(row, dict) else row[0]
-                year = row.get('year') if isinstance(row, dict) else (row[1] if len(row) > 1 else '—')
-                link = row.get('link') if isinstance(row, dict) else (row[2] if len(row) > 2 else '')
-                text += f"• <b>{title}</b> ({year})\n<a href='{link}'>{link}</a>\n\n"
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                kp_id = row.get('kp_id') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                title = row.get('title') if isinstance(row, dict) else row[2]
+                year = row.get('year') if isinstance(row, dict) else (row[3] if len(row) > 3 else '—')
+                link = row.get('link') if isinstance(row, dict) else (row[4] if len(row) > 4 else '')
+                # Используем kp_id если есть, иначе film_id
+                movie_id = kp_id or film_id
+                text += f"• <b>{title}</b> ({year}) [ID: {movie_id}]\n<a href='{link}'>{link}</a>\n\n"
             
             text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
             
