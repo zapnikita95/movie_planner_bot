@@ -1338,6 +1338,19 @@ def handle_reaction(reaction):
     except Exception as e:
         logger.error(f"[REACTION] Ошибка при планировании напоминания: {e}", exc_info=True)
 
+# Обработчик для сохранения сообщений пользователей с ссылками на фильмы
+@bot.message_handler(func=lambda m: m.text and ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text))
+def save_movie_message(message):
+    """Сохраняет сообщения пользователей с ссылками на фильмы для обработки реакций"""
+    try:
+        link_match = re.search(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
+        if link_match:
+            link = link_match.group(1)
+            bot_messages[message.message_id] = link
+            logger.info(f"[SAVE MESSAGE] Сохранена ссылка для message_id={message.message_id}: {link}")
+    except Exception as e:
+        logger.warning(f"[SAVE MESSAGE] Ошибка при сохранении сообщения: {e}")
+
 # Обработка оценок текстом
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 1 <= int(m.text) <= 10 and m.reply_to_message)
 def handle_rating(message):
