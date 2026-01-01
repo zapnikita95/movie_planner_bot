@@ -906,11 +906,12 @@ def handle_reaction(update):
                 is_like = True
                 break
         
-        if is_like and user_id and user_id in vote_data['active_members']:
+        if is_like and user_id:
+            # Любой участник чата может проголосовать, не только те, кто в active_members
             vote_data['voted'].add(user_id)
             
-            # Проверяем, все ли проголосовали
-            if len(vote_data['voted']) >= len(vote_data['active_members']):
+            # Проверяем, все ли проголосовали (используем members_count, а не len(active_members))
+            if len(vote_data['voted']) >= vote_data['members_count']:
                 # Все проголосовали - удаляем базу
                 with db_lock:
                     cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
@@ -929,13 +930,13 @@ def handle_reaction(update):
             else:
                 # Обновляем сообщение с прогрессом
                 voted_count = len(vote_data['voted'])
-                total_count = len(vote_data['active_members'])
+                total_count = vote_data['members_count']
                 try:
                     bot.edit_message_text(
                         f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено полное обнуление базы данных чата.\n\n"
-                        f"Активных участников: {total_count}\n"
+                        f"Участников в чате: {total_count}\n"
                         f"Проголосовало: {voted_count}/{total_count}\n\n"
-                        f"Для подтверждения все активные участники должны поставить 👍 (лайк) на это сообщение.\n\n"
+                        f"Для подтверждения все участники должны поставить 👍 (лайк) на это сообщение.\n\n"
                         f"Если не все проголосуют, база не будет удалена.",
                         chat_id, message_id, parse_mode='HTML')
                 except:
