@@ -3065,7 +3065,11 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     if candidate < now:
                         year += 1
                     plan_date = datetime(year, month, day_num)
-                    hour = 9 if plan_type == 'cinema' else (19 if plan_date.weekday() == 4 else 10)
+                    if plan_type == 'cinema':
+                        hour = 9
+                    else:  # home
+                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                        hour = 19 if plan_date.weekday() < 5 else 10
                     plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                 except ValueError:
                     logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
@@ -3098,7 +3102,11 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                 year += 1
                         
                         plan_date = datetime(year, month_num, day_num)
-                        hour = 9 if plan_type == 'cinema' else (19 if plan_date.weekday() == 4 else 10)
+                        if plan_type == 'cinema':
+                            hour = 9
+                        else:  # home
+                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                            hour = 19 if plan_date.weekday() < 5 else 10
                         plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                         logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
                     except ValueError as e:
@@ -3353,8 +3361,8 @@ def get_plan_day_or_date(message):
         plan_date = now.date() + timedelta(days=delta)
 
         if plan_type == 'home':
-            # Пятница — 19:00, остальные — 10:00
-            hour = 19 if target_weekday == 4 else 10
+            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+            hour = 19 if target_weekday < 5 else 10
         else:  # cinema
             hour = 9
 
