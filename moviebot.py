@@ -914,36 +914,36 @@ def handle_reaction(reaction):
     if message_id in settings_messages:
         settings_info = settings_messages[message_id]
         if reaction.new_reaction:
+            # Собираем все новые эмодзи сначала
+            new_emojis = []
+            new_custom_ids = []
+            
             for r in reaction.new_reaction:
-                new_emoji = None
-                new_custom_id = None
-                
                 if r.type == 'emoji' and hasattr(r, 'emoji'):
-                    new_emoji = r.emoji
+                    new_emojis.append(r.emoji)
                 elif r.type == 'custom_emoji' and hasattr(r, 'custom_emoji_id'):
-                    new_custom_id = str(r.custom_emoji_id)
+                    new_custom_ids.append(str(r.custom_emoji_id))
+            
+            if new_emojis or new_custom_ids:
+                # Получаем текущие эмодзи
+                current_emojis = get_watched_emojis()
+                current_custom_ids = get_watched_custom_emoji_ids()
                 
-                if new_emoji or new_custom_id:
-                    # Получаем текущие эмодзи
-                    current_emojis = get_watched_emojis()
-                    current_custom_ids = get_watched_custom_emoji_ids()
-                    
-                    action = settings_info.get('action', 'add')
-                    
+                action = settings_info.get('action', 'add')
+                
+                # Фильтруем только новые эмодзи (которых еще нет)
+                actually_new_emojis = [e for e in new_emojis if e not in current_emojis]
+                actually_new_custom_ids = [cid for cid in new_custom_ids if cid not in current_custom_ids]
+                
+                if actually_new_emojis or actually_new_custom_ids:
                     if action == "add":
                         # Добавляем к текущим
-                        if new_emoji:
-                            if new_emoji not in current_emojis:
-                                current_emojis.append(new_emoji)
-                        if new_custom_id:
-                            if new_custom_id not in current_custom_ids:
-                                current_custom_ids.append(new_custom_id)
+                        current_emojis.extend(actually_new_emojis)
+                        current_custom_ids.extend(actually_new_custom_ids)
                     else:
                         # Заменяем полностью (но добавляем новое)
-                        if new_emoji:
-                            current_emojis = [new_emoji] if new_emoji not in current_emojis else current_emojis
-                        if new_custom_id:
-                            current_custom_ids = [new_custom_id] if new_custom_id not in current_custom_ids else current_custom_ids
+                        current_emojis = actually_new_emojis if actually_new_emojis else current_emojis
+                        current_custom_ids = actually_new_custom_ids if actually_new_custom_ids else current_custom_ids
                     
                     # Формируем строку для сохранения
                     emojis_str = ''.join(current_emojis)
@@ -962,9 +962,19 @@ def handle_reaction(reaction):
                             conn.commit()
                             logger.info(f"[SETTINGS REACTION] Эмодзи сохранено: {emojis_str}")
                             
-                            # Отправляем подтверждение
-                            emoji_display = new_emoji if new_emoji else f"custom:{new_custom_id}"
-                            bot.send_message(chat_id, f"✅ Эмодзи {emoji_display} добавлен! Теперь он отмечает фильмы как просмотренные.")
+                            # Отправляем одно подтверждение со всеми новыми эмодзи
+                            emoji_displays = []
+                            if actually_new_emojis:
+                                emoji_displays.extend(actually_new_emojis)
+                            if actually_new_custom_ids:
+                                emoji_displays.extend([f"custom:{cid}" for cid in actually_new_custom_ids])
+                            
+                            if emoji_displays:
+                                emojis_text = ', '.join(emoji_displays)
+                                if len(emoji_displays) == 1:
+                                    bot.send_message(chat_id, f"✅ Эмодзи {emojis_text} добавлен! Теперь он отмечает фильмы как просмотренные.")
+                                else:
+                                    bot.send_message(chat_id, f"✅ Эмодзи добавлены: {emojis_text}\nТеперь они отмечают фильмы как просмотренные.")
                     except Exception as e:
                         conn.rollback()
                         logger.error(f"[SETTINGS REACTION] Ошибка сохранения: {e}", exc_info=True)
