@@ -3970,12 +3970,12 @@ def clean_action_choice(call):
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_plan:{plan_id}"))
             except Exception as e:
                 logger.error(f"[CLEAN] Ошибка форматирования плана {plan_id}: {e}", exc_info=True)
-                # Fallback: показываем хотя бы название и тип
-                type_text = "🎦 кино" if plan_type == 'cinema' else "🏠 дома"
-                button_text = f"{title} ({type_text})"
+                # Fallback: показываем хотя бы название и тип в том же формате
+                type_text = "🎦" if plan_type == 'cinema' else "🏠"
+                button_text = f"{title} {type_text}"
                 if len(button_text) > 60:
-                    short_title = title[:50] + "..."
-                    button_text = f"{short_title} ({type_text})"
+                    short_title = title[:55] + "..."
+                    button_text = f"{short_title} {type_text}"
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_plan:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
         
