@@ -1761,7 +1761,7 @@ def random_show_movie(call):
         
         # Автоматически планируем фильм на выбранную дату
         if plan_dt:
-        try:
+            try:
             chat_id = call.message.chat.id
             film_id = movie.get('id')
             kp_id = movie.get('kp_id')
