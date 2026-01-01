@@ -1221,7 +1221,11 @@ def rate_movie(message):
         FROM stats
         WHERE chat_id = %s AND user_id IS NOT NULL
     ''', (chat_id,))
-    chat_users = {row['user_id']: row['username'] or f"user_{row['user_id']}" for row in cursor.fetchall()}
+    chat_users = {}
+    for row in cursor.fetchall():
+        user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+        username = row.get('username') if isinstance(row, dict) else row[1]
+        chat_users[user_id] = username or f"user_{user_id}"
     
     # Для каждого фильма находим, кто не оценил
     text = "📊 <b>Список просмотренных фильмов для оценки:</b>\n\n"
@@ -1232,17 +1236,18 @@ def rate_movie(message):
     text += "=" * 40 + "\n\n"
     
     for movie in movies:
-        film_id = movie['id']
-        kp_id = movie['kp_id']
-        title = movie['title']
-        year = movie['year'] or '—'
+        # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+        film_id = movie.get('id') if isinstance(movie, dict) else movie[0]
+        kp_id = movie.get('kp_id') if isinstance(movie, dict) else movie[1]
+        title = movie.get('title') if isinstance(movie, dict) else movie[2]
+        year = (movie.get('year') if isinstance(movie, dict) else movie[3]) or '—'
         
         # Получаем всех, кто оценил этот фильм
         cursor.execute('''
             SELECT user_id FROM ratings
             WHERE chat_id = %s AND film_id = %s
         ''', (chat_id, film_id))
-        rated_users = {row['user_id'] for row in cursor.fetchall()}
+        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
         
         # Находим, кто не оценил
         not_rated = []
@@ -1320,8 +1325,8 @@ def handle_rate_list_reply(message):
                     errors.append(f"{kp_id}: фильм не найден или не просмотрен")
                     continue
                 
-                film_id = film_row['id']
-                title = film_row['title']
+                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
                 
                 # Проверяем, не оценил ли уже пользователь этот фильм
                 cursor.execute('''
