@@ -313,6 +313,7 @@ cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_film_id ON cinema_vo
 conn.commit()
 
 logger.info("[DEBUG] После conn.commit(), перед определением функций")
+logger.info("[DEBUG] Все таблицы созданы, миграции выполнены")
 
 def get_watched_emoji(chat_id):
     """Возвращает строку с эмодзи для отметки просмотренных (может быть несколько) для конкретного чата"""
