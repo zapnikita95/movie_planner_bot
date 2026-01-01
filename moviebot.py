@@ -312,6 +312,8 @@ cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_film_id ON cinema_vo
 
 conn.commit()
 
+logger.info("[DEBUG] После conn.commit(), перед определением функций")
+
 def get_watched_emoji(chat_id):
     """Возвращает строку с эмодзи для отметки просмотренных (может быть несколько) для конкретного чата"""
     with db_lock:
@@ -3502,7 +3504,9 @@ def health():
     return jsonify({'status': 'ok'}), 200
 
 # Логируем зарегистрированные маршруты после их определения
-logger.info(f"Flask маршруты зарегистрированы: {[str(rule) for rule in app.url_map.iter_rules()]}")
+logger.info(f"[DEBUG] Flask маршруты зарегистрированы: {[str(rule) for rule in app.url_map.iter_rules()]}")
+
+logger.info("[DEBUG] Перед определением IS_RENDER")
 
 # Определяем, где запускается бот: на Render или локально
 # Проверяем несколько признаков Render окружения
