@@ -529,7 +529,11 @@ def add_and_announce(link, chat_id):
         existing = cursor.fetchone()
     
     if existing:
-        film_id, existing_title, watched, _ = existing
+        # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+        film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+        existing_title = existing.get('title') if isinstance(existing, dict) else existing[1]
+        watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
+        
         # Фильм уже есть в базе
         text = f"🎞️ <b>Уже добавлено ранее в базу!</b>\n\n"
         text += f"<b>{existing_title}</b>\n"
@@ -550,8 +554,11 @@ def add_and_announce(link, chat_id):
             text += f"\n⏳ <b>Ещё не просмотрено</b>\n"
         
         text += f"\n<a href='{link}'>Кинопоиск</a>"
-        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
-        logger.info(f"Фильм уже в базе: {existing_title}")
+        try:
+            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            logger.info(f"Сообщение отправлено: фильм уже в базе - {existing_title}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения (фильм уже в базе): {e}", exc_info=True)
         return False
     
     # Новый фильм - добавляем
@@ -566,6 +573,7 @@ def add_and_announce(link, chat_id):
                 except:
                     # Если транзакция в состоянии ошибки, откатываем
                     conn.rollback()
+                    logger.debug("Транзакция была в состоянии ошибки, выполнен rollback")
                 
                 cursor.execute('''
                     INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
@@ -574,14 +582,18 @@ def add_and_announce(link, chat_id):
                 ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                 conn.commit()
                 inserted = cursor.rowcount == 1
+                logger.debug(f"Попытка вставки фильма: rowcount={cursor.rowcount}, inserted={inserted}")
             except Exception as db_error:
                 conn.rollback()
-                logger.error(f"Ошибка при добавлении фильма в БД: {db_error}")
+                logger.error(f"Ошибка при добавлении фильма в БД: {db_error}", exc_info=True)
                 # Продолжаем выполнение, чтобы отправить сообщение даже при ошибке БД
                 inserted = True  # Считаем, что нужно отправить сообщение
     except Exception as e:
-        logger.error(f"Критическая ошибка при работе с БД: {e}")
+        logger.error(f"Критическая ошибка при работе с БД: {e}", exc_info=True)
         # Продолжаем выполнение, чтобы отправить сообщение
+        inserted = True  # Отправляем сообщение даже при ошибке
+    
+    logger.info(f"Готовимся отправить сообщение: inserted={inserted}, title={info['title']}")
     
     if inserted:
         text = f"🎬 <b>Добавлено в базу!</b>\n\n"
@@ -593,13 +605,16 @@ def add_and_announce(link, chat_id):
         text += f"<a href='{link}'>Кинопоиск</a>"
         
         try:
+            logger.info(f"Отправляем сообщение в чат {chat_id}")
             msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
             bot_messages[msg.message_id] = link  # запоминаем для реакции
-            logger.info(f"Новый фильм добавлен: {info['title']}")
+            logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}")
             return True
         except Exception as e:
-            logger.error(f"Ошибка при отправке сообщения: {e}")
+            logger.error(f"❌ Ошибка при отправке сообщения: {e}", exc_info=True)
             return False
+    else:
+        logger.warning(f"Фильм не был вставлен (возможно, уже существует), сообщение не отправляется")
     return False
 
 # /start — приветственное сообщение
