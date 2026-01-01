@@ -4275,6 +4275,7 @@ def clean_command(message):
     markup.add(InlineKeyboardButton("🗑️ Удалить оценку", callback_data="clean:rating"))
     markup.add(InlineKeyboardButton("👁️ Удалить просмотр", callback_data="clean:watched"))
     markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="clean:plan"))
+    markup.add(InlineKeyboardButton("🎬 Удалить фильм из базы", callback_data="clean:movie"))
     markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
     markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
     
@@ -4442,6 +4443,43 @@ def clean_action_choice(call):
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
         
         bot.edit_message_text("📅 <b>Выберите план для удаления:</b>", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
+    elif action == 'movie':
+        # Показываем список всех фильмов для удаления
+        with db_lock:
+            cursor.execute('''
+                SELECT id, title, year, kp_id
+                FROM movies
+                WHERE chat_id = %s
+                ORDER BY title
+                LIMIT 30
+            ''', (chat_id,))
+            movies = cursor.fetchall()
+        
+        if not movies:
+            bot.edit_message_text("Нет фильмов в базе для удаления.", call.message.chat.id, call.message.message_id)
+            return
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for row in movies:
+            if isinstance(row, dict):
+                film_id = row.get('id')
+                title = row.get('title')
+                year = row.get('year')
+                kp_id = row.get('kp_id')
+            else:
+                film_id = row[0]
+                title = row[1]
+                year = row[2] if len(row) > 2 else None
+                kp_id = row[3] if len(row) > 3 else None
+            
+            button_text = f"{title} ({year or '—'})"
+            if len(button_text) > 60:
+                button_text = button_text[:57] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_movie:{film_id}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
+        
+        bot.edit_message_text("🎬 <b>Выберите фильм для удаления из базы:</b>\n\n<i>Внимание: это удалит фильм, все его оценки, планы и отметки просмотра.</i>", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
     
     elif action == 'chat_db':
         # Обнуление базы чата - требует голосования в группах
