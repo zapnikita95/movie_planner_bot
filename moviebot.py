@@ -2277,17 +2277,12 @@ def webhook():
         abort(403)
 
 if __name__ == '__main__':
-    # Для локального теста
+    # Для локального запуска (тестирование)
     bot.remove_webhook()
-    bot.infinity_polling(
-        timeout=10,
-        long_polling_timeout=5,
-        allowed_updates=['message', 'edited_message', 'channel_post', 'edited_channel_post', 'message_reaction', 'callback_query']
-    )
+    bot.infinity_polling()
 else:
     # На Render
     bot.remove_webhook()
-    bot.set_webhook(url=os.getenv('RENDER_EXTERNAL_URL') + '/webhook')
-    
-    # Запуск Flask (Render использует gunicorn или uvicorn, но для простоты)
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
+    webhook_url = os.getenv('RENDER_EXTERNAL_URL') + '/webhook'
+    bot.set_webhook(url=webhook_url)
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
