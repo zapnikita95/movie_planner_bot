@@ -2173,11 +2173,10 @@ def settings_command(message):
         current = ', '.join(reactions['emoji'] + [f"custom:{cid}" for cid in reactions['custom']]) or "не настроено"
         
         # Создаем inline keyboard с тремя режимами
-        from telebot import types
-        markup = types.InlineKeyboardMarkup(row_width=1)
-        markup.add(types.InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
-        markup.add(types.InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
-        markup.add(types.InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
+        markup.add(InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
+        markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
         
         settings_msg = bot.reply_to(message, f"⚙️ <b>Настройки реакций</b>\n\nТекущие реакции для просмотренных: {current}\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
         user_settings_state[user_id] = {'waiting_action': True, 'settings_msg_id': settings_msg.message_id}
