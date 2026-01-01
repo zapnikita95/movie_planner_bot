@@ -89,6 +89,7 @@ commands = [
     BotCommand("plan", "Запланировать просмотр дома или в кино"),
     BotCommand("schedule", "Список запланированных просмотров"),
     BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
+    BotCommand("stats", "Детальная статистика группы и участников"),
     BotCommand("rate", "Оценить просмотренные фильмы"),
     BotCommand("settings", "Настроить эмодзи просмотра"),
     BotCommand("clean", "Очистить базу данных (чат или данные о просмотрах)"),
@@ -171,6 +172,42 @@ cursor.execute('''
     )
 ''')
 cursor.execute('''
+    CREATE TABLE IF NOT EXISTS genre_ratings (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        user_id INTEGER,
+        genre TEXT,
+        rating REAL,
+        film_id INTEGER,
+        UNIQUE(chat_id, user_id, genre, film_id)
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS director_ratings (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        user_id INTEGER,
+        director TEXT,
+        rating REAL,
+        film_id INTEGER,
+        UNIQUE(chat_id, user_id, director, film_id)
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS actor_ratings (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        user_id INTEGER,
+        actor TEXT,
+        rating REAL,
+        film_id INTEGER,
+        UNIQUE(chat_id, user_id, actor, film_id)
+    )
+''')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre_ratings_chat_user ON genre_ratings (chat_id, user_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_director_ratings_chat_user ON director_ratings (chat_id, user_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_actor_ratings_chat_user ON actor_ratings (chat_id, user_id)')
+cursor.execute('''
     CREATE TABLE IF NOT EXISTS cinema_votes (
         id SERIAL PRIMARY KEY,
         chat_id INTEGER,
@@ -196,6 +233,59 @@ cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_chat_id ON cinema_vo
 cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_film_id ON cinema_votes (film_id)')
 
 conn.commit()
+
+def save_rating_statistics(chat_id, user_id, film_id, rating):
+    """Сохраняет статистику по жанрам, режиссерам и актерам при сохранении оценки"""
+    try:
+        with db_lock:
+            # Получаем информацию о фильме
+            cursor.execute('SELECT genres, director, actors FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            row = cursor.fetchone()
+            if not row:
+                return
+            
+            genres_str = row.get('genres') if isinstance(row, dict) else row[0]
+            director = row.get('director') if isinstance(row, dict) else row[1]
+            actors_str = row.get('actors') if isinstance(row, dict) else row[2]
+            
+            # Сохраняем первый жанр
+            if genres_str and genres_str != "—":
+                first_genre = genres_str.split(',')[0].strip()
+                if first_genre:
+                    cursor.execute('''
+                        INSERT INTO genre_ratings (chat_id, user_id, genre, rating, film_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (chat_id, user_id, genre, film_id) DO UPDATE SET rating = EXCLUDED.rating
+                    ''', (chat_id, user_id, first_genre, rating, film_id))
+            
+            # Сохраняем первого режиссера
+            if director and director != "Не указан" and director != "—":
+                cursor.execute('''
+                    INSERT INTO director_ratings (chat_id, user_id, director, rating, film_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (chat_id, user_id, director, film_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, user_id, director, rating, film_id))
+            
+            # Сохраняем первых 3 актеров
+            if actors_str and actors_str != "—":
+                actors_list = [a.strip() for a in actors_str.split(',')[:3]]
+                for actor in actors_list:
+                    if actor and actor != "—":
+                        cursor.execute('''
+                            INSERT INTO actor_ratings (chat_id, user_id, actor, rating, film_id)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (chat_id, user_id, actor, film_id) DO UPDATE SET rating = EXCLUDED.rating
+                        ''', (chat_id, user_id, actor, rating, film_id))
+            
+            conn.commit()
+            logger.debug(f"Статистика по оценке сохранена: chat_id={chat_id}, user_id={user_id}, film_id={film_id}, rating={rating}")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении статистики оценки: {e}", exc_info=True)
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
 
 def get_watched_emoji(chat_id):
     """Возвращает строку с эмодзи для отметки просмотренных (может быть несколько) для конкретного чата"""
@@ -911,6 +1001,9 @@ def handle_rating(message):
                     ''', (chat_id, film_id, user_id, rating))
                     conn.commit()
                     
+                    # Сохраняем статистику по жанрам, режиссерам и актерам
+                    save_rating_statistics(chat_id, user_id, film_id, rating)
+                    
                     cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                     avg_row = cursor.fetchone()
                     avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
@@ -1259,21 +1352,47 @@ def random_genre(call):
     # Переходим к выбору жанра
     chat_id = call.message.chat.id
     with db_lock:
+        # Получаем все жанры из непросмотренных фильмов
         cursor.execute("""
-            SELECT genres FROM movies 
-            WHERE chat_id = %s AND watched = 0 
-            AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            SELECT DISTINCT m.id, m.genres
+            FROM movies m
+            WHERE m.chat_id = %s AND m.watched = 0 
+            AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
         """, (chat_id, chat_id))
         all_genres = set()
         for row in cursor.fetchall():
-            genres = row.get('genres') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+            genres = row.get('genres') if isinstance(row, dict) else row[1]
             if genres:
                 for g in str(genres).split(', '):
                     if g.strip():
                         all_genres.add(g.strip())
+        
+        # Находим любимый жанр (с максимальной средней оценкой среди непросмотренных)
+        favorite_genre = None
+        favorite_avg = 0
+        for genre in all_genres:
+            # Получаем среднюю оценку по этому жанру (только из непросмотренных фильмов)
+            cursor.execute("""
+                SELECT AVG(gr.rating)
+                FROM genre_ratings gr
+                JOIN movies m ON gr.film_id = m.id AND gr.chat_id = m.chat_id
+                WHERE gr.chat_id = %s AND gr.genre = %s
+                AND m.watched = 0
+                AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            """, (chat_id, genre, chat_id))
+            avg_row = cursor.fetchone()
+            if avg_row and avg_row[0]:
+                avg = avg_row[0]
+                if avg > favorite_avg:
+                    favorite_avg = avg
+                    favorite_genre = genre
+    
     markup = InlineKeyboardMarkup(row_width=2)
     for genre in sorted(all_genres):
-        markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
+        label = genre
+        if genre == favorite_genre:
+            label = f"⭐ {genre} (любимый)"
+        markup.add(InlineKeyboardButton(label, callback_data=f"rand_genre:{genre}"))
     markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
     bot.edit_message_text("🎬 Выберите жанр:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
@@ -1285,35 +1404,136 @@ def random_director(call):
         genre = None
     user_random_state[user_id]['genre'] = genre
 
-    # Топ-3 режиссёра
+    # Топ-5 режиссёров по оценкам (только из непросмотренных фильмов)
     chat_id = call.message.chat.id
     with db_lock:
         cursor.execute("""
-            SELECT director FROM movies 
-            WHERE chat_id = %s AND watched = 0 
-            AND director IS NOT NULL AND director != "Не указан"
-            AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            SELECT dr.director, AVG(dr.rating) as avg_rating, COUNT(*) as count
+            FROM director_ratings dr
+            JOIN movies m ON dr.film_id = m.id AND dr.chat_id = m.chat_id
+            WHERE dr.chat_id = %s
+            AND m.watched = 0
+            AND m.director IS NOT NULL AND m.director != 'Не указан'
+            AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            GROUP BY dr.director
+            HAVING COUNT(*) > 0
+            ORDER BY AVG(dr.rating) DESC, COUNT(*) DESC
+            LIMIT 5
         """, (chat_id, chat_id))
-        directors = []
+        top_directors = []
         for row in cursor.fetchall():
-            director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+            director = row.get('director') if isinstance(row, dict) else row[0]
+            avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
             if director:
-                directors.append(director)
-        top_directors = [d for d in sorted(set(directors), key=directors.count, reverse=True)[:3]]
+                top_directors.append((director, avg))
 
-    markup = InlineKeyboardMarkup(row_width=2)
-    for d in top_directors:
-        markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
+    markup = InlineKeyboardMarkup(row_width=1)
+    for d, avg in top_directors:
+        markup.add(InlineKeyboardButton(f"{d} ({avg:.1f}/10)", callback_data=f"rand_dir:{d}"))
     markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
-    bot.edit_message_text("🎥 Выберите режиссёра из любимых группы:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    bot.edit_message_text("🎥 Выберите режиссёра из топ-5 по оценкам:", call.message.chat.id, call.message.message_id, reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
-def random_final(call):
+def random_actor(call):
     user_id = call.from_user.id
     director = call.data.split(":", 1)[1]
     if director == "skip":
         director = None
     user_random_state[user_id]['director'] = director
+
+    # Топ актеров по оценкам (только из непросмотренных фильмов)
+    chat_id = call.message.chat.id
+    with db_lock:
+        cursor.execute("""
+            SELECT ar.actor, AVG(ar.rating) as avg_rating, COUNT(*) as count
+            FROM actor_ratings ar
+            JOIN movies m ON ar.film_id = m.id AND ar.chat_id = m.chat_id
+            WHERE ar.chat_id = %s
+            AND m.watched = 0
+            AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            GROUP BY ar.actor
+            HAVING COUNT(*) > 0
+            ORDER BY AVG(ar.rating) DESC, COUNT(*) DESC
+            LIMIT 10
+        """, (chat_id, chat_id))
+        top_actors = []
+        for row in cursor.fetchall():
+            actor = row.get('actor') if isinstance(row, dict) else row[0]
+            avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+            if actor:
+                top_actors.append((actor, avg))
+    
+    # Сохраняем выбранных актеров (пока пусто)
+    if 'selected_actors' not in user_random_state[user_id]:
+        user_random_state[user_id]['selected_actors'] = []
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    for actor, avg in top_actors:
+        # Проверяем, выбран ли актер
+        is_selected = actor in user_random_state[user_id]['selected_actors']
+        label = f"{'✓ ' if is_selected else ''}{actor} ({avg:.1f}/10)"
+        markup.add(InlineKeyboardButton(label, callback_data=f"rand_actor:{actor}"))
+    markup.add(InlineKeyboardButton("✅ Готово", callback_data="rand_actor:done"))
+    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
+    
+    selected = user_random_state[user_id]['selected_actors']
+    selected_text = f"\n\nВыбрано: {', '.join(selected)}" if selected else ""
+    bot.edit_message_text(f"⭐ Выберите любимых актёров (можно несколько):{selected_text}", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_actor:"))
+def random_final(call):
+    user_id = call.from_user.id
+    actor_data = call.data.split(":", 1)[1]
+    
+    if actor_data == "skip":
+        user_random_state[user_id]['selected_actors'] = []
+    elif actor_data == "done":
+        # Готово - переходим к финальному выбору
+        pass
+    else:
+        # Переключение актера (toggle)
+        if 'selected_actors' not in user_random_state[user_id]:
+            user_random_state[user_id]['selected_actors'] = []
+        
+        selected_actors = user_random_state[user_id]['selected_actors']
+        if actor_data in selected_actors:
+            selected_actors.remove(actor_data)
+        else:
+            selected_actors.append(actor_data)
+        
+        # Обновляем интерфейс
+        chat_id = call.message.chat.id
+        with db_lock:
+            cursor.execute("""
+                SELECT ar.actor, AVG(ar.rating) as avg_rating, COUNT(*) as count
+                FROM actor_ratings ar
+                JOIN movies m ON ar.film_id = m.id AND ar.chat_id = m.chat_id
+                WHERE ar.chat_id = %s
+                AND m.watched = 0
+                AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+                GROUP BY ar.actor
+                HAVING COUNT(*) > 0
+                ORDER BY AVG(ar.rating) DESC, COUNT(*) DESC
+                LIMIT 10
+            """, (chat_id, chat_id))
+            top_actors = []
+            for row in cursor.fetchall():
+                actor = row.get('actor') if isinstance(row, dict) else row[0]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+                if actor:
+                    top_actors.append((actor, avg))
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for actor, avg in top_actors:
+            is_selected = actor in selected_actors
+            label = f"{'✓ ' if is_selected else ''}{actor} ({avg:.1f}/10)"
+            markup.add(InlineKeyboardButton(label, callback_data=f"rand_actor:{actor}"))
+        markup.add(InlineKeyboardButton("✅ Готово", callback_data="rand_actor:done"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
+        
+        selected_text = f"\n\nВыбрано: {', '.join(selected_actors)}" if selected_actors else ""
+        bot.edit_message_text(f"⭐ Выберите любимых актёров (можно несколько):{selected_text}", call.message.chat.id, call.message.message_id, reply_markup=markup)
+        return
 
     state = user_random_state[user_id]
     chat_id = call.message.chat.id
@@ -1349,6 +1569,17 @@ def random_final(call):
         if state.get('director'):
             query += " AND director = %s"
             params.append(state['director'])
+        
+        # Фильтрация по выбранным актерам
+        selected_actors = state.get('selected_actors', [])
+        if selected_actors:
+            # Фильтруем фильмы, где есть хотя бы один из выбранных актеров
+            actor_conditions = []
+            for actor in selected_actors:
+                actor_conditions.append("actors LIKE %s")
+                params.append(f"%{actor}%")
+            if actor_conditions:
+                query += " AND (" + " OR ".join(actor_conditions) + ")"
 
         cursor.execute(query, params)
         candidates = cursor.fetchall()
@@ -1652,6 +1883,9 @@ def handle_rate_list_reply(message):
                     VALUES (%s, %s, %s, %s)
                     ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
                 ''', (chat_id, film_id, user_id, rating))
+                
+                # Сохраняем статистику по жанрам, режиссерам и актерам
+                save_rating_statistics(chat_id, user_id, film_id, rating)
                 
                 results.append((kp_id, title, rating))
                 
