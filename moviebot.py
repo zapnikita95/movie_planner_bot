@@ -1219,24 +1219,50 @@ def random_genre(call):
     
     # Переходим к выбору жанра
     chat_id = call.message.chat.id
-    with db_lock:
-        cursor.execute("""
-            SELECT genres FROM movies 
-            WHERE chat_id = %s AND watched = 0 
-            AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
-        """, (chat_id, chat_id))
-        all_genres = set()
-        for row in cursor.fetchall():
-            genres = row.get('genres') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-            if genres:
-                for g in str(genres).split(', '):
-                    if g.strip():
-                        all_genres.add(g.strip())
-    markup = InlineKeyboardMarkup(row_width=2)
-    for genre in sorted(all_genres):
-        markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
-    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
-    bot.edit_message_text("🎬 Выберите жанр:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+    try:
+        with db_lock:
+            cursor.execute("""
+                SELECT genres FROM movies 
+                WHERE chat_id = %s AND watched = 0 
+                AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            """, (chat_id, chat_id))
+            all_genres = set()
+            for row in cursor.fetchall():
+                genres = row.get('genres') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                if genres:
+                    for g in str(genres).split(', '):
+                        if g.strip():
+                            all_genres.add(g.strip())
+        
+        if not all_genres:
+            bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", call.message.chat.id, call.message.message_id)
+            if user_id in user_random_state:
+                del user_random_state[user_id]
+            bot.answer_callback_query(call.id, "Нет доступных жанров", show_alert=True)
+            return
+        
+        markup = InlineKeyboardMarkup(row_width=2)
+        for genre in sorted(all_genres):
+            markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+        
+        try:
+            bot.edit_message_text("🎬 Выберите жанр:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+            bot.answer_callback_query(call.id)  # Подтверждаем нажатие кнопки
+            logger.info(f"[RANDOM] Переход к выбору жанра для user_id={user_id}")
+        except Exception as e:
+            logger.error(f"[RANDOM] Ошибка при переходе к выбору жанра: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при переходе к выбору жанра", show_alert=True)
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"[RANDOM] Критическая ошибка в random_genre: {e}", exc_info=True)
+        try:
+            bot.edit_message_text("Произошла ошибка при обработке выбора периода.", call.message.chat.id, call.message.message_id)
+            bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
 def random_director(call):
