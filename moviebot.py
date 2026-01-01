@@ -1697,17 +1697,27 @@ def random_final(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_day:"))
 def random_show_movie(call):
-    user_id = call.from_user.id
-    day_data = call.data.split(":", 1)[1]
-    
-    if user_id not in user_random_state or 'movie' not in user_random_state[user_id]:
-        bot.edit_message_text("Ошибка: данные о фильме не найдены. Начните заново с /random", call.message.chat.id, call.message.message_id)
-        if user_id in user_random_state:
-            del user_random_state[user_id]
-        return
-    
-    movie = user_random_state[user_id]['movie']
-    
+    try:
+        user_id = call.from_user.id
+        try:
+            day_data = call.data.split(":", 1)[1]
+        except (IndexError, AttributeError) as e:
+            logger.error(f"[RANDOM] Ошибка парсинга day_data: {e}, call.data={call.data}", exc_info=True)
+            bot.answer_callback_query(call.id, "Ошибка при обработке выбора дня", show_alert=True)
+            return
+        
+        if user_id not in user_random_state or 'movie' not in user_random_state[user_id]:
+            try:
+                bot.edit_message_text("Ошибка: данные о фильме не найдены. Начните заново с /random", call.message.chat.id, call.message.message_id)
+                bot.answer_callback_query(call.id, "Ошибка: данные о фильме не найдены", show_alert=True)
+            except:
+                pass
+            if user_id in user_random_state:
+                del user_random_state[user_id]
+            return
+        
+        movie = user_random_state[user_id]['movie']
+        
         # Формируем текст с днем
         if day_data == "skip":
             day_text = "на вечер"
