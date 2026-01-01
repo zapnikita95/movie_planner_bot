@@ -1597,6 +1597,112 @@ def handle_list_reply(message):
             pass
 
 # /total — расширенная статистика
+@bot.message_handler(commands=['stats'])
+def stats_command(message):
+    logger.info(f"[HANDLER] /stats вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/stats', message.chat.id)
+        logger.info(f"Команда /stats от пользователя {message.from_user.id}, chat_id={message.chat.id}")
+        chat_id = message.chat.id
+        
+        with db_lock:
+            # Получаем статистику по участникам
+            cursor.execute('''
+                SELECT 
+                    user_id,
+                    username,
+                    COUNT(*) as command_count,
+                    MAX(timestamp) as last_activity
+                FROM stats
+                WHERE chat_id = %s AND user_id IS NOT NULL
+                GROUP BY user_id, username
+                ORDER BY command_count DESC, last_activity DESC
+            ''', (chat_id,))
+            users_stats = cursor.fetchall()
+            
+            # Получаем общую статистику чата
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
+            total_movies_row = cursor.fetchone()
+            total_movies = total_movies_row.get('count') if isinstance(total_movies_row, dict) else (total_movies_row[0] if total_movies_row else 0)
+            
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            watched_movies_row = cursor.fetchone()
+            watched_movies = watched_movies_row.get('count') if isinstance(watched_movies_row, dict) else (watched_movies_row[0] if watched_movies_row else 0)
+            
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s', (chat_id,))
+            total_ratings_row = cursor.fetchone()
+            total_ratings = total_ratings_row.get('count') if isinstance(total_ratings_row, dict) else (total_ratings_row[0] if total_ratings_row else 0)
+            
+            cursor.execute('SELECT COUNT(*) FROM plans WHERE chat_id = %s', (chat_id,))
+            total_plans_row = cursor.fetchone()
+            total_plans = total_plans_row.get('count') if isinstance(total_plans_row, dict) else (total_plans_row[0] if total_plans_row else 0)
+            
+            # Получаем статистику по оценкам участников
+            cursor.execute('''
+                SELECT 
+                    r.user_id,
+                    COUNT(*) as ratings_count,
+                    AVG(r.rating) as avg_rating
+                FROM ratings r
+                WHERE r.chat_id = %s
+                GROUP BY r.user_id
+                ORDER BY ratings_count DESC
+            ''', (chat_id,))
+            ratings_stats = cursor.fetchall()
+            ratings_by_user = {}
+            for row in ratings_stats:
+                user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                count = row.get('ratings_count') if isinstance(row, dict) else row[1]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[2]
+                ratings_by_user[user_id] = {'count': count, 'avg': avg}
+        
+        # Формируем сообщение
+        text = "📊 <b>Детальная статистика группы</b>\n\n"
+        
+        # Общая статистика
+        text += "📈 <b>Общая статистика:</b>\n"
+        text += f"• Всего фильмов: <b>{total_movies}</b>\n"
+        text += f"• Просмотрено: <b>{watched_movies}</b>\n"
+        text += f"• Всего оценок: <b>{total_ratings}</b>\n"
+        text += f"• Запланировано: <b>{total_plans}</b>\n\n"
+        
+        # Статистика по участникам
+        if users_stats:
+            text += "👥 <b>Участники группы:</b>\n"
+            for idx, user_row in enumerate(users_stats[:10], 1):  # Показываем топ-10
+                user_id = user_row.get('user_id') if isinstance(user_row, dict) else user_row[0]
+                username = user_row.get('username') if isinstance(user_row, dict) else user_row[1]
+                command_count = user_row.get('command_count') if isinstance(user_row, dict) else user_row[2]
+                last_activity = user_row.get('last_activity') if isinstance(user_row, dict) else user_row[3]
+                
+                user_display = username or f"user_{user_id}"
+                rating_info = ratings_by_user.get(user_id, {})
+                if rating_info:
+                    text += f"{idx}. <b>{user_display}</b>\n"
+                    text += f"   • Команд: {command_count}\n"
+                    text += f"   • Оценок: {rating_info.get('count', 0)}\n"
+                    if rating_info.get('avg'):
+                        text += f"   • Средняя оценка: {rating_info['avg']:.1f}/10\n"
+                else:
+                    text += f"{idx}. <b>{user_display}</b>\n"
+                    text += f"   • Команд: {command_count}\n"
+                text += "\n"
+            
+            if len(users_stats) > 10:
+                text += f"<i>... и ещё {len(users_stats) - 10} участников</i>\n"
+        else:
+            text += "👥 <i>Нет данных об участниках</i>\n"
+        
+        bot.reply_to(message, text, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /stats отправлен пользователю {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /stats: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /stats")
+        except Exception as reply_error:
+            logger.error(f"❌ Ошибка при отправке сообщения об ошибке: {reply_error}", exc_info=True)
+
 @bot.message_handler(commands=['total'])
 def total_stats(message):
     logger.info(f"[HANDLER] /total вызван от {message.from_user.id}")
