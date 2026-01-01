@@ -331,11 +331,11 @@ def log_request(user_id, username, command_or_action, chat_id=None):
                     # Если транзакция в состоянии ошибки, откатываем
                     conn.rollback()
                 
-            cursor.execute('''
-                INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
-                VALUES (%s, %s, %s, %s, %s)
-            ''', (user_id, username, command_or_action, timestamp, chat_id))
-            conn.commit()
+                cursor.execute('''
+                    INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                ''', (user_id, username, command_or_action, timestamp, chat_id))
+                conn.commit()
             except Exception as db_error:
                 # КРИТИЧНО: откатываем транзакцию при ошибке
                 conn.rollback()
