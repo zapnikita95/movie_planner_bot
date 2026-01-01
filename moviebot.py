@@ -1427,30 +1427,30 @@ def random_genre(call):
                     if genres:
                         for g in str(genres).split(', '):
                             if g.strip():
-                                all_genres.add(g.strip())
+                            all_genres.add(g.strip())
             
             if not all_genres:
-            bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", call.message.chat.id, call.message.message_id)
-            if user_id in user_random_state:
-                del user_random_state[user_id]
-            bot.answer_callback_query(call.id, "Нет доступных жанров", show_alert=True)
-            return
-        
-        markup = InlineKeyboardMarkup(row_width=2)
-        for genre in sorted(all_genres):
-            markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
-        
-        try:
-            bot.edit_message_text("🎬 Выберите жанр:", call.message.chat.id, call.message.message_id, reply_markup=markup)
-            bot.answer_callback_query(call.id)  # Подтверждаем нажатие кнопки
-            logger.info(f"[RANDOM] Переход к выбору жанра для user_id={user_id}")
-        except Exception as e:
-            logger.error(f"[RANDOM] Ошибка при переходе к выбору жанра: {e}", exc_info=True)
+                bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", call.message.chat.id, call.message.message_id)
+                if user_id in user_random_state:
+                    del user_random_state[user_id]
+                bot.answer_callback_query(call.id, "Нет доступных жанров", show_alert=True)
+                return
+            
+            markup = InlineKeyboardMarkup(row_width=2)
+            for genre in sorted(all_genres):
+                markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+            
             try:
-                bot.answer_callback_query(call.id, "Ошибка при переходе к выбору жанра", show_alert=True)
-            except:
-                pass
+                bot.edit_message_text("🎬 Выберите жанр:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+                bot.answer_callback_query(call.id)  # Подтверждаем нажатие кнопки
+                logger.info(f"[RANDOM] Переход к выбору жанра для user_id={user_id}")
+            except Exception as e:
+                logger.error(f"[RANDOM] Ошибка при переходе к выбору жанра: {e}", exc_info=True)
+                try:
+                    bot.answer_callback_query(call.id, "Ошибка при переходе к выбору жанра", show_alert=True)
+                except:
+                    pass
     except Exception as e:
         logger.error(f"[RANDOM] Критическая ошибка в random_genre: {e}", exc_info=True)
         try:
