@@ -1815,10 +1815,21 @@ def random_show_movie(call):
                         cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)', 
                                       (chat_id, film_id, 'home', plan_utc_iso, user_id))
                         conn.commit()
-            
-            bot.answer_callback_query(call.id, f"Фильм запланирован на {plan_dt.strftime('%d.%m.%Y')}")
-            logger.info(f"Фильм {movie.get('title')} автоматически запланирован на {plan_dt.strftime('%d.%m.%Y %H:%M')}")
-        except Exception as e:
+                    
+                    bot.answer_callback_query(call.id, f"Фильм запланирован на {plan_dt.strftime('%d.%m.%Y')}")
+                    logger.info(f"Фильм {movie.get('title')} автоматически запланирован на {plan_dt.strftime('%d.%m.%Y %H:%M')}")
+                except Exception as db_error:
+                    logger.error(f"Ошибка БД при автоматическом планировании фильма: {db_error}", exc_info=True)
+                    try:
+                        with db_lock:
+                            conn.rollback()
+                    except:
+                        pass
+                    try:
+                        bot.answer_callback_query(call.id, "Ошибка при планировании фильма", show_alert=True)
+                    except:
+                        pass
+            except Exception as e:
             logger.error(f"Ошибка при автоматическом планировании фильма: {e}", exc_info=True)
             try:
                 bot.answer_callback_query(call.id, f"Ошибка при планировании: {str(e)[:50]}", show_alert=True)
