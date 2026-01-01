@@ -2398,12 +2398,13 @@ def handle_settings_reply(message):
         del user_settings_state[user_id]
 
 # Обработка ответа с эмодзи на сообщение /settings (расширенная версия с режимами)
+# Этот обработчик должен иметь высокий приоритет, чтобы сработать раньше handle_message
 @bot.message_handler(func=lambda message: (
     message.reply_to_message and 
     message.from_user.id in user_settings_state and 
     user_settings_state[message.from_user.id].get('adding_reactions') and
     message.reply_to_message.message_id == user_settings_state[message.from_user.id].get('settings_msg_id')
-))
+), priority=10)  # Высокий приоритет
 def add_reactions(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
