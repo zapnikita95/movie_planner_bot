@@ -747,6 +747,23 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type):
         logger.error(f"[PLAN NOTIFICATION] Ошибка отправки уведомления: {e}")
 
 # Получение информации о фильме через прямой запрос к API
+def extract_kp_id_from_text(text):
+    """Извлекает kp_id из текста (URL или просто число)"""
+    if not text:
+        return None
+    
+    # Пытаемся найти kp_id в URL
+    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', text)
+    if match:
+        return match.group(2)
+    
+    # Если это просто число, возвращаем его
+    match = re.search(r'^(\d+)$', text.strip())
+    if match:
+        return match.group(1)
+    
+    return None
+
 def extract_movie_info(link):
     match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
     if not match:
@@ -1994,83 +2011,78 @@ def rate_movie(message):
     log_request(message.from_user.id, username, '/rate', message.chat.id)
     logger.info(f"Команда /rate от пользователя {message.from_user.id}")
     chat_id = message.chat.id
+    user_id = message.from_user.id
     
-    # Получаем все просмотренные фильмы
-    with db_lock:
-        cursor.execute('''
-            SELECT m.id, m.kp_id, m.title, m.year
-            FROM movies m
-            WHERE m.chat_id = %s AND m.watched = 1
-            ORDER BY m.title
-        ''', (chat_id,))
-        movies = cursor.fetchall()
+    # Проверяем, есть ли аргументы в команде
+    text = message.text or ""
+    parts = text.split(None, 2)  # Разбиваем на максимум 3 части: /rate, kp_id/url, rating
     
-    if not movies:
-        bot.reply_to(message, "Нет просмотренных фильмов.")
-        return
-    
-    # Получаем всех пользователей чата из stats (внутри db_lock)
-    with db_lock:
-        cursor.execute('''
-            SELECT DISTINCT user_id, username
-            FROM stats
-            WHERE chat_id = %s AND user_id IS NOT NULL
-        ''', (chat_id,))
-        chat_users = {}
-        for row in cursor.fetchall():
-            user_id = row.get('user_id') if isinstance(row, dict) else row[0]
-            username = row.get('username') if isinstance(row, dict) else row[1]
-            if user_id:
-                chat_users[user_id] = username or f"user_{user_id}"
-    
-    # Формируем список фильмов с информацией о том, кто оценил
-    output = "📊 Список просмотренных фильмов для оценки:\n"
-    output += "💬 Ответьте на это сообщение списком оценок в формате:\n"
-    output += "kp_id оценка\n"
-    output += "Пример:\n"
-    output += "123 10\n"
-    output += "31341 8\n"
-    output += "123123 4\n"
-    output += "========================================\n"
-    
-    for movie in movies:
-        film_id = movie.get('id') if isinstance(movie, dict) else movie[0]
-        kp_id = movie.get('kp_id') if isinstance(movie, dict) else movie[1]
-        title = movie.get('title') if isinstance(movie, dict) else movie[2]
-        year = movie.get('year') if isinstance(movie, dict) else movie[3]
+    if len(parts) >= 3:
+        # Есть аргументы - пытаемся поставить оценку напрямую
+        kp_id_or_url = parts[1]
+        rating_str = parts[2]
         
-        # Получаем всех, кто оценил этот фильм
+        # Извлекаем kp_id
+        kp_id = extract_kp_id_from_text(kp_id_or_url)
+        if not kp_id:
+            bot.reply_to(message, "❌ Не удалось распознать kp_id. Используйте формат:\n<code>/rate 81682 10</code>\nили\n<code>/rate https://www.kinopoisk.ru/film/81682/ 10</code>", parse_mode='HTML')
+            return
+        
+        # Парсим оценку
+        try:
+            rating = int(rating_str.strip())
+            if not (1 <= rating <= 10):
+                bot.reply_to(message, "❌ Оценка должна быть от 1 до 10")
+                return
+        except ValueError:
+            bot.reply_to(message, "❌ Неверный формат оценки. Используйте число от 1 до 10")
+            return
+        
+        # Ищем фильм в базе
         with db_lock:
             cursor.execute('''
-                SELECT DISTINCT user_id FROM ratings 
-                WHERE chat_id = %s AND film_id = %s
-            ''', (chat_id, film_id))
-            rated_users = [row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+                SELECT id, title FROM movies
+                WHERE chat_id = %s AND kp_id = %s AND watched = 1
+            ''', (chat_id, kp_id))
+            film_row = cursor.fetchone()
+            
+            if not film_row:
+                bot.reply_to(message, f"❌ Фильм с kp_id={kp_id} не найден в базе или не помечен как просмотренный")
+                return
+            
+            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+            title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
+            
+            # Проверяем, не оценил ли уже пользователь этот фильм
+            cursor.execute('''
+                SELECT rating FROM ratings
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s
+            ''', (chat_id, film_id, user_id))
+            existing = cursor.fetchone()
+            
+            if existing:
+                old_rating = existing.get('rating') if isinstance(existing, dict) else existing[0]
+                # Обновляем оценку
+                cursor.execute('''
+                    UPDATE ratings SET rating = %s
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                ''', (rating, chat_id, film_id, user_id))
+                conn.commit()
+                bot.reply_to(message, f"✅ Оценка обновлена!\n\n<b>{title}</b>\nСтарая оценка: {old_rating}/10\nНовая оценка: {rating}/10", parse_mode='HTML')
+                logger.info(f"[RATE] Пользователь {user_id} обновил оценку для фильма {kp_id} с {old_rating} на {rating}")
+            else:
+                # Сохраняем новую оценку
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                    VALUES (%s, %s, %s, %s)
+                ''', (chat_id, film_id, user_id, rating))
+                conn.commit()
+                bot.reply_to(message, f"✅ Оценка сохранена!\n\n<b>{title}</b>\nОценка: {rating}/10", parse_mode='HTML')
+                logger.info(f"[RATE] Пользователь {user_id} поставил оценку {rating} для фильма {kp_id}")
         
-        # Формируем список тех, кто не оценил
-        not_rated = []
-        for uid, uname in chat_users.items():
-            if uid not in rated_users:
-                not_rated.append(uname)
-        
-        link = f"https://kinopoisk.ru/film/{kp_id}" if kp_id else ""
-        title_with_link = f"<a href='{link}'>{title}</a>" if link else title
-        
-        output += f"{kp_id} — {title_with_link} ({year})\n"
-        if not_rated:
-            output += f"     ⚠️ Не оценили: {', '.join(not_rated)}\n"
-        else:
-            output += f"     ✅ Все оценили\n"
+        return
     
-    sent = bot.reply_to(message, output, parse_mode='HTML')
-    rate_list_messages[sent.message_id] = chat_id
-@bot.message_handler(commands=['rate'])
-def rate_movie(message):
-    username = message.from_user.username or f"user_{message.from_user.id}"
-    log_request(message.from_user.id, username, '/rate', message.chat.id)
-    logger.info(f"Команда /rate от пользователя {message.from_user.id}")
-    chat_id = message.chat.id
-    
+    # Если аргументов нет - показываем список как раньше
     # Получаем все просмотренные фильмы
     with db_lock:
         cursor.execute('''
