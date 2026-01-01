@@ -359,16 +359,34 @@ def get_watched_emoji(chat_id):
         return "✅"
 
 def get_watched_emojis():
-    """Возвращает глобальные эмодзи для отметки просмотренных (chat_id=-1)"""
+    """Возвращает глобальные эмодзи для отметки просмотренных (chat_id=-1) как список"""
     with db_lock:
         cursor.execute("SELECT value FROM settings WHERE chat_id = -1 AND key = 'watched_emoji'")
         row = cursor.fetchone()
         if row:
             value = row.get('value') if isinstance(row, dict) else row[0]
             if value:
-                return value
+                # Убираем кастомные эмодзи вида custom:ID из строки
+                import re
+                value_clean = re.sub(r'custom:\d+', '', str(value))
+                # Возвращаем список символов
+                return list(value_clean) if value_clean else ['✅']
         # Дефолт, если не настроено
-        return "✅"
+        return ['✅']
+
+def get_watched_custom_emoji_ids():
+    """Возвращает список ID кастомных эмодзи для отметки просмотренных (chat_id=-1)"""
+    with db_lock:
+        cursor.execute("SELECT value FROM settings WHERE chat_id = -1 AND key = 'watched_emoji'")
+        row = cursor.fetchone()
+        if row:
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            if value:
+                # Ищем кастомные эмодзи в формате custom:ID
+                import re
+                custom_ids = re.findall(r'custom:(\d+)', str(value))
+                return [str(cid) for cid in custom_ids]
+        return []
 
 def is_watched_emoji(reaction_emoji, chat_id):
     """Проверяет, является ли реакция одним из сохранённых эмодзи для просмотра"""
@@ -883,28 +901,26 @@ rating_messages = {}  # message_id: film_id (связь сообщения о п
 rate_list_messages = {}  # chat_id: message_id (сообщение со списком фильмов для /rate)
 
 @bot.message_reaction_handler(func=lambda r: True)
-def handle_reaction(update):
-    if not update.new_reaction:
-        return
+def handle_reaction(reaction):
+    logger.info(f"[REACTION] Получена реакция в чате {reaction.chat.id} на сообщение {reaction.message_id}")
     
-    chat_id = update.chat.id
-    user_id = update.user.id if update.user else None
-    message_id = update.message_id
-    
-    logger.info(f"[REACTION] Получена реакция в чате {chat_id} на сообщение {message_id} от пользователя {user_id}")
+    chat_id = reaction.chat.id
+    message_id = reaction.message_id
     
     # Сначала проверяем, не это ли голосование по обнулению базы
     if message_id in clean_votes:
         vote_data = clean_votes[message_id]
         is_like = False
-        for reaction in update.new_reaction:
-            if hasattr(reaction, 'type'):
-                if reaction.type == 'emoji' and hasattr(reaction, 'emoji') and reaction.emoji == '👍':
+        user_id = reaction.user.id if reaction.user else None
+        if reaction.new_reaction:
+            for r in reaction.new_reaction:
+                if hasattr(r, 'type'):
+                    if r.type == 'emoji' and hasattr(r, 'emoji') and r.emoji == '👍':
+                        is_like = True
+                        break
+                elif hasattr(r, 'emoji') and r.emoji == '👍':
                     is_like = True
                     break
-            elif hasattr(reaction, 'emoji') and reaction.emoji == '👍':
-                is_like = True
-                break
         
         if is_like and user_id:
             # Любой участник чата может проголосовать, не только те, кто в active_members
@@ -943,69 +959,32 @@ def handle_reaction(update):
                     pass
         return
     
-    # Обычная обработка реакций для отметки просмотренных
-    # Используем глобальные настройки (get_watched_emojis) и локальные (get_watched_reactions) для обратной совместимости
-    watched_emojis_global = get_watched_emojis()
-    watched = get_watched_reactions(chat_id)
-    logger.info(f"[REACTION DEBUG] Chat: {chat_id}, Msg: {message_id}, User: {user_id}, New reactions: {len(update.new_reaction) if update.new_reaction else 0}, Watched emojis global: {watched_emojis_global}, Watched reactions: {watched}")
+    # Получаем обычные эмодзи (как список символов)
+    ordinary_emojis = list(get_watched_emojis())  # ['✅', '💋', '❤️' и т.д.]
     
-    for reaction in update.new_reaction:
-        is_watched = False
-        reaction_emoji = None
-        
-        # Детальное логирование структуры реакции
-        logger.info(f"[REACTION DEBUG] Reaction object: type={type(reaction)}, dir={[attr for attr in dir(reaction) if not attr.startswith('_')][:10]}")
-        
-        # Проверяем разные форматы реакции
-        if hasattr(reaction, 'type'):
-            logger.info(f"[REACTION DEBUG] Reaction has type: {reaction.type}")
-            if reaction.type == 'emoji':
-                if hasattr(reaction, 'emoji'):
-                    reaction_emoji = reaction.emoji
-                    logger.info(f"[REACTION DEBUG] Emoji reaction found: {reaction_emoji}")
-                elif hasattr(reaction, 'emoji_id'):
-                    reaction_emoji = reaction.emoji_id
-                    logger.info(f"[REACTION DEBUG] Emoji ID reaction found: {reaction_emoji}")
-                # Проверяем и в глобальных настройках, и в локальных
-                if reaction_emoji:
-                    is_watched = reaction_emoji in watched_emojis_global or reaction_emoji in watched['emoji']
-            elif reaction.type == 'custom_emoji':
-                if hasattr(reaction, 'custom_emoji_id'):
-                    custom_id = str(reaction.custom_emoji_id)
-                    # Проверяем, есть ли этот кастомный эмодзи в настройках
-                    is_watched = custom_id in watched['custom']
-                    logger.info(f"[REACTION DEBUG] Custom emoji ID: {custom_id}, is_watched: {is_watched}")
-                    
-                    # Если кастомный эмодзи не найден в настройках, но пользователь использует кастомную версию стандартного эмодзи
-                    # (например, кастомный ✅), то считаем его как watched, если в настройках есть обычный ✅
-                    # Это работает для случаев, когда пользователь использует кастомную версию стандартного эмодзи из Telegram
-                    if not is_watched:
-                        # Если в настройках есть обычный ✅, то кастомный эмодзи тоже считается watched
-                        # (предполагаем, что это кастомная версия стандартного эмодзи)
-                        if watched_emojis_global and '✅' in watched_emojis_global:
-                            is_watched = True
-                            logger.info(f"[REACTION DEBUG] Кастомный эмодзи {custom_id} распознан как watched (кастомная версия ✅)")
-                        elif watched['emoji'] and '✅' in watched['emoji']:
-                            is_watched = True
-                            logger.info(f"[REACTION DEBUG] Кастомный эмодзи {custom_id} распознан как watched (кастомная версия ✅)")
-        elif hasattr(reaction, 'emoji'):
-            # Старый формат для обратной совместимости
-            reaction_emoji = reaction.emoji
-            logger.info(f"[REACTION DEBUG] Old format emoji: {reaction_emoji}")
-            is_watched = reaction.emoji in watched_emojis_global or reaction.emoji in watched['emoji']
-        else:
-            # Пробуем получить эмодзи через другие атрибуты
-            for attr in ['emoji', 'emoji_id', 'reaction']:
-                if hasattr(reaction, attr):
-                    reaction_emoji = getattr(reaction, attr)
-                    logger.info(f"[REACTION DEBUG] Found emoji via {attr}: {reaction_emoji}")
-                    if reaction_emoji:
-                        is_watched = str(reaction_emoji) in watched_emojis_global or str(reaction_emoji) in watched['emoji']
-                        break
-        
-        logger.info(f"[REACTION DEBUG] Final: Reaction emoji: {reaction_emoji}, is_watched: {is_watched}")
-        
-        if is_watched:
+    # Получаем кастомные эмодзи ID
+    custom_emoji_ids = get_watched_custom_emoji_ids()
+    
+    is_watched = False
+    
+    if not reaction.new_reaction:
+        return
+    
+    for r in reaction.new_reaction:
+        if r.type == 'emoji' and r.emoji in ordinary_emojis:
+            logger.info(f"[REACTION DEBUG] Обычный watched эмодзи: {r.emoji}")
+            is_watched = True
+            break
+        elif r.type == 'custom_emoji' and str(r.custom_emoji_id) in custom_emoji_ids:
+            logger.info(f"[REACTION DEBUG] Кастомный watched эмодзи ID: {r.custom_emoji_id}")
+            is_watched = True
+            break
+    
+    if not is_watched:
+        logger.info("[REACTION] Не watched эмодзи — игнорируем")
+        return
+    
+    if is_watched:
             link = bot_messages.get(message_id)
             if not link:
                 # Проверяем также plan_notification_messages
@@ -1014,77 +993,34 @@ def handle_reaction(update):
                     link = plan_data.get('link')
                     logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
             
-            if not link:
-                logger.warning(f"[REACTION] Нет ссылки в bot_messages для message_id {message_id}. Доступные message_ids: {list(bot_messages.keys())[:10]}")
-                return
-            
-            try:
-                logger.info(f"[REACTION] Обрабатываем реакцию для фильма с ссылкой {link}")
-                # Извлекаем kp_id из ссылки для поиска фильма
-                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
-                if not match:
-                    logger.warning(f"[REACTION] Не удалось извлечь kp_id из ссылки: {link}")
-                    return
-                
-                kp_id = match.group(2)
-                film_id = None
-                title = None
-                watched_status = None
-                
-                try:
-                    with db_lock:
-                        # Проверяем состояние транзакции
-                        try:
-                            cursor.execute('SELECT 1')
-                            cursor.fetchone()
-                        except:
-                            conn.rollback()
-                        
-                        # Сначала проверяем, есть ли фильм и его текущий статус
-                        cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                        row = cursor.fetchone()
-                        
-                        if not row:
-                            logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в БД для chat_id={chat_id}")
-                            return
-                        
-                        film_id = row.get('id') if isinstance(row, dict) else row[0]
-                        title = row.get('title') if isinstance(row, dict) else row[1]
-                        watched_status = row.get('watched') if isinstance(row, dict) else row[2]
-                        
-                        if watched_status == 1:
-                            logger.info(f"[REACTION] Фильм {title} уже отмечен как просмотренный")
-                            return
-                        
-                        # Обновляем watched
-                        cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                        updated_count = cursor.rowcount
-                        conn.commit()
-                        logger.info(f"[REACTION] Обновлено записей: {updated_count} для film_id={film_id}, kp_id={kp_id}, chat_id={chat_id}")
-                        
-                except Exception as db_error:
-                    logger.error(f"[REACTION] Ошибка БД при обработке реакции: {db_error}", exc_info=True)
-                    try:
-                        with db_lock:
-                            conn.rollback()
-                    except:
-                        pass
-                    return
-                
-                # Отправляем сообщение только если фильм найден и обновлён
-                if film_id and title:
-                    user_name = update.user.first_name if update.user else "Кто-то"
-                    try:
-                        msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
-                        # Сохраняем связь message_id -> film_id для обработки оценки
-                        rating_messages[msg.message_id] = film_id
-                        logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}, message_id={msg.message_id}, film_id={film_id}")
-                    except Exception as send_error:
-                        logger.error(f"[REACTION] Ошибка при отправке сообщения: {send_error}", exc_info=True)
-                else:
-                    logger.warning(f"[REACTION] Не удалось отправить сообщение: film_id={film_id}, title={title}")
-            except Exception as e:
-                logger.error(f"[REACTION] Ошибка реакции: {e}", exc_info=True)
+    if not link:
+        # Проверяем также plan_notification_messages
+        plan_data = plan_notification_messages.get(message_id)
+        if plan_data:
+            link = plan_data.get('link')
+            logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
+    
+    if not link:
+        logger.info("[REACTION] Нет link в bot_messages")
+        return
+    
+    with db_lock:
+        cursor.execute("SELECT id, title FROM movies WHERE link = %s AND chat_id = %s AND watched = 0", (link, chat_id))
+        film = cursor.fetchone()
+        if not film:
+            logger.info("[REACTION] Фильм не найден или уже просмотрен")
+            return
+        
+        cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s", (film['id'],))
+        conn.commit()
+        logger.info(f"[REACTION] Фильм {film['title']} отмечен просмотренным")
+    
+    markup = InlineKeyboardMarkup(row_width=5)
+    for i in range(1, 11):
+        markup.add(InlineKeyboardButton(str(i), callback_data=f"rate:{film['id']}:{i}"))
+    
+    bot.send_message(chat_id, f"🎬 <b>{film['title']}</b> отмечен как просмотренный!\nОцени от 1 до 10:", 
+                     reply_markup=markup, parse_mode='HTML')
 
 # Обработка оценок текстом
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 1 <= int(m.text) <= 10 and m.reply_to_message)
