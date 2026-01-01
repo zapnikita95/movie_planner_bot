@@ -3537,7 +3537,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         logger.info(f"[PLAN] Уведомление запланировано на {plan_dt} МСК для фильма {title}")
         return True
 
-@bot.message_handler(commands=['plan'])
+@bot.message_handler(commands=['plan'], priority=1)
 def plan_handler(message):
     logger.info(f"[HANDLER] /plan вызван от {message.from_user.id}")
     try:
