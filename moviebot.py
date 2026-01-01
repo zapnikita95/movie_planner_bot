@@ -54,7 +54,7 @@ user_plan_state = {}  # user_id: {'step': int, 'link': str, 'type': str, 'day_or
 bot_messages = {}  # message_id: link (храним карточки бота)
 list_messages = {}  # message_id: chat_id (храним сообщения /list для обработки ответов)
 # Состояния настроек
-user_settings_state = {}  # user_id: {'waiting_emoji': bool, 'adding_reactions': bool, 'action': str, 'settings_msg_id': int}
+user_settings_state = {}  # user_id: {'action': str, 'settings_msg_id': int, 'chat_id': int}
 # Состояния очистки
 user_clean_state = {}  # user_id: {'action': str, 'target': str}
 clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
