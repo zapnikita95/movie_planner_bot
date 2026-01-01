@@ -2390,11 +2390,11 @@ def total_stats(message):
         text += f"❤️ Любимый жанр: <b>{fav_genre}</b>\n\n"
         text += "<b>Топ режиссёров:</b>\n"
         for d, stats in top_directors:
-            avg_d = stats['sum_rating']/stats['count'] if stats['count'] > 0 else 0
+            avg_d = stats.get('avg_rating', 0) if stats.get('avg_rating') else 0
             text += f"• {d} — {stats['count']} фильм(ов), средняя {avg_d:.1f}/10\n"
         text += "\n<b>Топ актёров:</b>\n"
         for a, stats in top_actors:
-            avg_a = stats['sum_rating']/stats['count'] if stats['count'] > 0 else 0
+            avg_a = stats.get('avg_rating', 0) if stats.get('avg_rating') else 0
             text += f"• {a} — {stats['count']} фильм(ов), средняя {avg_a:.1f}/10\n"
 
         bot.reply_to(message, text, parse_mode='HTML')
