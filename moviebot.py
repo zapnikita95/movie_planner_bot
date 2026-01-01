@@ -50,6 +50,15 @@ else:
     raise ValueError("Добавьте BOT_TOKEN в environment variables")
 
 bot = telebot.TeleBot(TOKEN)
+# Получаем ID бота для исключения из подсчета участников
+try:
+    bot_info = bot.get_me()
+    BOT_ID = bot_info.id
+    logger.info(f"ID бота: {BOT_ID}")
+except Exception as e:
+    logger.warning(f"Не удалось получить ID бота: {e}")
+    BOT_ID = None
+
 # Очищаем старые webhook, если были (с обработкой ошибок)
 try:
     bot.remove_webhook()
@@ -3744,14 +3753,30 @@ def clean_action_choice(call):
                         active_members_from_stats.add(user_id)
                     logger.info(f"[CLEAN] Найдено активных участников в stats: {len(active_members_from_stats)}, user_ids: {list(active_members_from_stats)}")
                 
+                # Исключаем бота из списка активных участников
+                if BOT_ID and BOT_ID in active_members_from_stats:
+                    active_members_from_stats.discard(BOT_ID)
+                    logger.info(f"[CLEAN] Бот (ID: {BOT_ID}) исключен из списка активных участников")
+                
                 # Определяем количество участников для голосования
                 # Если получили через API и оно больше, используем его
                 # Иначе используем количество из stats, но минимум 2 (чтобы учесть хотя бы двух участников)
-                if chat_member_count and chat_member_count > len(active_members_from_stats):
-                    active_members_count = chat_member_count
-                    logger.info(f"[CLEAN] Используем количество участников из API: {active_members_count}")
-                    # Для голосования используем всех участников чата (не только активных в stats)
-                    active_members = active_members_from_stats  # Это будут те, кто может проголосовать
+                if chat_member_count:
+                    # Вычитаем бота из общего количества участников
+                    if chat_member_count > 0:
+                        chat_member_count = max(1, chat_member_count - 1)  # Вычитаем бота, минимум 1
+                        logger.info(f"[CLEAN] Количество участников после исключения бота: {chat_member_count}")
+                    
+                    if chat_member_count > len(active_members_from_stats):
+                        active_members_count = chat_member_count
+                        logger.info(f"[CLEAN] Используем количество участников из API (без бота): {active_members_count}")
+                        # Для голосования используем всех участников чата (не только активных в stats)
+                        active_members = active_members_from_stats  # Это будут те, кто может проголосовать
+                    else:
+                        # Используем количество из stats, но минимум 2
+                        active_members_count = max(len(active_members_from_stats), 2)
+                        active_members = active_members_from_stats
+                        logger.info(f"[CLEAN] Используем количество участников из stats (минимум 2): {active_members_count}")
                 else:
                     # Используем количество из stats, но минимум 2
                     active_members_count = max(len(active_members_from_stats), 2)
