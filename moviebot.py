@@ -1,2 +1,3495 @@
-# Исправляю отступ в get_watched_reactions
-# Читаю файл и исправляю проблему
+from dotenv import load_dotenv
+load_dotenv()  # загружает .env
+
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
+import os
+import random
+import re
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime, timedelta
+import time
+import threading
+from apscheduler.schedulers.background import BackgroundScheduler
+import pytz
+import dateutil.parser
+import logging
+import json
+import sys
+from flask import Flask, request, abort
+import psycopg2
+from psycopg2.extras import RealDictCursor
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+TOKEN = os.getenv('BOT_TOKEN')
+if not TOKEN:
+    logger.error("BOT_TOKEN не задан! Бот не может работать.")
+    raise ValueError("Добавьте BOT_TOKEN в environment variables")
+
+bot = telebot.TeleBot(TOKEN)
+# Очищаем старые webhook, если были (с обработкой ошибок)
+try:
+    bot.remove_webhook()
+    logger.info("Старые webhook очищены")
+except Exception as e:
+    logger.warning(f"Не удалось очистить webhook (возможно, токен неверный или еще не установлен): {e}")
+
+# Токен Kinopoisk API
+KP_TOKEN = os.getenv('KP_TOKEN')
+
+# Планировщик для уведомлений
+scheduler = BackgroundScheduler()
+scheduler.start()
+
+# Состояния планирования
+user_plan_state = {}  # user_id: {'step': int, 'link': str, 'type': str, 'day_or_date': str}
+bot_messages = {}  # message_id: link (храним карточки бота)
+list_messages = {}  # message_id: chat_id (храним сообщения /list для обработки ответов)
+plan_notification_messages = {}  # message_id: {'kp_id': str, 'chat_id': int, 'link': str} (храним напоминания о планах)
+# Состояния настроек
+user_settings_state = {}  # user_id: {'action': str, 'settings_msg_id': int, 'chat_id': int}
+# Состояния очистки
+user_clean_state = {}  # user_id: {'action': str, 'target': str}
+clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
+# Состояния очистки
+user_clean_state = {}  # user_id: {'action': str, 'target': str}
+clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
+plans_tz = pytz.timezone('Europe/Moscow')
+months_map = {
+    'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
+    'июля': 7, 'августа': 8, 'сентября': 9, 'октября': 10, 'ноября': 11, 'декабря': 12
+}
+# Расширенный маппинг дней недели
+days_full = {
+    'понедельник': 0, 'пн': 0, 'в понедельник': 0, 'на понедельник': 0,
+    'вторник': 1, 'вт': 1, 'во вторник': 1, 'на вторник': 1,
+    'среда': 2, 'ср': 2, 'в среду': 2, 'на среду': 2,
+    'четверг': 3, 'чт': 3, 'в четверг': 3, 'на четверг': 3,
+    'пятница': 4, 'пт': 4, 'в пятницу': 4, 'на пятницу': 4,
+    'суббота': 5, 'сб': 5, 'в субботу': 5, 'на субботу': 5,
+    'воскресенье': 6, 'вс': 6, 'в воскресенье': 6, 'на воскресенье': 6,
+    'в пн': 0, 'в вт': 1, 'в ср': 2, 'в чт': 3, 'в пт': 4, 'в сб': 5, 'в вс': 6,
+    'на пн': 0, 'на вт': 1, 'на ср': 2, 'на чт': 3, 'на пт': 4, 'на сб': 5, 'на вс': 6
+}
+days_map = days_full  # Для обратной совместимости
+
+# Команды
+commands = [
+    BotCommand("start", "Приветствие и инструкция по использованию"),
+    BotCommand("list", "Список непросмотренных фильмов"),
+    BotCommand("random", "Рандомный фильм с фильтрами"),
+    BotCommand("plan", "Запланировать просмотр дома или в кино"),
+    BotCommand("schedule", "Список запланированных просмотров"),
+    BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
+    BotCommand("stats", "Детальная статистика группы и участников"),
+    BotCommand("rate", "Оценить просмотренные фильмы"),
+    BotCommand("settings", "Настроить эмодзи просмотра"),
+    BotCommand("clean", "Очистить базу данных (чат или данные о просмотрах)"),
+    BotCommand("help", "Помощь по командам")
+]
+bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
+bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
+
+# БД
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+if not DATABASE_URL:
+    logger.error("DATABASE_URL не задан! Бот не может подключиться к БД.")
+    raise ValueError("Добавьте DATABASE_URL в Render environment variables")
+
+try:
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    cursor = conn.cursor()
+    logger.info("Подключение к PostgreSQL успешно!")
+except Exception as e:
+    logger.error(f"Не удалось подключиться к БД: {e}")
+    raise
+# Блокировка для синхронизации доступа к БД из разных потоков
+db_lock = threading.Lock()
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS movies (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        link TEXT,
+        kp_id TEXT,
+        title TEXT,
+        year INTEGER,
+        genres TEXT,
+        description TEXT,
+        director TEXT,
+        actors TEXT,
+        watched INTEGER DEFAULT 0,
+        rating REAL DEFAULT NULL,
+        UNIQUE(chat_id, kp_id)
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS settings (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        key TEXT,
+        value TEXT,
+        UNIQUE(chat_id, key)
+    )
+''')
+cursor.execute('INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING', (-1, "watched_emoji", "✅"))
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS plans (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        film_id INTEGER,
+        plan_type TEXT,
+        plan_datetime TEXT,
+        user_id INTEGER
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS stats (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER,
+        username TEXT,
+        command_or_action TEXT,
+        timestamp TEXT,
+        chat_id INTEGER
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ratings (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        film_id INTEGER,
+        user_id INTEGER,
+        rating INTEGER CHECK(rating BETWEEN 1 AND 10),
+        UNIQUE(chat_id, film_id, user_id)
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS genre_ratings (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        user_id INTEGER,
+        genre TEXT,
+        rating REAL,
+        film_id INTEGER,
+        UNIQUE(chat_id, user_id, genre, film_id)
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS director_ratings (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        user_id INTEGER,
+        director TEXT,
+        rating REAL,
+        film_id INTEGER,
+        UNIQUE(chat_id, user_id, director, film_id)
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS actor_ratings (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        user_id INTEGER,
+        actor TEXT,
+        rating REAL,
+        film_id INTEGER,
+        UNIQUE(chat_id, user_id, actor, film_id)
+    )
+''')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_genre_ratings_chat_user ON genre_ratings (chat_id, user_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_director_ratings_chat_user ON director_ratings (chat_id, user_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_actor_ratings_chat_user ON actor_ratings (chat_id, user_id)')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS cinema_votes (
+        id SERIAL PRIMARY KEY,
+        chat_id INTEGER,
+        film_id INTEGER,
+        deadline TEXT,
+        message_id INTEGER,
+        yes_users TEXT DEFAULT '[]',
+        no_users TEXT DEFAULT '[]'
+    )
+''')
+
+# Индексы для скорости
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_movies_chat_id ON movies (chat_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_movies_link ON movies (link)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_ratings_chat_id ON ratings (chat_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_ratings_film_id ON ratings (film_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_plans_chat_id ON plans (chat_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_plans_film_id ON plans (film_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_plans_datetime ON plans (plan_datetime)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_settings_chat_id ON settings (chat_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_stats_chat_id ON stats (chat_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_chat_id ON cinema_votes (chat_id)')
+cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_film_id ON cinema_votes (film_id)')
+
+conn.commit()
+
+def save_rating_statistics(chat_id, user_id, film_id, rating):
+    """Сохраняет статистику по жанрам, режиссерам и актерам при сохранении оценки"""
+    try:
+        # Получаем информацию о фильме (без db_lock, так как вызывается изнутри db_lock)
+        cursor.execute('SELECT genres, director, actors FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        row = cursor.fetchone()
+        if not row:
+            return
+        
+        genres_str = row.get('genres') if isinstance(row, dict) else row[0]
+        director = row.get('director') if isinstance(row, dict) else row[1]
+        actors_str = row.get('actors') if isinstance(row, dict) else row[2]
+        
+        # Сохраняем первый жанр
+        if genres_str and genres_str != "—":
+            first_genre = genres_str.split(',')[0].strip()
+            if first_genre:
+                cursor.execute('''
+                    INSERT INTO genre_ratings (chat_id, user_id, genre, rating, film_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (chat_id, user_id, genre, film_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, user_id, first_genre, rating, film_id))
+        
+        # Сохраняем первого режиссера
+        if director and director != "Не указан" and director != "—":
+            cursor.execute('''
+                INSERT INTO director_ratings (chat_id, user_id, director, rating, film_id)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (chat_id, user_id, director, film_id) DO UPDATE SET rating = EXCLUDED.rating
+            ''', (chat_id, user_id, director, rating, film_id))
+        
+        # Сохраняем первых 3 актеров
+        if actors_str and actors_str != "—":
+            actors_list = [a.strip() for a in actors_str.split(',')[:3]]
+            for actor in actors_list:
+                if actor and actor != "—":
+                    cursor.execute('''
+                        INSERT INTO actor_ratings (chat_id, user_id, actor, rating, film_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (chat_id, user_id, actor, film_id) DO UPDATE SET rating = EXCLUDED.rating
+                    ''', (chat_id, user_id, actor, rating, film_id))
+        
+        logger.debug(f"Статистика по оценке сохранена: chat_id={chat_id}, user_id={user_id}, film_id={film_id}, rating={rating}")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении статистики оценки: {e}", exc_info=True)
+
+def get_watched_emoji(chat_id):
+    """Возвращает строку с эмодзи для отметки просмотренных (может быть несколько) для конкретного чата"""
+    with db_lock:
+        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+        row = cursor.fetchone()
+        if row:
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            if value:
+                return value
+        # Дефолт, если не настроено
+        return "✅"
+
+def is_watched_emoji(reaction_emoji, chat_id):
+    """Проверяет, является ли реакция одним из сохранённых эмодзи для просмотра"""
+    watched_emojis = get_watched_emoji(chat_id)
+    # Если сохранено несколько эмодзи, проверяем каждый
+    return reaction_emoji in watched_emojis
+
+def get_watched_reactions(chat_id):
+    """Возвращает словарь с обычными и кастомными эмодзи для реакций"""
+    with db_lock:
+        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
+        row = cursor.fetchone()
+        if row:
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            if value:
+            try:
+                    reactions = json.loads(value)
+                emojis = [r for r in reactions if not r.startswith('custom:')]
+                custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
+                return {'emoji': emojis, 'custom': custom_ids}
+            except:
+                pass
+    # Дефолт
+    return {'emoji': ['✅'], 'custom': []}
+
+# Статистика
+def log_request(user_id, username, command_or_action, chat_id=None):
+    """Логирует запрос пользователя в БД"""
+    try:
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with db_lock:
+            try:
+                # Проверяем, не в состоянии ли ошибки транзакция
+                try:
+                    cursor.execute('SELECT 1')
+                    cursor.fetchone()
+                except:
+                    # Если транзакция в состоянии ошибки, откатываем
+                    conn.rollback()
+                
+            cursor.execute('''
+                INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
+                VALUES (%s, %s, %s, %s, %s)
+            ''', (user_id, username, command_or_action, timestamp, chat_id))
+            conn.commit()
+            except Exception as db_error:
+                # КРИТИЧНО: откатываем транзакцию при ошибке
+                conn.rollback()
+                raise db_error
+    except Exception as e:
+        logger.error(f"Ошибка логирования запроса: {e}")
+        # Убеждаемся, что транзакция откачена
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
+
+def print_daily_stats():
+    """Выводит статистику за текущий день в консоль"""
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        with db_lock:
+            cursor.execute('''
+                SELECT COUNT(*) as total_requests,
+                       COUNT(DISTINCT user_id) as unique_users
+                FROM stats
+                WHERE DATE(timestamp) = DATE(%s)
+            ''', (today,))
+            row = cursor.fetchone()
+            if row:
+                total_requests = row.get('total_requests') if isinstance(row, dict) else (row[0] if len(row) > 0 else 0)
+                unique_users = row.get('unique_users') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0)
+            else:
+                total_requests = 0
+                unique_users = 0
+            
+            # Статистика по командам
+            cursor.execute('''
+                SELECT command_or_action, COUNT(*) as count
+                FROM stats
+                WHERE DATE(timestamp) = DATE(%s)
+                GROUP BY command_or_action
+                ORDER BY count DESC
+            ''', (today,))
+            commands_stats = cursor.fetchall()
+        
+        print("\n" + "=" * 60)
+        print(f"📊 СТАТИСТИКА БОТА ЗА {today}")
+        print("=" * 60)
+        print(f"📈 Всего запросов за день: {total_requests}")
+        print(f"👥 Уникальных пользователей: {unique_users}")
+        print("\n📋 Топ команд/действий:")
+        if commands_stats:
+            for cmd, count in commands_stats:
+                print(f"   • {cmd}: {count}")
+        else:
+            print("   (нет данных)")
+        print("=" * 60 + "\n")
+    except Exception as e:
+        logger.error(f"Ошибка вывода статистики: {e}")
+
+# Периодический вывод статистики (каждый час)
+def hourly_stats():
+    """Вызывается каждый час для вывода статистики"""
+    print_daily_stats()
+
+# Настройка периодического вывода статистики
+scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
+
+# Очистка планов
+def clean_home_plans():
+    """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок"""
+    yesterday = (datetime.now(plans_tz) - timedelta(days=1)).date().isoformat()
+    
+    with db_lock:
+        # Находим планы дома на вчера
+        cursor.execute('''
+            SELECT p.id, p.film_id, p.chat_id
+            FROM plans p
+            WHERE p.plan_type = 'home' AND date(p.plan_datetime) = %s
+        ''', (yesterday,))
+        rows = cursor.fetchall()
+        
+        deleted_count = 0
+        for row in rows:
+            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+            plan_id = row.get('id') if isinstance(row, dict) else row[0]
+            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
+            # Проверяем, есть ли оценки по фильму
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            count_row = cursor.fetchone()
+            count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+            if count == 0:
+                cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                deleted_count += 1
+                try:
+                    bot.send_message(chat_id, f"📅 План на фильм удалён (нет оценок за вчера).")
+                except:
+                    pass
+        
+        conn.commit()
+    
+    logger.info(f"Очищены планы дома без оценок: {deleted_count} планов")
+
+def clean_cinema_plans():
+    """Каждый понедельник удаляет все планы кино"""
+    with db_lock:
+        cursor.execute("DELETE FROM plans WHERE plan_type = 'cinema'")
+        deleted_count = cursor.rowcount
+        conn.commit()
+    
+    logger.info(f"Очищены все планы кино (понедельник): {deleted_count} планов")
+
+# Голосование для фильмов "в кино"
+def start_cinema_votes():
+    """Каждый понедельник в 9:00 запускает голосование для фильмов в кино"""
+    now = datetime.now(plans_tz)
+    if now.weekday() != 0:  # только понедельник
+        return
+    
+    with db_lock:
+        cursor.execute('''
+            SELECT p.id, p.film_id, p.chat_id, m.title, m.link
+            FROM plans p
+            JOIN movies m ON p.film_id = m.id AND m.chat_id = p.chat_id
+            WHERE p.plan_type = 'cinema' AND datetime(p.plan_datetime) < NOW()
+        ''')
+        rows = cursor.fetchall()
+        
+        for row in rows:
+            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+            plan_id = row.get('id') if isinstance(row, dict) else row[0]
+            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
+            title = row.get('title') if isinstance(row, dict) else row[3]
+            link = row.get('link') if isinstance(row, dict) else row[4]
+            # Проверяем, есть ли оценки
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            count_row = cursor.fetchone()
+            count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+            if count > 0:
+                continue  # оценки есть — не запускаем голосование
+            
+            # Запускаем голосование
+            deadline = (now.replace(hour=23, minute=59, second=59) + timedelta(days=1)).isoformat()  # конец понедельника
+            
+            try:
+                text = f"📊 Голосование: Оставить в расписании фильм <b>{title}</b> ещё на неделю%s\n{link}\n\nОтветьте \"да\" или \"нет\" (в ответ на это сообщение)."
+                msg = bot.send_message(chat_id, text, parse_mode='HTML')
+                
+                cursor.execute('''
+                    INSERT INTO cinema_votes (chat_id, film_id, message_id, deadline)
+                    VALUES (%s, %s, %s, %s)
+                ''', (chat_id, film_id, msg.message_id, deadline))
+                conn.commit()
+            except Exception as e:
+                logger.error(f"Ошибка при отправке сообщения голосования для фильма {film_id}: {e}")
+    
+    logger.info(f"Запущены голосования для фильмов в кино")
+
+def resolve_cinema_votes():
+    """Во вторник в 9:00 подводит итоги голосований"""
+    with db_lock:
+        cursor.execute('''
+            SELECT chat_id, film_id, yes_users, no_users, m.title
+            FROM cinema_votes v
+            JOIN movies m ON v.film_id = m.id AND m.chat_id = v.chat_id
+            WHERE deadline < NOW()
+        ''')
+        rows = cursor.fetchall()
+        
+        for row in rows:
+            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
+            yes_json = row.get('yes_votes') if isinstance(row, dict) else row[2]
+            no_json = row.get('no_votes') if isinstance(row, dict) else row[3]
+            title = row.get('title') if isinstance(row, dict) else row[4]
+            yes_count = len(json.loads(yes_json or '[]'))
+            no_count = len(json.loads(no_json or '[]'))
+            
+            if no_count > yes_count or (yes_count == no_count and no_count > 0):
+                cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                try:
+                    bot.send_message(chat_id, f"📅 Фильм <b>{title}</b> удалён из расписания по результатам голосования.", parse_mode='HTML')
+                except:
+                    pass
+            else:
+                try:
+                    bot.send_message(chat_id, f"📅 Фильм <b>{title}</b> остался в расписании на следующую неделю.", parse_mode='HTML')
+                except:
+                    pass
+            
+            cursor.execute('DELETE FROM cinema_votes WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        conn.commit()
+    
+    logger.info(f"Подведены итоги для {len(rows)} голосований")
+
+# Добавляем задачи очистки и голосования в scheduler
+scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
+scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
+scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
+
+def send_plan_notification(chat_id, title, link, plan_type):
+    # Извлекаем kp_id из ссылки для сохранения связи
+    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+    kp_id = match.group(2) if match else None
+    
+    if plan_type == 'home':
+        text = f"Привет! Вы планировали посмотреть дома фильм <b>{title}</b>: {link}"
+    else:
+        text = f"Привет! Вы планировали сходить в кино на <b>{title}</b>: {link}"
+    
+    msg = bot.send_message(chat_id, text, parse_mode='HTML')
+    
+    # Сохраняем связь message_id -> kp_id для обработки реакций на напоминания
+    if kp_id and msg:
+        plan_notification_messages[msg.message_id] = {
+            'kp_id': kp_id,
+            'chat_id': chat_id,
+            'link': link
+        }
+        logger.info(f"[PLAN_NOTIFICATION] Сохранена связь message_id={msg.message_id} с kp_id={kp_id} для чата {chat_id}")
+
+# Получение информации о фильме через прямой запрос к API
+def extract_movie_info(link):
+    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+    if not match:
+        logger.warning(f"Не распознана ссылка: {link}")
+        return None
+    kp_id = match.group(2)
+
+    headers = {
+        'X-API-KEY': KP_TOKEN,
+        'Content-Type': 'application/json'
+    }
+
+    try:
+        # Основные данные (название, год, жанры, описание)
+        url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+        response_main = requests.get(url_main, headers=headers, timeout=15)
+        if response_main.status_code != 200:
+            logger.error(f"Основной запрос ошибка {response_main.status_code}")
+            return None
+        data_main = response_main.json()
+
+        title = data_main.get('nameRu') or data_main.get('nameOriginal') or "Unknown"
+        year = data_main.get('year') or "—"
+        genres = ', '.join([g['genre'] for g in data_main.get('genres', [])]) or "—"
+        description = data_main.get('description') or data_main.get('shortDescription') or "Нет описания"
+
+        # Отдельный запрос на staff (режиссёр и актёры)
+        # Используем v1 endpoint как основной, так как v2.2 не работает
+        url_staff = f"https://kinopoiskapiunofficial.tech/api/v1/staff?filmId={kp_id}"
+        logger.debug(f"Staff запрос URL: {url_staff}")
+        response_staff = requests.get(url_staff, headers=headers, timeout=15)
+        staff = []
+        if response_staff.status_code == 200:
+            staff = response_staff.json()
+            logger.debug(f"Staff ответ получен, количество записей: {len(staff) if isinstance(staff, list) else 'не список'}")
+        else:
+            logger.warning(f"Staff запрос ошибка {response_staff.status_code} — режиссёр/актёры не загружены")
+            logger.warning(f"Staff ответ: {response_staff.text[:200] if response_staff.text else 'нет текста'}")
+
+        # Режиссёр
+        director = "Не указан"
+        if staff and len(staff) > 0:
+            # Логируем структуру первого элемента для отладки
+            logger.debug(f"Пример структуры staff элемента: {list(staff[0].keys()) if isinstance(staff[0], dict) else 'не словарь'}")
+        
+        for person in staff:
+            if not isinstance(person, dict):
+                continue
+            # Проверяем разные варианты полей для профессии
+            profession = person.get('professionKey') or person.get('professionText') or person.get('profession')
+            if profession and ('DIRECTOR' in str(profession).upper() or 'РЕЖИССЕР' in str(profession).upper() or profession == 'DIRECTOR'):
+                # Проверяем разные варианты полей для имени
+                name = person.get('nameRu') or person.get('nameEn') or person.get('name') or person.get('staffName')
+                if name:
+                    director = name
+                break
+
+        # Актёры (top 6)
+        actors_list = []
+        for person in staff:
+            if not isinstance(person, dict):
+                continue
+            # Проверяем разные варианты полей для профессии
+            profession = person.get('professionKey') or person.get('professionText') or person.get('profession')
+            if profession and ('ACTOR' in str(profession).upper() or 'АКТЕР' in str(profession).upper() or profession == 'ACTOR') and len(actors_list) < 6:
+                # Проверяем разные варианты полей для имени
+                name = person.get('nameRu') or person.get('nameEn') or person.get('name') or person.get('staffName')
+                if name:
+                    actors_list.append(name)
+        actors = ', '.join(actors_list) if actors_list else "—"
+
+        logger.info(f"Успешно: {title} ({year}), режиссёр: {director}, актёры: {actors}")
+
+        return {
+            'kp_id': kp_id,
+            'title': title,
+            'year': year,
+            'genres': genres,
+            'director': director,
+            'actors': actors,
+            'description': description
+        }
+    except Exception as e:
+        logger.error(f"Ошибка получения данных для {kp_id}: {e}")
+        return None
+
+# Добавление и анонс
+def add_and_announce(link, chat_id):
+    # Нормализуем ссылку (убираем лишние пробелы, проверяем формат)
+    if link:
+        link = link.strip()
+        # Если ссылка не начинается с http, добавляем https://
+        if not link.startswith('http'):
+            if 'kinopoisk.ru' in link:
+                link = 'https://' + link.lstrip('/')
+            else:
+                logger.error(f"Некорректная ссылка: {link}")
+                return False
+    
+    logger.info(f"[ADD_AND_ANNOUNCE] Обрабатываем ссылку: {link} для чата {chat_id}")
+    
+    info = extract_movie_info(link)
+    if not info:
+        logger.warning(f"Не удалось извлечь информацию о фильме: {link}")
+        return False
+
+    # Проверяем, существует ли уже фильм в этом чате по kp_id (не по ссылке, так как ссылки могут отличаться)
+    kp_id = info.get('kp_id')
+    if not kp_id:
+        logger.error(f"kp_id не найден в info для ссылки {link}")
+        return False
+    
+    existing = None
+    try:
+    with db_lock:
+            # Проверяем состояние транзакции перед выполнением запроса
+            try:
+                cursor.execute('SELECT 1')
+                cursor.fetchone()
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"Транзакция была в состоянии ошибки, выполнен rollback перед проверкой существующего фильма: {e}")
+            
+            cursor.execute('SELECT id, title, watched, rating FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+        existing = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Ошибка при проверке существующего фильма в БД: {e}", exc_info=True)
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
+        # Продолжаем выполнение, чтобы попытаться отправить сообщение
+    
+    if existing:
+        # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+        film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+        existing_title = existing.get('title') if isinstance(existing, dict) else existing[1]
+        watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
+        
+        # Фильм уже есть в базе
+        text = f"🎞️ <b>Уже добавлено ранее в базу!</b>\n\n"
+        text += f"<b>{existing_title}</b>\n"
+        
+        # Если фильм просмотрен, рассчитываем среднее из ratings (внутри db_lock)
+        if watched:
+            avg = None
+            try:
+                with db_lock:
+            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                    avg_result = cursor.fetchone()
+                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else (avg_result[0] if avg_result and len(avg_result) > 0 else None)
+            except Exception as e:
+                logger.error(f"Ошибка при расчете среднего рейтинга для существующего фильма: {e}", exc_info=True)
+            
+            text += f"\n✅ <b>Просмотрено</b>\n"
+            if avg:
+                text += f"⭐ <b>Средняя оценка: {avg:.1f}/10</b>\n"
+            else:
+                text += f"⭐ <b>Оценка не указана</b>\n"
+        else:
+            text += f"\n⏳ <b>Ещё не просмотрено</b>\n"
+        
+        text += f"\n<a href='{link}'>Кинопоиск</a>"
+        try:
+        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            logger.info(f"Сообщение отправлено: фильм уже в базе - {existing_title}")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке сообщения (фильм уже в базе): {e}", exc_info=True)
+        return False
+    
+    # Новый фильм - добавляем
+    inserted = False
+    try:
+    with db_lock:
+            try:
+                # Проверяем, не в состоянии ли ошибки транзакция
+                try:
+                    cursor.execute('SELECT 1')
+                    cursor.fetchone()
+                except:
+                    # Если транзакция в состоянии ошибки, откатываем
+                    conn.rollback()
+                    logger.debug("Транзакция была в состоянии ошибки, выполнен rollback")
+                
+                # Дополнительная проверка перед вставкой (на случай race condition)
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                duplicate_check = cursor.fetchone()
+                if duplicate_check:
+                    logger.info(f"Фильм с kp_id={kp_id} уже существует в базе (обнаружен перед вставкой), пропускаем")
+                    return False
+                
+                # Получаем количество записей до вставки
+                cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                count_before_row = cursor.fetchone()
+                count_before = count_before_row.get('count') if isinstance(count_before_row, dict) else (count_before_row[0] if count_before_row else 0)
+                
+        cursor.execute('''
+            INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+        ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+        conn.commit()
+    
+                # Проверяем, был ли фильм действительно добавлен (а не обновлен)
+                cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                count_after_row = cursor.fetchone()
+                count_after = count_after_row.get('count') if isinstance(count_after_row, dict) else (count_after_row[0] if count_after_row else 0)
+                
+                # Фильм был добавлен только если его не было до вставки
+                inserted = (count_before == 0 and count_after == 1)
+                logger.debug(f"Попытка вставки фильма: count_before={count_before}, count_after={count_after}, inserted={inserted}, kp_id={kp_id}")
+                
+                if not inserted and count_before > 0:
+                    logger.info(f"Фильм с kp_id={kp_id} уже существовал (count_before={count_before}), вставка не выполнена")
+                    return False
+            except Exception as db_error:
+                conn.rollback()
+                logger.error(f"Ошибка при добавлении фильма в БД: {db_error}", exc_info=True)
+                # Проверяем, не был ли фильм добавлен из-за конфликта
+                try:
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    if cursor.fetchone():
+                        logger.info(f"Фильм с kp_id={kp_id} уже существует (обнаружен после ошибки)")
+                        return False
+                except:
+                    pass
+                return False
+    except Exception as e:
+        logger.error(f"Критическая ошибка при работе с БД: {e}", exc_info=True)
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
+        return False
+    
+    logger.info(f"Готовимся отправить сообщение: inserted={inserted}, title={info['title']}, link={link}")
+    
+    if inserted:
+        # Убеждаемся, что link - это валидная ссылка
+        if not link or not link.startswith('http'):
+            logger.warning(f"Некорректная ссылка: {link}, генерируем новую")
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            logger.info(f"Используем сгенерированную ссылку: {link}")
+        
+        text = f"🎬 <b>Добавлено в базу!</b>\n\n"
+        text += f"<b>{info['title']}</b> ({info['year'] or '—'})\n"
+        text += f"<i>Режиссёр:</i> {info['director']}\n"
+        text += f"<i>Жанры:</i> {info['genres']}\n"
+        text += f"<i>В ролях:</i> {info['actors']}\n\n"
+        text += f"<i>Кратко:</i> {info['description']}\n\n"
+        text += f"<a href='{link}'>Кинопоиск</a>"
+        
+        try:
+            logger.info(f"Отправляем сообщение в чат {chat_id}, ссылка в тексте: {link}")
+        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+        bot_messages[msg.message_id] = link  # запоминаем для реакции
+            logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}, message_id={msg.message_id}")
+        return True
+        except Exception as send_e:
+            logger.error(f"❌ Ошибка при отправке сообщения: {send_e}", exc_info=True)
+            return False
+    else:
+        logger.warning(f"Фильм не был вставлен (возможно, уже существует), сообщение не отправляется")
+    return False
+
+# /start — приветственное сообщение
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    logger.info(f"[HANDLER] /start вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/start', message.chat.id)
+    logger.info(f"Команда /start от пользователя {message.from_user.id}")
+    
+    # Проверяем, не является ли это автоматическим /start из лички (когда пользователь пишет боту впервые)
+    # Если это личный чат и нет текста после /start - это автоматический /start, пропускаем
+    if message.chat.type == 'private' and (not message.text or message.text.strip() == '/start'):
+        logger.info(f"Автоматический /start в личке - пропускаем приветствие")
+        return
+    
+    emoji = get_watched_emoji(message.chat.id)  # Берёт актуальный эмодзи из настроек
+
+    welcome_text = f"""
+🎬 <b>Добро пожаловать в MovieBot — ваш групповой планировщик кино!</b>
+
+Этот бот помогает друзьям собирать фильмы, отмечать просмотренные, планировать просмотр и выбирать, что посмотреть следующим.
+
+<b>Как это работает:</b>
+• Кидайте в чат ссылки на фильмы/сериалы с Кинопоиска
+• Бот сразу добавит фильм в базу и покажет красивую карточку с названием, годом, жанрами, режиссёром, актёрами и описанием
+
+• Когда посмотрели — поставьте на сообщение со ссылкой эмодзи {emoji}  
+  Бот поздравит и попросит оценку от 1 до 10
+
+<b>Основные команды:</b>
+/list — список непросмотренных фильмов
+/random — рандомный непросмотренный фильм с фильтрами (год, жанр, режиссёр — можно пропустить)
+/plan — запланировать просмотр дома или в кино (с напоминанием)
+/total — статистика группы: сколько посмотрели, любимые жанры, режиссёры, актёры и оценки
+/rate — дооценить просмотренные фильмы
+/settings — сменить эмодзи для отметки просмотренных
+
+Просто кидайте ссылки и пользуйтесь командами — бот всё запомнит и сделает кино-вечера идеальными! 🍿
+
+Если нужно больше деталей — /help
+    """.strip()
+
+    try:
+        bot.reply_to(message, welcome_text, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при отправке ответа на /start: {e}", exc_info=True)
+
+# Реакции + сбор оценок
+rating_messages = {}  # message_id: film_id (связь сообщения о просмотренном фильме с film_id)
+rate_list_messages = {}  # chat_id: message_id (сообщение со списком фильмов для /rate)
+
+@bot.message_reaction_handler(func=lambda r: True)
+def handle_reaction(update):
+    if not update.new_reaction:
+        return
+    
+    chat_id = update.chat.id
+    user_id = update.user.id if update.user else None
+    message_id = update.message_id
+    
+    logger.info(f"[REACTION] Получена реакция в чате {chat_id} на сообщение {message_id} от пользователя {user_id}")
+    
+    # Сначала проверяем, не это ли голосование по обнулению базы
+    if message_id in clean_votes:
+        vote_data = clean_votes[message_id]
+        is_like = False
+        for reaction in update.new_reaction:
+            if hasattr(reaction, 'type'):
+                if reaction.type == 'emoji' and hasattr(reaction, 'emoji') and reaction.emoji == '👍':
+                    is_like = True
+                    break
+            elif hasattr(reaction, 'emoji') and reaction.emoji == '👍':
+                is_like = True
+                break
+        
+        if is_like and user_id and user_id in vote_data['active_members']:
+            vote_data['voted'].add(user_id)
+            
+            # Проверяем, все ли проголосовали
+            if len(vote_data['voted']) >= len(vote_data['active_members']):
+                # Все проголосовали - удаляем базу
+                with db_lock:
+                    cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
+                    cursor.execute('DELETE FROM cinema_votes WHERE chat_id = %s', (chat_id,))
+                    conn.commit()
+                
+                bot.send_message(chat_id, "✅ Все участники проголосовали. База данных чата полностью обнулена.")
+                logger.info(f"База данных чата {chat_id} обнулена после голосования всех участников")
+                
+                # Удаляем из clean_votes
+                del clean_votes[message_id]
+            else:
+                # Обновляем сообщение с прогрессом
+                voted_count = len(vote_data['voted'])
+                total_count = len(vote_data['active_members'])
+                try:
+                    bot.edit_message_text(
+                        f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено полное обнуление базы данных чата.\n\n"
+                        f"Активных участников: {total_count}\n"
+                        f"Проголосовало: {voted_count}/{total_count}\n\n"
+                        f"Для подтверждения все активные участники должны поставить 👍 (лайк) на это сообщение.\n\n"
+                        f"Если не все проголосуют, база не будет удалена.",
+                        chat_id, message_id, parse_mode='HTML')
+                except:
+                    pass
+        return
+    
+    # Обычная обработка реакций для отметки просмотренных
+    watched = get_watched_reactions(chat_id)
+    
+    for reaction in update.new_reaction:
+        is_watched = False
+        if hasattr(reaction, 'type'):
+            if reaction.type == 'emoji' and hasattr(reaction, 'emoji'):
+                is_watched = reaction.emoji in watched['emoji']
+            elif reaction.type == 'custom_emoji' and hasattr(reaction, 'custom_emoji_id'):
+                is_watched = str(reaction.custom_emoji_id) in watched['custom']
+        elif hasattr(reaction, 'emoji'):
+            # Старый формат для обратной совместимости
+            is_watched = reaction.emoji in watched['emoji']
+        
+        if is_watched:
+            # Сначала проверяем, не это ли напоминание о плане
+            notification_data = plan_notification_messages.get(message_id)
+            if notification_data:
+                # Это реакция на напоминание о плане
+                kp_id = notification_data['kp_id']
+                link = notification_data['link']
+                try:
+                    logger.info(f"[REACTION] Обрабатываем реакцию на напоминание о плане с kp_id={kp_id}")
+                    film_id = None
+                    title = None
+                    with db_lock:
+                        cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        conn.commit()
+                        
+                        cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        row = cursor.fetchone()
+                        if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+                            title = row.get('title') if isinstance(row, dict) else row[1]
+                            logger.info(f"[REACTION] Фильм {title} (ID: {film_id}, kp_id: {kp_id}) отмечен как просмотренный по реакции на напоминание пользователем {user_id}")
+                        else:
+                            logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в базе")
+                    
+                    # Отправляем сообщение только если фильм найден
+                    if film_id and title:
+                        user_name = update.user.first_name if update.user else "Кто-то"
+                        try:
+                            msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
+                            # Сохраняем связь message_id -> film_id для обработки оценки
+                            rating_messages[msg.message_id] = film_id
+                            logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}")
+                        except Exception as send_error:
+                            logger.error(f"[REACTION] Ошибка при отправке сообщения: {send_error}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"Ошибка реакции на напоминание: {e}", exc_info=True)
+                continue  # Пропускаем дальнейшую обработку, так как уже обработали напоминание
+            
+            # Обычная обработка реакций на сообщения с фильмами
+            link = bot_messages.get(message_id)
+            if link:
+                try:
+                    logger.info(f"[REACTION] Обрабатываем реакцию для фильма с ссылкой {link}")
+                    # Извлекаем kp_id из ссылки для поиска фильма
+                    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+                    if match:
+                        kp_id = match.group(2)
+                        film_id = None
+                        title = None
+                    with db_lock:
+                            cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        conn.commit()
+                        
+                            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        row = cursor.fetchone()
+                        if row:
+                                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                                title = row.get('title') if isinstance(row, dict) else row[1]
+                                logger.info(f"[REACTION] Фильм {title} (ID: {film_id}, kp_id: {kp_id}) отмечен как просмотренный пользователем {user_id}")
+                            else:
+                                logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в базе")
+                    else:
+                        logger.warning(f"[REACTION] Не удалось извлечь kp_id из ссылки: {link}")
+                    
+                    # Отправляем сообщение только если фильм найден
+                    if film_id and title:
+                    user_name = update.user.first_name if update.user else "Кто-то"
+                        try:
+                    msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
+                    # Сохраняем связь message_id -> film_id для обработки оценки
+                        rating_messages[msg.message_id] = film_id
+                            logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}")
+                        except Exception as send_error:
+                            logger.error(f"[REACTION] Ошибка при отправке сообщения: {send_error}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"Ошибка реакции: {e}", exc_info=True)
+
+# Обработка оценок текстом
+@bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 1 <= int(m.text) <= 10 and m.reply_to_message)
+def handle_rating(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    rating = int(message.text)
+    
+    film_id = None
+    
+    # Проверяем реплай на сообщение о просмотренном фильме
+    if message.reply_to_message:
+        reply_msg_id = message.reply_to_message.message_id
+        film_id = rating_messages.get(reply_msg_id)
+        
+        # Если не найдено, проверяем реплай на исходное сообщение с фильмом
+        if not film_id:
+            reply_link = bot_messages.get(reply_msg_id)
+            if reply_link:
+                # Извлекаем kp_id из ссылки для поиска
+                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                if match:
+                    kp_id = match.group(2)
+                with db_lock:
+                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor.fetchone()
+                    if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+    
+    if film_id:
+        try:
+        with db_lock:
+                try:
+                    # Проверяем, не в состоянии ли ошибки транзакция
+                    try:
+                        cursor.execute('SELECT 1')
+                        cursor.fetchone()
+                    except:
+                        conn.rollback()
+                    
+            cursor.execute('''
+                INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+            ''', (chat_id, film_id, user_id, rating))
+            conn.commit()
+                    
+                    # Сохраняем статистику по жанрам, режиссерам и актерам
+                    save_rating_statistics(chat_id, user_id, film_id, rating)
+            
+            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                    avg_row = cursor.fetchone()
+                    avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
+            
+            avg_str = f"{avg:.1f}" if avg else "—"
+            bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                except Exception as db_error:
+                    conn.rollback()
+                    logger.error(f"Ошибка при сохранении оценки: {db_error}", exc_info=True)
+                    bot.reply_to(message, "Произошла ошибка при сохранении оценки. Попробуйте позже.")
+        except Exception as e:
+            logger.error(f"Критическая ошибка в handle_rating: {e}", exc_info=True)
+        
+        # Удаляем из rating_messages после сохранения
+        if message.reply_to_message:
+            rating_messages.pop(message.reply_to_message.message_id, None)
+    else:
+        bot.reply_to(message, "❌ Оценка не привязана к фильму. Ответьте на сообщение о просмотренном фильме или на сообщение с фильмом.")
+
+# Обработка голосований "в кино"
+@bot.message_handler(func=lambda m: m.text and m.text.lower() in ['да', 'нет'] and m.reply_to_message)
+def handle_cinema_vote(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    vote = message.text.lower()
+    
+    with db_lock:
+        cursor.execute('''
+            SELECT film_id, deadline, yes_users, no_users
+            FROM cinema_votes
+            WHERE chat_id = %s AND message_id = %s
+        ''', (chat_id, message.reply_to_message.message_id))
+        row = cursor.fetchone()
+        if not row:
+            return
+        film_id, deadline, yes_json, no_json = row
+        
+        if datetime.now(plans_tz).isoformat() > deadline:
+            bot.reply_to(message, "Голосование завершено.")
+            return
+        
+        yes_users = json.loads(yes_json or '[]')
+        no_users = json.loads(no_json or '[]')
+        
+        if user_id in yes_users or user_id in no_users:
+            bot.reply_to(message, "Вы уже голосовали.")
+            return
+        
+        if vote == 'да':
+            yes_users.append(user_id)
+        else:
+            no_users.append(user_id)
+        
+        cursor.execute('''
+            UPDATE cinema_votes
+            SET yes_users = %s, no_users = %s
+            WHERE chat_id = %s AND film_id = %s
+        ''', (json.dumps(yes_users), json.dumps(no_users), chat_id, film_id))
+        conn.commit()
+        
+        bot.reply_to(message, "Ответ принят!")
+        logger.info(f"Голос '{vote}' сохранён для фильма {film_id} от пользователя {user_id}")
+
+# /list — только непросмотренные
+@bot.message_handler(commands=['list'])
+def list_movies(message):
+    logger.info(f"[HANDLER] /list вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/list', message.chat.id)
+        logger.info(f"Команда /list от пользователя {message.from_user.id}")
+        chat_id = message.chat.id
+        with db_lock:
+            cursor.execute('SELECT id, title, year, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
+            rows = cursor.fetchall()
+        
+        if not rows:
+            bot.reply_to(message, "⏳ Нет непросмотренных фильмов!")
+            return
+        
+        text = "*⏳ Непросмотренные фильмы:*\n\n"
+        # Все запросы к БД должны быть внутри db_lock
+        with db_lock:
+            for row in rows:
+                # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
+                year = row.get('year') if isinstance(row, dict) else row[2]
+                link = row.get('link') if isinstance(row, dict) else row[3]
+                kp_id = row.get('kp_id') if isinstance(row, dict) else (row[4] if len(row) > 4 else None)
+                
+            # Рассчитываем среднее из ratings
+            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                avg_result = cursor.fetchone()
+                # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+                if avg_result:
+                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else (avg_result[0] if len(avg_result) > 0 else None)
+                else:
+                    avg = None
+            rate_str = f" 🌟 {avg:.1f}/10" if avg else ""
+                # Используем kp_id вместо film_id для единообразия с /rate
+                text += f"• <b>{title}</b> ({year}){rate_str} [ID: {kp_id or film_id}]\n{link}\n\n"
+        
+        text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
+        msg = bot.reply_to(message, text, parse_mode='HTML', disable_web_page_preview=True)
+        # Сохраняем message_id для обработки ответов
+        list_messages[msg.message_id] = chat_id
+        logger.info(f"✅ Ответ на /list отправлен пользователю {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /list: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /list")
+        except:
+            pass
+
+# Обработчик ответов на /list для отметки фильмов как просмотренных
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in list_messages)
+def handle_list_reply(message):
+    """Обрабатывает ответ на сообщение /list с ID фильмов для отметки как просмотренных"""
+    try:
+        chat_id = list_messages.get(message.reply_to_message.message_id)
+        if not chat_id:
+            return
+        
+        # Парсим ID фильмов из сообщения (используем kp_id, как в /rate)
+        text = message.text.strip()
+        # Извлекаем все числа из текста (это будут kp_id)
+        kp_ids = re.findall(r'\d+', text)
+        
+        if not kp_ids:
+            bot.reply_to(message, "Не найдены ID фильмов. Отправьте список ID кинопоиска через запятую или пробел.")
+            return
+        
+        marked_count = 0
+        with db_lock:
+            for kp_id_str in kp_ids:
+                try:
+                    kp_id = kp_id_str.strip()
+                    # Проверяем, что фильм существует и не просмотрен по kp_id
+                    cursor.execute('SELECT id, title, watched FROM movies WHERE kp_id = %s AND chat_id = %s', (kp_id, chat_id))
+                    row = cursor.fetchone()
+                    if row:
+                        film_id_db = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
+                        watched = row.get('watched') if isinstance(row, dict) else row[2]
+                        
+                        if not watched:
+                            cursor.execute('UPDATE movies SET watched = 1 WHERE kp_id = %s AND chat_id = %s', (kp_id, chat_id))
+                            marked_count += 1
+                            logger.info(f"Фильм {film_id_db} ({title}, kp_id: {kp_id}) отмечен как просмотренный в чате {chat_id}")
+                except ValueError:
+                    continue
+                except Exception as e:
+                    logger.error(f"Ошибка при отметке фильма {film_id_str}: {e}", exc_info=True)
+                    continue
+            
+            if marked_count > 0:
+                conn.commit()
+                bot.reply_to(message, f"✅ Отмечено как просмотрено: {marked_count} фильм(ов).\n\nТеперь вы можете оценить их командой /rate")
+            else:
+                bot.reply_to(message, "Не удалось отметить фильмы. Проверьте, что ID корректны и фильмы не были просмотрены ранее.")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в handle_list_reply: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке списка фильмов.")
+        except:
+            pass
+
+# /total — расширенная статистика
+@bot.message_handler(commands=['total'])
+def total_stats(message):
+    logger.info(f"[HANDLER] /total вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/total', message.chat.id)
+        logger.info(f"Команда /total от пользователя {message.from_user.id}")
+        chat_id = message.chat.id
+        with db_lock:
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
+            total_row = cursor.fetchone()
+            total = total_row[0] if total_row and total_row[0] else 0
+            
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            watched_row = cursor.fetchone()
+            watched = watched_row[0] if watched_row and watched_row[0] else 0
+            unwatched = total - watched
+            
+            # Если нет данных, отправляем сообщение
+            if total == 0:
+                bot.reply_to(message, "📊 Нет данных о вашей статистике.\n\nОцените первый фильм, чтобы статистика начала собираться.")
+                return
+
+            # Жанры
+            cursor.execute('SELECT genres FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            genre_counts = {}
+            for row in cursor.fetchall():
+                genres = row.get('genres') if isinstance(row, dict) else row[0]
+                if genres:
+                    for g in str(genres).split(', '):
+                        if g.strip():
+                            genre_counts[g.strip()] = genre_counts.get(g.strip(), 0) + 1
+            fav_genre = max(genre_counts, key=genre_counts.get) if genre_counts else "—"
+
+            # Режиссёры
+            cursor.execute('SELECT director, rating FROM movies WHERE chat_id = %s AND watched = 1 AND director IS NOT NULL AND director != "Не указан"', (chat_id,))
+            director_stats = {}
+            for row in cursor.fetchall():
+                d = row.get('director') if isinstance(row, dict) else row[0]
+                r = row.get('rating') if isinstance(row, dict) else row[1]
+                if d not in director_stats:
+                    director_stats[d] = {'count': 0, 'sum_rating': 0}
+                director_stats[d]['count'] += 1
+                if r:
+                    director_stats[d]['sum_rating'] += r
+            top_directors = sorted(director_stats.items(), key=lambda x: (-x[1]['count'], -(x[1]['sum_rating']/x[1]['count'] if x[1]['count'] > 0 else 0)))[:3]
+
+            # Актёры
+            cursor.execute('SELECT actors, rating FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            actor_stats = {}
+            for row in cursor.fetchall():
+                actors_str = row.get('actors') if isinstance(row, dict) else row[0]
+                r = row.get('rating') if isinstance(row, dict) else row[1]
+                if actors_str:
+                    for a in actors_str.split(', '):
+                        a = a.strip()
+                        if a and a != "—":
+                            if a not in actor_stats:
+                                actor_stats[a] = {'count': 0, 'sum_rating': 0}
+                            actor_stats[a]['count'] += 1
+                            if r:
+                                actor_stats[a]['sum_rating'] += r
+            top_actors = sorted(actor_stats.items(), key=lambda x: (-x[1]['count'], -(x[1]['sum_rating']/x[1]['count'] if x[1]['count'] > 0 else 0)))[:3]
+
+            # Рассчитываем среднее из ratings (не из movies.rating)
+            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s', (chat_id,))
+            avg_row = cursor.fetchone()
+            avg_rating = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
+            avg_str = f"{avg_rating:.1f}/10" if avg_rating else "—"
+
+        text = f"📊 <b>Статистика кино-группы</b>\n\n"
+        text += f"🎬 Всего фильмов: <b>{total}</b>\n"
+        text += f"✅ Просмотрено: <b>{watched}</b>\n"
+        text += f"⏳ Ждёт просмотра: <b>{unwatched}</b>\n"
+        text += f"🌟 Средняя оценка: <b>{avg_str}</b>\n"
+        text += f"❤️ Любимый жанр: <b>{fav_genre}</b>\n\n"
+        text += "<b>Топ режиссёров:</b>\n"
+        for d, stats in top_directors:
+            avg_d = stats['sum_rating']/stats['count'] if stats['count'] > 0 else 0
+            text += f"• {d} — {stats['count']} фильм(ов), средняя {avg_d:.1f}/10\n"
+        text += "\n<b>Топ актёров:</b>\n"
+        for a, stats in top_actors:
+            avg_a = stats['sum_rating']/stats['count'] if stats['count'] > 0 else 0
+            text += f"• {a} — {stats['count']} фильм(ов), средняя {avg_a:.1f}/10\n"
+
+        bot.reply_to(message, text, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /total отправлен пользователю {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /total: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /total")
+        except:
+            pass
+
+# /stats — детальная статистика
+@bot.message_handler(commands=['stats'])
+def stats_command(message):
+    logger.info(f"[HANDLER] /stats вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/stats', message.chat.id)
+        logger.info(f"Команда /stats от пользователя {message.from_user.id}")
+        chat_id = message.chat.id
+        
+        with db_lock:
+            # Общая статистика
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            total_watched_row = cursor.fetchone()
+            total_watched = total_watched_row[0] if total_watched_row and total_watched_row[0] else 0
+            
+            # Топ-3 жанров (по средним оценкам всех пользователей)
+            cursor.execute('''
+                SELECT genre, AVG(rating) as avg_rating, COUNT(*) as count
+                FROM genre_ratings
+                WHERE chat_id = %s
+                GROUP BY genre
+                HAVING COUNT(*) > 0
+                ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                LIMIT 3
+            ''', (chat_id,))
+            top_genres = []
+            for row in cursor.fetchall():
+                genre = row.get('genre') if isinstance(row, dict) else row[0]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+                count = row.get('count') if isinstance(row, dict) else row[2]
+                top_genres.append((genre, avg, count))
+            
+            # Топ-5 режиссеров (по средним оценкам всех пользователей)
+            cursor.execute('''
+                SELECT director, AVG(rating) as avg_rating, COUNT(*) as count
+                FROM director_ratings
+                WHERE chat_id = %s
+                GROUP BY director
+                HAVING COUNT(*) > 0
+                ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                LIMIT 5
+            ''', (chat_id,))
+            top_directors = []
+            for row in cursor.fetchall():
+                director = row.get('director') if isinstance(row, dict) else row[0]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+                count = row.get('count') if isinstance(row, dict) else row[2]
+                top_directors.append((director, avg, count))
+            
+            # Топ-10 актеров (по средним оценкам всех пользователей)
+            cursor.execute('''
+                SELECT actor, AVG(rating) as avg_rating, COUNT(*) as count
+                FROM actor_ratings
+                WHERE chat_id = %s
+                GROUP BY actor
+                HAVING COUNT(*) > 0
+                ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                LIMIT 10
+            ''', (chat_id,))
+            top_actors = []
+            for row in cursor.fetchall():
+                actor = row.get('actor') if isinstance(row, dict) else row[0]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+                count = row.get('count') if isinstance(row, dict) else row[2]
+                top_actors.append((actor, avg, count))
+            
+            # Получаем список всех пользователей, которые оценивали фильмы
+            cursor.execute('SELECT DISTINCT user_id FROM ratings WHERE chat_id = %s', (chat_id,))
+            user_ids = []
+            for row in cursor.fetchall():
+                user_id_db = row.get('user_id') if isinstance(row, dict) else row[0]
+                user_ids.append(user_id_db)
+            
+            # Получаем имена пользователей из stats
+            users_data = {}
+            if user_ids:
+                placeholders = ','.join(['%s'] * len(user_ids))
+                cursor.execute(f'''
+                    SELECT DISTINCT user_id, username
+                    FROM stats
+                    WHERE chat_id = %s AND user_id IN ({placeholders})
+                ''', [chat_id] + user_ids)
+                for row in cursor.fetchall():
+                    user_id_db = row.get('user_id') if isinstance(row, dict) else row[0]
+                    username_db = row.get('username') if isinstance(row, dict) else row[1]
+                    users_data[user_id_db] = username_db or f"user_{user_id_db}"
+            
+            # Если не нашли через stats, используем user_id
+            for user_id_db in user_ids:
+                if user_id_db not in users_data:
+                    users_data[user_id_db] = f"user_{user_id_db}"
+        
+        # Формируем общую статистику
+        text = "📊 <b>Статистика группы</b>\n\n"
+        text += f"🎬 Всего просмотрено: <b>{total_watched}</b>\n\n"
+        
+        text += "<b>🏆 Топ-3 жанров:</b>\n"
+        if top_genres:
+            for genre, avg, count in top_genres:
+                text += f"• <b>{genre}</b> — {avg:.1f}/10 ({count} оценок)\n"
+        else:
+            text += "— Нет данных\n"
+        
+        text += "\n<b>🎬 Топ-5 режиссёров:</b>\n"
+        if top_directors:
+            for director, avg, count in top_directors:
+                text += f"• <b>{director}</b> — {avg:.1f}/10 ({count} оценок)\n"
+        else:
+            text += "— Нет данных\n"
+        
+        text += "\n<b>⭐ Топ-10 актёров:</b>\n"
+        if top_actors:
+            for actor, avg, count in top_actors:
+                text += f"• <b>{actor}</b> — {avg:.1f}/10 ({count} оценок)\n"
+        else:
+            text += "— Нет данных\n"
+        
+        # Статистика по каждому пользователю
+        if users_data:
+            text += "\n\n<b>👥 Статистика по участникам:</b>\n"
+            for user_id_db, username_db in users_data.items():
+                with db_lock:
+                    # Количество просмотренных фильмов пользователя
+                    cursor.execute('''
+                        SELECT COUNT(DISTINCT film_id) FROM ratings
+                        WHERE chat_id = %s AND user_id = %s
+                    ''', (chat_id, user_id_db))
+                    count_row = cursor.fetchone()
+                    films_count = count_row[0] if count_row and count_row[0] else 0
+                    
+                    # Средняя оценка пользователя
+                    cursor.execute('''
+                        SELECT AVG(rating) FROM ratings
+                        WHERE chat_id = %s AND user_id = %s
+                    ''', (chat_id, user_id_db))
+                    avg_row = cursor.fetchone()
+                    avg_rating = avg_row[0] if avg_row and avg_row[0] else None
+                    
+                    # Любимый жанр пользователя
+                    cursor.execute('''
+                        SELECT genre, AVG(rating) as avg_rating
+                        FROM genre_ratings
+                        WHERE chat_id = %s AND user_id = %s
+                        GROUP BY genre
+                        ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                        LIMIT 1
+                    ''', (chat_id, user_id_db))
+                    fav_genre_row = cursor.fetchone()
+                    fav_genre = fav_genre_row[0] if fav_genre_row else "—"
+                    
+                    # Любимый режиссер пользователя
+                    cursor.execute('''
+                        SELECT director, AVG(rating) as avg_rating
+                        FROM director_ratings
+                        WHERE chat_id = %s AND user_id = %s
+                        GROUP BY director
+                        ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                        LIMIT 1
+                    ''', (chat_id, user_id_db))
+                    fav_director_row = cursor.fetchone()
+                    fav_director = fav_director_row[0] if fav_director_row else "—"
+                    
+                    # Любимый актер пользователя
+                    cursor.execute('''
+                        SELECT actor, AVG(rating) as avg_rating
+                        FROM actor_ratings
+                        WHERE chat_id = %s AND user_id = %s
+                        GROUP BY actor
+                        ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                        LIMIT 1
+                    ''', (chat_id, user_id_db))
+                    fav_actor_row = cursor.fetchone()
+                    fav_actor = fav_actor_row[0] if fav_actor_row else "—"
+                
+                text += f"\n<b>{username_db}:</b>\n"
+                text += f"  🎬 Фильмов: {films_count}\n"
+                text += f"  ⭐ Средняя: {avg_rating:.1f}/10\n" if avg_rating else "  ⭐ Средняя: —\n"
+                text += f"  ❤️ Жанр: {fav_genre}\n"
+                text += f"  🎬 Режиссёр: {fav_director}\n"
+                text += f"  ⭐ Актёр: {fav_actor}\n"
+        
+        bot.reply_to(message, text, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /stats отправлен пользователю {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /stats: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /stats")
+        except:
+            pass
+
+# /random с пропуском шагов
+user_random_state = {}  # user_id: {'periods': [...], 'genre': ..., 'director': ...}
+
+@bot.message_handler(commands=['random'])
+def random_start(message):
+    logger.info(f"[HANDLER] /random вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/random', message.chat.id)
+        logger.info(f"Команда /random от пользователя {message.from_user.id}")
+        user_id = message.from_user.id
+        user_random_state[user_id] = {}
+
+        markup = InlineKeyboardMarkup(row_width=2)
+        periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+        for i in range(0, len(periods), 2):
+            row = []
+            row.append(InlineKeyboardButton(periods[i], callback_data=f"rand_period:{periods[i]}"))
+            if i+1 < len(periods):
+                row.append(InlineKeyboardButton(periods[i+1], callback_data=f"rand_period:{periods[i+1]}"))
+            markup.row(*row)
+        markup.add(InlineKeyboardButton("✅ Готово", callback_data="rand_period:done"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+        bot.send_message(message.chat.id, "🎲 Выберите периоды (можно несколько). Нажмите 'Готово' для продолжения:", reply_markup=markup)
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /random: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /random")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_period:"))
+def random_genre(call):
+    user_id = call.from_user.id
+    period_data = call.data.split(":", 1)[1]
+    
+    if period_data == "skip":
+        # Пропустить выбор периодов
+        if user_id not in user_random_state:
+            user_random_state[user_id] = {}
+        user_random_state[user_id]['periods'] = []
+    elif period_data == "done":
+        # Готово - переходим к выбору жанра
+        if user_id not in user_random_state or 'periods' not in user_random_state[user_id]:
+            user_random_state[user_id] = {'periods': []}
+    else:
+        # Переключение периода (toggle)
+        if user_id not in user_random_state:
+            user_random_state[user_id] = {'periods': []}
+        if 'periods' not in user_random_state[user_id]:
+            user_random_state[user_id]['periods'] = []
+        
+        periods_list = user_random_state[user_id]['periods']
+        if period_data in periods_list:
+            # Убираем период, если он уже выбран
+            periods_list.remove(period_data)
+        else:
+            # Добавляем период
+            periods_list.append(period_data)
+        
+        # Обновляем кнопки с отметками выбранных периодов
+        markup = InlineKeyboardMarkup(row_width=2)
+        all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+        for i in range(0, len(all_periods), 2):
+            row = []
+            for j in range(2):
+                if i + j < len(all_periods):
+                    period = all_periods[i + j]
+                    label = period
+                    if period in periods_list:
+                        label = f"✓ {period}"
+                    row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{period}"))
+            markup.row(*row)
+        markup.add(InlineKeyboardButton("✅ Готово", callback_data="rand_period:done"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+        
+        selected_text = f"Выбрано: {', '.join(periods_list)}" if periods_list else "Периоды не выбраны"
+        bot.edit_message_text(
+            f"🎲 Выберите периоды (можно несколько). Нажмите 'Готово' для продолжения:\n\n{selected_text}",
+            call.message.chat.id, call.message.message_id, reply_markup=markup)
+        return
+    
+    # Переходим к выбору жанра
+    chat_id = call.message.chat.id
+    with db_lock:
+        # Получаем все жанры из непросмотренных фильмов
+        cursor.execute("""
+            SELECT DISTINCT m.id, m.genres
+            FROM movies m
+            WHERE m.chat_id = %s AND m.watched = 0 
+            AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+        """, (chat_id, chat_id))
+        all_genres = set()
+        for row in cursor.fetchall():
+            genres = row.get('genres') if isinstance(row, dict) else row[1]
+            if genres:
+                for g in str(genres).split(', '):
+                    if g.strip():
+                        all_genres.add(g.strip())
+        
+        # Находим любимый жанр (с максимальной средней оценкой среди непросмотренных)
+        favorite_genre = None
+        favorite_avg = 0
+        for genre in all_genres:
+            # Получаем среднюю оценку по этому жанру (только из непросмотренных фильмов)
+            cursor.execute("""
+                SELECT AVG(gr.rating)
+                FROM genre_ratings gr
+                JOIN movies m ON gr.film_id = m.id AND gr.chat_id = m.chat_id
+                WHERE gr.chat_id = %s AND gr.genre = %s
+                AND m.watched = 0
+                AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            """, (chat_id, genre, chat_id))
+            avg_row = cursor.fetchone()
+            if avg_row and avg_row[0]:
+                avg = avg_row[0]
+                if avg > favorite_avg:
+                    favorite_avg = avg
+                    favorite_genre = genre
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    for genre in sorted(all_genres):
+        label = genre
+        if genre == favorite_genre:
+            label = f"⭐ {genre} (любимый)"
+        markup.add(InlineKeyboardButton(label, callback_data=f"rand_genre:{genre}"))
+    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+    bot.edit_message_text("🎬 Выберите жанр:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
+def random_director(call):
+    user_id = call.from_user.id
+    genre = call.data.split(":", 1)[1]
+    if genre == "skip":
+        genre = None
+    user_random_state[user_id]['genre'] = genre
+
+    # Топ-5 режиссёров по оценкам (только из непросмотренных фильмов)
+    chat_id = call.message.chat.id
+    with db_lock:
+        cursor.execute("""
+            SELECT dr.director, AVG(dr.rating) as avg_rating, COUNT(*) as count
+            FROM director_ratings dr
+            JOIN movies m ON dr.film_id = m.id AND dr.chat_id = m.chat_id
+            WHERE dr.chat_id = %s
+            AND m.watched = 0
+            AND m.director IS NOT NULL AND m.director != 'Не указан'
+            AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            GROUP BY dr.director
+            HAVING COUNT(*) > 0
+            ORDER BY AVG(dr.rating) DESC, COUNT(*) DESC
+            LIMIT 5
+        """, (chat_id, chat_id))
+        top_directors = []
+        for row in cursor.fetchall():
+            director = row.get('director') if isinstance(row, dict) else row[0]
+            avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+            if director:
+                top_directors.append((director, avg))
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for d, avg in top_directors:
+        markup.add(InlineKeyboardButton(f"{d} ({avg:.1f}/10)", callback_data=f"rand_dir:{d}"))
+    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
+    bot.edit_message_text("🎥 Выберите режиссёра из топ-5 по оценкам:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
+def random_actor(call):
+    user_id = call.from_user.id
+    director = call.data.split(":", 1)[1]
+    if director == "skip":
+        director = None
+    user_random_state[user_id]['director'] = director
+
+    # Топ актеров по оценкам (только из непросмотренных фильмов)
+    chat_id = call.message.chat.id
+    with db_lock:
+        cursor.execute("""
+            SELECT ar.actor, AVG(ar.rating) as avg_rating, COUNT(*) as count
+            FROM actor_ratings ar
+            JOIN movies m ON ar.film_id = m.id AND ar.chat_id = m.chat_id
+            WHERE ar.chat_id = %s
+            AND m.watched = 0
+            AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+            GROUP BY ar.actor
+            HAVING COUNT(*) > 0
+            ORDER BY AVG(ar.rating) DESC, COUNT(*) DESC
+            LIMIT 10
+        """, (chat_id, chat_id))
+        top_actors = []
+        for row in cursor.fetchall():
+            actor = row.get('actor') if isinstance(row, dict) else row[0]
+            avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+            if actor:
+                top_actors.append((actor, avg))
+    
+    # Сохраняем выбранных актеров (пока пусто)
+    if 'selected_actors' not in user_random_state[user_id]:
+        user_random_state[user_id]['selected_actors'] = []
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    for actor, avg in top_actors:
+        # Проверяем, выбран ли актер
+        is_selected = actor in user_random_state[user_id]['selected_actors']
+        label = f"{'✓ ' if is_selected else ''}{actor} ({avg:.1f}/10)"
+        markup.add(InlineKeyboardButton(label, callback_data=f"rand_actor:{actor}"))
+    markup.add(InlineKeyboardButton("✅ Готово", callback_data="rand_actor:done"))
+    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
+    
+    selected = user_random_state[user_id]['selected_actors']
+    selected_text = f"\n\nВыбрано: {', '.join(selected)}" if selected else ""
+    bot.edit_message_text(f"⭐ Выберите любимых актёров (можно несколько):{selected_text}", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_actor:"))
+def random_final(call):
+    user_id = call.from_user.id
+    actor_data = call.data.split(":", 1)[1]
+    
+    if actor_data == "skip":
+        user_random_state[user_id]['selected_actors'] = []
+    elif actor_data == "done":
+        # Готово - переходим к финальному выбору
+        pass
+    else:
+        # Переключение актера (toggle)
+        if 'selected_actors' not in user_random_state[user_id]:
+            user_random_state[user_id]['selected_actors'] = []
+        
+        selected_actors = user_random_state[user_id]['selected_actors']
+        if actor_data in selected_actors:
+            selected_actors.remove(actor_data)
+        else:
+            selected_actors.append(actor_data)
+        
+        # Обновляем интерфейс
+        chat_id = call.message.chat.id
+        with db_lock:
+            cursor.execute("""
+                SELECT ar.actor, AVG(ar.rating) as avg_rating, COUNT(*) as count
+                FROM actor_ratings ar
+                JOIN movies m ON ar.film_id = m.id AND ar.chat_id = m.chat_id
+                WHERE ar.chat_id = %s
+                AND m.watched = 0
+                AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+                GROUP BY ar.actor
+                HAVING COUNT(*) > 0
+                ORDER BY AVG(ar.rating) DESC, COUNT(*) DESC
+                LIMIT 10
+            """, (chat_id, chat_id))
+            top_actors = []
+            for row in cursor.fetchall():
+                actor = row.get('actor') if isinstance(row, dict) else row[0]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+                if actor:
+                    top_actors.append((actor, avg))
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for actor, avg in top_actors:
+            is_selected = actor in selected_actors
+            label = f"{'✓ ' if is_selected else ''}{actor} ({avg:.1f}/10)"
+            markup.add(InlineKeyboardButton(label, callback_data=f"rand_actor:{actor}"))
+        markup.add(InlineKeyboardButton("✅ Готово", callback_data="rand_actor:done"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
+        
+        selected_text = f"\n\nВыбрано: {', '.join(selected_actors)}" if selected_actors else ""
+        bot.edit_message_text(f"⭐ Выберите любимых актёров (можно несколько):{selected_text}", call.message.chat.id, call.message.message_id, reply_markup=markup)
+        return
+
+    state = user_random_state[user_id]
+    chat_id = call.message.chat.id
+    
+    with db_lock:
+        query = "SELECT id, kp_id, title, year, genres, description, director, actors, link FROM movies WHERE chat_id = %s AND watched = 0 AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())"
+        params = [chat_id, chat_id]
+
+        # Обработка множественного выбора периодов
+        if state.get('periods') and len(state['periods']) > 0:
+            period_conditions = []
+            for p in state['periods']:
+                if p == "До 1980":
+                    period_conditions.append("year < 1980")
+                elif p == "1980–1990":
+                    period_conditions.append("(year >= 1980 AND year <= 1990)")
+                elif p == "1990–2000":
+                    period_conditions.append("(year >= 1990 AND year <= 2000)")
+                elif p == "2000–2010":
+                    period_conditions.append("(year >= 2000 AND year <= 2010)")
+                elif p == "2010–2020":
+                    period_conditions.append("(year >= 2010 AND year <= 2020)")
+                elif p == "2020–сейчас":
+                    period_conditions.append("year >= 2020")
+            
+            if period_conditions:
+                query += " AND (" + " OR ".join(period_conditions) + ")"
+
+        if state.get('genre'):
+            query += " AND genres LIKE %s"
+            params.append(f"%{state['genre']}%")
+
+        if state.get('director'):
+            query += " AND director = %s"
+            params.append(state['director'])
+        
+        # Фильтрация по выбранным актерам
+        selected_actors = state.get('selected_actors', [])
+        if selected_actors:
+            # Фильтруем фильмы, где есть хотя бы один из выбранных актеров
+            actor_conditions = []
+            for actor in selected_actors:
+                actor_conditions.append("actors LIKE %s")
+                params.append(f"%{actor}%")
+            if actor_conditions:
+                query += " AND (" + " OR ".join(actor_conditions) + ")"
+
+        cursor.execute(query, params)
+        candidates = cursor.fetchall()
+    
+    if not candidates:
+        bot.edit_message_text("😔 Нет подходящих непросмотренных фильмов по вашим фильтрам.", call.message.chat.id, call.message.message_id)
+        del user_random_state[user_id]
+        return
+
+    # Выбираем случайный фильм и сохраняем его данные в state
+    movie = random.choice(candidates)
+    # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+    user_random_state[user_id]['movie'] = {
+        'id': movie.get('id') if isinstance(movie, dict) else movie[0],
+        'kp_id': movie.get('kp_id') if isinstance(movie, dict) else movie[1],
+        'title': movie.get('title') if isinstance(movie, dict) else movie[2],
+        'year': movie.get('year') if isinstance(movie, dict) else movie[3],
+        'genres': movie.get('genres') if isinstance(movie, dict) else movie[4],
+        'description': movie.get('description') if isinstance(movie, dict) else movie[5],
+        'director': movie.get('director') if isinstance(movie, dict) else movie[6],
+        'actors': movie.get('actors') if isinstance(movie, dict) else movie[7],
+        'link': movie.get('link') if isinstance(movie, dict) else movie[8]
+    }
+    
+    # Показываем выбор дня
+    now = datetime.now(plans_tz)
+    days = []
+    # Русские названия дней недели
+    days_ru = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
+    
+    # Находим ближайшее воскресенье
+    current_weekday = now.weekday()  # 0 = понедельник, 6 = воскресенье
+    days_until_sunday = (6 - current_weekday) % 7
+    if days_until_sunday == 0:
+        # Сегодня воскресенье, берем следующее
+        days_until_sunday = 7
+    
+    nearest_sunday = now + timedelta(days=days_until_sunday)
+    # Следующее за ближайшим воскресенье
+    next_sunday = nearest_sunday + timedelta(days=7)
+    
+    # Включаем все даты до следующего воскресенья включительно
+    end_date = next_sunday
+    current_date = now
+    
+    day_count = 0
+    while current_date <= end_date and day_count < 20:  # Ограничение на 20 дней
+        day_date = current_date.strftime('%d.%m')
+        weekday = current_date.weekday()  # 0 = понедельник, 6 = воскресенье
+        
+        if day_count == 0:
+            label = f"Сегодня ({day_date})"
+        elif day_count == 1:
+            label = f"Завтра ({day_date})"
+        else:
+            day_name_ru = days_ru[weekday]
+            label = f"{day_name_ru} ({day_date})"
+        days.append((label, current_date.isoformat()))
+        
+        current_date = current_date + timedelta(days=1)
+        day_count += 1
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    for label, iso_date in days:
+        markup.add(InlineKeyboardButton(label, callback_data=f"rand_day:{iso_date}"))
+    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_day:skip"))
+    
+    bot.edit_message_text("📅 Выберите день для просмотра:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_day:"))
+def random_show_movie(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    day_data = call.data.split(":", 1)[1]
+    
+    logger.info(f"[RANDOM] Обработка выбора даты: user_id={user_id}, day_data={day_data}")
+    
+    if user_id not in user_random_state or 'movie' not in user_random_state[user_id]:
+        logger.error(f"[RANDOM] Данные о фильме не найдены для user_id={user_id}")
+        bot.edit_message_text("Ошибка: данные о фильме не найдены. Начните заново с /random", chat_id, call.message.message_id)
+        if user_id in user_random_state:
+            del user_random_state[user_id]
+        return
+    
+    movie = user_random_state[user_id]['movie']
+    
+    # Формируем текст с днем
+    if day_data == "skip":
+        day_text = "на вечер"
+        plan_dt = None
+    else:
+        try:
+            day_dt = datetime.fromisoformat(day_data.replace('Z', '+00:00')).astimezone(plans_tz)
+            day_text = day_dt.strftime('%d.%m.%Y')
+            # Планируем на этот день в 19:00 для дома
+            plan_dt = day_dt.replace(hour=19, minute=0)
+        except:
+            day_text = "на вечер"
+            plan_dt = None
+    
+    # Формируем полное описание фильма
+    text = f"🍿 <b>Фильм {day_text}:</b>\n\n"
+    text += f"<b>{movie['title']}</b> ({movie['year']})\n\n"
+    
+    if movie['director'] and movie['director'] != "Не указан":
+        text += f"🎬 <b>Режиссёр:</b> {movie['director']}\n"
+    
+    if movie['genres'] and movie['genres'] != "—":
+        text += f"🎭 <b>Жанры:</b> {movie['genres']}\n"
+    
+    if movie['actors'] and movie['actors'] != "—":
+        text += f"👥 <b>В ролях:</b> {movie['actors']}\n"
+    
+    text += f"\n📝 <b>Описание:</b>\n{movie['description']}\n\n"
+    text += f"🔗 {movie['link']}"
+    
+    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
+    
+    # Автоматически планируем фильм на выбранную дату
+    if plan_dt:
+        try:
+            logger.info(f"[RANDOM] Планируем фильм {movie.get('title', 'Unknown')} на дату {plan_dt}")
+            with db_lock:
+                # Проверяем, есть ли фильм в базе
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, movie['kp_id']))
+                row = cursor.fetchone()
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                else:
+                    # Добавляем фильм в базу, если его нет
+                    cursor.execute('''
+                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                    ''', (chat_id, movie['link'], movie['kp_id'], movie['title'], movie['year'], movie['genres'], movie['description'], movie['director'], movie['actors']))
+                    conn.commit()
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, movie['kp_id']))
+                    row = cursor.fetchone()
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    else:
+                        logger.error(f"Не удалось добавить фильм в базу для планирования")
+                        del user_random_state[user_id]
+                        return
+                
+                # Добавляем план
+                plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
+                cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)', 
+                              (chat_id, film_id, 'home', plan_utc_iso, user_id))
+                conn.commit()
+            
+            logger.info(f"Фильм {movie['title']} автоматически запланирован на {plan_dt.strftime('%d.%m.%Y %H:%M')}")
+        except Exception as e:
+            logger.error(f"Ошибка при автоматическом планировании фильма: {e}", exc_info=True)
+    
+    del user_random_state[user_id]
+
+# /rate
+@bot.message_handler(commands=['rate'])
+def rate_movie(message):
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/rate', message.chat.id)
+    logger.info(f"Команда /rate от пользователя {message.from_user.id}")
+    chat_id = message.chat.id
+    
+    # Получаем все просмотренные фильмы
+    with db_lock:
+        cursor.execute('''
+            SELECT m.id, m.kp_id, m.title, m.year
+            FROM movies m
+            WHERE m.chat_id = %s AND m.watched = 1
+            ORDER BY m.title
+        ''', (chat_id,))
+        movies = cursor.fetchall()
+    
+    if not movies:
+        bot.reply_to(message, "Нет просмотренных фильмов.")
+        return
+    
+    # Получаем всех пользователей чата из stats (внутри db_lock)
+    with db_lock:
+    cursor.execute('''
+        SELECT DISTINCT user_id, username
+        FROM stats
+        WHERE chat_id = %s AND user_id IS NOT NULL
+    ''', (chat_id,))
+    chat_users = {}
+    for row in cursor.fetchall():
+        user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+        username = row.get('username') if isinstance(row, dict) else row[1]
+        chat_users[user_id] = username or f"user_{user_id}"
+    
+    # Для каждого фильма находим, кто не оценил
+    text = "📊 <b>Список просмотренных фильмов для оценки:</b>\n\n"
+    text += "💬 <i>Ответьте на это сообщение списком оценок в формате:</i>\n"
+    text += "<code>kp_id оценка</code>\n\n"
+    text += "<i>Пример:</i>\n"
+    text += "<code>123 10\n31341 8\n123123 4</code>\n\n"
+    text += "=" * 40 + "\n\n"
+    
+    for movie in movies:
+        # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+        film_id = movie.get('id') if isinstance(movie, dict) else movie[0]
+        kp_id = movie.get('kp_id') if isinstance(movie, dict) else movie[1]
+        title = movie.get('title') if isinstance(movie, dict) else movie[2]
+        year = (movie.get('year') if isinstance(movie, dict) else movie[3]) or '—'
+        
+        # Получаем всех, кто оценил этот фильм
+        cursor.execute('''
+            SELECT user_id FROM ratings
+            WHERE chat_id = %s AND film_id = %s
+        ''', (chat_id, film_id))
+        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+        
+        # Находим, кто не оценил
+        not_rated = []
+        for user_id, username in chat_users.items():
+            if user_id not in rated_users:
+                not_rated.append(username)
+        
+        not_rated_text = ", ".join(not_rated[:5])
+        if len(not_rated) > 5:
+            not_rated_text += f" и ещё {len(not_rated) - 5}"
+        
+        text += f"<b>{kp_id}</b> — {title} ({year})\n"
+        if not_rated:
+            text += f"   ⚠️ Не оценили: {not_rated_text}\n"
+        else:
+            text += f"   ✅ Все оценили\n"
+        text += "\n"
+    
+    # Отправляем сообщение и сохраняем его message_id для обработки реплая
+    sent_msg = bot.reply_to(message, text, parse_mode='HTML')
+    rate_list_messages[message.chat.id] = sent_msg.message_id
+
+# Обработка реплая на список фильмов с оценками
+
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == bot.get_me().id and m.text)
+def handle_rate_list_reply(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    # Проверяем, что это реплай на список фильмов
+    reply_text = message.reply_to_message.text or ""
+    if "Список просмотренных фильмов для оценки" not in reply_text:
+        return
+    
+    # Дополнительная проверка по message_id
+    expected_msg_id = rate_list_messages.get(chat_id)
+    if expected_msg_id and message.reply_to_message.message_id != expected_msg_id:
+        return
+    
+    text = message.text.strip()
+    if not text:
+        return
+    
+    # Парсим оценки: kp_id оценка (разделители: пробел, запятая, точка с запятой, таб)
+    import re
+    ratings_pattern = r'(\d+)\s*[,;:\t]?\s*(\d+)'
+    matches = re.findall(ratings_pattern, text)
+    
+    if not matches:
+        bot.reply_to(message, "❌ Не удалось распознать оценки. Используйте формат: <code>kp_id оценка</code>", parse_mode='HTML')
+        return
+    
+    results = []
+    errors = []
+    
+    with db_lock:
+        for kp_id_str, rating_str in matches:
+            try:
+                kp_id = kp_id_str.strip()
+                rating = int(rating_str.strip())
+                
+                if not (1 <= rating <= 10):
+                    errors.append(f"{kp_id}: оценка должна быть от 1 до 10")
+                    continue
+                
+                # Находим фильм по kp_id
+                cursor.execute('''
+                    SELECT id, title FROM movies
+                    WHERE chat_id = %s AND kp_id = %s AND watched = 1
+                ''', (chat_id, kp_id))
+                film_row = cursor.fetchone()
+                
+                if not film_row:
+                    errors.append(f"{kp_id}: фильм не найден или не просмотрен")
+                    continue
+                
+                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
+                
+                # Проверяем, не оценил ли уже пользователь этот фильм
+                cursor.execute('''
+                    SELECT rating FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                ''', (chat_id, film_id, user_id))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    errors.append(f"{kp_id}: вы уже оценили этот фильм")
+                    continue
+                
+                # Сохраняем оценку
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, film_id, user_id, rating))
+                
+                # Сохраняем статистику по жанрам, режиссерам и актерам
+                save_rating_statistics(chat_id, user_id, film_id, rating)
+                
+                results.append((kp_id, title, rating))
+                
+            except ValueError:
+                errors.append(f"{kp_id_str}: неверный формат оценки")
+            except Exception as e:
+                logger.error(f"Ошибка при сохранении оценки {kp_id_str}: {e}")
+                errors.append(f"{kp_id_str}: ошибка обработки")
+        
+        conn.commit()
+    
+    # Формируем ответ
+    response_text = ""
+    
+    if results:
+        user_name = message.from_user.first_name or f"user_{user_id}"
+        response_text += f"✅ <b>{user_name}</b> поставил(а) оценки:\n\n"
+        for kp_id, title, rating in results:
+            response_text += f"• <b>{kp_id}</b> — {title}: {rating}/10\n"
+        response_text += "\n"
+    
+    if errors:
+        response_text += "⚠️ <b>Ошибки:</b>\n"
+        for error in errors:
+            response_text += f"• {error}\n"
+    
+    if not results and not errors:
+        response_text = "❌ Не удалось обработать оценки. Проверьте формат."
+    
+    bot.reply_to(message, response_text, parse_mode='HTML')
+
+# /settings
+@bot.message_handler(commands=['settings'])
+def settings_command(message):
+    logger.info(f"[HANDLER] /settings вызван от {message.from_user.id}")
+    try:
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+        username = message.from_user.username or f"user_{user_id}"
+        log_request(user_id, username, '/settings', chat_id)
+        logger.info(f"Команда /settings от пользователя {user_id}")
+    
+    # Проверяем на reset
+    if message.text and 'reset' in message.text.lower():
+        with db_lock:
+                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
+            conn.commit()
+        bot.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
+            logger.info(f"Реакции сброшены для чата {chat_id}")
+            if user_id in user_settings_state:
+                del user_settings_state[user_id]
+        return
+    
+    reactions = get_watched_reactions(chat_id)
+    current = ', '.join(reactions['emoji'] + [f"custom:{cid}" for cid in reactions['custom']]) or "не настроено"
+        
+        # Создаем меню с кнопками
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🔄 Заменить реакции", callback_data="settings:replace"))
+        markup.add(InlineKeyboardButton("➕ Добавить реакции", callback_data="settings:add"))
+        markup.add(InlineKeyboardButton("🔄 Сбросить настройки", callback_data="settings:reset"))
+        
+        settings_msg = bot.reply_to(
+            message, 
+            f"⚙️ <b>Настройки реакций</b>\n\n"
+            f"Текущие реакции: <b>{current}</b>\n\n"
+            f"Выберите действие:",
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+        
+        # Сохраняем message_id системного сообщения
+        user_settings_state[user_id] = {
+            'settings_msg_id': settings_msg.message_id,
+            'chat_id': chat_id
+        }
+        logger.info(f"Настройки открыты для пользователя {user_id}, message_id: {settings_msg.message_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /settings")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("settings:"))
+def settings_action_choice(call):
+    """Обработчик выбора действия в настройках"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    action = call.data.split(":")[1]
+    
+    try:
+        if action == 'reset':
+            with db_lock:
+                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
+                conn.commit()
+            bot.edit_message_text(
+                "✅ Реакции сброшены к значению по умолчанию (✅)",
+                call.message.chat.id,
+                call.message.message_id
+            )
+            if user_id in user_settings_state:
+                del user_settings_state[user_id]
+            logger.info(f"Реакции сброшены для чата {chat_id}")
+            return
+        
+        # Сохраняем выбранное действие и message_id
+        user_settings_state[user_id] = {
+            'action': action,  # 'replace' или 'add'
+            'settings_msg_id': call.message.message_id,
+            'chat_id': chat_id
+        }
+        
+        action_text = "заменить" if action == 'replace' else "добавить"
+        reactions = get_watched_reactions(chat_id)
+        current = ', '.join(reactions['emoji'] + [f"custom:{cid}" for cid in reactions['custom']]) or "не настроено"
+        
+        bot.edit_message_text(
+            f"⚙️ <b>Настройки реакций</b>\n\n"
+            f"Текущие реакции: <b>{current}</b>\n\n"
+            f"Вы выбрали: <b>{action_text}</b>\n\n"
+            f"📝 <b>Отправьте эмодзи в ответ на это сообщение</b> (можно несколько в одном сообщении).",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode='HTML'
+        )
+        logger.info(f"Пользователь {user_id} выбрал действие: {action}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в settings_action_choice: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка")
+        except:
+            pass
+
+@bot.message_handler(func=lambda m: m.reply_to_message and m.from_user.id in user_settings_state)
+def add_reactions(message):
+    """Обработчик эмодзи в ответе на системное сообщение settings"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    state = user_settings_state.get(user_id, {})
+    
+    logger.info(f"[SETTINGS] add_reactions вызван для пользователя {user_id}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}, state={state}")
+    
+    # Проверяем, что это реплай на системное сообщение settings
+    if not state.get('settings_msg_id'):
+        logger.warning(f"[SETTINGS] Нет settings_msg_id в состоянии для пользователя {user_id}")
+        return
+    
+    if not message.reply_to_message:
+        logger.warning(f"[SETTINGS] Нет reply_to_message для пользователя {user_id}")
+        return
+    
+    if message.reply_to_message.message_id != state.get('settings_msg_id'):
+        logger.warning(f"[SETTINGS] message_id не совпадает: ожидалось {state.get('settings_msg_id')}, получено {message.reply_to_message.message_id}")
+        bot.reply_to(message, "❌ Пожалуйста, отправьте эмодзи в ответ на системное сообщение с настройками.")
+        return
+    
+    logger.info(f"[SETTINGS] Начинаем обработку эмодзи для пользователя {user_id}, текст: {message.text[:50] if message.text else 'нет текста'}")
+    
+    action = state.get('action')
+    if not action:
+        logger.warning(f"[SETTINGS] Нет action в состоянии для пользователя {user_id}, state={state}")
+        return
+    
+    logger.info(f"[SETTINGS] Действие: {action}, начинаем обработку эмодзи")
+    
+    # Собираем обычные эмодзи и custom_id из сообщения
+    emojis = []
+    custom_ids = []
+    
+    # Обычные эмодзи из текста
+    if message.text:
+        # Улучшенная проверка эмодзи
+        for char in message.text:
+            # Проверяем различные диапазоны Unicode для эмодзи
+            code = ord(char)
+            if (0x1F300 <= code <= 0x1F9FF or  # Различные символы и пиктограммы
+                0x1F600 <= code <= 0x1F64F or  # Эмодзи лица
+                0x1F680 <= code <= 0x1F6FF or  # Транспорт и карты
+                0x2600 <= code <= 0x26FF or    # Разные символы
+                0x2700 <= code <= 0x27BF or    # Dingbats
+                0xFE00 <= code <= 0xFE0F or    # Вариационные селекторы
+                0x1F900 <= code <= 0x1F9FF or  # Дополнительные символы
+                0x1F1E0 <= code <= 0x1F1FF):   # Флаги
+                if char not in emojis:  # Избегаем дубликатов
+                    emojis.append(char)
+            # Также проверяем популярные эмодзи
+            elif char in '👍✅❤️🔥🎉😂🤣😍😢😡👎⭐🌟💯🎬🍿💋🙏🙌🥰':
+                if char not in emojis:
+                emojis.append(char)
+    
+    # Кастомные эмодзи из entities
+    if message.entities:
+        for entity in message.entities:
+            if entity.type == 'custom_emoji' and hasattr(entity, 'custom_emoji_id'):
+                custom_id = str(entity.custom_emoji_id)
+                if custom_id not in custom_ids:
+                custom_ids.append(custom_id)
+    
+    all_reactions = emojis + [f"custom:{cid}" for cid in custom_ids]
+    
+    if not all_reactions:
+        bot.reply_to(message, "❌ Не нашёл эмодзи в сообщении. Попробуйте отправить эмодзи в ответ на системное сообщение.")
+        return
+    
+    # Сохраняем в зависимости от действия
+    with db_lock:
+        if action == 'replace':
+            # Заменяем все реакции
+        cursor.execute('''
+            INSERT INTO settings (chat_id, key, value)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+        ''', (chat_id, "watched_reactions", json.dumps(all_reactions)))
+        conn.commit()
+            bot.reply_to(message, f"✅ Реакции заменены: {', '.join(all_reactions)}")
+        elif action == 'add':
+            # Добавляем к существующим
+            reactions = get_watched_reactions(chat_id)
+            existing_emojis = reactions['emoji']
+            existing_custom = reactions['custom']
+            
+            # Объединяем, избегая дубликатов
+            new_emojis = list(set(existing_emojis + emojis))
+            new_custom = list(set(existing_custom + custom_ids))
+            
+            all_combined = new_emojis + [f"custom:{cid}" for cid in new_custom]
+            cursor.execute('''
+                INSERT INTO settings (chat_id, key, value)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            ''', (chat_id, "watched_reactions", json.dumps(all_combined)))
+        conn.commit()
+            bot.reply_to(message, f"✅ Реакции добавлены. Теперь: {', '.join(all_combined)}")
+    
+    # Очищаем состояние
+    if user_id in user_settings_state:
+        del user_settings_state[user_id]
+    
+    logger.info(f"Реакции обновлены для чата {chat_id}, действие: {action}")
+
+
+# /plan — планирование просмотра
+def process_plan(user_id, chat_id, link, plan_type, day_or_date):
+    plan_dt = None
+    now = datetime.now(plans_tz)
+    
+    # Ищем день недели в расширенном словаре
+    target_weekday = None
+    day_lower = day_or_date.lower()
+    for phrase, wd in days_full.items():
+        if phrase in day_lower:
+            target_weekday = wd
+            break
+    
+    if target_weekday is not None:
+        # Вычисляем ближайший указанный день (вперёд)
+        current_wd = now.weekday()
+        delta = (target_weekday - current_wd + 7) % 7
+        if delta == 0:  # если сегодня — переносим на следующую неделю
+            delta = 7
+        plan_date = now.date() + timedelta(days=delta)
+        
+        if plan_type == 'home':
+            # Пятница — 19:00, остальные — 10:00
+            hour = 19 if target_weekday == 4 else 10
+        else:  # cinema
+            hour = 9
+        
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = plans_tz.localize(plan_dt)
+    
+    elif plan_type == 'cinema':
+        # Если день недели не найден — пытаемся распарсить дату (только для "в кино")
+        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', day_lower)
+        if date_match:
+            day_num = int(date_match.group(1))
+            month_str = date_match.group(2)
+            month = months_map.get(month_str)
+            if month:
+                try:
+                    year = now.year
+                    candidate = plans_tz.localize(datetime(year, month, day_num))
+                    if candidate < now:
+                        year += 1
+                    plan_date = datetime(year, month, day_num)
+                    plan_dt = plans_tz.localize(plan_date.replace(hour=9, minute=0))
+                except ValueError:
+                    return False
+            else:
+                return False
+        else:
+                return False
+    
+    if plan_dt:
+        # Извлекаем kp_id из ссылки для поиска
+        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+        kp_id = match.group(2) if match else None
+        
+        with db_lock:
+            if kp_id:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            else:
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+            row = cursor.fetchone()
+            if not row:
+                info = extract_movie_info(link)
+                if info:
+                    cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link', 
+                                 (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                    conn.commit()
+                    cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
+                    row = cursor.fetchone()
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
+                    else:
+                        bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
+                        return
+                else:
+                    bot.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
+                    return
+            else:
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
+            
+            plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
+            cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)', 
+                          (chat_id, film_id, plan_type, plan_utc_iso, user_id))
+            conn.commit()
+        
+        plan_type_text = "в кино" if plan_type == 'cinema' else "дома"
+        bot.send_message(chat_id, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на {plan_dt.strftime('%d.%m.%Y %H:%M')} MSK", parse_mode='HTML')
+        
+        scheduler.add_job(send_plan_notification, 'date', run_date=plan_dt.astimezone(pytz.utc), 
+                         args=[chat_id, title, link, plan_type])
+
+# /plan — планирование просмотра
+def process_plan(user_id, chat_id, link, plan_type, day_or_date):
+    plan_dt = None
+    now = datetime.now(plans_tz)
+    
+    # Ищем день недели в расширенном словаре
+    target_weekday = None
+    day_lower = day_or_date.lower()
+    for phrase, wd in days_full.items():
+        if phrase in day_lower:
+            target_weekday = wd
+            break
+    
+    if target_weekday is not None:
+        # Вычисляем ближайший указанный день (вперёд)
+        current_wd = now.weekday()
+        delta = (target_weekday - current_wd + 7) % 7
+        if delta == 0:  # если сегодня — переносим на следующую неделю
+            delta = 7
+        plan_date = now.date() + timedelta(days=delta)
+        
+        if plan_type == 'home':
+            # Пятница — 19:00, остальные — 10:00
+            hour = 19 if target_weekday == 4 else 10
+        else:  # cinema
+            hour = 9
+        
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = plans_tz.localize(plan_dt)
+    
+    elif plan_type == 'cinema':
+        # Если день недели не найден — пытаемся распарсить дату (только для "в кино")
+        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', day_lower)
+        if date_match:
+            day_num = int(date_match.group(1))
+            month_str = date_match.group(2)
+            month = months_map.get(month_str)
+            if month:
+                try:
+                    year = now.year
+                    candidate = plans_tz.localize(datetime(year, month, day_num))
+                    if candidate < now:
+                        year += 1
+                    plan_date = datetime(year, month, day_num)
+                    plan_dt = plans_tz.localize(plan_date.replace(hour=9, minute=0))
+                except ValueError:
+                    return False
+            else:
+                return False
+        else:
+            return False
+    
+    if plan_dt:
+        # Извлекаем kp_id из ссылки для поиска
+        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+        kp_id = match.group(2) if match else None
+        
+        with db_lock:
+            if kp_id:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            else:
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+            row = cursor.fetchone()
+            if not row:
+                info = extract_movie_info(link)
+                if info:
+                    cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link', 
+                                 (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                    conn.commit()
+                    cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
+                    row = cursor.fetchone()
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
+                    else:
+                        bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
+                        return
+                else:
+                    bot.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
+                    return
+            else:
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
+            
+            plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
+            cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)', 
+                          (chat_id, film_id, plan_type, plan_utc_iso, user_id))
+            conn.commit()
+        
+        plan_type_text = "в кино" if plan_type == 'cinema' else "дома"
+        bot.send_message(chat_id, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на {plan_dt.strftime('%d.%m.%Y %H:%M')} MSK", parse_mode='HTML')
+        
+        scheduler.add_job(send_plan_notification, 'date', run_date=plan_dt.astimezone(pytz.utc), 
+                         args=[chat_id, title, link, plan_type])
+
+@bot.message_handler(commands=['plan'])
+def plan_handler(message):
+    logger.info(f"[HANDLER] /plan вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/plan', message.chat.id)
+        logger.info(f"Команда /plan от пользователя {message.from_user.id}")
+        user_id = message.from_user.id
+        text = message.text.lower().replace('/plan', '').strip()
+        
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', text)
+        link = link_match.group(1) if link_match else None
+        
+        plan_type = 'home' if 'дома' in text else 'cinema' if 'кино' in text else None
+        
+        day_or_date = None
+        if plan_type == 'home':
+            # Ищем любой день недели из расширенного словаря (сначала длинные фразы)
+            sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
+            for phrase in sorted_phrases:
+                if phrase in text:
+                    day_or_date = phrase
+                    break
+        elif plan_type == 'cinema':
+            # Ищем день недели или дату
+            sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
+            for phrase in sorted_phrases:
+                if phrase in text:
+                    day_or_date = phrase
+                    break
+            if not day_or_date:
+                # Пробуем разные форматы даты: "15 января", "15.01", "15/01"
+                date_match = re.search(r'(\d+)\s*([а-яё]+)', text)
+                if date_match:
+                    day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+                else:
+                    # Формат "15.01" или "15/01"
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
+        
+        if link and plan_type and day_or_date:
+            try:
+                process_plan(user_id, message.chat.id, link, plan_type, day_or_date)
+            except Exception as e:
+                bot.reply_to(message, f"Ошибка при планировании: {e}")
+                logger.error(f"Ошибка process_plan: {e}", exc_info=True)
+            return
+        
+        if not link:
+            bot.reply_to(message, "Не найдена ссылка на фильм. Отправьте ссылку на фильм (или реплай на сообщение с ней).")
+            return
+        
+        if not plan_type:
+            bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+            return
+        
+        if not day_or_date:
+            bot.reply_to(message, "Не указан день/дата. Для дома укажите день недели (пн, вт, ср, чт, пт, сб, вс или 'в сб'), для кино - день недели или дату (15 января).")
+            return
+        
+        user_plan_state[user_id] = {'step': 1}
+        bot.reply_to(message, "Отправьте ссылку на фильм (или реплай на сообщение с ней).")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /plan: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /plan")
+        except:
+            pass
+
+@bot.message_handler(func=lambda m: user_plan_state.get(m.from_user.id, {}).get('step') == 1)
+def get_plan_link(message):
+    user_id = message.from_user.id
+    link = None
+    
+    if message.reply_to_message:
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
+        if link_match:
+            link = link_match.group(0)
+    
+    if not link:
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.text)
+        if link_match:
+            link = link_match.group(0)
+    
+    if not link:
+        bot.reply_to(message, "Не нашёл ссылку. Попробуйте снова.")
+        return
+    
+    user_plan_state[user_id]['link'] = link
+    user_plan_state[user_id]['step'] = 2
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
+    markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
+    bot.send_message(message.chat.id, "Где планируете смотреть%s", reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan_type:"))
+def plan_type_choice(call):
+    user_id = call.from_user.id
+    plan_type = call.data.split(":")[1]
+    user_plan_state[user_id]['type'] = plan_type
+    user_plan_state[user_id]['step'] = 3
+
+    bot.edit_message_text("Укажите день/дату:", call.message.chat.id, call.message.message_id)
+    if plan_type == 'home':
+        bot.send_message(call.message.chat.id, "Для дома: пт, сб или вс.")
+    else:
+        bot.send_message(call.message.chat.id, "Для кино: '15 января' или 'с четверга'.")
+
+@bot.message_handler(func=lambda m: user_plan_state.get(m.from_user.id, {}).get('step') == 3)
+def get_plan_day_or_date(message):
+    user_id = message.from_user.id
+    text = message.text.lower().strip()
+    plan_type = user_plan_state[user_id]['type']
+    link = user_plan_state[user_id]['link']
+    
+    now_msk = datetime.now(plans_tz)
+    plan_dt = None
+
+    # Поиск дня недели
+    target_weekday = None
+    for phrase, wd in days_full.items():
+        if phrase in text:
+            target_weekday = wd
+            break
+
+    if target_weekday is not None:
+        # Вычисляем ближайший указанный день (вперёд)
+        current_wd = now_msk.weekday()
+        delta = (target_weekday - current_wd + 7) % 7
+        if delta == 0:  # если сегодня — переносим на следующую неделю
+            delta = 7
+        plan_date = now_msk.date() + timedelta(days=delta)
+
+        if plan_type == 'home':
+            # Пятница — 19:00, остальные — 10:00
+            hour = 19 if target_weekday == 4 else 10
+        else:  # cinema
+            hour = 9
+
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = plans_tz.localize(plan_dt)
+
+    else:
+        # Если день недели не найден — пытаемся распарсить дату (только для "в кино")
+        if plan_type == 'cinema':
+            if 'четверг' in text or any(p in text for p in ['чт', 'в четверг']):
+                target_weekday = 3
+                current_wd = now_msk.weekday()
+                delta = (3 - current_wd + 7) % 7
+                if delta == 0:
+                    delta = 7
+                plan_date = now_msk.date() + timedelta(days=delta)
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
+                plan_dt = plans_tz.localize(plan_dt)
+            else:
+                # Парсинг "15 января"
+                date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+                if date_match:
+                    day_num = int(date_match.group(1))
+                    month_str = date_match.group(2)
+                    month = months_map.get(month_str)
+                    if month:
+                        try:
+                            year = now_msk.year
+                            candidate = plans_tz.localize(datetime(year, month, day_num))
+                            if candidate < now_msk:
+                                year += 1
+                            plan_date = datetime(year, month, day_num)
+                            plan_dt = plans_tz.localize(plan_date.replace(hour=9, minute=0))
+                        except ValueError:
+                            bot.reply_to(message, "Некорректная дата. Попробуйте снова.")
+                            return
+                    else:
+                        bot.reply_to(message, "Не распознал месяц.")
+                        return
+                else:
+                    bot.reply_to(message, "Укажите день недели или дату в формате '15 января'.")
+                    return
+        else:
+            bot.reply_to(message, "Укажите день недели (пн, вт, ср, чт, пт, сб, вс или полное название).")
+            return
+
+    if plan_dt:
+        # Получаем/создаём фильм
+        chat_id = message.chat.id
+        # Извлекаем kp_id из ссылки для поиска
+        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+        kp_id = match.group(2) if match else None
+        
+        with db_lock:
+            if kp_id:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            else:
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+            row = cursor.fetchone()
+            if not row:
+                info = extract_movie_info(link)
+                if not info:
+                    bot.reply_to(message, "Не удалось получить информацию о фильме.")
+                    return
+                cursor.execute('''
+                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                conn.commit()
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
+                row = cursor.fetchone()
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
+                else:
+                    bot.reply_to(message, "Не удалось добавить фильм в базу.")
+                    return
+            else:
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
+
+            # Сохраняем план
+            plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
+            cursor.execute('''
+                INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (chat_id, film_id, plan_type, plan_utc_iso, user_id))
+        conn.commit()
+
+        day_name = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'][plan_dt.weekday()]
+        plan_type_text = "в кино" if plan_type == 'cinema' else "дома"
+        bot.reply_to(message, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на <b>{day_name} {plan_dt.strftime('%d.%m.%Y в %H:%M')}</b> МСК", parse_mode='HTML')
+
+        # Планируем уведомление
+        scheduler.add_job(
+            send_plan_notification,
+            'date',
+            run_date=plan_dt.astimezone(pytz.utc),
+            args=[message.chat.id, title, link, plan_type]
+        )
+
+        del user_plan_state[user_id]
+
+# /schedule — список запланированных просмотров
+@bot.message_handler(commands=['schedule'])
+def show_schedule(message):
+    logger.info(f"[HANDLER] /schedule вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/schedule', message.chat.id)
+        logger.info(f"Команда /schedule от пользователя {message.from_user.id}")
+        
+        chat_id = message.chat.id
+        with db_lock:
+            cursor.execute('''
+                SELECT m.title, p.plan_datetime, p.plan_type
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND m.chat_id = p.chat_id
+                WHERE p.chat_id = %s
+                ORDER BY p.plan_type DESC, p.plan_datetime ASC
+            ''', (chat_id,))
+            rows = cursor.fetchall()
+        
+        if not rows:
+            bot.reply_to(message, "📅 Нет запланированных просмотров.")
+            return
+        
+        # Разделяем на секции: сначала кино, потом дома
+        cinema_plans = []
+        home_plans = []
+        
+        for row in rows:
+            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+            title = row.get('title') if isinstance(row, dict) else row[0]
+            plan_dt_iso = row.get('plan_datetime') if isinstance(row, dict) else row[1]
+            plan_type = row.get('plan_type') if isinstance(row, dict) else row[2]
+            # Преобразуем ISO в дату МСК без времени
+            try:
+                # Обрабатываем разные форматы ISO строк
+                if plan_dt_iso.endswith('Z'):
+                    plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(plans_tz)
+                elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
+                    # Уже есть timezone
+                    plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(plans_tz)
+                else:
+                    # Нет timezone, предполагаем UTC
+                    plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(plans_tz)
+                
+                date_str = plan_dt.strftime('%d.%m.%Y')
+                plan_info = (title, date_str)
+                
+                if plan_type == 'cinema':
+                    cinema_plans.append(plan_info)
+                else:  # home
+                    home_plans.append(plan_info)
+            except Exception as e:
+                logger.error(f"Ошибка при обработке даты {plan_dt_iso}: {e}")
+                # Fallback: показываем как есть
+                date_str = plan_dt_iso[:10] if len(plan_dt_iso) >= 10 else plan_dt_iso
+                plan_info = (title, date_str)
+                
+                if plan_type == 'cinema':
+                    cinema_plans.append(plan_info)
+                else:  # home
+                    home_plans.append(plan_info)
+        
+        # Формируем текст с секциями
+        text = "*📅 Запланированные просмотры:*\n\n"
+        
+        # Секция: Премьеры в кино
+        if cinema_plans:
+            text += "*🎦 Премьеры в кино:*\n"
+            for title, date_str in cinema_plans:
+                text += f"• <b>{title}</b> — {date_str}\n"
+            text += "\n"
+        
+        # Секция: Просмотры дома
+        if home_plans:
+            text += "*🏠 Просмотры дома:*\n"
+            for title, date_str in home_plans:
+                text += f"• <b>{title}</b> — {date_str}\n"
+            text += "\n"
+        
+        text += "Приятного просмотра! 🍿"
+        bot.reply_to(message, text, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /schedule: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /schedule")
+        except:
+            pass
+
+# /help
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    logger.info(f"[HANDLER] /help вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/help', message.chat.id)
+    logger.info(f"Команда /help от пользователя {message.from_user.id}")
+    text = """*🎬 Помощь по командам бота:*
+
+*/list* — Показать список непросмотренных фильмов
+*/random* — Выбрать случайный непросмотренный фильм с фильтрами (год, жанр, режиссёр)
+*/total* — Статистика: фильмы, жанры, режиссёры, актёры, оценки
+*/rate* — Оценить просмотренные фильмы
+*/plan* — Запланировать просмотр фильма (дома/в кино)
+*/schedule* — Показать список запланированных просмотров
+*/settings* — Настроить эмодзи для отметки просмотренных фильмов
+*/clean* — Удалить оценку, просмотр, план или обнулить базу
+*/help* — Эта справка
+
+*Как использовать:*
+1. Отправьте ссылку на фильм с Кинопоиска — бот автоматически добавит его
+2. Поставьте реакцию ✅ (или настроенное эмодзи) на сообщение со ссылкой — фильм будет отмечен как просмотренный
+3. После отметки напишите оценку от 1 до 10
+
+*Приятного просмотра!* 🍿"""
+    
+    bot.reply_to(message, text, parse_mode='Markdown')
+
+# /clean
+@bot.message_handler(commands=['clean'])
+def clean_command(message):
+    logger.info(f"[HANDLER] /clean вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/clean', message.chat.id)
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("🎬 Удалить фильм", callback_data="clean:movie"))
+    markup.add(InlineKeyboardButton("🗑️ Удалить оценку", callback_data="clean:rating"))
+    markup.add(InlineKeyboardButton("👁️ Удалить просмотр", callback_data="clean:watched"))
+    markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="clean:plan"))
+    markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
+    markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
+    
+    help_text = (
+        "🧹 <b>Что вы хотите удалить?</b>\n\n"
+        "<b>🎬 Удалить фильм</b> — удаляет фильм из базы вместе со всеми связанными данными:\n"
+        "• Фильм\n"
+        "• Все оценки этого фильма\n"
+        "• Все планы этого фильма\n\n"
+        "<b>💥 Обнулить базу чата</b> — удаляет <b>ВСЕ данные чата</b>:\n"
+        "• Все фильмы\n"
+        "• Все оценки всех пользователей\n"
+        "• Все планы всех пользователей\n"
+        "• Все настройки\n\n"
+        "<b>👤 Обнулить базу пользователя</b> — удаляет <b>только ваши данные</b>:\n"
+        "• Ваши оценки\n"
+        "• Ваши планы\n"
+        "• Ваша статистика\n\n"
+        "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
+        "Выберите действие:"
+    )
+    bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("clean:"))
+def clean_action_choice(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    action = call.data.split(":")[1]
+    
+    user_clean_state[user_id] = {'action': action}
+    
+    if action == 'movie':
+        # Показываем список всех фильмов для удаления
+        with db_lock:
+            cursor.execute('''
+                SELECT id, title, year, kp_id
+                FROM movies
+                WHERE chat_id = %s
+                ORDER BY title
+                LIMIT 50
+            ''', (chat_id,))
+            movies = cursor.fetchall()
+        
+        if not movies:
+            bot.edit_message_text("Нет фильмов для удаления.", call.message.chat.id, call.message.message_id)
+            return
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for row in movies:
+            film_id = row.get('id') if isinstance(row, dict) else row[0]
+            title = row.get('title') if isinstance(row, dict) else row[1]
+            year = row.get('year') if isinstance(row, dict) else row[2]
+            kp_id = row.get('kp_id') if isinstance(row, dict) else row[3]
+            year_str = f" ({year})" if year else ""
+            button_text = f"{title}{year_str} [ID: {kp_id}]"
+            # Ограничиваем длину текста кнопки
+            if len(button_text) > 60:
+                button_text = button_text[:57] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_movie:{film_id}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
+        
+        bot.edit_message_text("🎬 <b>Выберите фильм для удаления:</b>\n\n<i>Внимание: будут удалены все оценки и планы этого фильма!</i>", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
+    elif action == 'rating':
+        # Показываем список фильмов с оценками
+        with db_lock:
+            cursor.execute('''
+                SELECT DISTINCT m.id, m.title, m.year
+                FROM movies m
+                JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                WHERE m.chat_id = %s
+                ORDER BY m.title
+                LIMIT 20
+            ''', (chat_id,))
+            movies = cursor.fetchall()
+        
+        if not movies:
+            bot.edit_message_text("Нет фильмов с оценками для удаления.", call.message.chat.id, call.message.message_id)
+            return
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for film_id, title, year in movies:
+            markup.add(InlineKeyboardButton(f"{title} ({year or '—'})", callback_data=f"clean_rating:{film_id}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
+        
+        bot.edit_message_text("🗑️ <b>Выберите фильм для удаления оценки:</b>", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
+    elif action == 'watched':
+        # Показываем список просмотренных фильмов
+        with db_lock:
+            cursor.execute('''
+                SELECT id, title, year
+                FROM movies
+                WHERE chat_id = %s AND watched = 1
+                ORDER BY title
+                LIMIT 20
+            ''', (chat_id,))
+            movies = cursor.fetchall()
+        
+        if not movies:
+            bot.edit_message_text("Нет просмотренных фильмов для удаления отметки.", call.message.chat.id, call.message.message_id)
+            return
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for film_id, title, year in movies:
+            markup.add(InlineKeyboardButton(f"{title} ({year or '—'})", callback_data=f"clean_watched:{film_id}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
+        
+        bot.edit_message_text("👁️ <b>Выберите фильм для удаления отметки просмотра:</b>", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
+    elif action == 'plan':
+        # Показываем список планов
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, m.title, p.plan_type, p.plan_datetime
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s
+                ORDER BY p.plan_datetime
+                LIMIT 20
+            ''', (chat_id,))
+            plans = cursor.fetchall()
+        
+        if not plans:
+            bot.edit_message_text("Нет запланированных фильмов для удаления.", call.message.chat.id, call.message.message_id)
+            return
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for plan_id, title, plan_type, plan_dt in plans:
+            try:
+                dt = datetime.fromisoformat(plan_dt.replace('Z', '+00:00')).astimezone(plans_tz)
+                date_str = dt.strftime('%d.%m.%Y %H:%M')
+                type_text = "🎦 кино" if plan_type == 'cinema' else "🏠 дома"
+                markup.add(InlineKeyboardButton(f"{title} — {date_str} ({type_text})", callback_data=f"clean_plan:{plan_id}"))
+            except:
+                markup.add(InlineKeyboardButton(f"{title} ({plan_type})", callback_data=f"clean_plan:{plan_id}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
+        
+        bot.edit_message_text("📅 <b>Выберите план для удаления:</b>", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
+    elif action == 'chat_db':
+        # Обнуление базы чата - требует голосования в группах
+        if call.message.chat.type in ['group', 'supergroup']:
+            try:
+                members_count = bot.get_chat_members_count(chat_id)
+                # Получаем список активных участников из stats (за последние 30 дней)
+                with db_lock:
+                    thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+                    cursor.execute('''
+                        SELECT DISTINCT user_id
+                        FROM stats
+                        WHERE chat_id = %s AND timestamp > %s
+                    ''', (chat_id, thirty_days_ago))
+                    active_members = set(row[0] for row in cursor.fetchall())
+                
+                if not active_members:
+                    bot.edit_message_text("⚠️ Не найдено активных участников чата за последние 30 дней.", call.message.chat.id, call.message.message_id)
+                    return
+                
+                msg = bot.send_message(chat_id, 
+                    f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено полное обнуление базы данных чата.\n\n"
+                    f"Активных участников: {len(active_members)}\n"
+                    f"Для подтверждения все активные участники должны поставить 👍 (лайк) на это сообщение.\n\n"
+                    f"Если не все проголосуют, база не будет удалена.",
+                    parse_mode='HTML')
+                
+                clean_votes[msg.message_id] = {
+                    'chat_id': chat_id,
+                    'members_count': len(active_members),
+                    'voted': set(),
+                    'active_members': active_members
+                }
+                
+                bot.edit_message_text("✅ Запрос на обнуление базы отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
+            except Exception as e:
+                logger.error(f"Ошибка при инициировании голосования: {e}", exc_info=True)
+                bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
+        else:
+            # В личном чате можно сразу удалить
+            bot.edit_message_text(
+                "⚠️ <b>Обнуление базы данных чата</b>\n\n"
+                "Это удалит <b>ВСЕ данные чата</b>:\n"
+                "• Все фильмы\n"
+                "• Все оценки\n"
+                "• Все планы\n"
+                "• Все настройки\n\n"
+                "Это действие необратимо!\n\n"
+                "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+                call.message.chat.id, call.message.message_id, parse_mode='HTML'
+            )
+            user_clean_state[user_id]['confirm_needed'] = True
+            user_clean_state[user_id]['target'] = 'chat'
+    
+    elif action == 'user_db':
+        # Обнуление базы пользователя - удаляет только данные конкретного пользователя
+        bot.edit_message_text(
+            "⚠️ <b>Обнуление базы данных пользователя</b>\n\n"
+            "Это удалит <b>только ваши данные</b>:\n"
+            "• Все ваши оценки\n"
+            "• Все ваши планы\n"
+            "• Вашу статистику\n\n"
+            "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
+            "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+            call.message.chat.id, call.message.message_id, parse_mode='HTML'
+        )
+        user_clean_state[user_id]['confirm_needed'] = True
+        user_clean_state[user_id]['target'] = 'user'
+    
+    elif action == 'cancel':
+        bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
+        if user_id in user_clean_state:
+            del user_clean_state[user_id]
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("clean_movie:"))
+def clean_movie_execute(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    film_id = int(call.data.split(":")[1])
+    
+    try:
+        with db_lock:
+            # Получаем информацию о фильме
+            cursor.execute('SELECT title, kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            row = cursor.fetchone()
+            if not row:
+                bot.edit_message_text("Фильм не найден.", call.message.chat.id, call.message.message_id)
+                return
+            
+            title = row.get('title') if isinstance(row, dict) else row[0]
+            kp_id = row.get('kp_id') if isinstance(row, dict) else row[1]
+            
+            # Удаляем все связанные данные
+            # 1. Удаляем оценки
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            ratings_deleted = cursor.rowcount
+            
+            # 2. Удаляем планы
+            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            plans_deleted = cursor.rowcount
+            
+            # 3. Удаляем статистику по жанрам, режиссерам и актерам
+            cursor.execute('DELETE FROM genre_ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            cursor.execute('DELETE FROM director_ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            cursor.execute('DELETE FROM actor_ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            
+            # 4. Удаляем сам фильм
+            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            conn.commit()
+            
+            result_text = f"✅ Фильм <b>{title}</b> удалён из базы.\n\n"
+            if ratings_deleted > 0:
+                result_text += f"• Удалено оценок: {ratings_deleted}\n"
+            if plans_deleted > 0:
+                result_text += f"• Удалено планов: {plans_deleted}\n"
+            
+            bot.edit_message_text(result_text, call.message.chat.id, call.message.message_id, parse_mode='HTML')
+            logger.info(f"Фильм {title} (ID: {film_id}, kp_id: {kp_id}) удалён из чата {chat_id} пользователем {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка при удалении фильма: {e}", exc_info=True)
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
+        bot.edit_message_text("❌ Произошла ошибка при удалении фильма. Попробуйте позже.", call.message.chat.id, call.message.message_id)
+    
+        if user_id in user_clean_state:
+            del user_clean_state[user_id]
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("clean_rating:"))
+def clean_rating_execute(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    film_id = int(call.data.split(":")[1])
+    
+    with db_lock:
+        cursor.execute('SELECT title FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        row = cursor.fetchone()
+        if row:
+            title = row[0]
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            conn.commit()
+            bot.edit_message_text(f"✅ Оценки для фильма <b>{title}</b> удалены.", call.message.chat.id, call.message.message_id, parse_mode='HTML')
+        else:
+            bot.edit_message_text("Фильм не найден.", call.message.chat.id, call.message.message_id)
+    
+    if user_id in user_clean_state:
+        del user_clean_state[user_id]
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("clean_watched:"))
+def clean_watched_execute(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    film_id = int(call.data.split(":")[1])
+    
+    with db_lock:
+        cursor.execute('SELECT title FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        row = cursor.fetchone()
+        if row:
+            title = row.get('title') if isinstance(row, dict) else row[0]
+            cursor.execute('UPDATE movies SET watched = 0 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            conn.commit()
+            bot.edit_message_text(f"✅ Отметка просмотра для фильма <b>{title}</b> удалена.", call.message.chat.id, call.message.message_id, parse_mode='HTML')
+        else:
+            bot.edit_message_text("Фильм не найден.", call.message.chat.id, call.message.message_id)
+    
+    if user_id in user_clean_state:
+        del user_clean_state[user_id]
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("clean_plan:"))
+def clean_plan_execute(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    with db_lock:
+        cursor.execute('''
+            SELECT m.title
+            FROM plans p
+            JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+            WHERE p.id = %s AND p.chat_id = %s
+        ''', (plan_id, chat_id))
+        row = cursor.fetchone()
+        if row:
+            title = row.get('title') if isinstance(row, dict) else row[0]
+            cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+            conn.commit()
+            bot.edit_message_text(f"✅ План для фильма <b>{title}</b> удалён.", call.message.chat.id, call.message.message_id, parse_mode='HTML')
+        else:
+            bot.edit_message_text("План не найден.", call.message.chat.id, call.message.message_id)
+    
+    if user_id in user_clean_state:
+        del user_clean_state[user_id]
+
+# Обработка подтверждения удаления базы
+@bot.message_handler(func=lambda m: m.text and m.text.upper().strip() == 'ДА, УДАЛИТЬ' and m.from_user.id in user_clean_state)
+def clean_confirm_execute(message):
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    state = user_clean_state.get(user_id, {})
+    action = state.get('action')
+    confirm_needed = state.get('confirm_needed', False)
+    
+    # Проверяем, что подтверждение действительно требуется
+    if not confirm_needed:
+        logger.warning(f"Попытка подтверждения без установленного confirm_needed для пользователя {user_id}")
+        return
+    
+    try:
+    if action == 'chat_db':
+        # Удаляем все данные чата
+        with db_lock:
+                try:
+            cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
+            cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
+            cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
+            cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
+            cursor.execute('DELETE FROM cinema_votes WHERE chat_id = %s', (chat_id,))
+            conn.commit()
+                    bot.reply_to(message, "✅ База данных чата полностью обнулена.\n\nВсе фильмы, оценки, планы и настройки удалены.")
+        logger.info(f"База данных чата {chat_id} обнулена пользователем {user_id}")
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"Ошибка при удалении данных чата: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Произошла ошибка при удалении данных. Попробуйте позже.")
+                    raise
+    
+    elif action == 'user_db':
+        # Удаляем все данные пользователя
+        with db_lock:
+                try:
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            conn.commit()
+                    bot.reply_to(message, "✅ Все ваши данные удалены из базы.\n\nВаши оценки, планы и статистика удалены. Фильмы и данные других пользователей остались без изменений.")
+        logger.info(f"Данные пользователя {user_id} удалены из чата {chat_id}")
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"Ошибка при удалении данных пользователя: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Произошла ошибка при удалении данных. Попробуйте позже.")
+                    raise
+    except Exception as e:
+        logger.error(f"Критическая ошибка в clean_confirm_execute: {e}", exc_info=True)
+    
+    if user_id in user_clean_state:
+        del user_clean_state[user_id]
+
+
+# Обработка новых ссылок (должен быть последним, чтобы не перехватывать команды)
+@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities)
+def handle_message(message):
+    logger.info(f"[HANDLER] handle_message вызван для сообщения от {message.from_user.id}")
+    
+    # Пропускаем сообщения, которые являются реплаями на settings (обрабатываются add_reactions)
+    if message.reply_to_message and message.from_user.id in user_settings_state:
+        state = user_settings_state.get(message.from_user.id, {})
+        if state.get('settings_msg_id') and message.reply_to_message.message_id == state.get('settings_msg_id'):
+            logger.info(f"[HANDLER] Пропускаем сообщение - это реплай на settings для пользователя {message.from_user.id}, message_id={message.reply_to_message.message_id}")
+            return
+    
+    # Проверяем, что в entities есть ссылки (url), иначе пропускаем
+    if not message.entities:
+        return
+    
+    has_url = False
+    for entity in message.entities:
+        if entity.type == 'url':
+            has_url = True
+            break
+    
+    if not has_url:
+        # Если нет ссылок, но есть реплай на settings, пропускаем
+        if message.reply_to_message and message.from_user.id in user_settings_state:
+            state = user_settings_state.get(message.from_user.id, {})
+            if state.get('settings_msg_id') and message.reply_to_message.message_id == state.get('settings_msg_id'):
+                logger.info(f"[HANDLER] Пропускаем сообщение без ссылок - это реплай на settings для пользователя {message.from_user.id}")
+                return
+        return
+    added_count = 0
+    links = []
+    for entity in message.entities:
+        if entity.type == 'url':
+            link = message.text[entity.offset:entity.offset + entity.length]
+            if 'kinopoisk.ru' in link and ('/film/' in link or '/series/' in link):
+                links.append(link)
+    
+    if links:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, 'add_movie', message.chat.id)
+        logger.info(f"Найдено ссылок на Кинопоиск: {len(links)}")
+    
+    for link in links:
+        if add_and_announce(link, message.chat.id):
+            added_count += 1
+    
+    if added_count > 1:
+        bot.send_message(message.chat.id, f"🎉 Добавлено {added_count} новых фильма в базу!")
+
+logger.info("=" * 50)
+logger.info("Финальная версия бота запущена! Всё готово 🎉")
+logger.info(f"Токен: {TOKEN[:10] if TOKEN else 'не установлен'}...")
+logger.info("=" * 50)
+
+# Flask app для webhook
+app = Flask(__name__)
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    else:
+        abort(403)
+
+# Определяем, где запускается бот: на Render или локально
+# Проверяем несколько признаков Render окружения
+RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
+RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
+RENDER = os.getenv('RENDER')
+PORT = os.getenv('PORT')  # На Render всегда есть PORT
+
+# Дополнительная проверка: путь выполнения (Render использует /opt/render/)
+IS_RENDER_PATH = '/opt/render' in sys.executable or '/opt/render' in str(sys.path)
+
+# Явная переменная для отключения polling (можно установить в Render env vars)
+USE_POLLING = os.getenv('USE_POLLING', '').lower() in ('true', '1', 'yes')
+
+# ВАЖНО: Если есть PORT или путь Render, это точно Render
+# Polling НИКОГДА не должен запускаться на Render, если не установлена явно USE_POLLING=True
+IS_RENDER = bool(PORT or RENDER_EXTERNAL_URL or RENDER_SERVICE_ID or RENDER or IS_RENDER_PATH)
+
+# Если это Render, принудительно отключаем polling (если не установлена явно USE_POLLING)
+if IS_RENDER and not USE_POLLING:
+    IS_RENDER = True  # Гарантируем, что это Render
+    logger.info(f"Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}")
+else:
+    logger.info(f"Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
+
+if IS_RENDER:
+    # На Render - используем ТОЛЬКО webhook, НИКОГДА не polling!
+    logger.info("=" * 50)
+    logger.info("ОБНАРУЖЕНО ОКРУЖЕНИЕ RENDER - ИСПОЛЬЗУЕТСЯ WEBHOOK РЕЖИМ")
+    logger.info("POLLING НЕ БУДЕТ ЗАПУЩЕН!")
+    logger.info("=" * 50)
+    
+    # Очищаем старые webhook с обработкой ошибок
+    try:
+    bot.remove_webhook()
+        logger.info("Старые webhook очищены")
+    except Exception as e:
+        logger.warning(f"Не удалось очистить webhook: {e}")
+    
+    if RENDER_EXTERNAL_URL:
+        webhook_url = RENDER_EXTERNAL_URL + '/webhook'
+        try:
+            bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook установлен: {webhook_url}")
+        except Exception as e:
+            logger.error(f"Не удалось установить webhook: {e}")
+    else:
+        logger.warning("RENDER_EXTERNAL_URL не установлен! Webhook не будет установлен.")
+        logger.warning("Убедитесь, что переменная RENDER_EXTERNAL_URL установлена в настройках Render.")
+    
+    # Запускаем Flask сервер только если запускается напрямую
+    # Если запускается через gunicorn/uvicorn, они сами запустят app
+    if __name__ == '__main__':
+        logger.info(f"Запуск Flask сервера на порту {PORT or 10000}")
+        app.run(host='0.0.0.0', port=int(PORT or 10000))
+    else:
+        logger.info("Приложение запущено через WSGI сервер (gunicorn/uvicorn)")
+else:
+    # Локальный запуск - используем polling (только если IS_RENDER=False)
+    if IS_RENDER:
+        # Дополнительная защита: если по какой-то причине IS_RENDER=True, но мы в блоке else
+        logger.error("ОШИБКА: IS_RENDER=True, но код попал в блок else! Polling НЕ будет запущен!")
+    elif __name__ == '__main__':
+        logger.info("Локальное окружение - будет использован polling")
+        try:
+            bot.remove_webhook()
+            logger.info("Старые webhook очищены")
+        except Exception as e:
+            logger.warning(f"Не удалось очистить webhook: {e}")
+        logger.info("Локальный запуск: используется polling")
+        bot.infinity_polling()
+    else:
+        logger.warning("Код выполняется не как main, но IS_RENDER=False. Polling не будет запущен автоматически.")
+>>>>>>> 96473a2 (Исправлен рандомайзер: добавлен kp_id в запрос и сохранение данных, исправлена обработка RealDictCursor, добавлено логирование)
