@@ -227,47 +227,63 @@ except Exception as e:
 # Ключевой блок: очистка дубликатов и создание уникального индекса
 try:
     # Удаляем старые индексы и constraints, если они существуют
-    cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_key')
-    cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_idx')
-    cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_unique')
+    try:
+        cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_key')
+        cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_idx')
+        cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_unique')
+    except Exception as idx_error:
+        logger.debug(f"Ошибка при удалении индексов (может не существовать): {idx_error}")
+        conn.rollback()
+    
     try:
         cursor.execute('ALTER TABLE movies DROP CONSTRAINT IF EXISTS movies_chat_id_kp_id_unique')
-    except:
-        pass  # Constraint может не существовать
+    except Exception as const_error:
+        logger.debug(f"Ошибка при удалении constraint (может не существовать): {const_error}")
+        conn.rollback()  # КРИТИЧНО: откатываем транзакцию после ошибки
     
     # Удаляем дубликаты, оставляя только одну запись (с наименьшим id)
-    cursor.execute("""
-        DELETE FROM movies a USING (
-            SELECT MIN(id) as keep_id, chat_id, kp_id
-            FROM movies 
-            GROUP BY chat_id, kp_id 
-            HAVING COUNT(*) > 1
-        ) b
-        WHERE a.chat_id = b.chat_id AND a.kp_id = b.kp_id AND a.id != b.keep_id
-    """)
-    deleted_count = cursor.rowcount
-    if deleted_count > 0:
-        logger.info(f"Удалено дубликатов фильмов: {deleted_count}")
+    try:
+        cursor.execute("""
+            DELETE FROM movies a USING (
+                SELECT MIN(id) as keep_id, chat_id, kp_id
+                FROM movies 
+                GROUP BY chat_id, kp_id 
+                HAVING COUNT(*) > 1
+            ) b
+            WHERE a.chat_id = b.chat_id AND a.kp_id = b.kp_id AND a.id != b.keep_id
+        """)
+        deleted_count = cursor.rowcount
+        if deleted_count > 0:
+            logger.info(f"Удалено дубликатов фильмов: {deleted_count}")
         conn.commit()
+    except Exception as del_error:
+        logger.warning(f"Ошибка при удалении дубликатов: {del_error}")
+        conn.rollback()
+        raise del_error
     
     # Теперь безопасно создаём уникальный индекс
-    # Используем обычный CREATE UNIQUE INDEX (CONCURRENTLY не работает в транзакции)
-    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS movies_chat_id_kp_id_unique ON movies (chat_id, kp_id)')
-    logger.info("Уникальный индекс на movies(chat_id, kp_id) успешно создан")
-    conn.commit()
+    try:
+        # Используем обычный CREATE UNIQUE INDEX (CONCURRENTLY не работает в транзакции)
+        cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS movies_chat_id_kp_id_unique ON movies (chat_id, kp_id)')
+        logger.info("Уникальный индекс на movies(chat_id, kp_id) успешно создан")
+        conn.commit()
+    except Exception as idx_create_error:
+        logger.warning(f"Ошибка при создании уникального индекса: {idx_create_error}")
+        conn.rollback()
+        # Пробуем создать constraint как fallback
+        try:
+            cursor.execute('ALTER TABLE movies ADD CONSTRAINT movies_chat_id_kp_id_unique UNIQUE (chat_id, kp_id)')
+            conn.commit()
+            logger.info("Уникальный constraint movies(chat_id, kp_id) создан как fallback")
+        except Exception as e2:
+            logger.debug(f"Constraint уже существует или ошибка: {e2}")
+            conn.rollback()
 except Exception as e:
-    logger.warning(f"Ошибка при очистке дубликатов или создании уникального индекса: {e}", exc_info=True)
+    logger.warning(f"Критическая ошибка при очистке дубликатов или создании уникального индекса: {e}", exc_info=True)
     try:
         conn.rollback()
     except:
         pass
-    # Пробуем создать constraint как fallback
-    try:
-        cursor.execute('ALTER TABLE movies ADD CONSTRAINT movies_chat_id_kp_id_unique UNIQUE (chat_id, kp_id)')
-        conn.commit()
-        logger.info("Уникальный constraint movies(chat_id, kp_id) создан как fallback")
-    except Exception as e2:
-        logger.debug(f"Constraint уже существует или ошибка: {e2}")
 
 # Индексы для скорости
 cursor.execute('CREATE INDEX IF NOT EXISTS idx_movies_chat_id ON movies (chat_id)')
