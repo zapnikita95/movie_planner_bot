@@ -5545,6 +5545,119 @@ def _random_final(call, chat_id, user_id):
         except:
             pass
 
+# Callback handlers для /search
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
+def handle_add_film_callback(call):
+    """Обработчик добавления фильма из результатов поиска"""
+    try:
+        kp_id = call.data.split("_")[-1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[SEARCH] Добавление фильма kp_id={kp_id} от пользователя {user_id}")
+        
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # Проверяем, добавлен ли уже
+        with db_lock:
+            cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            existing = cursor.fetchone()
+            if existing:
+                title = existing.get('title') if isinstance(existing, dict) else existing[1]
+                bot.answer_callback_query(call.id, f"Фильм '{title}' уже добавлен!", show_alert=False)
+                return
+        
+        # Добавляем фильм
+        if add_and_announce(link, chat_id):
+            bot.answer_callback_query(call.id, "✅ Фильм добавлен!", show_alert=False)
+        else:
+            bot.answer_callback_query(call.id, "❌ Ошибка добавления фильма", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SEARCH] Ошибка в handle_add_film_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("search_"))
+def handle_search_pagination_callback(call):
+    """Обработчик пагинации результатов поиска"""
+    try:
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Парсим callback_data: search_<query>_<page>
+        parts = call.data.split("_", 2)  # Разделяем максимум на 3 части
+        if len(parts) < 3:
+            bot.answer_callback_query(call.id, "Ошибка формата")
+            return
+        
+        query_encoded = parts[1]
+        try:
+            page = int(parts[2])
+        except ValueError:
+            bot.answer_callback_query(call.id, "Ошибка номера страницы")
+            return
+        
+        # Декодируем запрос (заменяем подчеркивания обратно на пробелы)
+        query = query_encoded.replace('_', ' ')
+        
+        logger.info(f"[SEARCH] Пагинация: запрос='{query}', страница={page}, пользователь={user_id}")
+        
+        films, total_pages = search_films(query, page)
+        if not films:
+            bot.answer_callback_query(call.id, "Нет результатов на этой странице")
+            return
+        
+        # Формируем сообщение с новыми результатами
+        results_text = f"🔍 Результаты поиска '{query}':\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for film in films[:10]:  # Показываем максимум 10 результатов на странице
+            title = film.get('nameRu') or film.get('nameEn') or "Без названия"
+            year = film.get('year', 'N/A')
+            rating = film.get('ratingKinopoisk') or 'N/A'
+            kp_id = film.get('kinopoiskId')
+            
+            if kp_id:
+                # Ограничиваем длину текста кнопки
+                button_text = f"{title} ({year})"
+                if len(button_text) > 50:
+                    button_text = button_text[:47] + "..."
+                results_text += f"• <b>{title}</b> ({year})"
+                if rating != 'N/A':
+                    results_text += f" ⭐ {rating}"
+                results_text += "\n"
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}"))
+        
+        # Пагинация
+        if total_pages > 1:
+            pagination_row = []
+            if page > 1:
+                pagination_row.append(InlineKeyboardButton("◀️ Назад", callback_data=f"search_{query_encoded}_{page-1}"))
+            pagination_row.append(InlineKeyboardButton(f"Страница {page}/{total_pages}", callback_data="noop"))
+            if page < total_pages:
+                pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_{page+1}"))
+            markup.row(*pagination_row)
+        
+        try:
+            bot.edit_message_text(results_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.answer_callback_query(call.id)
+        except Exception as e:
+            logger.error(f"[SEARCH] Ошибка при редактировании сообщения: {e}")
+            bot.answer_callback_query(call.id, "Ошибка обновления")
+    except Exception as e:
+        logger.error(f"[SEARCH] Ошибка в handle_search_pagination_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data == "noop")
+def handle_noop_callback(call):
+    """Обработчик для плейсхолдера (кнопка с информацией о странице)"""
+    bot.answer_callback_query(call.id)
+
 logger.info("[DEBUG] Перед созданием Flask app")
 logger.info(f"[DEBUG] sys.argv={sys.argv}, sys.executable={sys.executable}")
 
