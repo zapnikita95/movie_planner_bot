@@ -1451,11 +1451,17 @@ def random_genre(call):
                     bot.answer_callback_query(call.id, "Ошибка при переходе к выбору жанра", show_alert=True)
                 except:
                     pass
+        except Exception as e:
+            logger.error(f"[RANDOM] Критическая ошибка в random_genre: {e}", exc_info=True)
+            try:
+                bot.edit_message_text("Произошла ошибка при обработке выбора периода.", call.message.chat.id, call.message.message_id)
+                bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+            except:
+                pass
     except Exception as e:
-        logger.error(f"[RANDOM] Критическая ошибка в random_genre: {e}", exc_info=True)
+        logger.error(f"[RANDOM] Критическая ошибка в random_genre (внешний блок): {e}", exc_info=True)
         try:
-            bot.edit_message_text("Произошла ошибка при обработке выбора периода.", call.message.chat.id, call.message.message_id)
-            bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+            bot.answer_callback_query(call.id, "Произошла ошибка при обработке выбора периода", show_alert=True)
         except:
             pass
 
