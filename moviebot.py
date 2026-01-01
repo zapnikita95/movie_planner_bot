@@ -1362,7 +1362,12 @@ def handle_reaction(reaction):
         logger.error(f"[REACTION] Ошибка при планировании напоминания: {e}", exc_info=True)
 
 # Обработчик для сохранения сообщений пользователей с ссылками на фильмы
-@bot.message_handler(func=lambda m: m.text and ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text))
+@bot.message_handler(func=lambda m: (
+    m.text and 
+    ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text) and
+    not m.text.strip().startswith('/plan') and  # Не обрабатываем команду /plan
+    m.from_user.id not in user_plan_state  # Не обрабатываем, если пользователь в процессе планирования
+))
 def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
     try:
@@ -3619,7 +3624,8 @@ def plan_handler(message):
         logger.info(f"Команда /plan от пользователя {message.from_user.id}")
         user_id = message.from_user.id
         chat_id = message.chat.id
-        text = message.text.lower().replace('/plan', '').strip()
+        original_text = message.text or ''
+        text = original_text.lower().replace('/plan', '').strip()
         
         # Проверяем реплай на сообщение со ссылкой
         link = None
@@ -3628,9 +3634,9 @@ def plan_handler(message):
             if link_match:
                 link = link_match.group(1)
         
-        # Ищем ссылку в тексте команды
+        # Ищем ссылку в тексте команды (используем оригинальный текст для правильного извлечения)
         if not link:
-            link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', text)
+            link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', original_text)
             link = link_match.group(1) if link_match else None
         
         # Ищем ID кинопоиска (например, "/plan 484791 дома в воскресенье")
@@ -3652,6 +3658,7 @@ def plan_handler(message):
                         logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
         
         plan_type = 'home' if 'дома' in text else 'cinema' if 'кино' in text else None
+        logger.info(f"[PLAN] plan_type={plan_type}, text={text}")
         
         day_or_date = None
         if plan_type == 'home':
@@ -3669,10 +3676,12 @@ def plan_handler(message):
                     day_or_date = phrase
                     break
             if not day_or_date:
-                # Пробуем разные форматы даты: "15 января", "15.01", "15/01"
-                date_match = re.search(r'(\d+)\s*([а-яё]+)', text)
+                # Пробуем разные форматы даты: "15 января", "с 20 февраля", "15.01", "15/01"
+                # Убираем предлоги "с", "на" и т.д. перед датой
+                date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
                 if date_match:
                     day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+                    logger.info(f"[PLAN] Найдена дата: {day_or_date}")
                 else:
                     # Формат "15.01" или "15/01"
                     date_match = re.search(r'(\d{1,2})[./](\d{1,2})', text)
@@ -3683,6 +3692,9 @@ def plan_handler(message):
                             month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
                                          'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
                             day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+        
+        logger.info(f"[PLAN] link={link}, plan_type={plan_type}, day_or_date={day_or_date}")
         
         if link and plan_type and day_or_date:
             try:
