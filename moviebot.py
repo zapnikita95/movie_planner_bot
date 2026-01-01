@@ -3304,28 +3304,38 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
             # Если время уже прошло, переносим на завтра
             plan_dt = plan_dt + timedelta(days=1)
     
-    # Обработка "завтра" (только для кино)
-    elif 'завтра' in day_lower and plan_type == 'cinema':
+    # Обработка "завтра" (для обоих режимов)
+    elif 'завтра' in day_lower:
         plan_date = (now.date() + timedelta(days=1))
-        hour = 9
+        if plan_type == 'cinema':
+            hour = 9
+        else:  # home
+            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+            hour = 19 if plan_date.weekday() < 5 else 10
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
         plan_dt = user_tz.localize(plan_dt)
     
-    # Обработка "следующая неделя" (только для кино - напоминание в четверг, день премьер)
-    elif ('следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower) and plan_type == 'cinema':
-        # Находим следующий четверг (3 - это четверг)
-        current_wd = now.weekday()
-        days_until_thursday = (3 - current_wd + 7) % 7
-        if days_until_thursday == 0:
-            # Если сегодня четверг, берем следующий четверг
-            days_until_thursday = 7
-        plan_date = now.date() + timedelta(days=days_until_thursday)
-        hour = 9
+    # Обработка "следующая неделя" (для обоих режимов)
+    elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower:
+        if plan_type == 'cinema':
+            # Для кино - напоминание в четверг, день премьер
+            current_wd = now.weekday()
+            days_until_thursday = (3 - current_wd + 7) % 7
+            if days_until_thursday == 0:
+                # Если сегодня четверг, берем следующий четверг
+                days_until_thursday = 7
+            plan_date = now.date() + timedelta(days=days_until_thursday)
+            hour = 9
+        else:  # home
+            # Для дома - через неделю от сегодня
+            plan_date = now.date() + timedelta(days=7)
+            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+            hour = 19 if plan_date.weekday() < 5 else 10
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
         plan_dt = user_tz.localize(plan_dt)
     
-    # Обработка "в марте", "в апреле" и т.д. (только для кино - напоминание 1 числа месяца)
-    elif plan_type == 'cinema' and re.search(r'в\s+([а-яё]+)', day_lower):
+    # Обработка "в марте", "в апреле" и т.д. (для обоих режимов - напоминание 1 числа месяца)
+    elif re.search(r'в\s+([а-яё]+)', day_lower):
         month_match = re.search(r'в\s+([а-яё]+)', day_lower)
         if month_match:
             month_str = month_match.group(1)
@@ -3338,7 +3348,11 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     # Месяц уже прошел, берем следующий год
                     year += 1
                 plan_date = datetime(year, month, 1)
-                hour = 9
+                if plan_type == 'cinema':
+                    hour = 9
+                else:  # home
+                    # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                    hour = 19 if plan_date.weekday() < 5 else 10
                 plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
     
     # Ищем день недели в расширенном словаре (для обоих режимов)
