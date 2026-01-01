@@ -306,13 +306,13 @@ def get_watched_reactions(chat_id):
         if row:
             value = row.get('value') if isinstance(row, dict) else row[0]
             if value:
-                try:
+            try:
                     reactions = json.loads(value)
-                    emojis = [r for r in reactions if not r.startswith('custom:')]
-                    custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
-                    return {'emoji': emojis, 'custom': custom_ids}
-                except:
-                    pass
+                emojis = [r for r in reactions if not r.startswith('custom:')]
+                custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
+                return {'emoji': emojis, 'custom': custom_ids}
+            except:
+                pass
     # Дефолт
     return {'emoji': ['✅'], 'custom': []}
 
@@ -331,11 +331,11 @@ def log_request(user_id, username, command_or_action, chat_id=None):
                     # Если транзакция в состоянии ошибки, откатываем
                     conn.rollback()
                 
-                cursor.execute('''
-                    INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
-                    VALUES (%s, %s, %s, %s, %s)
-                ''', (user_id, username, command_or_action, timestamp, chat_id))
-                conn.commit()
+            cursor.execute('''
+                INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
+                VALUES (%s, %s, %s, %s, %s)
+            ''', (user_id, username, command_or_action, timestamp, chat_id))
+            conn.commit()
             except Exception as db_error:
                 # КРИТИЧНО: откатываем транзакцию при ошибке
                 conn.rollback()
@@ -672,7 +672,7 @@ def add_and_announce(link, chat_id):
     
     existing = None
     try:
-        with db_lock:
+    with db_lock:
             # Проверяем состояние транзакции перед выполнением запроса
             try:
                 cursor.execute('SELECT 1')
@@ -707,7 +707,7 @@ def add_and_announce(link, chat_id):
             avg = None
             try:
                 with db_lock:
-                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                     avg_result = cursor.fetchone()
                     avg = avg_result.get('avg') if isinstance(avg_result, dict) else (avg_result[0] if avg_result and len(avg_result) > 0 else None)
             except Exception as e:
@@ -723,7 +723,7 @@ def add_and_announce(link, chat_id):
         
         text += f"\n<a href='{link}'>Кинопоиск</a>"
         try:
-            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
             logger.info(f"Сообщение отправлено: фильм уже в базе - {existing_title}")
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения (фильм уже в базе): {e}", exc_info=True)
@@ -732,7 +732,7 @@ def add_and_announce(link, chat_id):
     # Новый фильм - добавляем
     inserted = False
     try:
-        with db_lock:
+    with db_lock:
             try:
                 # Проверяем, не в состоянии ли ошибки транзакция
                 try:
@@ -3222,8 +3222,8 @@ def clean_movie_execute(call):
             pass
         bot.edit_message_text("❌ Произошла ошибка при удалении фильма. Попробуйте позже.", call.message.chat.id, call.message.message_id)
     
-    if user_id in user_clean_state:
-        del user_clean_state[user_id]
+        if user_id in user_clean_state:
+            del user_clean_state[user_id]
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("clean_rating:"))
 def clean_rating_execute(call):
