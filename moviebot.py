@@ -3586,10 +3586,20 @@ else:
 
 if IS_PRODUCTION:
     # Определяем платформу и URL для webhook
+    # Railway может использовать RAILWAY_PUBLIC_DOMAIN или RAILWAY_PRIVATE_DOMAIN
+    RAILWAY_PRIVATE_DOMAIN = os.getenv('RAILWAY_PRIVATE_DOMAIN')
+    
+    logger.info(f"[DEBUG] Railway домены: PUBLIC={RAILWAY_PUBLIC_DOMAIN}, PRIVATE={RAILWAY_PRIVATE_DOMAIN}")
+    
     if RAILWAY_PUBLIC_DOMAIN:
-        # Railway
+        # Railway с публичным доменом
         webhook_base_url = f"https://{RAILWAY_PUBLIC_DOMAIN}"
         logger.info("=== RAILWAY MODE: WEBHOOK + FLASK SERVER ===")
+    elif RAILWAY_PRIVATE_DOMAIN:
+        # Railway с приватным доменом (можно использовать для тестирования)
+        webhook_base_url = f"https://{RAILWAY_PRIVATE_DOMAIN}"
+        logger.info("=== RAILWAY MODE (PRIVATE DOMAIN): WEBHOOK + FLASK SERVER ===")
+        logger.warning("[DEBUG] Используется приватный домен Railway. Для production лучше использовать публичный домен.")
     elif RENDER_EXTERNAL_URL:
         # Render
         webhook_base_url = RENDER_EXTERNAL_URL
@@ -3598,6 +3608,7 @@ if IS_PRODUCTION:
         # Другая облачная платформа с PORT
         webhook_base_url = None
         logger.info("=== PRODUCTION MODE: WEBHOOK + FLASK SERVER ===")
+        logger.warning("[DEBUG] Webhook URL не определён. Убедитесь, что RAILWAY_PUBLIC_DOMAIN установлен или включите публичный домен в Railway.")
     
     # Очистка и установка webhook
     try:
