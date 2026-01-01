@@ -1643,42 +1643,51 @@ def random_final(call):
         
         # Находим ближайшее воскресенье
         current_weekday = now.weekday()  # 0 = понедельник, 6 = воскресенье
-    days_until_sunday = (6 - current_weekday) % 7
-    if days_until_sunday == 0:
-        # Сегодня воскресенье, берем следующее
-        days_until_sunday = 7
-    
-    nearest_sunday = now + timedelta(days=days_until_sunday)
-    # Следующее за ближайшим воскресенье
-    next_sunday = nearest_sunday + timedelta(days=7)
-    
-    # Включаем все даты до следующего воскресенья включительно
-    end_date = next_sunday
-    current_date = now
-    
-    day_count = 0
-    while current_date <= end_date and day_count < 20:  # Ограничение на 20 дней
-        day_date = current_date.strftime('%d.%m')
-        weekday = current_date.weekday()  # 0 = понедельник, 6 = воскресенье
+        days_until_sunday = (6 - current_weekday) % 7
+        if days_until_sunday == 0:
+            # Сегодня воскресенье, берем следующее
+            days_until_sunday = 7
         
-        if day_count == 0:
-            label = f"Сегодня ({day_date})"
-        elif day_count == 1:
-            label = f"Завтра ({day_date})"
-        else:
-            day_name_ru = days_ru[weekday]
-            label = f"{day_name_ru} ({day_date})"
-        days.append((label, current_date.isoformat()))
+        nearest_sunday = now + timedelta(days=days_until_sunday)
+        # Следующее за ближайшим воскресенье
+        next_sunday = nearest_sunday + timedelta(days=7)
         
-        current_date = current_date + timedelta(days=1)
-        day_count += 1
-    
-    markup = InlineKeyboardMarkup(row_width=1)
-    for label, iso_date in days:
-        markup.add(InlineKeyboardButton(label, callback_data=f"rand_day:{iso_date}"))
-    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_day:skip"))
-    
-    bot.edit_message_text("📅 Выберите день для просмотра:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+        # Включаем все даты до следующего воскресенья включительно
+        end_date = next_sunday
+        current_date = now
+        
+        day_count = 0
+        while current_date <= end_date and day_count < 20:  # Ограничение на 20 дней
+            day_date = current_date.strftime('%d.%m')
+            weekday = current_date.weekday()  # 0 = понедельник, 6 = воскресенье
+            
+            if day_count == 0:
+                label = f"Сегодня ({day_date})"
+            elif day_count == 1:
+                label = f"Завтра ({day_date})"
+            else:
+                day_name_ru = days_ru[weekday]
+                label = f"{day_name_ru} ({day_date})"
+            days.append((label, current_date.isoformat()))
+            
+            current_date = current_date + timedelta(days=1)
+            day_count += 1
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for label, iso_date in days:
+            markup.add(InlineKeyboardButton(label, callback_data=f"rand_day:{iso_date}"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_day:skip"))
+        
+        try:
+            bot.edit_message_text("📅 Выберите день для просмотра:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+            bot.answer_callback_query(call.id)
+            logger.info(f"[RANDOM] Переход к выбору дня для user_id={user_id}")
+        except Exception as e:
+            logger.error(f"[RANDOM] Ошибка при переходе к выбору дня: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при переходе к выбору дня", show_alert=True)
+            except:
+                pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_day:"))
 def random_show_movie(call):
