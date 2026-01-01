@@ -2798,20 +2798,59 @@ def handle_settings_emojis(message):
     user_id = message.from_user.id
     state = user_settings_state.get(user_id)
     
-    if not state or message.reply_to_message.message_id != state.get('settings_msg_id'):
+    if not state:
+        return  # нет состояния
+    
+    # Проверяем, что это ответ на правильное сообщение
+    if not message.reply_to_message:
+        return
+    
+    settings_msg_id = state.get('settings_msg_id')
+    if not settings_msg_id or message.reply_to_message.message_id != settings_msg_id:
         return  # не наш реплай
     
-    logger.info(f"[SETTINGS] Получен ответ с эмодзи от {user_id}, state={state}")
+    # Проверяем, что состояние ожидает эмодзи
+    if not state.get('adding_reactions'):
+        return  # не в режиме добавления реакций
+    
+    logger.info(f"[SETTINGS] Получен ответ с эмодзи от {user_id}, state={state}, text={message.text}")
     
     # Извлекаем все эмодзи из текста
     import re
-    emojis = re.findall(r'[\U0001F300-\U0001F9FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF\U00002600-\U000027BF\U0001F900-\U0001F9FF]+', message.text or "")
+    # Более широкий паттерн для эмодзи
+    emoji_pattern = re.compile(
+        r'[\U0001F300-\U0001F9FF]'  # Различные символы и пиктограммы
+        r'|[\U0001F600-\U0001F64F]'  # Эмодзи лиц
+        r'|[\U0001F680-\U0001F6FF]'  # Транспорт и карты
+        r'|[\U00002600-\U000026FF]'  # Разные символы
+        r'|[\U00002700-\U000027BF]'  # Dingbats
+        r'|[\U0001F900-\U0001F9FF]'  # Дополнительные символы
+        r'|[\U0001FA00-\U0001FAFF]'  # Шахматы и другие
+        r'|[\U00002700-\U000027BF]'  # Дополнительные символы
+        r'|[\U0001F1E0-\U0001F1FF]'  # Флаги
+        r'|[\U0001F300-\U0001F5FF]'  # Символы и пиктограммы
+        r'|[\U0001F600-\U0001F64F]'  # Эмодзи лиц
+        r'|[\U0001F680-\U0001F6FF]'  # Транспорт и карты
+        r'|[\U0001F700-\U0001F77F]'  # Алхимические символы
+        r'|[\U0001F780-\U0001F7FF]'  # Геометрические фигуры
+        r'|[\U0001F800-\U0001F8FF]'  # Дополнительные стрелки
+        r'|[\U0001F900-\U0001F9FF]'  # Дополнительные символы
+        r'|[\U0001FA00-\U0001FA6F]'  # Шахматы
+        r'|[\U0001FA70-\U0001FAFF]'  # Символы и пиктограммы
+        r'|[\U00002600-\U000026FF]'  # Разные символы
+        r'|[\U00002700-\U000027BF]'  # Dingbats
+    )
+    
+    emojis = emoji_pattern.findall(message.text or "")
     
     if not emojis:
         bot.reply_to(message, "⚠️ Не найдено эмодзи в сообщении. Отправьте только эмодзи (можно несколько).")
+        logger.warning(f"[SETTINGS] Не найдено эмодзи в сообщении от {user_id}: {message.text}")
         return
     
-    emojis_str = ''.join(set(''.join(emojis)))  # убираем дубли
+    emojis_str = ''.join(set(emojis))  # убираем дубли
+    
+    logger.info(f"[SETTINGS] Извлечено эмодзи: {emojis_str}")
     
     # Проверяем режим (add или replace)
     action = state.get('action', 'replace')
