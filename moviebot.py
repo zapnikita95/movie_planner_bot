@@ -3114,13 +3114,23 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         # Вычисляем ближайший указанный день (вперёд)
         current_wd = now.weekday()
         delta = (target_weekday - current_wd + 7) % 7
-        if delta == 0:  # если сегодня — переносим на следующую неделю
-            delta = 7
-        plan_date = now.date() + timedelta(days=delta)
+        
+        # Если сегодня указанный день недели
+        if delta == 0:
+            # Проверяем время: если до 20:00, можно планировать на сегодня
+            if now.hour < 20:
+                # Планируем на сегодня
+                plan_date = now.date()
+            else:
+                # Уже 20:00 или позже - переносим на следующую неделю
+                delta = 7
+                plan_date = now.date() + timedelta(days=delta)
+        else:
+            plan_date = now.date() + timedelta(days=delta)
         
         if plan_type == 'home':
-            # Пятница — 19:00, остальные — 10:00
-            hour = 19 if target_weekday == 4 else 10
+            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+            hour = 19 if target_weekday < 5 else 10
         else:  # cinema
             hour = 9
         
@@ -3138,10 +3148,25 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
             if month:
                 try:
                     year = now.year
-                    candidate = user_tz.localize(datetime(year, month, day_num))
-                    if candidate < now:
+                    candidate_date = datetime(year, month, day_num).date()
+                    candidate_dt = user_tz.localize(datetime(year, month, day_num))
+                    
+                    # Проверяем, не является ли дата сегодняшней
+                    if candidate_date == now.date():
+                        # Если сегодня, проверяем время: если до 20:00, можно планировать на сегодня
+                        if now.hour < 20:
+                            plan_date = datetime(year, month, day_num)
+                        else:
+                            # Уже 20:00 или позже - переносим на следующий год (или следующий месяц, если это возможно)
+                            year += 1
+                            plan_date = datetime(year, month, day_num)
+                    elif candidate_dt < now:
+                        # Дата в прошлом - переносим на следующий год
                         year += 1
-                    plan_date = datetime(year, month, day_num)
+                        plan_date = datetime(year, month, day_num)
+                    else:
+                        plan_date = datetime(year, month, day_num)
+                    
                     if plan_type == 'cinema':
                         hour = 9
                     else:  # home
@@ -3174,11 +3199,30 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                         else:
                             # Год не указан, используем текущий или следующий
                             year = now.year
-                            candidate = user_tz.localize(datetime(year, month_num, day_num))
-                            if candidate < now:
-                                year += 1
                         
-                        plan_date = datetime(year, month_num, day_num)
+                        candidate_date = datetime(year, month_num, day_num).date()
+                        candidate_dt = user_tz.localize(datetime(year, month_num, day_num))
+                        
+                        # Проверяем, не является ли дата сегодняшней
+                        if candidate_date == now.date():
+                            # Если сегодня, проверяем время: если до 20:00, можно планировать на сегодня
+                            if now.hour < 20:
+                                plan_date = datetime(year, month_num, day_num)
+                            else:
+                                # Уже 20:00 или позже - переносим на следующий год (или следующий месяц, если это возможно)
+                                if month_num == 12:
+                                    year += 1
+                                    month_num = 1
+                                else:
+                                    month_num += 1
+                                plan_date = datetime(year, month_num, day_num)
+                        elif candidate_dt < now:
+                            # Дата в прошлом - переносим на следующий год
+                            year += 1
+                            plan_date = datetime(year, month_num, day_num)
+                        else:
+                            plan_date = datetime(year, month_num, day_num)
+                        
                         if plan_type == 'cinema':
                             hour = 9
                         else:  # home
