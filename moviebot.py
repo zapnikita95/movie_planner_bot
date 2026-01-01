@@ -1343,72 +1343,78 @@ def random_start(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_period:"))
 def random_genre(call):
-    user_id = call.from_user.id
-    period_data = call.data.split(":", 1)[1]
-    
-    logger.info(f"[RANDOM] Обработка выбора периода: user_id={user_id}, period_data={period_data}")
-    
-    if period_data == "skip":
-        # Пропустить выбор периодов
-        if user_id not in user_random_state:
-            user_random_state[user_id] = {}
-        user_random_state[user_id]['periods'] = []
-        logger.info(f"[RANDOM] Периоды пропущены для user_id={user_id}")
-    elif period_data == "done":
-        # Готово - переходим к выбору жанра
-        if user_id not in user_random_state or 'periods' not in user_random_state[user_id]:
-            user_random_state[user_id] = {'periods': []}
-        logger.info(f"[RANDOM] Периоды выбраны, переходим к жанру для user_id={user_id}, periods={user_random_state[user_id]['periods']}")
-    else:
-        # Переключение периода (toggle)
-        if user_id not in user_random_state:
-            user_random_state[user_id] = {'periods': []}
-        if 'periods' not in user_random_state[user_id]:
-            user_random_state[user_id]['periods'] = []
-        
-        periods_list = user_random_state[user_id]['periods']
-        if period_data in periods_list:
-            # Убираем период, если он уже выбран
-            periods_list.remove(period_data)
-            logger.info(f"[RANDOM] Период {period_data} убран для user_id={user_id}")
-        else:
-            # Добавляем период
-            periods_list.append(period_data)
-            logger.info(f"[RANDOM] Период {period_data} добавлен для user_id={user_id}")
-        
-        # Обновляем кнопки с отметками выбранных периодов
-        markup = InlineKeyboardMarkup(row_width=2)
-        all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
-        for i in range(0, len(all_periods), 2):
-            row = []
-            for j in range(2):
-                if i + j < len(all_periods):
-                    period = all_periods[i + j]
-                    label = period
-                    if period in periods_list:
-                        label = f"✓ {period}"
-                    row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{period}"))
-            markup.row(*row)
-        markup.add(InlineKeyboardButton("✅ Готово", callback_data="rand_period:done"))
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
-        
-        selected_text = f"Выбрано: {', '.join(periods_list)}" if periods_list else "Периоды не выбраны"
-        try:
-            bot.edit_message_text(
-                f"🎲 Выберите периоды (можно несколько). Нажмите 'Готово' для продолжения:\n\n{selected_text}",
-                call.message.chat.id, call.message.message_id, reply_markup=markup)
-            bot.answer_callback_query(call.id)  # Подтверждаем нажатие кнопки
-        except Exception as e:
-            logger.error(f"[RANDOM] Ошибка при обновлении сообщения с периодами: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "Ошибка при обновлении", show_alert=True)
-            except:
-                pass
-        return
-    
-    # Переходим к выбору жанра
-    chat_id = call.message.chat.id
     try:
+        user_id = call.from_user.id
+        try:
+            period_data = call.data.split(":", 1)[1]
+        except (IndexError, AttributeError) as e:
+            logger.error(f"[RANDOM] Ошибка парсинга period_data: {e}, call.data={call.data}", exc_info=True)
+            bot.answer_callback_query(call.id, "Ошибка при обработке выбора периода", show_alert=True)
+            return
+        
+        logger.info(f"[RANDOM] Обработка выбора периода: user_id={user_id}, period_data={period_data}")
+        
+        if period_data == "skip":
+            # Пропустить выбор периодов
+            if user_id not in user_random_state:
+                user_random_state[user_id] = {}
+            user_random_state[user_id]['periods'] = []
+            logger.info(f"[RANDOM] Периоды пропущены для user_id={user_id}")
+        elif period_data == "done":
+            # Готово - переходим к выбору жанра
+            if user_id not in user_random_state or 'periods' not in user_random_state[user_id]:
+                user_random_state[user_id] = {'periods': []}
+            logger.info(f"[RANDOM] Периоды выбраны, переходим к жанру для user_id={user_id}, periods={user_random_state[user_id]['periods']}")
+        else:
+            # Переключение периода (toggle)
+            if user_id not in user_random_state:
+                user_random_state[user_id] = {'periods': []}
+            if 'periods' not in user_random_state[user_id]:
+                user_random_state[user_id]['periods'] = []
+            
+            periods_list = user_random_state[user_id]['periods']
+            if period_data in periods_list:
+                # Убираем период, если он уже выбран
+                periods_list.remove(period_data)
+                logger.info(f"[RANDOM] Период {period_data} убран для user_id={user_id}")
+            else:
+                # Добавляем период
+                periods_list.append(period_data)
+                logger.info(f"[RANDOM] Период {period_data} добавлен для user_id={user_id}")
+            
+            # Обновляем кнопки с отметками выбранных периодов
+            markup = InlineKeyboardMarkup(row_width=2)
+            all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+            for i in range(0, len(all_periods), 2):
+                row = []
+                for j in range(2):
+                    if i + j < len(all_periods):
+                        period = all_periods[i + j]
+                        label = period
+                        if period in periods_list:
+                            label = f"✓ {period}"
+                        row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{period}"))
+                markup.row(*row)
+            markup.add(InlineKeyboardButton("✅ Готово", callback_data="rand_period:done"))
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            
+            selected_text = f"Выбрано: {', '.join(periods_list)}" if periods_list else "Периоды не выбраны"
+            try:
+                bot.edit_message_text(
+                    f"🎲 Выберите периоды (можно несколько). Нажмите 'Готово' для продолжения:\n\n{selected_text}",
+                    call.message.chat.id, call.message.message_id, reply_markup=markup)
+                bot.answer_callback_query(call.id)  # Подтверждаем нажатие кнопки
+            except Exception as e:
+                logger.error(f"[RANDOM] Ошибка при обновлении сообщения с периодами: {e}", exc_info=True)
+                try:
+                    bot.answer_callback_query(call.id, "Ошибка при обновлении", show_alert=True)
+                except:
+                    pass
+            return
+        
+        # Переходим к выбору жанра
+        chat_id = call.message.chat.id
+        try:
         with db_lock:
             cursor.execute("""
                 SELECT genres FROM movies 
@@ -1455,27 +1461,38 @@ def random_genre(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
 def random_director(call):
-    user_id = call.from_user.id
-    genre = call.data.split(":", 1)[1]
-    if genre == "skip":
-        genre = None
-    user_random_state[user_id]['genre'] = genre
+    try:
+        user_id = call.from_user.id
+        try:
+            genre = call.data.split(":", 1)[1]
+        except (IndexError, AttributeError) as e:
+            logger.error(f"[RANDOM] Ошибка парсинга genre: {e}, call.data={call.data}", exc_info=True)
+            bot.answer_callback_query(call.id, "Ошибка при обработке выбора жанра", show_alert=True)
+            return
+        
+        if genre == "skip":
+            genre = None
+        
+        if user_id not in user_random_state:
+            user_random_state[user_id] = {}
+        user_random_state[user_id]['genre'] = genre
 
-    # Топ-3 режиссёра
-    chat_id = call.message.chat.id
-    with db_lock:
-        cursor.execute("""
-            SELECT director FROM movies 
-            WHERE chat_id = %s AND watched = 0 
-            AND director IS NOT NULL AND director != "Не указан"
-            AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
-        """, (chat_id, chat_id))
-        directors = []
-        for row in cursor.fetchall():
-            director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-            if director:
-                directors.append(director)
-        top_directors = [d for d in sorted(set(directors), key=directors.count, reverse=True)[:3]]
+        # Топ-3 режиссёра
+        chat_id = call.message.chat.id
+        try:
+            with db_lock:
+                cursor.execute("""
+                    SELECT director FROM movies 
+                    WHERE chat_id = %s AND watched = 0 
+                    AND director IS NOT NULL AND director != "Не указан"
+                    AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+                """, (chat_id, chat_id))
+                directors = []
+                for row in cursor.fetchall():
+                    director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                    if director:
+                        directors.append(director)
+                top_directors = [d for d in sorted(set(directors), key=directors.count, reverse=True)[:3]]
 
     markup = InlineKeyboardMarkup(row_width=2)
     for d in top_directors:
@@ -1485,75 +1502,115 @@ def random_director(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
 def random_final(call):
-    user_id = call.from_user.id
-    director = call.data.split(":", 1)[1]
-    if director == "skip":
-        director = None
-    user_random_state[user_id]['director'] = director
+    try:
+        user_id = call.from_user.id
+        try:
+            director = call.data.split(":", 1)[1]
+        except (IndexError, AttributeError) as e:
+            logger.error(f"[RANDOM] Ошибка парсинга director: {e}, call.data={call.data}", exc_info=True)
+            bot.answer_callback_query(call.id, "Ошибка при обработке выбора режиссёра", show_alert=True)
+            return
+        
+        if director == "skip":
+            director = None
+        
+        if user_id not in user_random_state:
+            user_random_state[user_id] = {}
+        user_random_state[user_id]['director'] = director
 
-    state = user_random_state[user_id]
-    chat_id = call.message.chat.id
-    
-    with db_lock:
-        query = "SELECT id, kp_id, title, year, genres, description, director, actors, link FROM movies WHERE chat_id = %s AND watched = 0 AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())"
-        params = [chat_id, chat_id]
+        state = user_random_state[user_id]
+        chat_id = call.message.chat.id
+        
+        try:
+            with db_lock:
+                query = "SELECT id, kp_id, title, year, genres, description, director, actors, link FROM movies WHERE chat_id = %s AND watched = 0 AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())"
+                params = [chat_id, chat_id]
 
-        # Обработка множественного выбора периодов
-        if state.get('periods') and len(state['periods']) > 0:
-            period_conditions = []
-            for p in state['periods']:
-                if p == "До 1980":
-                    period_conditions.append("year < 1980")
-                elif p == "1980–1990":
-                    period_conditions.append("(year >= 1980 AND year <= 1990)")
-                elif p == "1990–2000":
-                    period_conditions.append("(year >= 1990 AND year <= 2000)")
-                elif p == "2000–2010":
-                    period_conditions.append("(year >= 2000 AND year <= 2010)")
-                elif p == "2010–2020":
-                    period_conditions.append("(year >= 2010 AND year <= 2020)")
-                elif p == "2020–сейчас":
-                    period_conditions.append("year >= 2020")
-            
-            if period_conditions:
-                query += " AND (" + " OR ".join(period_conditions) + ")"
+                # Обработка множественного выбора периодов
+                if state.get('periods') and len(state['periods']) > 0:
+                    period_conditions = []
+                    for p in state['periods']:
+                        if p == "До 1980":
+                            period_conditions.append("year < 1980")
+                        elif p == "1980–1990":
+                            period_conditions.append("(year >= 1980 AND year <= 1990)")
+                        elif p == "1990–2000":
+                            period_conditions.append("(year >= 1990 AND year <= 2000)")
+                        elif p == "2000–2010":
+                            period_conditions.append("(year >= 2000 AND year <= 2010)")
+                        elif p == "2010–2020":
+                            period_conditions.append("(year >= 2010 AND year <= 2020)")
+                        elif p == "2020–сейчас":
+                            period_conditions.append("year >= 2020")
+                    
+                    if period_conditions:
+                        query += " AND (" + " OR ".join(period_conditions) + ")"
 
-        if state.get('genre'):
-            query += " AND genres LIKE %s"
-            params.append(f"%{state['genre']}%")
+                if state.get('genre'):
+                    query += " AND genres LIKE %s"
+                    params.append(f"%{state['genre']}%")
 
-        if state.get('director'):
-            query += " AND director = %s"
-            params.append(state['director'])
+                if state.get('director'):
+                    query += " AND director = %s"
+                    params.append(state['director'])
 
-        cursor.execute(query, params)
-        candidates = cursor.fetchall()
-    
-    if not candidates:
-        bot.edit_message_text("😔 Нет подходящих непросмотренных фильмов по вашим фильтрам.", call.message.chat.id, call.message.message_id)
-        del user_random_state[user_id]
-        return
+                cursor.execute(query, params)
+                candidates = cursor.fetchall()
+        except Exception as db_error:
+            logger.error(f"[RANDOM] Ошибка БД при поиске фильмов: {db_error}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при поиске фильмов", show_alert=True)
+            except:
+                pass
+            return
+        
+        if not candidates:
+            try:
+                bot.edit_message_text("😔 Нет подходящих непросмотренных фильмов по вашим фильтрам.", call.message.chat.id, call.message.message_id)
+                bot.answer_callback_query(call.id, "Нет подходящих фильмов", show_alert=True)
+            except:
+                pass
+            if user_id in user_random_state:
+                del user_random_state[user_id]
+            return
 
-    # Выбираем случайный фильм и сохраняем его данные в state
-    movie = random.choice(candidates)
-    # RealDictCursor возвращает словари, но поддерживает доступ по индексу
-    user_random_state[user_id]['movie'] = {
-        'id': movie.get('id') if isinstance(movie, dict) else movie[0],
-        'kp_id': movie.get('kp_id') if isinstance(movie, dict) else movie[1],
-        'title': movie.get('title') if isinstance(movie, dict) else movie[2],
-        'year': movie.get('year') if isinstance(movie, dict) else movie[3],
-        'genres': movie.get('genres') if isinstance(movie, dict) else movie[4],
-        'description': movie.get('description') if isinstance(movie, dict) else movie[5],
-        'director': movie.get('director') if isinstance(movie, dict) else movie[6],
-        'actors': movie.get('actors') if isinstance(movie, dict) else movie[7],
-        'link': movie.get('link') if isinstance(movie, dict) else movie[8]
-    }
-    
-    # Показываем выбор дня
-    now = datetime.now(plans_tz)
-    days = []
-    # Русские названия дней недели
-    days_ru = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
+        # Выбираем случайный фильм и сохраняем его данные в state
+        try:
+            movie = random.choice(candidates)
+        except (IndexError, ValueError) as e:
+            logger.error(f"[RANDOM] Ошибка при выборе случайного фильма: {e}, candidates={len(candidates) if candidates else 0}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при выборе фильма", show_alert=True)
+            except:
+                pass
+            return
+        
+        # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+        try:
+            user_random_state[user_id]['movie'] = {
+                'id': movie.get('id') if isinstance(movie, dict) else movie[0],
+                'kp_id': movie.get('kp_id') if isinstance(movie, dict) else movie[1],
+                'title': movie.get('title') if isinstance(movie, dict) else movie[2],
+                'year': movie.get('year') if isinstance(movie, dict) else movie[3],
+                'genres': movie.get('genres') if isinstance(movie, dict) else movie[4],
+                'description': movie.get('description') if isinstance(movie, dict) else movie[5],
+                'director': movie.get('director') if isinstance(movie, dict) else movie[6],
+                'actors': movie.get('actors') if isinstance(movie, dict) else movie[7],
+                'link': movie.get('link') if isinstance(movie, dict) else movie[8]
+            }
+        except (IndexError, KeyError, AttributeError) as e:
+            logger.error(f"[RANDOM] Ошибка при извлечении данных фильма: {e}, movie={movie}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при обработке данных фильма", show_alert=True)
+            except:
+                pass
+            return
+        
+        # Показываем выбор дня
+        now = datetime.now(plans_tz)
+        days = []
+        # Русские названия дней недели
+        days_ru = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота', 'Воскресенье']
     
     # Находим ближайшее воскресенье
     current_weekday = now.weekday()  # 0 = понедельник, 6 = воскресенье
@@ -1607,37 +1664,46 @@ def random_show_movie(call):
     
     movie = user_random_state[user_id]['movie']
     
-    # Формируем текст с днем
-    if day_data == "skip":
-        day_text = "на вечер"
-        plan_dt = None
-    else:
-        try:
-            day_dt = datetime.fromisoformat(day_data.replace('Z', '+00:00')).astimezone(plans_tz)
-            day_text = day_dt.strftime('%d.%m.%Y')
-            # Планируем на этот день в 19:00 для дома
-            plan_dt = day_dt.replace(hour=19, minute=0)
-        except:
+        # Формируем текст с днем
+        if day_data == "skip":
             day_text = "на вечер"
             plan_dt = None
-    
-    # Формируем полное описание фильма
-    text = f"🍿 <b>Фильм {day_text}:</b>\n\n"
-    text += f"<b>{movie['title']}</b> ({movie['year']})\n\n"
-    
-    if movie['director'] and movie['director'] != "Не указан":
-        text += f"🎬 <b>Режиссёр:</b> {movie['director']}\n"
-    
-    if movie['genres'] and movie['genres'] != "—":
-        text += f"🎭 <b>Жанры:</b> {movie['genres']}\n"
-    
-    if movie['actors'] and movie['actors'] != "—":
-        text += f"👥 <b>В ролях:</b> {movie['actors']}\n"
-    
-    text += f"\n📝 <b>Описание:</b>\n{movie['description']}\n\n"
-    text += f"🔗 {movie['link']}"
-    
-    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
+        else:
+            try:
+                day_dt = datetime.fromisoformat(day_data.replace('Z', '+00:00')).astimezone(plans_tz)
+                day_text = day_dt.strftime('%d.%m.%Y')
+                # Планируем на этот день в 19:00 для дома
+                plan_dt = day_dt.replace(hour=19, minute=0)
+            except Exception as date_error:
+                logger.warning(f"[RANDOM] Ошибка парсинга даты: {date_error}, day_data={day_data}")
+                day_text = "на вечер"
+                plan_dt = None
+        
+        # Формируем полное описание фильма
+        try:
+            text = f"🍿 <b>Фильм {day_text}:</b>\n\n"
+            text += f"<b>{movie.get('title', 'Неизвестно')}</b> ({movie.get('year', '—')})\n\n"
+            
+            if movie.get('director') and movie['director'] != "Не указан":
+                text += f"🎬 <b>Режиссёр:</b> {movie['director']}\n"
+            
+            if movie.get('genres') and movie['genres'] != "—":
+                text += f"🎭 <b>Жанры:</b> {movie['genres']}\n"
+            
+            if movie.get('actors') and movie['actors'] != "—":
+                text += f"👥 <b>В ролях:</b> {movie['actors']}\n"
+            
+            text += f"\n📝 <b>Описание:</b>\n{movie.get('description', 'Нет описания')}\n\n"
+            text += f"🔗 {movie.get('link', '')}"
+            
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
+            bot.answer_callback_query(call.id)
+        except Exception as edit_error:
+            logger.error(f"[RANDOM] Ошибка при редактировании сообщения: {edit_error}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при отображении фильма", show_alert=True)
+            except:
+                pass
     
     # Автоматически планируем фильм на выбранную дату
     if plan_dt:
