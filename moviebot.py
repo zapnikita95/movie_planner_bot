@@ -1688,6 +1688,12 @@ def random_final(call):
                 bot.answer_callback_query(call.id, "Ошибка при переходе к выбору дня", show_alert=True)
             except:
                 pass
+    except Exception as e:
+        logger.error(f"[RANDOM] Критическая ошибка в random_final: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка при обработке выбора режиссёра", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_day:"))
 def random_show_movie(call):
