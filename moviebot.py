@@ -3566,19 +3566,14 @@ if IS_RENDER:
         logger.warning("RENDER_EXTERNAL_URL не установлен! Webhook не будет установлен.")
         logger.warning("Убедитесь, что переменная RENDER_EXTERNAL_URL установлена в настройках Render.")
     
-    # На Render всегда запускаем Flask сервер
-    # Render ожидает, что приложение будет слушать на порту из переменной PORT
-    port = int(PORT or 10000)
-    logger.info(f"Запуск Flask сервера на порту {port} (IS_RENDER={IS_RENDER}, PORT={PORT})")
-    logger.info(f"Зарегистрированные маршруты: {[str(rule) for rule in app.url_map.iter_rules()]}")
-    
-    # Запускаем Flask сервер (блокирующий вызов, чтобы скрипт не завершился)
-    # На Render это будет основной процесс
-    logger.info(f"Flask сервер запускается на 0.0.0.0:{port}")
+    # На Render используется gunicorn для запуска Flask приложения
+    # gunicorn moviebot:app -b 0.0.0.0:$PORT --timeout 120 --workers 1
+    logger.info(f"Окружение Render обнаружено (IS_RENDER={IS_RENDER}, PORT={PORT})")
+    logger.info(f"Зарегистрированные маршруты Flask: {[str(rule) for rule in app.url_map.iter_rules()]}")
     logger.info("=" * 50)
-    logger.info("FLASK СЕРВЕР ЗАПУЩЕН И ГОТОВ К РАБОТЕ")
+    logger.info("FLASK ПРИЛОЖЕНИЕ ГОТОВО К ЗАПУСКУ ЧЕРЕЗ GUNICORN")
     logger.info("=" * 50)
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    # Flask app будет запущен через gunicorn, не нужно вызывать app.run()
 else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
     if IS_RENDER:
