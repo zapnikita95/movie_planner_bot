@@ -2637,6 +2637,10 @@ def rate_movie(message):
 
 @bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == bot.get_me().id and m.text)
 def handle_rate_list_reply(message):
+    # Пропускаем команды - они обрабатываются отдельными обработчиками
+    if message.text and message.text.startswith('/'):
+        return
+    
     chat_id = message.chat.id
     user_id = message.from_user.id
     
@@ -2944,6 +2948,10 @@ def handle_settings_callback(call):
 # Этот обработчик обрабатывает ответы на settings с учетом режимов add/replace
 @bot.message_handler(func=lambda m: m.reply_to_message and m.from_user.id in user_settings_state, priority=10)
 def handle_settings_emojis(message):
+    # Пропускаем команды - они обрабатываются отдельными обработчиками
+    if message.text and message.text.startswith('/'):
+        return
+    
     user_id = message.from_user.id
     state = user_settings_state.get(user_id)
     
@@ -3942,6 +3950,10 @@ def get_plan_day_or_date(message):
 @bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in plan_error_messages)
 def handle_plan_error_reply(message):
     """Обрабатывает ответы на сообщения об ошибках планирования для дополнения недостающих данных"""
+    # Пропускаем команды - они обрабатываются отдельными обработчиками
+    if message.text and message.text.startswith('/'):
+        return
+    
     try:
         reply_msg_id = message.reply_to_message.message_id
         error_data = plan_error_messages.get(reply_msg_id)
@@ -6000,11 +6012,13 @@ def webhook():
         update = telebot.types.Update.de_json(json_string)
         
         # Логируем информацию о реплае для отладки
-        if update.message and update.message.reply_to_message:
-            logger.info(f"[WEBHOOK] Update содержит reply_to_message: message_id={update.message.reply_to_message.message_id}")
-        elif update.message:
-            logger.info(f"[WEBHOOK] Update.message есть, но reply_to_message отсутствует")
-            logger.info(f"[WEBHOOK] message.text='{update.message.text[:100] if update.message.text else None}'")
+        if update.message:
+            logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
+            logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
+            if update.message.reply_to_message:
+                logger.info(f"[WEBHOOK] Update содержит reply_to_message: message_id={update.message.reply_to_message.message_id}")
+            else:
+                logger.info(f"[WEBHOOK] Update.message есть, но reply_to_message отсутствует")
         
         bot.process_new_updates([update])
         return ''
