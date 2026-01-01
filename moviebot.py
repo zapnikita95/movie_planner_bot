@@ -3544,7 +3544,12 @@ def plan_handler(message):
         logger.info(f"[PLAN] ===== НАЧАЛО ОБРАБОТКИ /plan =====")
         logger.info(f"[PLAN] user_id={user_id}, chat_id={chat_id}")
         logger.info(f"[PLAN] original_text='{original_text}'")
+        logger.info(f"[PLAN] message object: {type(message)}")
+        logger.info(f"[PLAN] message.reply_to_message type: {type(message.reply_to_message) if message.reply_to_message else None}")
         logger.info(f"[PLAN] message.reply_to_message={message.reply_to_message}")
+        logger.info(f"[PLAN] hasattr(message, 'reply_to_message'): {hasattr(message, 'reply_to_message')}")
+        if hasattr(message, 'reply_to_message'):
+            logger.info(f"[PLAN] message.reply_to_message value: {getattr(message, 'reply_to_message', 'NOT_FOUND')}")
         logger.info(f"[PLAN] Есть реплай: {message.reply_to_message is not None}")
         if message.reply_to_message:
             reply_msg = message.reply_to_message
@@ -3557,6 +3562,8 @@ def plan_handler(message):
                     logger.info(f"[PLAN] Entity {idx}: type={entity.type}, offset={entity.offset}, length={entity.length}")
                     if hasattr(entity, 'url'):
                         logger.info(f"[PLAN] Entity {idx} url={entity.url}")
+        else:
+            logger.warning(f"[PLAN] ⚠️ reply_to_message отсутствует, хотя в webhook он был!")
         
         # Проверяем реплай на сообщение со ссылкой
         link = None
