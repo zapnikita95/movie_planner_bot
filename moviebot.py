@@ -1893,9 +1893,12 @@ def handle_list_page(call):
 def handle_list_reply(message):
     """Обрабатывает ответ на сообщение /list с ID фильмов для отметки как просмотренных"""
     try:
+        logger.info(f"[LIST REPLY] Получен ответ на /list от пользователя {message.from_user.id}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
         chat_id = list_messages.get(message.reply_to_message.message_id)
         if not chat_id:
+            logger.warning(f"[LIST REPLY] Не найден chat_id для message_id={message.reply_to_message.message_id if message.reply_to_message else None}, list_messages keys: {list(list_messages.keys())}")
             return
+        logger.info(f"[LIST REPLY] Обработка ответа для chat_id={chat_id}, текст: {message.text}")
         
         # Парсим ID фильмов из сообщения (используем kp_id, как в /rate)
         text = message.text.strip()
