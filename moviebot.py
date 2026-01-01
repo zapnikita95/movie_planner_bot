@@ -1745,9 +1745,9 @@ def settings_command(message):
         
         reactions = get_watched_reactions(chat_id)
         current = ', '.join(reactions['emoji'] + [f"custom:{cid}" for cid in reactions['custom']]) or "не настроено"
-        bot.reply_to(message, f"⚙️ Текущие реакции для просмотренных: {current}\n\nОтправьте эмодзи (обычные или кастомные), которые хотите использовать (можно несколько в одном сообщении). Для сброса — /settings reset")
-        user_settings_state[user_id] = {'adding_reactions': True}
-        logger.info(f"Настройки открыты для пользователя {user_id}")
+        settings_msg = bot.reply_to(message, f"⚙️ Текущие реакции для просмотренных: {current}\n\nОтправьте эмодзи в ответ на это сообщение (обычные или кастомные), которые хотите использовать (можно несколько в одном сообщении). Для сброса — /settings reset")
+        user_settings_state[user_id] = {'adding_reactions': True, 'settings_msg_id': settings_msg.message_id}
+        logger.info(f"Настройки открыты для пользователя {user_id}, message_id: {settings_msg.message_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
         try:
@@ -1760,15 +1760,41 @@ def add_reactions(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     
+    # Проверяем, что это ответ на сообщение settings
+    state = user_settings_state.get(user_id, {})
+    settings_msg_id = state.get('settings_msg_id')
+    
+    if not message.reply_to_message:
+        bot.reply_to(message, "⚠️ Пожалуйста, отправьте эмодзи в ответ на сообщение бота о настройках.")
+        return
+    
+    if settings_msg_id and message.reply_to_message.message_id != settings_msg_id:
+        bot.reply_to(message, "⚠️ Пожалуйста, отправьте эмодзи в ответ на сообщение бота о настройках.")
+        return
+    
+    logger.info(f"[SETTINGS] Получен ответ на settings от user_id={user_id}, reply_to_message_id={message.reply_to_message.message_id}, settings_msg_id={settings_msg_id}")
+    
     # Собираем обычные эмодзи и custom_id из сообщения
     emojis = []
     custom_ids = []
     
     # Обычные эмодзи из текста
     if message.text:
+        # Улучшенная проверка эмодзи - используем более широкий диапазон Unicode
         for char in message.text:
-            # Проверяем, является ли символ эмодзи (широкий диапазон Unicode для эмодзи)
-            if ord(char) > 0x1F000 or char in '👍✅❤️🔥🎉😂🤣😍😢😡👎⭐🌟💯🎬🍿':
+            # Проверяем различные диапазоны Unicode для эмодзи
+            code_point = ord(char)
+            is_emoji = (
+                code_point >= 0x1F300 and code_point <= 0x1F9FF or  # Различные символы и пиктограммы
+                code_point >= 0x2600 and code_point <= 0x26FF or    # Разные символы
+                code_point >= 0x2700 and code_point <= 0x27BF or    # Dingbats
+                code_point >= 0x1F600 and code_point <= 0x1F64F or  # Эмодзи лиц
+                code_point >= 0x1F680 and code_point <= 0x1F6FF or  # Транспорт и карты
+                code_point >= 0x1F900 and code_point <= 0x1F9FF or  # Дополнительные символы
+                code_point >= 0x1FA00 and code_point <= 0x1FAFF or # Шахматы и другие
+                char in '👍✅❤️🔥🎉😂🤣😍😢😡👎⭐🌟💯🎬🍿'  # Популярные эмодзи
+            )
+            if is_emoji:
                 emojis.append(char)
     
     # Кастомные эмодзи из entities
@@ -1781,20 +1807,30 @@ def add_reactions(message):
     all_reactions = emojis + [f"custom:{cid}" for cid in custom_ids]
     
     if not all_reactions:
-        bot.reply_to(message, "Не нашёл эмодзи. Попробуйте снова.")
+        bot.reply_to(message, "❌ Не нашёл эмодзи в вашем сообщении. Попробуйте отправить эмодзи снова.")
+        logger.warning(f"[SETTINGS] Не найдено эмодзи в сообщении от user_id={user_id}, text={message.text}")
         return
     
     # Сохраняем
-    with db_lock:
-        cursor.execute('''
-            INSERT INTO settings (chat_id, key, value)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-        ''', (chat_id, "watched_reactions", json.dumps(all_reactions)))
-        conn.commit()
+    try:
+        with db_lock:
+            cursor.execute('''
+                INSERT INTO settings (chat_id, key, value)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            ''', (chat_id, "watched_reactions", json.dumps(all_reactions)))
+            conn.commit()
+        
+        reactions_str = ', '.join(all_reactions)
+        bot.reply_to(message, f"✅ Готово! Реакции для просмотренных: {reactions_str}")
+        logger.info(f"[SETTINGS] Реакции сохранены для chat_id={chat_id}: {reactions_str}")
+    except Exception as e:
+        logger.error(f"[SETTINGS] Ошибка при сохранении реакций: {e}", exc_info=True)
+        bot.reply_to(message, "❌ Произошла ошибка при сохранении реакций. Попробуйте снова.")
     
-    bot.reply_to(message, f"Готово! Реакции для просмотренных: {', '.join(all_reactions)}")
-    del user_settings_state[user_id]
+    # Удаляем состояние
+    if user_id in user_settings_state:
+        del user_settings_state[user_id]
 
 @bot.message_handler(func=lambda m: user_settings_state.get(m.from_user.id, {}).get('waiting_emoji', False) and m.text and not m.text.startswith('/'))
 def handle_emoji_input(message):
