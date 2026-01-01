@@ -3482,8 +3482,12 @@ logger.info("Финальная версия бота запущена! Всё �
 logger.info(f"Токен: {TOKEN[:10] if TOKEN else 'не установлен'}...")
 logger.info("=" * 50)
 
+logger.info("[DEBUG] Перед созданием Flask app")
+
 # Flask app для webhook
 app = Flask(__name__)
+
+logger.info("[DEBUG] Flask app создан")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
