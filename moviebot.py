@@ -1260,6 +1260,197 @@ def total_stats(message):
         except:
             pass
 
+# /stats — детальная статистика
+@bot.message_handler(commands=['stats'])
+def stats_command(message):
+    logger.info(f"[HANDLER] /stats вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/stats', message.chat.id)
+        logger.info(f"Команда /stats от пользователя {message.from_user.id}")
+        chat_id = message.chat.id
+        
+        with db_lock:
+            # Общая статистика
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            total_watched_row = cursor.fetchone()
+            total_watched = total_watched_row[0] if total_watched_row and total_watched_row[0] else 0
+            
+            # Топ-3 жанров (по средним оценкам всех пользователей)
+            cursor.execute('''
+                SELECT genre, AVG(rating) as avg_rating, COUNT(*) as count
+                FROM genre_ratings
+                WHERE chat_id = %s
+                GROUP BY genre
+                HAVING COUNT(*) > 0
+                ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                LIMIT 3
+            ''', (chat_id,))
+            top_genres = []
+            for row in cursor.fetchall():
+                genre = row.get('genre') if isinstance(row, dict) else row[0]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+                count = row.get('count') if isinstance(row, dict) else row[2]
+                top_genres.append((genre, avg, count))
+            
+            # Топ-5 режиссеров (по средним оценкам всех пользователей)
+            cursor.execute('''
+                SELECT director, AVG(rating) as avg_rating, COUNT(*) as count
+                FROM director_ratings
+                WHERE chat_id = %s
+                GROUP BY director
+                HAVING COUNT(*) > 0
+                ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                LIMIT 5
+            ''', (chat_id,))
+            top_directors = []
+            for row in cursor.fetchall():
+                director = row.get('director') if isinstance(row, dict) else row[0]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+                count = row.get('count') if isinstance(row, dict) else row[2]
+                top_directors.append((director, avg, count))
+            
+            # Топ-10 актеров (по средним оценкам всех пользователей)
+            cursor.execute('''
+                SELECT actor, AVG(rating) as avg_rating, COUNT(*) as count
+                FROM actor_ratings
+                WHERE chat_id = %s
+                GROUP BY actor
+                HAVING COUNT(*) > 0
+                ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                LIMIT 10
+            ''', (chat_id,))
+            top_actors = []
+            for row in cursor.fetchall():
+                actor = row.get('actor') if isinstance(row, dict) else row[0]
+                avg = row.get('avg_rating') if isinstance(row, dict) else row[1]
+                count = row.get('count') if isinstance(row, dict) else row[2]
+                top_actors.append((actor, avg, count))
+            
+            # Получаем список всех пользователей, которые оценивали фильмы
+            cursor.execute('SELECT DISTINCT user_id FROM ratings WHERE chat_id = %s', (chat_id,))
+            user_ids = []
+            for row in cursor.fetchall():
+                user_id_db = row.get('user_id') if isinstance(row, dict) else row[0]
+                user_ids.append(user_id_db)
+            
+            # Получаем имена пользователей из stats
+            users_data = {}
+            if user_ids:
+                placeholders = ','.join(['%s'] * len(user_ids))
+                cursor.execute(f'''
+                    SELECT DISTINCT user_id, username
+                    FROM stats
+                    WHERE chat_id = %s AND user_id IN ({placeholders})
+                ''', [chat_id] + user_ids)
+                for row in cursor.fetchall():
+                    user_id_db = row.get('user_id') if isinstance(row, dict) else row[0]
+                    username_db = row.get('username') if isinstance(row, dict) else row[1]
+                    users_data[user_id_db] = username_db or f"user_{user_id_db}"
+            
+            # Если не нашли через stats, используем user_id
+            for user_id_db in user_ids:
+                if user_id_db not in users_data:
+                    users_data[user_id_db] = f"user_{user_id_db}"
+        
+        # Формируем общую статистику
+        text = "📊 <b>Статистика группы</b>\n\n"
+        text += f"🎬 Всего просмотрено: <b>{total_watched}</b>\n\n"
+        
+        text += "<b>🏆 Топ-3 жанров:</b>\n"
+        if top_genres:
+            for genre, avg, count in top_genres:
+                text += f"• <b>{genre}</b> — {avg:.1f}/10 ({count} оценок)\n"
+        else:
+            text += "— Нет данных\n"
+        
+        text += "\n<b>🎬 Топ-5 режиссёров:</b>\n"
+        if top_directors:
+            for director, avg, count in top_directors:
+                text += f"• <b>{director}</b> — {avg:.1f}/10 ({count} оценок)\n"
+        else:
+            text += "— Нет данных\n"
+        
+        text += "\n<b>⭐ Топ-10 актёров:</b>\n"
+        if top_actors:
+            for actor, avg, count in top_actors:
+                text += f"• <b>{actor}</b> — {avg:.1f}/10 ({count} оценок)\n"
+        else:
+            text += "— Нет данных\n"
+        
+        # Статистика по каждому пользователю
+        if users_data:
+            text += "\n\n<b>👥 Статистика по участникам:</b>\n"
+            for user_id_db, username_db in users_data.items():
+                with db_lock:
+                    # Количество просмотренных фильмов пользователя
+                    cursor.execute('''
+                        SELECT COUNT(DISTINCT film_id) FROM ratings
+                        WHERE chat_id = %s AND user_id = %s
+                    ''', (chat_id, user_id_db))
+                    count_row = cursor.fetchone()
+                    films_count = count_row[0] if count_row and count_row[0] else 0
+                    
+                    # Средняя оценка пользователя
+                    cursor.execute('''
+                        SELECT AVG(rating) FROM ratings
+                        WHERE chat_id = %s AND user_id = %s
+                    ''', (chat_id, user_id_db))
+                    avg_row = cursor.fetchone()
+                    avg_rating = avg_row[0] if avg_row and avg_row[0] else None
+                    
+                    # Любимый жанр пользователя
+                    cursor.execute('''
+                        SELECT genre, AVG(rating) as avg_rating
+                        FROM genre_ratings
+                        WHERE chat_id = %s AND user_id = %s
+                        GROUP BY genre
+                        ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                        LIMIT 1
+                    ''', (chat_id, user_id_db))
+                    fav_genre_row = cursor.fetchone()
+                    fav_genre = fav_genre_row[0] if fav_genre_row else "—"
+                    
+                    # Любимый режиссер пользователя
+                    cursor.execute('''
+                        SELECT director, AVG(rating) as avg_rating
+                        FROM director_ratings
+                        WHERE chat_id = %s AND user_id = %s
+                        GROUP BY director
+                        ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                        LIMIT 1
+                    ''', (chat_id, user_id_db))
+                    fav_director_row = cursor.fetchone()
+                    fav_director = fav_director_row[0] if fav_director_row else "—"
+                    
+                    # Любимый актер пользователя
+                    cursor.execute('''
+                        SELECT actor, AVG(rating) as avg_rating
+                        FROM actor_ratings
+                        WHERE chat_id = %s AND user_id = %s
+                        GROUP BY actor
+                        ORDER BY AVG(rating) DESC, COUNT(*) DESC
+                        LIMIT 1
+                    ''', (chat_id, user_id_db))
+                    fav_actor_row = cursor.fetchone()
+                    fav_actor = fav_actor_row[0] if fav_actor_row else "—"
+                
+                text += f"\n<b>{username_db}:</b>\n"
+                text += f"  🎬 Фильмов: {films_count}\n"
+                text += f"  ⭐ Средняя: {avg_rating:.1f}/10\n" if avg_rating else "  ⭐ Средняя: —\n"
+                text += f"  ❤️ Жанр: {fav_genre}\n"
+                text += f"  🎬 Режиссёр: {fav_director}\n"
+                text += f"  ⭐ Актёр: {fav_actor}\n"
+        
+        bot.reply_to(message, text, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /stats отправлен пользователю {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /stats: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /stats")
+        except:
+            pass
+
 # /random с пропуском шагов
 user_random_state = {}  # user_id: {'periods': [...], 'genre': ..., 'director': ...}
 
