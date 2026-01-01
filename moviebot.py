@@ -3484,6 +3484,7 @@ logger.info(f"Токен: {TOKEN[:10] if TOKEN else 'не установлен'}
 logger.info("=" * 50)
 
 logger.info("[DEBUG] Перед созданием Flask app")
+logger.info(f"[DEBUG] sys.argv={sys.argv}, sys.executable={sys.executable}")
 
 # Flask app для webhook
 app = Flask(__name__)
