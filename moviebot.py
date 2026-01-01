@@ -886,17 +886,25 @@ def handle_reaction(update):
     
     # Обычная обработка реакций для отметки просмотренных
     watched = get_watched_reactions(chat_id)
+    logger.info(f"[REACTION DEBUG] Chat: {chat_id}, Msg: {message_id}, User: {user_id}, New reactions: {len(update.new_reaction) if update.new_reaction else 0}, Watched emojis: {watched}")
     
     for reaction in update.new_reaction:
         is_watched = False
+        reaction_emoji = None
+        
         if hasattr(reaction, 'type'):
             if reaction.type == 'emoji' and hasattr(reaction, 'emoji'):
+                reaction_emoji = reaction.emoji
                 is_watched = reaction.emoji in watched['emoji']
             elif reaction.type == 'custom_emoji' and hasattr(reaction, 'custom_emoji_id'):
-                is_watched = str(reaction.custom_emoji_id) in watched['custom']
+                custom_id = str(reaction.custom_emoji_id)
+                is_watched = custom_id in watched['custom']
         elif hasattr(reaction, 'emoji'):
             # Старый формат для обратной совместимости
+            reaction_emoji = reaction.emoji
             is_watched = reaction.emoji in watched['emoji']
+        
+        logger.info(f"[REACTION DEBUG] Reaction emoji: {reaction_emoji}, is_watched: {is_watched}")
         
         if is_watched:
             link = bot_messages.get(message_id)
@@ -907,58 +915,77 @@ def handle_reaction(update):
                     link = plan_data.get('link')
                     logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
             
-            if link:
+            if not link:
+                logger.warning(f"[REACTION] Нет ссылки в bot_messages для message_id {message_id}. Доступные message_ids: {list(bot_messages.keys())[:10]}")
+                return
+            
+            try:
+                logger.info(f"[REACTION] Обрабатываем реакцию для фильма с ссылкой {link}")
+                # Извлекаем kp_id из ссылки для поиска фильма
+                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+                if not match:
+                    logger.warning(f"[REACTION] Не удалось извлечь kp_id из ссылки: {link}")
+                    return
+                
+                kp_id = match.group(2)
+                film_id = None
+                title = None
+                watched_status = None
+                
                 try:
-                    logger.info(f"[REACTION] Обрабатываем реакцию для фильма с ссылкой {link}")
-                    # Извлекаем kp_id из ссылки для поиска фильма
-                    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
-                    if match:
-                        kp_id = match.group(2)
-                        film_id = None
-                        title = None
+                    with db_lock:
+                        # Проверяем состояние транзакции
                         try:
-                            with db_lock:
-                                # Сначала обновляем watched
-                                cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                                updated_count = cursor.rowcount
-                                conn.commit()
-                                logger.info(f"[REACTION] Обновлено записей: {updated_count} для kp_id={kp_id}, chat_id={chat_id}")
-                                
-                                # Затем получаем данные фильма
-                                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                                row = cursor.fetchone()
-                                if row:
-                                    film_id = row.get('id') if isinstance(row, dict) else row[0]
-                                    title = row.get('title') if isinstance(row, dict) else row[1]
-                                    logger.info(f"[REACTION] Фильм {title} (ID: {film_id}, kp_id: {kp_id}) отмечен как просмотренный пользователем {user_id}")
-                                else:
-                                    logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в базе после обновления")
-                        except Exception as db_error:
-                            logger.error(f"[REACTION] Ошибка БД при обработке реакции: {db_error}", exc_info=True)
-                            try:
-                                with db_lock:
-                                    conn.rollback()
-                            except:
-                                pass
-                    else:
-                        logger.warning(f"[REACTION] Не удалось извлечь kp_id из ссылки: {link}")
-                    
-                    # Отправляем сообщение только если фильм найден
-                    if film_id and title:
-                        user_name = update.user.first_name if update.user else "Кто-то"
-                        try:
-                            msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
-                            # Сохраняем связь message_id -> film_id для обработки оценки
-                            rating_messages[msg.message_id] = film_id
-                            logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}, message_id={msg.message_id}, film_id={film_id}")
-                        except Exception as send_error:
-                            logger.error(f"[REACTION] Ошибка при отправке сообщения: {send_error}", exc_info=True)
-                    else:
-                        logger.warning(f"[REACTION] Не удалось отправить сообщение: film_id={film_id}, title={title}")
-                except Exception as e:
-                    logger.error(f"[REACTION] Ошибка реакции: {e}", exc_info=True)
-            else:
-                logger.warning(f"[REACTION] Ссылка не найдена для message_id={message_id} в bot_messages или plan_notification_messages")
+                            cursor.execute('SELECT 1')
+                            cursor.fetchone()
+                        except:
+                            conn.rollback()
+                        
+                        # Сначала проверяем, есть ли фильм и его текущий статус
+                        cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        row = cursor.fetchone()
+                        
+                        if not row:
+                            logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в БД для chat_id={chat_id}")
+                            return
+                        
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
+                        watched_status = row.get('watched') if isinstance(row, dict) else row[2]
+                        
+                        if watched_status == 1:
+                            logger.info(f"[REACTION] Фильм {title} уже отмечен как просмотренный")
+                            return
+                        
+                        # Обновляем watched
+                        cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        updated_count = cursor.rowcount
+                        conn.commit()
+                        logger.info(f"[REACTION] Обновлено записей: {updated_count} для film_id={film_id}, kp_id={kp_id}, chat_id={chat_id}")
+                        
+                except Exception as db_error:
+                    logger.error(f"[REACTION] Ошибка БД при обработке реакции: {db_error}", exc_info=True)
+                    try:
+                        with db_lock:
+                            conn.rollback()
+                    except:
+                        pass
+                    return
+                
+                # Отправляем сообщение только если фильм найден и обновлён
+                if film_id and title:
+                    user_name = update.user.first_name if update.user else "Кто-то"
+                    try:
+                        msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
+                        # Сохраняем связь message_id -> film_id для обработки оценки
+                        rating_messages[msg.message_id] = film_id
+                        logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}, message_id={msg.message_id}, film_id={film_id}")
+                    except Exception as send_error:
+                        logger.error(f"[REACTION] Ошибка при отправке сообщения: {send_error}", exc_info=True)
+                else:
+                    logger.warning(f"[REACTION] Не удалось отправить сообщение: film_id={film_id}, title={title}")
+            except Exception as e:
+                logger.error(f"[REACTION] Ошибка реакции: {e}", exc_info=True)
 
 # Обработка оценок текстом
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 1 <= int(m.text) <= 10 and m.reply_to_message)
@@ -1917,24 +1944,22 @@ def add_reactions(message):
     emojis = []
     custom_ids = []
     
-    # Обычные эмодзи из текста
+    # Обычные эмодзи из текста - используем regex для более точного извлечения
     if message.text:
-        # Улучшенная проверка эмодзи - используем более широкий диапазон Unicode
-        for char in message.text:
-            # Проверяем различные диапазоны Unicode для эмодзи
-            code_point = ord(char)
-            is_emoji = (
-                code_point >= 0x1F300 and code_point <= 0x1F9FF or  # Различные символы и пиктограммы
-                code_point >= 0x2600 and code_point <= 0x26FF or    # Разные символы
-                code_point >= 0x2700 and code_point <= 0x27BF or    # Dingbats
-                code_point >= 0x1F600 and code_point <= 0x1F64F or  # Эмодзи лиц
-                code_point >= 0x1F680 and code_point <= 0x1F6FF or  # Транспорт и карты
-                code_point >= 0x1F900 and code_point <= 0x1F9FF or  # Дополнительные символы
-                code_point >= 0x1FA00 and code_point <= 0x1FAFF or # Шахматы и другие
-                char in '👍✅❤️🔥🎉😂🤣😍😢😡👎⭐🌟💯🎬🍿'  # Популярные эмодзи
-            )
-            if is_emoji:
-                emojis.append(char)
+        # Используем regex для извлечения эмодзи (поддерживает все основные диапазоны Unicode)
+        import re
+        emoji_pattern = re.compile(
+            r'[\U0001F300-\U0001F9FF]'  # Различные символы и пиктограммы
+            r'|[\U0001F600-\U0001F64F]'  # Эмодзи лиц
+            r'|[\U0001F680-\U0001F6FF]'  # Транспорт и карты
+            r'|[\U00002600-\U000026FF]'  # Разные символы
+            r'|[\U00002700-\U000027BF]'  # Dingbats
+            r'|[\U0001F900-\U0001F9FF]'  # Дополнительные символы
+            r'|[\U0001FA00-\U0001FAFF]'  # Шахматы и другие
+            r'|[\U00002B50-\U00002B55]'  # Звезды
+            r'|👍|✅|❤️|🔥|🎉|😂|🤣|😍|😢|😡|👎|⭐|🌟|💯|🎬|🍿'  # Популярные эмодзи
+        )
+        emojis = emoji_pattern.findall(message.text)
     
     # Кастомные эмодзи из entities
     if message.entities:
@@ -1950,21 +1975,33 @@ def add_reactions(message):
         logger.warning(f"[SETTINGS] Не найдено эмодзи в сообщении от user_id={user_id}, text={message.text}")
         return
     
-    # Сохраняем
+    # Сохраняем в БД
     try:
         with db_lock:
-            cursor.execute('''
-                INSERT INTO settings (chat_id, key, value)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-            ''', (chat_id, "watched_reactions", json.dumps(all_reactions)))
-            conn.commit()
-        
-        reactions_str = ', '.join(all_reactions)
-        bot.reply_to(message, f"✅ Готово! Реакции для просмотренных: {reactions_str}")
-        logger.info(f"[SETTINGS] Реакции сохранены для chat_id={chat_id}: {reactions_str}")
+            try:
+                # Проверяем состояние транзакции
+                try:
+                    cursor.execute('SELECT 1')
+                    cursor.fetchone()
+                except:
+                    conn.rollback()
+                
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (chat_id, "watched_reactions", json.dumps(all_reactions)))
+                conn.commit()
+                
+                reactions_str = ', '.join(all_reactions)
+                bot.reply_to(message, f"✅ Готово! Реакции для просмотренных: {reactions_str}")
+                logger.info(f"[SETTINGS] Реакции сохранены для chat_id={chat_id}: {reactions_str}")
+            except Exception as db_error:
+                conn.rollback()
+                logger.error(f"[SETTINGS] Ошибка БД при сохранении реакций: {db_error}", exc_info=True)
+                bot.reply_to(message, "❌ Произошла ошибка при сохранении реакций. Попробуйте снова.")
     except Exception as e:
-        logger.error(f"[SETTINGS] Ошибка при сохранении реакций: {e}", exc_info=True)
+        logger.error(f"[SETTINGS] Критическая ошибка при сохранении реакций: {e}", exc_info=True)
         bot.reply_to(message, "❌ Произошла ошибка при сохранении реакций. Попробуйте снова.")
     
     # Удаляем состояние
