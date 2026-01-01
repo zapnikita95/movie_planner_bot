@@ -165,7 +165,9 @@ cursor.execute('''
         UNIQUE(chat_id, key)
     )
 ''')
-cursor.execute('INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING', (-1, "watched_emoji", "✅"))
+# Базовый набор эмодзи: ✅, все варианты лайков (👍 👍🏻 👍🏼 👍🏽 👍🏾 👍🏿), все варианты сердечек (❤️ ❤️‍🔥 ❤️‍🩹 💛 🧡 💚 💙 💜 🖤 🤍 🤎)
+default_watched_emojis = "✅👍👍🏻👍🏼👍🏽👍🏾👍🏿❤️❤️‍🔥❤️‍🩹💛🧡💚💙💜🖤🤍🤎"
+cursor.execute('INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING', (-1, "watched_emoji", default_watched_emojis))
 cursor.execute('''
     CREATE TABLE IF NOT EXISTS plans (
         id SERIAL PRIMARY KEY,
@@ -372,8 +374,8 @@ def get_watched_emojis():
                 value_clean = re.sub(r'custom:\d+', '', str(value))
                 # Возвращаем список символов
                 return list(value_clean) if value_clean else ['✅']
-        # Дефолт, если не настроено
-        return ['✅']
+        # Дефолт, если не настроено: ✅, все варианты лайков и сердечек
+        return ['✅', '👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿', '❤️', '❤️‍🔥', '❤️‍🩹', '💛', '🧡', '💚', '💙', '💜', '🖤', '🤍', '🤎']
 
 def get_watched_custom_emoji_ids():
     """Возвращает список ID кастомных эмодзи для отметки просмотренных (chat_id=-1)"""
@@ -410,8 +412,8 @@ def get_watched_reactions(chat_id):
                     return {'emoji': emojis, 'custom': custom_ids}
                 except:
                     pass
-    # Дефолт
-    return {'emoji': ['✅'], 'custom': []}
+    # Дефолт: ✅, все варианты лайков и сердечек
+    return {'emoji': ['✅', '👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿', '❤️', '❤️‍🔥', '❤️‍🩹', '💛', '🧡', '💚', '💙', '💜', '🖤', '🤍', '🤎'], 'custom': []}
 
 # Статистика
 def log_request(user_id, username, command_or_action, chat_id=None):
