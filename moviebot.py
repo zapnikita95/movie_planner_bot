@@ -2276,13 +2276,35 @@ def webhook():
     else:
         abort(403)
 
-if __name__ == '__main__':
-    # Для локального запуска (тестирование)
+# Определяем, где запускается бот: на Render или локально
+# Проверяем несколько признаков Render окружения
+RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
+RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
+RENDER = os.getenv('RENDER')  # Может быть установлена Render
+PORT = os.getenv('PORT')  # На Render всегда есть PORT
+
+# Считаем, что это Render, если есть хотя бы один из признаков
+IS_RENDER = bool(RENDER_EXTERNAL_URL or RENDER_SERVICE_ID or (RENDER and PORT))
+
+if IS_RENDER:
+    # На Render - используем ТОЛЬКО webhook, НИКОГДА не polling!
+    logger.info("Обнаружено окружение Render - используется webhook режим")
     bot.remove_webhook()
-    bot.infinity_polling()
+    
+    if RENDER_EXTERNAL_URL:
+        webhook_url = RENDER_EXTERNAL_URL + '/webhook'
+        bot.set_webhook(url=webhook_url)
+        logger.info(f"Webhook установлен: {webhook_url}")
+    else:
+        logger.warning("RENDER_EXTERNAL_URL не установлен! Webhook не будет установлен.")
+    
+    # Запускаем Flask сервер только если запускается напрямую
+    # Если запускается через gunicorn/uvicorn, они сами запустят app
+    if __name__ == '__main__':
+        app.run(host='0.0.0.0', port=int(PORT or 10000))
 else:
-    # На Render
-    bot.remove_webhook()
-    webhook_url = os.getenv('RENDER_EXTERNAL_URL') + '/webhook'
-    bot.set_webhook(url=webhook_url)
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 10000)))
+    # Локальный запуск - используем polling
+    if __name__ == '__main__':
+        bot.remove_webhook()
+        logger.info("Локальный запуск: используется polling")
+        bot.infinity_polling()
