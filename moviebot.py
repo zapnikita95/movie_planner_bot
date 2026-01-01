@@ -4271,6 +4271,82 @@ def clean_command(message):
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/clean', message.chat.id)
     
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text or ''
+    
+    # Проверяем, есть ли в команде ссылка или ID фильма
+    link = None
+    kp_id = None
+    
+    # Ищем ссылку на Кинопоиск
+    link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', text)
+    if link_match:
+        link = link_match.group(1)
+        kp_id = link_match.group(3)
+        logger.info(f"[CLEAN] Найдена ссылка в команде: {link}, kp_id={kp_id}")
+    
+    # Ищем ID кинопоиска (например, "/clean 8269")
+    if not kp_id:
+        id_match = re.search(r'/clean\s+(\d+)', text)
+        if id_match:
+            kp_id = id_match.group(1)
+            link = f"https://kinopoisk.ru/film/{kp_id}/"
+            logger.info(f"[CLEAN] Найден ID в команде: kp_id={kp_id}")
+    
+    # Если есть ссылка или ID - удаляем фильм напрямую
+    if kp_id:
+        with db_lock:
+            # Ищем фильм по kp_id
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            movie_row = cursor.fetchone()
+            
+            if not movie_row:
+                bot.reply_to(message, "❌ Фильма нет в базе!")
+                logger.info(f"[CLEAN] Фильм с kp_id={kp_id} не найден в базе")
+                return
+            
+            film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
+            title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[1]
+            
+            logger.info(f"[CLEAN] Удаление фильма film_id={film_id}, title={title} от пользователя {user_id}")
+            
+            # Удаляем связанные записи
+            # 1. Удаляем оценки
+            cursor.execute('DELETE FROM ratings WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+            ratings_deleted = cursor.rowcount
+            
+            # 2. Удаляем планы
+            cursor.execute('DELETE FROM plans WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+            plans_deleted = cursor.rowcount
+            
+            # 3. Удаляем отметки просмотра (watched_movies)
+            cursor.execute('DELETE FROM watched_movies WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+            watched_deleted = cursor.rowcount
+            
+            # 4. Удаляем сам фильм
+            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            movie_deleted = cursor.rowcount
+            
+            conn.commit()
+        
+        if movie_deleted > 0:
+            bot.reply_to(message, 
+                f"✅ <b>Фильм удален из базы</b>\n\n"
+                f"<b>{title}</b>\n\n"
+                f"Также удалено:\n"
+                f"• Оценок: {ratings_deleted}\n"
+                f"• Планов: {plans_deleted}\n"
+                f"• Отметок просмотра: {watched_deleted}",
+                parse_mode='HTML'
+            )
+            logger.info(f"[CLEAN] Фильм {title} (id={film_id}) успешно удален вместе с {ratings_deleted} оценками, {plans_deleted} планами и {watched_deleted} отметками просмотра")
+        else:
+            bot.reply_to(message, "❌ Ошибка удаления фильма")
+            logger.error(f"[CLEAN] Не удалось удалить фильм id={film_id}")
+        return
+    
+    # Если нет ссылки/ID - показываем обычное меню
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("🗑️ Удалить оценку", callback_data="clean:rating"))
     markup.add(InlineKeyboardButton("👁️ Удалить просмотр", callback_data="clean:watched"))
