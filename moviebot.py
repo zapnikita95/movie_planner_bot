@@ -444,7 +444,7 @@ def extract_movie_info(link):
         description = data_main.get('description') or data_main.get('shortDescription') or "Нет описания"
 
         # Отдельный запрос на staff (режиссёр и актёры)
-        url_staff = f"https://kinopoiskapiunofficial.tech/api/v1/staff%sfilmId={kp_id}"
+        url_staff = f"https://kinopoiskapiunofficial.tech/api/v1/staff?filmId={kp_id}"
         response_staff = requests.get(url_staff, headers=headers, timeout=15)
         staff = []
         if response_staff.status_code == 200:
