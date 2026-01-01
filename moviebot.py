@@ -4324,8 +4324,8 @@ def random_start(message):
             'step': 'period',
             'periods': [],
             'available_periods': available_periods,  # Сохраняем доступные периоды
-            'genre': None,
-            'director': None,
+            'genres': [],  # Список выбранных жанров
+            'directors': [],  # Список выбранных режиссеров
             'actors': []  # Список выбранных актёров
         }
         
@@ -4449,16 +4449,45 @@ def random_period_handler(call):
             pass
 
 def _show_genre_step(call, chat_id, user_id):
-    """Показывает шаг выбора жанра"""
+    """Показывает шаг выбора жанра с учетом выбранных периодов"""
     try:
         logger.info(f"[RANDOM] Showing genre step for user {user_id}")
+        
+        # Получаем состояние пользователя
+        state = user_random_state.get(user_id, {})
+        selected_genres = state.get('genres', [])
+        periods = state.get('periods', [])
+        
+        # Формируем WHERE условие с учетом периодов
+        base_query = """
+            SELECT DISTINCT TRIM(UNNEST(string_to_array(genres, ', '))) as genre
+            FROM movies
+            WHERE chat_id = %s AND watched = 0 
+            AND genres IS NOT NULL AND genres != '' AND genres != '—'
+        """
+        params = [chat_id]
+        
+        # Добавляем фильтр по периодам, если они выбраны
+        if periods:
+            period_conditions = []
+            for p in periods:
+                if p == "До 1980":
+                    period_conditions.append("year < 1980")
+                elif p == "1980–1990":
+                    period_conditions.append("(year >= 1980 AND year <= 1990)")
+                elif p == "1990–2000":
+                    period_conditions.append("(year >= 1990 AND year <= 2000)")
+                elif p == "2000–2010":
+                    period_conditions.append("(year >= 2000 AND year <= 2010)")
+                elif p == "2010–2020":
+                    period_conditions.append("(year >= 2010 AND year <= 2020)")
+                elif p == "2020–сейчас":
+                    period_conditions.append("year >= 2020")
+            if period_conditions:
+                base_query += " AND (" + " OR ".join(period_conditions) + ")"
+        
         with db_lock:
-            cursor.execute("""
-                SELECT DISTINCT TRIM(UNNEST(string_to_array(genres, ', '))) as genre
-                FROM movies
-                WHERE chat_id = %s AND watched = 0 
-                AND genres IS NOT NULL AND genres != '' AND genres != '—'
-            """, (chat_id,))
+            cursor.execute(base_query, params)
             rows = cursor.fetchall()
             genres = []
             for row in rows:
@@ -4469,19 +4498,27 @@ def _show_genre_step(call, chat_id, user_id):
         
         markup = InlineKeyboardMarkup(row_width=2)
         if genres:
-            for genre in sorted(genres)[:20]:  # Ограничиваем до 20 жанров
-                markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+            for genre in sorted(set(genres))[:20]:  # Ограничиваем до 20 жанров
+                label = f"✓ {genre}" if genre in selected_genres else genre
+                markup.add(InlineKeyboardButton(label, callback_data=f"rand_genre:{genre}"))
         
+        # Кнопка "Продолжить" появляется только если выбран хотя бы один жанр
+        # "Пропустить" убирается, если выбран хотя бы один жанр
+        if selected_genres:
+            markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_genre:done"))
+        else:
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+        
+        selected_text = f"\n\nВыбрано: {', '.join(selected_genres)}" if selected_genres else ""
         try:
-            bot.edit_message_text("🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(или пропустите)", 
+            bot.edit_message_text(f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}", 
                                 chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             bot.answer_callback_query(call.id)
-            logger.info(f"[RANDOM] Genre step shown, user_id={user_id}")
+            logger.info(f"[RANDOM] Genre step shown, user_id={user_id}, selected={len(selected_genres)}")
         except Exception as e:
             logger.error(f"[RANDOM] Error showing genre step: {e}", exc_info=True)
             # Пробуем отправить новое сообщение
-            bot.send_message(chat_id, "🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(или пропустите)", 
+            bot.send_message(chat_id, f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}", 
                             reply_markup=markup, parse_mode='HTML')
             bot.answer_callback_query(call.id)
     except Exception as e:
@@ -4500,21 +4537,34 @@ def random_genre_handler(call):
         data = call.data.split(":", 1)[1]
         
         if user_id not in user_random_state:
-            logger.warning(f"[RANDOM] State not found for user {user_id}")
-            bot.answer_callback_query(call.id, "Ошибка: сессия устарела. Начните заново /random")
-            return
+            logger.warning(f"[RANDOM] State not found for user {user_id}, reinitializing")
+            user_random_state[user_id] = {'step': 'genre', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
         
         if data == "skip":
-            genre = None
-            logger.info(f"[RANDOM] Genre skipped")
+            user_random_state[user_id]['genres'] = []
+            user_random_state[user_id]['step'] = 'director'
+            logger.info(f"[RANDOM] Genre skipped, moving to director")
+            _show_director_step(call, chat_id, user_id)
+        elif data == "done":
+            # Переход к следующему шагу
+            logger.info(f"[RANDOM] Genres confirmed, moving to director")
+            user_random_state[user_id]['step'] = 'director'
+            _show_director_step(call, chat_id, user_id)
         else:
-            genre = data
-            logger.info(f"[RANDOM] Genre selected: {genre}")
-        
-        user_random_state[user_id]['genre'] = genre
-        user_random_state[user_id]['step'] = 'director'
-        
-        _show_director_step(call, chat_id, user_id)
+            # Toggle жанра
+            genres = user_random_state[user_id].get('genres', [])
+            if data in genres:
+                genres.remove(data)
+                logger.info(f"[RANDOM] Genre removed: {data}")
+            else:
+                genres.append(data)
+                logger.info(f"[RANDOM] Genre added: {data}")
+            
+            user_random_state[user_id]['genres'] = genres
+            user_random_state[user_id]['step'] = 'genre'
+            
+            # Обновляем клавиатуру
+            _show_genre_step(call, chat_id, user_id)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_genre_handler: {e}", exc_info=True)
         try:
@@ -4523,19 +4573,57 @@ def random_genre_handler(call):
             pass
 
 def _show_director_step(call, chat_id, user_id):
-    """Показывает шаг выбора режиссёра"""
+    """Показывает шаг выбора режиссёра с учетом выбранных периодов и жанров"""
     try:
         logger.info(f"[RANDOM] Showing director step for user {user_id}")
+        
+        # Получаем состояние пользователя
+        state = user_random_state.get(user_id, {})
+        selected_directors = state.get('directors', [])
+        periods = state.get('periods', [])
+        genres = state.get('genres', [])
+        
+        # Формируем WHERE условие с учетом периодов и жанров
+        base_query = """
+            SELECT director, COUNT(*) as cnt
+            FROM movies
+            WHERE chat_id = %s AND watched = 0 
+            AND director IS NOT NULL AND director != 'Не указан' AND director != ''
+        """
+        params = [chat_id]
+        
+        # Добавляем фильтр по периодам, если они выбраны
+        if periods:
+            period_conditions = []
+            for p in periods:
+                if p == "До 1980":
+                    period_conditions.append("year < 1980")
+                elif p == "1980–1990":
+                    period_conditions.append("(year >= 1980 AND year <= 1990)")
+                elif p == "1990–2000":
+                    period_conditions.append("(year >= 1990 AND year <= 2000)")
+                elif p == "2000–2010":
+                    period_conditions.append("(year >= 2000 AND year <= 2010)")
+                elif p == "2010–2020":
+                    period_conditions.append("(year >= 2010 AND year <= 2020)")
+                elif p == "2020–сейчас":
+                    period_conditions.append("year >= 2020")
+            if period_conditions:
+                base_query += " AND (" + " OR ".join(period_conditions) + ")"
+        
+        # Добавляем фильтр по жанрам, если они выбраны
+        if genres:
+            genre_conditions = []
+            for genre in genres:
+                genre_conditions.append("genres ILIKE %s")
+                params.append(f"%{genre}%")
+            if genre_conditions:
+                base_query += " AND (" + " OR ".join(genre_conditions) + ")"
+        
+        base_query += " GROUP BY director ORDER BY cnt DESC LIMIT 10"
+        
         with db_lock:
-            cursor.execute("""
-                SELECT director, COUNT(*) as cnt
-                FROM movies
-                WHERE chat_id = %s AND watched = 0 
-                AND director IS NOT NULL AND director != 'Не указан' AND director != ''
-                GROUP BY director
-                ORDER BY cnt DESC
-                LIMIT 10
-            """, (chat_id,))
+            cursor.execute(base_query, params)
             rows = cursor.fetchall()
             directors = []
             for row in rows:
@@ -4547,17 +4635,25 @@ def _show_director_step(call, chat_id, user_id):
         markup = InlineKeyboardMarkup(row_width=2)
         if directors:
             for d in directors:
-                markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
+                label = f"✓ {d}" if d in selected_directors else d
+                markup.add(InlineKeyboardButton(label, callback_data=f"rand_dir:{d}"))
         
+        # Кнопка "Продолжить" появляется только если выбран хотя бы один режиссер
+        # "Пропустить" убирается, если выбран хотя бы один режиссер
+        if selected_directors:
+            markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_dir:done"))
+        else:
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
+        
+        selected_text = f"\n\nВыбрано: {', '.join(selected_directors)}" if selected_directors else ""
         try:
-            bot.edit_message_text("🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(или пропустите)", 
+            bot.edit_message_text(f"🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(можно выбрать несколько){selected_text}", 
                                 chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             bot.answer_callback_query(call.id)
-            logger.info(f"[RANDOM] Director step shown, user_id={user_id}")
+            logger.info(f"[RANDOM] Director step shown, user_id={user_id}, selected={len(selected_directors)}")
         except Exception as e:
             logger.error(f"[RANDOM] Error showing director step: {e}", exc_info=True)
-            bot.send_message(chat_id, "🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(или пропустите)", 
+            bot.send_message(chat_id, f"🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(можно выбрать несколько){selected_text}", 
                             reply_markup=markup, parse_mode='HTML')
             bot.answer_callback_query(call.id)
     except Exception as e:
@@ -4576,25 +4672,40 @@ def random_director_handler(call):
         data = call.data.split(":", 1)[1]
         
         if user_id not in user_random_state:
-            logger.warning(f"[RANDOM] State not found for user {user_id}")
-            bot.answer_callback_query(call.id, "Ошибка: сессия устарела. Начните заново /random")
-            return
+            logger.warning(f"[RANDOM] State not found for user {user_id}, reinitializing")
+            user_random_state[user_id] = {'step': 'director', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
         
         if data == "skip":
-            director = None
-            logger.info(f"[RANDOM] Director skipped")
+            user_random_state[user_id]['directors'] = []
+            user_random_state[user_id]['step'] = 'actor'
+            logger.info(f"[RANDOM] Director skipped, moving to actor")
+            # Инициализируем список актёров, если его нет
+            if 'actors' not in user_random_state[user_id]:
+                user_random_state[user_id]['actors'] = []
+            _show_actor_step(call, chat_id, user_id)
+        elif data == "done":
+            # Переход к следующему шагу
+            logger.info(f"[RANDOM] Directors confirmed, moving to actor")
+            user_random_state[user_id]['step'] = 'actor'
+            # Инициализируем список актёров, если его нет
+            if 'actors' not in user_random_state[user_id]:
+                user_random_state[user_id]['actors'] = []
+            _show_actor_step(call, chat_id, user_id)
         else:
-            director = data
-            logger.info(f"[RANDOM] Director selected: {director}")
-        
-        user_random_state[user_id]['director'] = director
-        user_random_state[user_id]['step'] = 'actor'
-        
-        # Инициализируем список актёров, если его нет
-        if 'actors' not in user_random_state[user_id]:
-            user_random_state[user_id]['actors'] = []
-        
-        _show_actor_step(call, chat_id, user_id)
+            # Toggle режиссера
+            directors = user_random_state[user_id].get('directors', [])
+            if data in directors:
+                directors.remove(data)
+                logger.info(f"[RANDOM] Director removed: {data}")
+            else:
+                directors.append(data)
+                logger.info(f"[RANDOM] Director added: {data}")
+            
+            user_random_state[user_id]['directors'] = directors
+            user_random_state[user_id]['step'] = 'director'
+            
+            # Обновляем клавиатуру
+            _show_director_step(call, chat_id, user_id)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_director_handler: {e}", exc_info=True)
         try:
@@ -4603,22 +4714,68 @@ def random_director_handler(call):
             pass
 
 def _show_actor_step(call, chat_id, user_id):
-    """Показывает шаг выбора актёра"""
+    """Показывает шаг выбора актёра с учетом всех выбранных фильтров"""
     try:
         logger.info(f"[RANDOM] Showing actor step for user {user_id}")
         
-        # Получаем список выбранных актёров
+        # Получаем состояние пользователя
         if user_id not in user_random_state:
             user_random_state[user_id] = {'actors': []}
-        selected_actors = user_random_state[user_id].get('actors', [])
+        state = user_random_state[user_id]
+        selected_actors = state.get('actors', [])
+        periods = state.get('periods', [])
+        genres = state.get('genres', [])
+        directors = state.get('directors', [])
+        
+        # Формируем WHERE условие с учетом всех фильтров
+        base_query = """
+            SELECT actors FROM movies
+            WHERE chat_id = %s AND watched = 0 
+            AND actors IS NOT NULL AND actors != '' AND actors != '—'
+        """
+        params = [chat_id]
+        
+        # Добавляем фильтр по периодам, если они выбраны
+        if periods:
+            period_conditions = []
+            for p in periods:
+                if p == "До 1980":
+                    period_conditions.append("year < 1980")
+                elif p == "1980–1990":
+                    period_conditions.append("(year >= 1980 AND year <= 1990)")
+                elif p == "1990–2000":
+                    period_conditions.append("(year >= 1990 AND year <= 2000)")
+                elif p == "2000–2010":
+                    period_conditions.append("(year >= 2000 AND year <= 2010)")
+                elif p == "2010–2020":
+                    period_conditions.append("(year >= 2010 AND year <= 2020)")
+                elif p == "2020–сейчас":
+                    period_conditions.append("year >= 2020")
+            if period_conditions:
+                base_query += " AND (" + " OR ".join(period_conditions) + ")"
+        
+        # Добавляем фильтр по жанрам, если они выбраны
+        if genres:
+            genre_conditions = []
+            for genre in genres:
+                genre_conditions.append("genres ILIKE %s")
+                params.append(f"%{genre}%")
+            if genre_conditions:
+                base_query += " AND (" + " OR ".join(genre_conditions) + ")"
+        
+        # Добавляем фильтр по режиссерам, если они выбраны
+        if directors:
+            director_conditions = []
+            for director in directors:
+                director_conditions.append("director = %s")
+                params.append(director)
+            if director_conditions:
+                base_query += " AND (" + " OR ".join(director_conditions) + ")"
         
         # Берем топ актёров по частоте
         actor_counts = {}
         with db_lock:
-            cursor.execute("""
-                SELECT actors FROM movies
-                WHERE chat_id = %s AND watched = 0 AND actors IS NOT NULL AND actors != '' AND actors != '—'
-            """, (chat_id,))
+            cursor.execute(base_query, params)
             for row in cursor.fetchall():
                 actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
                 if actors_str:
@@ -4670,9 +4827,8 @@ def random_actor_handler(call):
         data = call.data.split(":", 1)[1]
         
         if user_id not in user_random_state:
-            logger.warning(f"[RANDOM] State not found for user {user_id}")
-            bot.answer_callback_query(call.id, "Ошибка: сессия устарела. Начните заново /random")
-            return
+            logger.warning(f"[RANDOM] State not found for user {user_id}, reinitializing")
+            user_random_state[user_id] = {'step': 'actor', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
         
         if data == "skip":
             # Пропускаем выбор актёров - переходим к финалу
@@ -4756,17 +4912,25 @@ def _random_final(call, chat_id, user_id):
             if period_conditions:
                 query += " AND (" + " OR ".join(period_conditions) + ")"
         
-        # Фильтр по жанру
-        genre = state.get('genre')
-        if genre:
-            query += " AND genres ILIKE %s"
-            params.append(f"%{genre}%")
+        # Фильтр по жанрам (можно несколько, OR условие)
+        genres = state.get('genres', [])
+        if genres:
+            genre_conditions = []
+            for genre in genres:
+                genre_conditions.append("genres ILIKE %s")
+                params.append(f"%{genre}%")
+            if genre_conditions:
+                query += " AND (" + " OR ".join(genre_conditions) + ")"
         
-        # Фильтр по режиссёру
-        director = state.get('director')
-        if director:
-            query += " AND director = %s"
-            params.append(director)
+        # Фильтр по режиссёрам (можно несколько, OR условие)
+        directors = state.get('directors', [])
+        if directors:
+            director_conditions = []
+            for director in directors:
+                director_conditions.append("director = %s")
+                params.append(director)
+            if director_conditions:
+                query += " AND (" + " OR ".join(director_conditions) + ")"
         
         # Фильтр по актёрам (можно несколько, OR условие)
         actors = state.get('actors', [])
@@ -4813,13 +4977,25 @@ def _random_final(call, chat_id, user_id):
                 if period_conditions:
                     similar_query += " AND (" + " OR ".join(period_conditions) + ")"
             
-            if genre:
-                similar_query += " AND m.genres ILIKE %s"
-                similar_params.append(f"%{genre}%")
+            # Фильтр по жанрам (можно несколько, OR условие)
+            genres = state.get('genres', [])
+            if genres:
+                genre_conditions = []
+                for genre in genres:
+                    genre_conditions.append("m.genres ILIKE %s")
+                    similar_params.append(f"%{genre}%")
+                if genre_conditions:
+                    similar_query += " AND (" + " OR ".join(genre_conditions) + ")"
             
-            if director:
-                similar_query += " AND m.director = %s"
-                similar_params.append(director)
+            # Фильтр по режиссёрам (можно несколько, OR условие)
+            directors = state.get('directors', [])
+            if directors:
+                director_conditions = []
+                for director in directors:
+                    director_conditions.append("m.director = %s")
+                    similar_params.append(director)
+                if director_conditions:
+                    similar_query += " AND (" + " OR ".join(director_conditions) + ")"
             
             if actors:
                 actor_conditions = []
