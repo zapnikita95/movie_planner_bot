@@ -723,7 +723,7 @@ def add_and_announce(link, chat_id):
         
         text += f"\n<a href='{link}'>Кинопоиск</a>"
         try:
-        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
             logger.info(f"Сообщение отправлено: фильм уже в базе - {existing_title}")
         except Exception as e:
             logger.error(f"Ошибка при отправке сообщения (фильм уже в базе): {e}", exc_info=True)
