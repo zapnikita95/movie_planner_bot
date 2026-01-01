@@ -3530,50 +3530,31 @@ else:
     logger.info(f"Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
 
 if IS_RENDER:
-    # На Render - используем ТОЛЬКО webhook, НИКОГДА не polling!
-    logger.info("=" * 50)
-    logger.info("ОБНАРУЖЕНО ОКРУЖЕНИЕ RENDER - ИСПОЛЬЗУЕТСЯ WEBHOOK РЕЖИМ")
-    logger.info("POLLING НЕ БУДЕТ ЗАПУЩЕН!")
-    logger.info("=" * 50)
+    logger.info("=== RENDER MODE: WEBHOOK + FLASK SERVER ===")
     
-    # Очищаем старые webhook с обработкой ошибок
+    # Очистка и установка webhook
     try:
         bot.remove_webhook()
-        logger.info("Старые webhook очищены")
-    except Exception as e:
-        logger.warning(f"Не удалось очистить webhook: {e}")
+        time.sleep(1)  # небольшая пауза
+    except:
+        pass
     
     if RENDER_EXTERNAL_URL:
         webhook_url = RENDER_EXTERNAL_URL + '/webhook'
-        
-        # Список разрешённых обновлений для поддержки реакций
         allowed_updates = [
-            "message",
-            "edited_message",
-            "callback_query",
-            "message_reaction",
-            "message_reaction_count",
-            "chat_member",
-            "my_chat_member"
+            "message", "edited_message", "callback_query",
+            "message_reaction", "message_reaction_count",
+            "chat_member", "my_chat_member"
         ]
-        
-        try:
-            bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
-            logger.info(f"Webhook установлен с allowed_updates: {webhook_url}")
-        except Exception as e:
-            logger.error(f"Не удалось установить webhook: {e}", exc_info=True)
+        bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
+        logger.info(f"Webhook установлен: {webhook_url}")
     else:
-        logger.warning("RENDER_EXTERNAL_URL не установлен! Webhook не будет установлен.")
-        logger.warning("Убедитесь, что переменная RENDER_EXTERNAL_URL установлена в настройках Render.")
-    
-    # На Render используется gunicorn для запуска Flask приложения
-    # gunicorn moviebot:app -b 0.0.0.0:$PORT --timeout 120 --workers 1
-    logger.info(f"Окружение Render обнаружено (IS_RENDER={IS_RENDER}, PORT={PORT})")
-    logger.info(f"Зарегистрированные маршруты Flask: {[str(rule) for rule in app.url_map.iter_rules()]}")
-    logger.info("=" * 50)
-    logger.info("FLASK ПРИЛОЖЕНИЕ ГОТОВО К ЗАПУСКУ ЧЕРЕЗ GUNICORN")
-    logger.info("=" * 50)
-    # Flask app будет запущен через gunicorn, не нужно вызывать app.run()
+        logger.error("RENDER_EXTERNAL_URL не задан!")
+
+    # Запуск Flask сервера — ЭТО ГЛАВНОЕ
+    port = int(os.getenv('PORT', 10000))
+    logger.info(f"Flask сервер запускается на порту {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
     if IS_RENDER:
