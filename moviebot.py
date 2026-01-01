@@ -2171,13 +2171,63 @@ def settings_command(message):
         
         reactions = get_watched_reactions(chat_id)
         current = ', '.join(reactions['emoji'] + [f"custom:{cid}" for cid in reactions['custom']]) or "не настроено"
-        settings_msg = bot.reply_to(message, f"⚙️ Текущие реакции для просмотренных: {current}\n\nОтправьте эмодзи в ответ на это сообщение (обычные или кастомные), которые хотите использовать (можно несколько в одном сообщении). Для сброса — /settings reset")
-        user_settings_state[user_id] = {'adding_reactions': True, 'settings_msg_id': settings_msg.message_id}
+        
+        # Создаем inline keyboard с тремя режимами
+        from telebot import types
+        markup = types.InlineKeyboardMarkup(row_width=1)
+        markup.add(types.InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
+        markup.add(types.InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
+        markup.add(types.InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
+        
+        settings_msg = bot.reply_to(message, f"⚙️ <b>Настройки реакций</b>\n\nТекущие реакции для просмотренных: {current}\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
+        user_settings_state[user_id] = {'waiting_action': True, 'settings_msg_id': settings_msg.message_id}
         logger.info(f"Настройки открыты для пользователя {user_id}, message_id: {settings_msg.message_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
         try:
             bot.reply_to(message, "Произошла ошибка при обработке команды /settings")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
+def handle_settings_callback(call):
+    """Обработчик callback для кнопок настроек"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        action = call.data.split(":", 1)[1]  # "add", "replace" или "reset"
+        
+        if action == "reset":
+            # Сброс к значению по умолчанию
+            with db_lock:
+                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
+                conn.commit()
+            bot.edit_message_text("✅ Реакции сброшены к значению по умолчанию (✅)", call.message.chat.id, call.message.message_id)
+            logger.info(f"Реакции сброшены для чата {chat_id}")
+            if user_id in user_settings_state:
+                del user_settings_state[user_id]
+            return
+        
+        # Для add и replace - сохраняем режим и просим отправить эмодзи
+        user_settings_state[user_id] = {
+            'adding_reactions': True,
+            'settings_msg_id': call.message.message_id,
+            'action': action  # "add" или "replace"
+        }
+        
+        mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
+        bot.edit_message_text(
+            f"⚙️ <b>Настройки реакций</b>\n\n📝 Отправьте эмодзи в ответ на это сообщение.\n\nНовые реакции будут {mode_text}.",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode='HTML'
+        )
+        logger.info(f"[SETTINGS] Пользователь {user_id} выбрал режим: {action}")
+    except Exception as e:
+        logger.error(f"[SETTINGS] Ошибка в handle_settings_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
         except:
             pass
 
@@ -2189,6 +2239,7 @@ def add_reactions(message):
     # Проверяем, что это ответ на сообщение settings
     state = user_settings_state.get(user_id, {})
     settings_msg_id = state.get('settings_msg_id')
+    action = state.get('action', 'replace')  # По умолчанию replace
     
     if not message.reply_to_message:
         bot.reply_to(message, "⚠️ Пожалуйста, отправьте эмодзи в ответ на сообщение бота о настройках.")
@@ -2198,7 +2249,7 @@ def add_reactions(message):
         bot.reply_to(message, "⚠️ Пожалуйста, отправьте эмодзи в ответ на сообщение бота о настройках.")
         return
     
-    logger.info(f"[SETTINGS] Получен ответ на settings от user_id={user_id}, reply_to_message_id={message.reply_to_message.message_id}, settings_msg_id={settings_msg_id}")
+    logger.info(f"[SETTINGS] Получен ответ на settings от user_id={user_id}, action={action}, reply_to_message_id={message.reply_to_message.message_id}, settings_msg_id={settings_msg_id}")
     
     # Собираем обычные эмодзи и custom_id из сообщения
     emojis = []
@@ -2228,9 +2279,9 @@ def add_reactions(message):
                 custom_id = str(entity.custom_emoji_id)
                 custom_ids.append(custom_id)
     
-    all_reactions = emojis + [f"custom:{cid}" for cid in custom_ids]
+    new_reactions = emojis + [f"custom:{cid}" for cid in custom_ids]
     
-    if not all_reactions:
+    if not new_reactions:
         bot.reply_to(message, "❌ Не нашёл эмодзи в вашем сообщении. Попробуйте отправить эмодзи снова.")
         logger.warning(f"[SETTINGS] Не найдено эмодзи в сообщении от user_id={user_id}, text={message.text}")
         return
@@ -2246,6 +2297,16 @@ def add_reactions(message):
                 except:
                     conn.rollback()
                 
+                if action == "add":
+                    # Добавляем к текущим
+                    current_reactions = get_watched_reactions(chat_id)
+                    current_emoji = current_reactions['emoji']
+                    current_custom = [f"custom:{cid}" for cid in current_reactions['custom']]
+                    all_reactions = list(set(current_emoji + current_custom + new_reactions))  # Убираем дубликаты
+                else:
+                    # Заменяем полностью
+                    all_reactions = new_reactions
+                
                 cursor.execute('''
                     INSERT INTO settings (chat_id, key, value)
                     VALUES (%s, %s, %s)
@@ -2254,8 +2315,9 @@ def add_reactions(message):
                 conn.commit()
                 
                 reactions_str = ', '.join(all_reactions)
-                bot.reply_to(message, f"✅ Готово! Реакции для просмотренных: {reactions_str}")
-                logger.info(f"[SETTINGS] Реакции сохранены для chat_id={chat_id}: {reactions_str}")
+                action_text = "добавлены к текущим" if action == "add" else "заменены"
+                bot.reply_to(message, f"✅ Готово! Реакции {action_text}:\n{reactions_str}")
+                logger.info(f"[SETTINGS] Реакции сохранены для chat_id={chat_id} (режим: {action}): {reactions_str}")
             except Exception as db_error:
                 conn.rollback()
                 logger.error(f"[SETTINGS] Ошибка БД при сохранении реакций: {db_error}", exc_info=True)
