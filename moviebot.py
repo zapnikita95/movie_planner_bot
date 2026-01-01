@@ -3523,14 +3523,16 @@ logger.info(f"[DEBUG] Flask маршруты зарегистрированы: {
 logger.info("[DEBUG] Перед определением IS_RENDER")
 
 try:
-    # Определяем, где запускается бот: на Render или локально
-    # Проверяем несколько признаков Render окружения
+    # Определяем, где запускается бот: на Render, Railway или локально
+    # Проверяем несколько признаков облачных окружений
     RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
     RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
     RENDER = os.getenv('RENDER')
-    PORT = os.getenv('PORT')  # На Render всегда есть PORT
+    RAILWAY_ENVIRONMENT = os.getenv('RAILWAY_ENVIRONMENT')
+    RAILWAY_PUBLIC_DOMAIN = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+    PORT = os.getenv('PORT')  # На Render и Railway всегда есть PORT
 
-    logger.info(f"[DEBUG] Переменные окружения: PORT={PORT}, RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}, RENDER_SERVICE_ID={RENDER_SERVICE_ID}, RENDER={RENDER}")
+    logger.info(f"[DEBUG] Переменные окружения: PORT={PORT}, RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}, RAILWAY_ENVIRONMENT={RAILWAY_ENVIRONMENT}, RAILWAY_PUBLIC_DOMAIN={RAILWAY_PUBLIC_DOMAIN}")
 except Exception as e:
     logger.error(f"[DEBUG] Ошибка при получении переменных окружения: {e}", exc_info=True)
     raise
@@ -3539,24 +3541,38 @@ except Exception as e:
 IS_RENDER_PATH = '/opt/render' in sys.executable or '/opt/render' in str(sys.path)
 logger.info(f"[DEBUG] IS_RENDER_PATH={IS_RENDER_PATH}, sys.executable={sys.executable}")
 
-# Явная переменная для отключения polling (можно установить в Render env vars)
+# Явная переменная для отключения polling (можно установить в env vars)
 USE_POLLING = os.getenv('USE_POLLING', '').lower() in ('true', '1', 'yes')
 
-# ВАЖНО: Если есть PORT или путь Render, это точно Render
-# Polling НИКОГДА не должен запускаться на Render, если не установлена явно USE_POLLING=True
-IS_RENDER = bool(PORT or RENDER_EXTERNAL_URL or RENDER_SERVICE_ID or RENDER or IS_RENDER_PATH)
+# ВАЖНО: Если есть PORT или признаки облачного окружения, это production
+# Polling НИКОГДА не должен запускаться в production, если не установлена явно USE_POLLING=True
+IS_PRODUCTION = bool(PORT or RENDER_EXTERNAL_URL or RENDER_SERVICE_ID or RENDER or IS_RENDER_PATH or RAILWAY_ENVIRONMENT or RAILWAY_PUBLIC_DOMAIN)
+IS_RENDER = IS_PRODUCTION  # Для обратной совместимости
 
-logger.info(f"[DEBUG] IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
+logger.info(f"[DEBUG] IS_PRODUCTION={IS_PRODUCTION}, IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
 
-# Если это Render, принудительно отключаем polling (если не установлена явно USE_POLLING)
-if IS_RENDER and not USE_POLLING:
-    IS_RENDER = True  # Гарантируем, что это Render
-    logger.info(f"[DEBUG] Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}")
+# Если это production, принудительно отключаем polling (если не установлена явно USE_POLLING)
+if IS_PRODUCTION and not USE_POLLING:
+    IS_PRODUCTION = True  # Гарантируем, что это production
+    IS_RENDER = True  # Для обратной совместимости
+    logger.info(f"[DEBUG] Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, RAILWAY_ENVIRONMENT={bool(RAILWAY_ENVIRONMENT)}, IS_PRODUCTION={IS_PRODUCTION}")
 else:
-    logger.info(f"[DEBUG] Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
+    logger.info(f"[DEBUG] Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, RAILWAY_ENVIRONMENT={bool(RAILWAY_ENVIRONMENT)}, IS_PRODUCTION={IS_PRODUCTION}, USE_POLLING={USE_POLLING}")
 
-if IS_RENDER:
-    logger.info("=== RENDER MODE: WEBHOOK + FLASK SERVER ===")
+if IS_PRODUCTION:
+    # Определяем платформу и URL для webhook
+    if RAILWAY_PUBLIC_DOMAIN:
+        # Railway
+        webhook_base_url = f"https://{RAILWAY_PUBLIC_DOMAIN}"
+        logger.info("=== RAILWAY MODE: WEBHOOK + FLASK SERVER ===")
+    elif RENDER_EXTERNAL_URL:
+        # Render
+        webhook_base_url = RENDER_EXTERNAL_URL
+        logger.info("=== RENDER MODE: WEBHOOK + FLASK SERVER ===")
+    else:
+        # Другая облачная платформа с PORT
+        webhook_base_url = None
+        logger.info("=== PRODUCTION MODE: WEBHOOK + FLASK SERVER ===")
     
     # Очистка и установка webhook
     try:
@@ -3566,8 +3582,8 @@ if IS_RENDER:
     except Exception as e:
         logger.warning(f"Ошибка при remove_webhook: {e}")
     
-    if RENDER_EXTERNAL_URL:
-        webhook_url = RENDER_EXTERNAL_URL + '/webhook'
+    if webhook_base_url:
+        webhook_url = webhook_base_url + '/webhook'
         allowed_updates = [
             "message", "edited_message", "callback_query",
             "message_reaction", "message_reaction_count",
@@ -3579,7 +3595,7 @@ if IS_RENDER:
         except Exception as e:
             logger.error(f"ОШИБКА при set_webhook: {e}")
     else:
-        logger.error("RENDER_EXTERNAL_URL НЕ ЗАДАН! Бот не будет получать обновления!")
+        logger.warning("Webhook URL не определён! Установите RENDER_EXTERNAL_URL или RAILWAY_PUBLIC_DOMAIN")
 
     # КЛЮЧЕВОЕ: запускаем Flask сервер
     port = int(os.getenv('PORT', 10000))
