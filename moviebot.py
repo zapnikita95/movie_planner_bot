@@ -1653,7 +1653,16 @@ def random_final(call):
                 query = "SELECT id, kp_id, title, year, genres, description, director, actors, link FROM movies WHERE chat_id = %s AND watched = 0 AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())"
                 params = [chat_id, chat_id]
 
-                # Обработка множественного выбора периодов
+                # Обработка year_range (числовой диапазон от rand_year)
+                if state.get('year_range') is not None:
+                    year_range = state['year_range']
+                    if year_range:
+                        start, end = year_range
+                        query += " AND (year >= %s AND year <= %s)"
+                        params.append(start)
+                        params.append(end)
+
+                # Обработка множественного выбора периодов (текстовые периоды от rand_period)
                 if state.get('periods') and len(state['periods']) > 0:
                     period_conditions = []
                     for p in state['periods']:
