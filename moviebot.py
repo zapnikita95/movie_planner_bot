@@ -224,6 +224,23 @@ try:
 except Exception as e:
     logger.debug(f"Миграция cinema_votes: {e}")
 
+# Пересоздаём уникальные индексы после миграции (на случай, если они были потеряны)
+try:
+    # Удаляем старый индекс, если он существует
+    cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_key')
+    cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_idx')
+    # Создаём уникальный индекс заново
+    cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS movies_chat_id_kp_id_unique ON movies (chat_id, kp_id)')
+    logger.info("Уникальный индекс movies(chat_id, kp_id) пересоздан")
+except Exception as e:
+    logger.warning(f"Ошибка при пересоздании уникального индекса movies: {e}")
+    # Если индекс не создался, пробуем создать constraint напрямую
+    try:
+        cursor.execute('ALTER TABLE movies ADD CONSTRAINT movies_chat_id_kp_id_unique UNIQUE (chat_id, kp_id)')
+        logger.info("Уникальный constraint movies(chat_id, kp_id) создан")
+    except Exception as e2:
+        logger.debug(f"Constraint уже существует или ошибка: {e2}")
+
 # Индексы для скорости
 cursor.execute('CREATE INDEX IF NOT EXISTS idx_movies_chat_id ON movies (chat_id)')
 cursor.execute('CREATE INDEX IF NOT EXISTS idx_movies_link ON movies (link)')
@@ -827,6 +844,13 @@ def handle_reaction(update):
         
         if is_watched:
             link = bot_messages.get(message_id)
+            if not link:
+                # Проверяем также plan_notification_messages
+                plan_data = plan_notification_messages.get(message_id)
+                if plan_data:
+                    link = plan_data.get('link')
+                    logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
+            
             if link:
                 try:
                     logger.info(f"[REACTION] Обрабатываем реакцию для фильма с ссылкой {link}")
@@ -836,18 +860,30 @@ def handle_reaction(update):
                         kp_id = match.group(2)
                         film_id = None
                         title = None
-                        with db_lock:
-                            cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                            conn.commit()
-                            
-                            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                            row = cursor.fetchone()
-                            if row:
-                                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                                title = row.get('title') if isinstance(row, dict) else row[1]
-                                logger.info(f"[REACTION] Фильм {title} (ID: {film_id}, kp_id: {kp_id}) отмечен как просмотренный пользователем {user_id}")
-                            else:
-                                logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в базе")
+                        try:
+                            with db_lock:
+                                # Сначала обновляем watched
+                                cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                                updated_count = cursor.rowcount
+                                conn.commit()
+                                logger.info(f"[REACTION] Обновлено записей: {updated_count} для kp_id={kp_id}, chat_id={chat_id}")
+                                
+                                # Затем получаем данные фильма
+                                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                                row = cursor.fetchone()
+                                if row:
+                                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                                    title = row.get('title') if isinstance(row, dict) else row[1]
+                                    logger.info(f"[REACTION] Фильм {title} (ID: {film_id}, kp_id: {kp_id}) отмечен как просмотренный пользователем {user_id}")
+                                else:
+                                    logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в базе после обновления")
+                        except Exception as db_error:
+                            logger.error(f"[REACTION] Ошибка БД при обработке реакции: {db_error}", exc_info=True)
+                            try:
+                                with db_lock:
+                                    conn.rollback()
+                            except:
+                                pass
                     else:
                         logger.warning(f"[REACTION] Не удалось извлечь kp_id из ссылки: {link}")
                     
@@ -858,11 +894,15 @@ def handle_reaction(update):
                             msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
                             # Сохраняем связь message_id -> film_id для обработки оценки
                             rating_messages[msg.message_id] = film_id
-                            logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}")
+                            logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}, message_id={msg.message_id}, film_id={film_id}")
                         except Exception as send_error:
                             logger.error(f"[REACTION] Ошибка при отправке сообщения: {send_error}", exc_info=True)
+                    else:
+                        logger.warning(f"[REACTION] Не удалось отправить сообщение: film_id={film_id}, title={title}")
                 except Exception as e:
-                    logger.error(f"Ошибка реакции: {e}", exc_info=True)
+                    logger.error(f"[REACTION] Ошибка реакции: {e}", exc_info=True)
+            else:
+                logger.warning(f"[REACTION] Ссылка не найдена для message_id={message_id} в bot_messages или plan_notification_messages")
 
 # Обработка оценок текстом
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 1 <= int(m.text) <= 10 and m.reply_to_message)
