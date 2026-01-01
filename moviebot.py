@@ -1031,6 +1031,13 @@ def search_films(query, page=1):
         items = data.get("films", []) or data.get("items", [])
         total_pages = data.get("totalPages", 1) or data.get("pagesCount", 1)
         logger.info(f"[SEARCH] Найдено результатов: {len(items)}, всего страниц: {total_pages}")
+        
+        # Логируем структуру первого элемента для отладки
+        if items and len(items) > 0:
+            first_item = items[0]
+            logger.info(f"[SEARCH] Структура первого элемента: {list(first_item.keys()) if isinstance(first_item, dict) else 'не словарь'}")
+            logger.info(f"[SEARCH] Пример данных: nameRu={first_item.get('nameRu')}, nameEn={first_item.get('nameEn')}, kinopoiskId={first_item.get('kinopoiskId')}, filmId={first_item.get('filmId')}")
+        
         return items, total_pages
     except requests.exceptions.RequestException as e:
         logger.error(f"[SEARCH] Ошибка запроса: {e}")
