@@ -52,6 +52,7 @@ scheduler.start()
 # Состояния планирования
 user_plan_state = {}  # user_id: {'step': int, 'link': str, 'type': str, 'day_or_date': str}
 bot_messages = {}  # message_id: link (храним карточки бота)
+list_messages = {}  # message_id: chat_id (храним сообщения /list для обработки ответов)
 # Состояния настроек
 user_settings_state = {}  # user_id: {'waiting_emoji': bool}
 # Состояния очистки
@@ -949,14 +950,70 @@ def list_movies(message):
                 else:
                     avg = None
                 rate_str = f" 🌟 {avg:.1f}/10" if avg else ""
-                text += f"• <b>{title}</b> ({year}){rate_str}\n{link}\n\n"
+                text += f"• <b>{title}</b> ({year}){rate_str} [ID: {film_id}]\n{link}\n\n"
         
-        bot.reply_to(message, text, parse_mode='HTML', disable_web_page_preview=True)
+        text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
+        msg = bot.reply_to(message, text, parse_mode='HTML', disable_web_page_preview=True)
+        # Сохраняем message_id для обработки ответов
+        list_messages[msg.message_id] = chat_id
         logger.info(f"✅ Ответ на /list отправлен пользователю {message.from_user.id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /list: {e}", exc_info=True)
         try:
             bot.reply_to(message, "Произошла ошибка при обработке команды /list")
+        except:
+            pass
+
+# Обработчик ответов на /list для отметки фильмов как просмотренных
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in list_messages)
+def handle_list_reply(message):
+    """Обрабатывает ответ на сообщение /list с ID фильмов для отметки как просмотренных"""
+    try:
+        chat_id = list_messages.get(message.reply_to_message.message_id)
+        if not chat_id:
+            return
+        
+        # Парсим ID фильмов из сообщения (могут быть через запятую, пробел, перенос строки)
+        text = message.text.strip()
+        # Извлекаем все числа из текста
+        film_ids = re.findall(r'\d+', text)
+        
+        if not film_ids:
+            bot.reply_to(message, "Не найдены ID фильмов. Отправьте список ID через запятую или пробел.")
+            return
+        
+        marked_count = 0
+        with db_lock:
+            for film_id_str in film_ids:
+                try:
+                    film_id = int(film_id_str)
+                    # Проверяем, что фильм существует и не просмотрен
+                    cursor.execute('SELECT id, title, watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    row = cursor.fetchone()
+                    if row:
+                        film_id_db = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
+                        watched = row.get('watched') if isinstance(row, dict) else row[2]
+                        
+                        if not watched:
+                            cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id_db, chat_id))
+                            marked_count += 1
+                            logger.info(f"Фильм {film_id_db} ({title}) отмечен как просмотренный в чате {chat_id}")
+                except ValueError:
+                    continue
+                except Exception as e:
+                    logger.error(f"Ошибка при отметке фильма {film_id_str}: {e}", exc_info=True)
+                    continue
+            
+            if marked_count > 0:
+                conn.commit()
+                bot.reply_to(message, f"✅ Отмечено как просмотрено: {marked_count} фильм(ов).\n\nТеперь вы можете оценить их командой /rate")
+            else:
+                bot.reply_to(message, "Не удалось отметить фильмы. Проверьте, что ID корректны и фильмы не были просмотрены ранее.")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в handle_list_reply: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке списка фильмов.")
         except:
             pass
 
@@ -1861,7 +1918,7 @@ def plan_handler(message):
         user_id = message.from_user.id
         text = message.text.lower().replace('/plan', '').strip()
         
-        link_match = re.search(r'(https%s://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', text)
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', text)
         link = link_match.group(1) if link_match else None
         
         plan_type = 'home' if 'дома' in text else 'cinema' if 'кино' in text else None
@@ -1921,12 +1978,12 @@ def get_plan_link(message):
     link = None
     
     if message.reply_to_message:
-        link_match = re.search(r'(https%s://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
         if link_match:
             link = link_match.group(0)
     
     if not link:
-        link_match = re.search(r'(https%s://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.text)
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.text)
         if link_match:
             link = link_match.group(0)
     
