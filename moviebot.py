@@ -30,8 +30,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TOKEN = os.getenv('BOT_TOKEN')
+if not TOKEN:
+    logger.error("BOT_TOKEN не задан! Бот не может работать.")
+    raise ValueError("Добавьте BOT_TOKEN в environment variables")
+
 bot = telebot.TeleBot(TOKEN)
-bot.remove_webhook()  # очищает старые webhook, если были
+# Очищаем старые webhook, если были (с обработкой ошибок)
+try:
+    bot.remove_webhook()
+    logger.info("Старые webhook очищены")
+except Exception as e:
+    logger.warning(f"Не удалось очистить webhook (возможно, токен неверный или еще не установлен): {e}")
 
 # Токен Kinopoisk API
 KP_TOKEN = os.getenv('KP_TOKEN')
@@ -2320,12 +2329,20 @@ if IS_RENDER:
     logger.info("POLLING НЕ БУДЕТ ЗАПУЩЕН!")
     logger.info("=" * 50)
     
-    bot.remove_webhook()
+    # Очищаем старые webhook с обработкой ошибок
+    try:
+        bot.remove_webhook()
+        logger.info("Старые webhook очищены")
+    except Exception as e:
+        logger.warning(f"Не удалось очистить webhook: {e}")
     
     if RENDER_EXTERNAL_URL:
         webhook_url = RENDER_EXTERNAL_URL + '/webhook'
-        bot.set_webhook(url=webhook_url)
-        logger.info(f"Webhook установлен: {webhook_url}")
+        try:
+            bot.set_webhook(url=webhook_url)
+            logger.info(f"Webhook установлен: {webhook_url}")
+        except Exception as e:
+            logger.error(f"Не удалось установить webhook: {e}")
     else:
         logger.warning("RENDER_EXTERNAL_URL не установлен! Webhook не будет установлен.")
         logger.warning("Убедитесь, что переменная RENDER_EXTERNAL_URL установлена в настройках Render.")
@@ -2344,7 +2361,11 @@ else:
         logger.error("ОШИБКА: IS_RENDER=True, но код попал в блок else! Polling НЕ будет запущен!")
     elif __name__ == '__main__':
         logger.info("Локальное окружение - будет использован polling")
-        bot.remove_webhook()
+        try:
+            bot.remove_webhook()
+            logger.info("Старые webhook очищены")
+        except Exception as e:
+            logger.warning(f"Не удалось очистить webhook: {e}")
         logger.info("Локальный запуск: используется polling")
         bot.infinity_polling()
     else:
