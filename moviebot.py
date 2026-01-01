@@ -2243,11 +2243,18 @@ def settings_command(message):
         
         current = get_watched_emojis()
         
+        # Создаем inline keyboard с тремя режимами
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
+        markup.add(InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
+        markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
+        
         sent = bot.send_message(chat_id,
-            f"⚙️ Текущие реакции для просмотренных: {current}\n\n"
-            "Отправьте эмодзи в ответ на это сообщение (можно несколько). "
-            "Для сброса — /settings reset",
-            reply_markup=None)
+            f"⚙️ <b>Настройки реакций</b>\n\n"
+            f"Текущие реакции: {current}\n\n"
+            f"Выберите действие:",
+            reply_markup=markup,
+            parse_mode='HTML')
         
         # Сохраняем состояние
         user_settings_state[user_id] = {
