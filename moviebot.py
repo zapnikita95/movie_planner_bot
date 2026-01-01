@@ -2330,13 +2330,71 @@ def handle_settings_callback(call):
         except:
             pass
 
-# Обработка ответа с эмодзи на сообщение /settings (упрощенная версия)
-# Этот обработчик срабатывает только если НЕ установлен режим add/replace (т.е. если пользователь напрямую отправил эмодзи без выбора режима)
+# Обработка ответа с эмодзи на сообщение /settings
+# Этот обработчик обрабатывает ответы на settings с учетом режимов add/replace
+@bot.message_handler(func=lambda m: m.reply_to_message and m.from_user.id in user_settings_state, priority=10)
+def handle_settings_emojis(message):
+    user_id = message.from_user.id
+    state = user_settings_state.get(user_id)
+    
+    if not state or message.reply_to_message.message_id != state.get('settings_msg_id'):
+        return  # не наш реплай
+    
+    logger.info(f"[SETTINGS] Получен ответ с эмодзи от {user_id}, state={state}")
+    
+    # Извлекаем все эмодзи из текста
+    import re
+    emojis = re.findall(r'[\U0001F300-\U0001F9FF\U0001F600-\U0001F64F\U0001F680-\U0001F6FF\U00002600-\U000027BF\U0001F900-\U0001F9FF]+', message.text or "")
+    
+    if not emojis:
+        bot.reply_to(message, "⚠️ Не найдено эмодзи в сообщении. Отправьте только эмодзи (можно несколько).")
+        return
+    
+    emojis_str = ''.join(set(''.join(emojis)))  # убираем дубли
+    
+    # Проверяем режим (add или replace)
+    action = state.get('action', 'replace')
+    
+    if action == "add":
+        # Добавляем к текущим
+        current_emojis = get_watched_emojis()
+        emojis_str = current_emojis + emojis_str
+        # Убираем дубликаты, сохраняя порядок
+        seen = set()
+        emojis_str = ''.join(c for c in emojis_str if c not in seen and not seen.add(c))
+        action_text = "добавлены к текущим"
+    else:
+        # Заменяем полностью
+        action_text = "заменены"
+    
+    # Сохраняем в БД (глобально, chat_id = -1)
+    with db_lock:
+        try:
+            cursor.execute("""
+                INSERT INTO settings (chat_id, key, value) 
+                VALUES (-1, 'watched_emoji', %s) 
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (emojis_str,))
+            conn.commit()
+            logger.info(f"[SETTINGS] Эмодзи сохранены (режим: {action}): {emojis_str}")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Ошибка сохранения эмодзи: {e}", exc_info=True)
+            bot.reply_to(message, "❌ Ошибка сохранения. Попробуй позже.")
+            return
+    
+    bot.reply_to(message, f"✅ Реакции {action_text}:\n{emojis_str}")
+    
+    # Очищаем состояние
+    if user_id in user_settings_state:
+        del user_settings_state[user_id]
+
+# Старый обработчик (оставляем для обратной совместимости, но он не должен срабатывать)
 @bot.message_handler(func=lambda m: (
     m.reply_to_message and 
     m.from_user.id in user_settings_state and 
     not user_settings_state[m.from_user.id].get('adding_reactions')  # Только если НЕ выбран режим add/replace
-))
+), priority=9)  # Немного ниже приоритет
 def handle_settings_reply(message):
     user_id = message.from_user.id
     state = user_settings_state.get(user_id)
