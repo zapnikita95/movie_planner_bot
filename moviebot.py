@@ -2263,13 +2263,19 @@ def settings_command(message):
         sent = bot.send_message(chat_id,
             f"⚙️ <b>Настройки реакций</b>\n\n"
             f"Текущие реакции: {current}\n\n"
-            f"Выберите действие:",
+            f"Выберите действие или поставьте реакцию на это сообщение — она автоматически добавится к текущим.",
             reply_markup=markup,
             parse_mode='HTML')
         
         # Сохраняем состояние
         user_settings_state[user_id] = {
             'settings_msg_id': sent.message_id,
+            'chat_id': chat_id
+        }
+        # Сохраняем информацию о сообщении settings для обработки реакций
+        settings_messages[sent.message_id] = {
+            'user_id': user_id,
+            'action': 'add',  # По умолчанию добавляем
             'chat_id': chat_id
         }
         logger.info(f"Настройки открыты для {user_id}, msg_id: {sent.message_id}")
