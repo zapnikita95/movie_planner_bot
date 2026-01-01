@@ -1578,40 +1578,61 @@ def handle_random_plan_reply(message):
         reply_msg_id = message.reply_to_message.message_id
         link = bot_messages.get(reply_msg_id)
         
+        logger.info(f"[RANDOM PLAN] Reply received: reply_msg_id={reply_msg_id}, link={link}, text={message.text}")
+        
         if not link:
+            logger.warning(f"[RANDOM PLAN] Link not found for message_id={reply_msg_id}, bot_messages keys: {list(bot_messages.keys())[:10]}")
             return
         
-        text = message.text.strip().lower()
+        original_text = message.text or ''
+        text = original_text.lower().strip()
         chat_id = message.chat.id
         user_id = message.from_user.id
         
-        logger.info(f"[RANDOM PLAN] Reply received: text={text}, link={link}, user_id={user_id}")
+        logger.info(f"[RANDOM PLAN] Processing: text='{text}', link={link}, user_id={user_id}")
         
-        # Парсим тип планирования и дату
-        plan_type = None
-        day_or_date = None
-        
-        # Проверяем "дома" или "в кино"
-        if 'дома' in text:
-            plan_type = 'home'
-            # Убираем "дома" из текста для парсинга даты
-            day_or_date = text.replace('дома', '').strip()
-        elif 'в кино' in text or 'кино' in text:
-            plan_type = 'cinema'
-            # Убираем "в кино" из текста для парсинга даты
-            day_or_date = re.sub(r'в\s*кино|кино', '', text).strip()
+        # Определяем тип планирования
+        plan_type = 'home' if 'дома' in text else 'cinema' if ('в кино' in text or 'кино' in text) else None
+        logger.info(f"[RANDOM PLAN] plan_type={plan_type}")
         
         if not plan_type:
-            # Если тип не указан, пытаемся определить по контексту или используем "дома" по умолчанию
-            plan_type = 'home'
-            day_or_date = text
+            bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+            return
+        
+        # Парсим дату/день недели используя ту же логику, что и в plan_handler
+        day_or_date = None
+        
+        # Сначала ищем день недели (для обоих режимов)
+        sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
+        for phrase in sorted_phrases:
+            if phrase in text:
+                day_or_date = phrase
+                break
+        
+        # Если день недели не найден, ищем дату (для обоих режимов)
+        if not day_or_date:
+            # Пробуем разные форматы даты: "15 января", "с 20 февраля", "15.01", "15/01", "15.01.25", "15.01.2025"
+            # Убираем предлоги "с", "на" и т.д. перед датой
+            date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
+            if date_match:
+                day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+                logger.info(f"[RANDOM PLAN] Найдена дата (текстовый формат): {day_or_date}")
+            else:
+                # Формат "15.01", "15/01", "15.01.25", "15.01.2025", "15/01/25", "15/01/2025"
+                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                if date_match:
+                    day_num = int(date_match.group(1))
+                    month_num = int(date_match.group(2))
+                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                        logger.info(f"[RANDOM PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         if not day_or_date:
-            # Если дата не указана, используем "сегодня" для дома или "суббота" для кино
-            if plan_type == 'home':
-                day_or_date = 'сегодня'
-            else:
-                day_or_date = 'суббота'
+            bot.reply_to(message, "Не указан день/дата. Для дома укажите день недели (пн, вт, ср, чт, пт, сб, вс или 'в сб'), для кино - день недели или дату (15 января).")
+            logger.warning(f"[RANDOM PLAN] Day/date not found in text: '{text}'")
+            return
         
         logger.info(f"[RANDOM PLAN] Parsed: plan_type={plan_type}, day_or_date={day_or_date}")
         
@@ -1628,6 +1649,8 @@ def handle_random_plan_reply(message):
             return
         elif result:
             logger.info(f"[RANDOM PLAN] Plan created successfully for link={link}")
+        else:
+            logger.warning(f"[RANDOM PLAN] process_plan returned False for link={link}")
     except Exception as e:
         logger.error(f"[RANDOM PLAN] Error processing plan reply: {e}", exc_info=True)
         try:
