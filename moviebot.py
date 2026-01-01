@@ -1761,6 +1761,74 @@ def handle_cinema_vote(message):
         bot.reply_to(message, "Ответ принят!")
         logger.info(f"Голос '{vote}' сохранён для фильма {film_id} от пользователя {user_id}")
 
+# Состояние пагинации для /list
+user_list_state = {}  # user_id: {'page': int, 'total_pages': int, 'chat_id': int}
+
+def show_list_page(chat_id, user_id, page=1, message_id=None):
+    """Показывает страницу списка фильмов"""
+    try:
+        MOVIES_PER_PAGE = 15
+        
+        with db_lock:
+            # Получаем все непросмотренные фильмы, отсортированные по алфавиту
+            cursor.execute('SELECT title, year, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
+            rows = cursor.fetchall()
+        
+        if not rows:
+            text = "⏳ Нет непросмотренных фильмов!"
+            markup = None
+        else:
+            total_movies = len(rows)
+            total_pages = (total_movies + MOVIES_PER_PAGE - 1) // MOVIES_PER_PAGE  # Округление вверх
+            page = max(1, min(page, total_pages))  # Ограничиваем страницу
+            
+            # Вычисляем диапазон фильмов для текущей страницы
+            start_idx = (page - 1) * MOVIES_PER_PAGE
+            end_idx = min(start_idx + MOVIES_PER_PAGE, total_movies)
+            page_movies = rows[start_idx:end_idx]
+            
+            # Формируем текст страницы
+            text = f"⏳ Непросмотренные фильмы (страница {page}/{total_pages}):\n\n"
+            for row in page_movies:
+                title = row.get('title') if isinstance(row, dict) else row[0]
+                year = row.get('year') if isinstance(row, dict) else (row[1] if len(row) > 1 else '—')
+                link = row.get('link') if isinstance(row, dict) else (row[2] if len(row) > 2 else '')
+                text += f"• <b>{title}</b> ({year})\n<a href='{link}'>{link}</a>\n\n"
+            
+            text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
+            
+            # Создаем кнопки пагинации
+            markup = InlineKeyboardMarkup(row_width=10)
+            buttons = []
+            for p in range(1, total_pages + 1):
+                label = f"•{p}" if p == page else str(p)
+                buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
+            # Разбиваем кнопки на строки по 10 штук
+            for i in range(0, len(buttons), 10):
+                markup.row(*buttons[i:i+10])
+            
+            # Сохраняем состояние
+            user_list_state[user_id] = {
+                'page': page,
+                'total_pages': total_pages,
+                'chat_id': chat_id
+            }
+        
+        if message_id:
+            try:
+                bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
+            except Exception as e:
+                logger.error(f"[LIST] Ошибка редактирования сообщения: {e}", exc_info=True)
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
+        else:
+            msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
+            # Сохраняем message_id для обработки ответов
+            list_messages[msg.message_id] = chat_id
+            return msg.message_id
+    except Exception as e:
+        logger.error(f"[LIST] Ошибка в show_list_page: {e}", exc_info=True)
+        return None
+
 # /list — только непросмотренные
 @bot.message_handler(commands=['list'])
 def list_movies(message):
@@ -1770,60 +1838,36 @@ def list_movies(message):
         log_request(message.from_user.id, username, '/list', message.chat.id)
         logger.info(f"Команда /list от пользователя {message.from_user.id}")
         chat_id = message.chat.id
-        with db_lock:
-            # Сначала проверяем общее количество фильмов в базе
-            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
-            total_count = cursor.fetchone()
-            total = total_count.get('count') if isinstance(total_count, dict) else (total_count[0] if total_count else 0)
-            logger.info(f"[LIST] Всего фильмов в базе для chat_id={chat_id}: {total}")
-            
-            # Проверяем количество просмотренных
-            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
-            watched_count = cursor.fetchone()
-            watched = watched_count.get('count') if isinstance(watched_count, dict) else (watched_count[0] if watched_count else 0)
-            logger.info(f"[LIST] Просмотренных фильмов для chat_id={chat_id}: {watched}")
-            
-            # Получаем непросмотренные
-            cursor.execute('SELECT id, kp_id, title, year, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
-            rows = cursor.fetchall()
-            logger.info(f"[LIST] Непросмотренных фильмов для chat_id={chat_id}: {len(rows) if rows else 0}")
+        user_id = message.from_user.id
         
-        if not rows:
-            bot.reply_to(message, "⏳ Нет непросмотренных фильмов!")
-            return
-        
-        text = "⏳ Непросмотренные фильмы:\n\n"
-        # Все запросы к БД должны быть внутри db_lock
-        with db_lock:
-            for row in rows:
-                # RealDictCursor возвращает словари, но поддерживает доступ по индексу
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                title = row.get('title') if isinstance(row, dict) else row[1]
-                year = row.get('year') if isinstance(row, dict) else row[2]
-                link = row.get('link') if isinstance(row, dict) else row[3]
-                kp_id = row.get('kp_id') if isinstance(row, dict) else (row[4] if len(row) > 4 else None)
-                
-                # Рассчитываем среднее из ratings
-                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-                avg_result = cursor.fetchone()
-                # RealDictCursor возвращает словари, но поддерживает доступ по индексу
-                if avg_result:
-                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else (avg_result[0] if len(avg_result) > 0 else None)
-                else:
-                    avg = None
-                rate_str = f" 🌟 {avg:.1f}/10" if avg else ""
-                # Используем kp_id вместо film_id для единообразия с /rate
-                text += f"• <b>{title}</b> ({year}){rate_str} [ID: {kp_id or film_id}]\n{link}\n\n"
-        
-        text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
-        msg = bot.reply_to(message, text, parse_mode='HTML', disable_web_page_preview=True)
-        # Сохраняем message_id для обработки ответов
-        list_messages[msg.message_id] = chat_id
-        logger.info(f"✅ Ответ на /list отправлен пользователю {message.from_user.id}")
+        show_list_page(chat_id, user_id, page=1)
+        logger.info(f"✅ Ответ на /list отправлен пользователю {user_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /list: {e}", exc_info=True)
         try:
             bot.reply_to(message, "Произошла ошибка при обработке команды /list")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("list_page:"))
+def handle_list_page(call):
+    """Обработчик переключения страниц в /list"""
+    try:
+        user_id = call.from_user.id
+        page = int(call.data.split(":")[1])
+        
+        state = user_list_state.get(user_id)
+        if not state:
+            bot.answer_callback_query(call.id, "Сессия устарела. Используйте /list заново")
+            return
+        
+        chat_id = state['chat_id']
+        show_list_page(chat_id, user_id, page, call.message.message_id)
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.error(f"[LIST] Ошибка в handle_list_page: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка переключения страницы")
         except:
             pass
 
