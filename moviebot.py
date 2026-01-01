@@ -4695,6 +4695,60 @@ def clean_plan_execute(call):
     if user_id in user_clean_state:
         del user_clean_state[user_id]
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("clean_movie:"))
+def clean_movie_execute(call):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    film_id = int(call.data.split(":")[1])
+    
+    logger.info(f"[CLEAN] Удаление фильма film_id={film_id} от пользователя {user_id}")
+    
+    with db_lock:
+        # Получаем информацию о фильме перед удалением
+        cursor.execute('SELECT title, kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        movie_row = cursor.fetchone()
+        
+        if not movie_row:
+            bot.answer_callback_query(call.id, "Фильм не найден", show_alert=True)
+            return
+        
+        title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
+        
+        # Удаляем связанные записи
+        # 1. Удаляем оценки
+        cursor.execute('DELETE FROM ratings WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+        ratings_deleted = cursor.rowcount
+        
+        # 2. Удаляем планы
+        cursor.execute('DELETE FROM plans WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+        plans_deleted = cursor.rowcount
+        
+        # 3. Удаляем отметки просмотра (watched_movies)
+        cursor.execute('DELETE FROM watched_movies WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+        watched_deleted = cursor.rowcount
+        
+        # 4. Удаляем сам фильм
+        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        movie_deleted = cursor.rowcount
+        
+        conn.commit()
+    
+    if movie_deleted > 0:
+        bot.edit_message_text(
+            f"✅ <b>Фильм удален из базы</b>\n\n"
+            f"<b>{title}</b>\n\n"
+            f"Также удалено:\n"
+            f"• Оценок: {ratings_deleted}\n"
+            f"• Планов: {plans_deleted}\n"
+            f"• Отметок просмотра: {watched_deleted}",
+            chat_id, call.message.message_id, parse_mode='HTML'
+        )
+        bot.answer_callback_query(call.id, "Фильм удален")
+        logger.info(f"[CLEAN] Фильм {title} (id={film_id}) успешно удален вместе с {ratings_deleted} оценками, {plans_deleted} планами и {watched_deleted} отметками просмотра")
+    else:
+        bot.answer_callback_query(call.id, "Ошибка удаления фильма", show_alert=True)
+        logger.error(f"[CLEAN] Не удалось удалить фильм id={film_id}")
+
 # Обработка подтверждения удаления базы
 # Работает независимо от того, реплай это или нет
 @bot.message_handler(func=lambda m: m.text and m.text.upper().strip() == 'ДА, УДАЛИТЬ' and m.from_user.id in user_clean_state)
