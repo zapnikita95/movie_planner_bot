@@ -29,9 +29,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Детальное логирование для отладки
+logger.info("[DEBUG] Проверка переменных окружения...")
+logger.info(f"[DEBUG] os.environ keys: {list(os.environ.keys())[:10]}...")  # Первые 10 ключей
+logger.info(f"[DEBUG] BOT_TOKEN присутствует: {'BOT_TOKEN' in os.environ}")
+logger.info(f"[DEBUG] DATABASE_URL присутствует: {'DATABASE_URL' in os.environ}")
+
 TOKEN = os.getenv('BOT_TOKEN')
 if not TOKEN:
     logger.error("BOT_TOKEN не задан! Бот не может работать.")
+    logger.error(f"[DEBUG] Все переменные окружения: {list(os.environ.keys())}")
     raise ValueError("Добавьте BOT_TOKEN в environment variables")
 
 bot = telebot.TeleBot(TOKEN)
@@ -101,6 +108,7 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 
 if not DATABASE_URL:
     logger.error("DATABASE_URL не задан! Бот не может подключиться к БД.")
+    logger.error(f"[DEBUG] Все переменные окружения: {list(os.environ.keys())}")
     logger.error("Проверьте, что переменная окружения DATABASE_URL установлена в настройках вашей платформы (Railway/Render/etc.)")
     raise ValueError("DATABASE_URL не задан! Добавьте DATABASE_URL в environment variables вашей платформы (Railway/Render/etc.)")
 
