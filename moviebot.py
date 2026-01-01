@@ -1779,8 +1779,8 @@ def random_show_movie(call):
                 
                 try:
                     with db_lock:
-                # Проверяем, есть ли фильм в базе по kp_id
-                if kp_id:
+                        # Проверяем, есть ли фильм в базе по kp_id
+                        if kp_id:
                     cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 else:
                     # Fallback на id, если kp_id нет
