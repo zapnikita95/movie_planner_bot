@@ -67,6 +67,7 @@ scheduler.start()
 # Состояния планирования
 user_plan_state = {}  # user_id: {'step': int, 'link': str, 'type': str, 'day_or_date': str}
 bot_messages = {}  # message_id: link (храним карточки бота)
+plan_notification_messages = {}  # message_id: {'link': str} (храним сообщения о планах для обработки реакций)
 list_messages = {}  # message_id: chat_id (храним сообщения /list для обработки ответов)
 # Состояния настроек
 user_settings_state = {}  # user_id: {'waiting_emoji': bool}
@@ -728,7 +729,9 @@ def send_plan_notification(chat_id, title, link, plan_type):
         text = f"Привет! Вы планировали посмотреть дома фильм <b>{title}</b>: {link}"
     else:
         text = f"Привет! Вы планировали сходить в кино на <b>{title}</b>: {link}"
-    bot.send_message(chat_id, text, parse_mode='HTML')
+    msg = bot.send_message(chat_id, text, parse_mode='HTML')
+    # Сохраняем message_id для обработки реакций
+    plan_notification_messages[msg.message_id] = {'link': link}
 
 # Получение информации о фильме через прямой запрос к API
 def extract_movie_info(link):
@@ -1195,20 +1198,13 @@ def handle_reaction(reaction):
         return
     
     if is_watched:
-            link = bot_messages.get(message_id)
-            if not link:
-                # Проверяем также plan_notification_messages
-                plan_data = plan_notification_messages.get(message_id)
-                if plan_data:
-                    link = plan_data.get('link')
-                    logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
-            
-    if not link:
-        # Проверяем также plan_notification_messages
-        plan_data = plan_notification_messages.get(message_id)
-        if plan_data:
-            link = plan_data.get('link')
-            logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
+        link = bot_messages.get(message_id)
+        if not link:
+            # Проверяем также plan_notification_messages
+            plan_data = plan_notification_messages.get(message_id)
+            if plan_data:
+                link = plan_data.get('link')
+                logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
     
     if not link:
         logger.info("[REACTION] Нет link в bot_messages")
@@ -1915,20 +1911,26 @@ def random_director(call):
 
         # Топ-3 режиссёра
         chat_id = call.message.chat.id
+        top_directors = []
         try:
             with db_lock:
                 cursor.execute("""
                     SELECT director FROM movies 
                     WHERE chat_id = %s AND watched = 0 
-                    AND director IS NOT NULL AND director != "Не указан"
+                    AND director IS NOT NULL AND director != 'Не указан'
                     AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
                 """, (chat_id, chat_id))
                 directors = []
                 for row in cursor.fetchall():
                     director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                    if director:
+                    if director and director != "Не указан":
                         directors.append(director)
-                top_directors = [d for d in sorted(set(directors), key=directors.count, reverse=True)[:3]]
+                
+                if directors:
+                    # Подсчитываем частоту и берем топ-3
+                    from collections import Counter
+                    director_counts = Counter(directors)
+                    top_directors = [d for d, _ in director_counts.most_common(3)]
         except Exception as db_error:
             logger.error(f"[RANDOM] Ошибка БД при получении режиссёров: {db_error}", exc_info=True)
             try:
@@ -1938,8 +1940,9 @@ def random_director(call):
             return
 
         markup = InlineKeyboardMarkup(row_width=2)
-        for d in top_directors:
-            markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
+        if top_directors:
+            for d in top_directors:
+                markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
         
         try:
@@ -3053,10 +3056,38 @@ def plan_handler(message):
         log_request(message.from_user.id, username, '/plan', message.chat.id)
         logger.info(f"Команда /plan от пользователя {message.from_user.id}")
         user_id = message.from_user.id
+        chat_id = message.chat.id
         text = message.text.lower().replace('/plan', '').strip()
         
-        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', text)
-        link = link_match.group(1) if link_match else None
+        # Проверяем реплай на сообщение со ссылкой
+        link = None
+        if message.reply_to_message:
+            link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
+            if link_match:
+                link = link_match.group(1)
+        
+        # Ищем ссылку в тексте команды
+        if not link:
+            link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', text)
+            link = link_match.group(1) if link_match else None
+        
+        # Ищем ID кинопоиска (например, "/plan 484791 дома в воскресенье")
+        kp_id = None
+        if not link:
+            id_match = re.search(r'^(\d+)', text.strip())
+            if id_match:
+                kp_id = id_match.group(1)
+                # Проверяем, есть ли фильм с таким ID в базе
+                with db_lock:
+                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor.fetchone()
+                    if row:
+                        link = row.get('link') if isinstance(row, dict) else row[0]
+                        logger.info(f"[PLAN] Найден фильм по ID {kp_id}: {link}")
+                    else:
+                        # Если фильма нет в базе, создаем ссылку из ID
+                        link = f"https://kinopoisk.ru/film/{kp_id}"
+                        logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
         
         plan_type = 'home' if 'дома' in text else 'cinema' if 'кино' in text else None
         
@@ -3093,14 +3124,17 @@ def plan_handler(message):
         
         if link and plan_type and day_or_date:
             try:
-                process_plan(user_id, message.chat.id, link, plan_type, day_or_date)
+                process_plan(user_id, chat_id, link, plan_type, day_or_date)
             except Exception as e:
                 bot.reply_to(message, f"Ошибка при планировании: {e}")
                 logger.error(f"Ошибка process_plan: {e}", exc_info=True)
             return
         
+        # Если нет ссылки, отправляем новое сообщение с возможностью отправки по частям
         if not link:
-            bot.reply_to(message, "Не найдена ссылка на фильм. Отправьте ссылку на фильм (или реплай на сообщение с ней).")
+            bot.reply_to(message, "Пришлите ссылку на фильм в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+            # Устанавливаем состояние для получения данных по частям
+            user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id}
             return
         
         if not plan_type:
@@ -3110,9 +3144,6 @@ def plan_handler(message):
         if not day_or_date:
             bot.reply_to(message, "Не указан день/дата. Для дома укажите день недели (пн, вт, ср, чт, пт, сб, вс или 'в сб'), для кино - день недели или дату (15 января).")
             return
-        
-        user_plan_state[user_id] = {'step': 1}
-        bot.reply_to(message, "Отправьте ссылку на фильм (или реплай на сообщение с ней).")
     except Exception as e:
         logger.error(f"❌ Ошибка в /plan: {e}", exc_info=True)
         try:
@@ -3123,6 +3154,7 @@ def plan_handler(message):
 @bot.message_handler(func=lambda m: user_plan_state.get(m.from_user.id, {}).get('step') == 1)
 def get_plan_link(message):
     user_id = message.from_user.id
+    chat_id = message.chat.id
     link = None
     
     if message.reply_to_message:
@@ -3135,8 +3167,25 @@ def get_plan_link(message):
         if link_match:
             link = link_match.group(0)
     
+    # Проверяем ID кинопоиска
     if not link:
-        bot.reply_to(message, "Не нашёл ссылку. Попробуйте снова.")
+        id_match = re.search(r'^(\d+)', message.text.strip())
+        if id_match:
+            kp_id = id_match.group(1)
+            # Проверяем, есть ли фильм с таким ID в базе
+            with db_lock:
+                cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    link = row.get('link') if isinstance(row, dict) else row[0]
+                    logger.info(f"[PLAN] Найден фильм по ID {kp_id}: {link}")
+                else:
+                    # Если фильма нет в базе, создаем ссылку из ID
+                    link = f"https://kinopoisk.ru/film/{kp_id}"
+                    logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
+    
+    if not link:
+        bot.reply_to(message, "Не нашёл ссылку или ID фильма. Попробуйте снова.")
         return
     
     user_plan_state[user_id]['link'] = link
@@ -3144,7 +3193,7 @@ def get_plan_link(message):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
     markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
-    bot.send_message(message.chat.id, "Где планируете смотреть%s", reply_markup=markup)
+    bot.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan_type:"))
 def plan_type_choice(call):
