@@ -3512,14 +3512,18 @@ logger.info(f"[DEBUG] Flask маршруты зарегистрированы: {
 
 logger.info("[DEBUG] Перед определением IS_RENDER")
 
-# Определяем, где запускается бот: на Render или локально
-# Проверяем несколько признаков Render окружения
-RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
-RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
-RENDER = os.getenv('RENDER')
-PORT = os.getenv('PORT')  # На Render всегда есть PORT
+try:
+    # Определяем, где запускается бот: на Render или локально
+    # Проверяем несколько признаков Render окружения
+    RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
+    RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
+    RENDER = os.getenv('RENDER')
+    PORT = os.getenv('PORT')  # На Render всегда есть PORT
 
-logger.info(f"[DEBUG] Переменные окружения: PORT={PORT}, RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}, RENDER_SERVICE_ID={RENDER_SERVICE_ID}, RENDER={RENDER}")
+    logger.info(f"[DEBUG] Переменные окружения: PORT={PORT}, RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}, RENDER_SERVICE_ID={RENDER_SERVICE_ID}, RENDER={RENDER}")
+except Exception as e:
+    logger.error(f"[DEBUG] Ошибка при получении переменных окружения: {e}", exc_info=True)
+    raise
 
 # Дополнительная проверка: путь выполнения (Render использует /opt/render/)
 IS_RENDER_PATH = '/opt/render' in sys.executable or '/opt/render' in str(sys.path)
@@ -3545,50 +3549,51 @@ if IS_RENDER:
     logger.info("=== RENDER MODE: WEBHOOK + FLASK SERVER ===")
     logger.info(f"[DEBUG] Вход в блок IS_RENDER, sys.argv={sys.argv}")
     
-    # Очистка и установка webhook
     try:
-        bot.remove_webhook()
-        time.sleep(1)  # небольшая пауза
-    except:
-        pass
-    
-    if RENDER_EXTERNAL_URL:
-        webhook_url = RENDER_EXTERNAL_URL + '/webhook'
-        allowed_updates = [
-            "message", "edited_message", "callback_query",
-            "message_reaction", "message_reaction_count",
-            "chat_member", "my_chat_member"
-        ]
-        bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
-        logger.info(f"Webhook установлен: {webhook_url}")
-    else:
-        logger.error("RENDER_EXTERNAL_URL не задан!")
-
-    # Проверяем, запускается ли через gunicorn или напрямую через Python
-    # Если команда запуска - gunicorn, то app.run() не вызываем
-    # Если команда запуска - python3 moviebot.py, то вызываем app.run()
-    
-    # Проверяем, есть ли 'gunicorn' в sys.argv (если запущен через gunicorn)
-    is_gunicorn = any('gunicorn' in arg for arg in sys.argv) or 'gunicorn' in os.environ.get('_', '')
-    
-    logger.info(f"[DEBUG] is_gunicorn={is_gunicorn}, sys.argv={sys.argv}")
-    
-    if is_gunicorn:
-        # Запуск через gunicorn - gunicorn сам запустит app
-        logger.info("Flask приложение готово к запуску через gunicorn")
-        logger.info(f"Зарегистрированные маршруты: {[str(rule) for rule in app.url_map.iter_rules()]}")
-        logger.info("Gunicorn запустит приложение автоматически")
-    else:
-        # Запуск напрямую через Python - нужно вызвать app.run()
-        port = int(os.getenv('PORT', 10000))
-        logger.info(f"[DEBUG] Запуск Flask сервера напрямую через Python на порту {port}")
-        logger.info(f"Зарегистрированные маршруты: {[str(rule) for rule in app.url_map.iter_rules()]}")
-        logger.info(f"[DEBUG] Вызов app.run() на 0.0.0.0:{port}")
+        # Очистка и установка webhook
         try:
+            bot.remove_webhook()
+            time.sleep(1)  # небольшая пауза
+        except:
+            pass
+        
+        if RENDER_EXTERNAL_URL:
+            webhook_url = RENDER_EXTERNAL_URL + '/webhook'
+            allowed_updates = [
+                "message", "edited_message", "callback_query",
+                "message_reaction", "message_reaction_count",
+                "chat_member", "my_chat_member"
+            ]
+            bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
+            logger.info(f"Webhook установлен: {webhook_url}")
+        else:
+            logger.error("RENDER_EXTERNAL_URL не задан!")
+
+        # Проверяем, запускается ли через gunicorn или напрямую через Python
+        # Если команда запуска - gunicorn, то app.run() не вызываем
+        # Если команда запуска - python3 moviebot.py, то вызываем app.run()
+        
+        # Проверяем, есть ли 'gunicorn' в sys.argv (если запущен через gunicorn)
+        is_gunicorn = any('gunicorn' in arg for arg in sys.argv) or 'gunicorn' in os.environ.get('_', '')
+        
+        logger.info(f"[DEBUG] is_gunicorn={is_gunicorn}, sys.argv={sys.argv}")
+        
+        if is_gunicorn:
+            # Запуск через gunicorn - gunicorn сам запустит app
+            logger.info("Flask приложение готово к запуску через gunicorn")
+            logger.info(f"Зарегистрированные маршруты: {[str(rule) for rule in app.url_map.iter_rules()]}")
+            logger.info("Gunicorn запустит приложение автоматически")
+        else:
+            # Запуск напрямую через Python - нужно вызвать app.run()
+            port = int(os.getenv('PORT', 10000))
+            logger.info(f"[DEBUG] Запуск Flask сервера напрямую через Python на порту {port}")
+            logger.info(f"Зарегистрированные маршруты: {[str(rule) for rule in app.url_map.iter_rules()]}")
+            logger.info(f"[DEBUG] Вызов app.run() на 0.0.0.0:{port}")
             app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-            logger.info("[DEBUG] app.run() завершился")
-        except Exception as e:
-            logger.error(f"[DEBUG] Ошибка при запуске app.run(): {e}", exc_info=True)
+            logger.info("[DEBUG] app.run() завершился (не должно быть видно, так как это блокирующий вызов)")
+    except Exception as e:
+        logger.error(f"[DEBUG] КРИТИЧЕСКАЯ ОШИБКА в блоке IS_RENDER: {e}", exc_info=True)
+        raise
 else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
     if IS_RENDER:
