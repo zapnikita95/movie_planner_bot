@@ -1341,15 +1341,22 @@ def handle_reaction(reaction):
 # Обработчик для сохранения сообщений пользователей с ссылками на фильмы
 @bot.message_handler(func=lambda m: m.text and ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text))
 def save_movie_message(message):
-    """Сохраняет сообщения пользователей с ссылками на фильмы для обработки реакций"""
+    """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
     try:
         link_match = re.search(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
         if link_match:
             link = link_match.group(1)
+            chat_id = message.chat.id
+            logger.info(f"[SAVE MESSAGE] Найдена ссылка на фильм: {link}, chat_id={chat_id}")
+            
+            # Сохраняем ссылку для обработки реакций
             bot_messages[message.message_id] = link
-            logger.info(f"[SAVE MESSAGE] Сохранена ссылка для message_id={message.message_id}: {link}")
+            
+            # Добавляем фильм в базу и отправляем карточку
+            add_and_announce(link, chat_id)
+            logger.info(f"[SAVE MESSAGE] Фильм обработан: {link}")
     except Exception as e:
-        logger.warning(f"[SAVE MESSAGE] Ошибка при сохранении сообщения: {e}")
+        logger.warning(f"[SAVE MESSAGE] Ошибка при обработке сообщения с фильмом: {e}", exc_info=True)
 
 # Обработка оценок текстом
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 1 <= int(m.text) <= 10 and m.reply_to_message)
@@ -1953,6 +1960,95 @@ def random_genre(call):
                 user_random_state[user_id] = {}
             user_random_state[user_id]['periods'] = []
             logger.info(f"[RANDOM] Периоды пропущены для user_id={user_id}")
+            
+            # Сразу переходим к выбору жанра (или пропускаем, если жанров нет)
+            chat_id = call.message.chat.id
+            try:
+                with db_lock:
+                    # Сначала проверяем, есть ли вообще непросмотренные фильмы
+                    cursor.execute("""
+                        SELECT COUNT(*) FROM movies 
+                        WHERE chat_id = %s AND watched = 0 
+                        AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+                    """, (chat_id, chat_id))
+                    count_row = cursor.fetchone()
+                    total_count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                    
+                    if total_count == 0:
+                        bot.edit_message_text("😔 Нет непросмотренных фильмов.", chat_id, call.message.message_id)
+                        if user_id in user_random_state:
+                            del user_random_state[user_id]
+                        bot.answer_callback_query(call.id)
+                        return
+                    
+                    # Теперь получаем жанры
+                    cursor.execute("""
+                        SELECT genres FROM movies 
+                        WHERE chat_id = %s AND watched = 0 
+                        AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+                        AND genres IS NOT NULL AND genres != '' AND genres != '—'
+                    """, (chat_id, chat_id))
+                    all_genres = set()
+                    for row in cursor.fetchall():
+                        genres = row.get('genres') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                        if genres:
+                            for g in str(genres).split(', '):
+                                if g.strip():
+                                    all_genres.add(g.strip())
+                
+                if not all_genres:
+                    # Если жанров нет, но фильмы есть - пропускаем выбор жанра и переходим к режиссеру
+                    logger.info(f"[RANDOM] Нет жанров, но есть {total_count} фильмов. Пропускаем выбор жанра.")
+                    user_random_state[user_id]['genre'] = None
+                    # Переходим к выбору режиссера
+                    try:
+                        with db_lock:
+                            cursor.execute("""
+                                SELECT director FROM movies 
+                                WHERE chat_id = %s AND watched = 0 
+                                AND director IS NOT NULL AND director != 'Не указан'
+                                AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+                            """, (chat_id, chat_id))
+                            directors = []
+                            for row in cursor.fetchall():
+                                director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                                if director:
+                                    directors.append(director)
+                            
+                            from collections import Counter
+                            director_counts = Counter(directors)
+                            top_directors = [d for d, _ in director_counts.most_common(3)]
+                            
+                            markup = InlineKeyboardMarkup(row_width=2)
+                            if top_directors:
+                                for d in top_directors:
+                                    markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
+                            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
+                            
+                            bot.edit_message_text("🎥 Выберите режиссёра из любимых группы:", chat_id, call.message.message_id, reply_markup=markup)
+                            bot.answer_callback_query(call.id)
+                            logger.info(f"[RANDOM] Переход к выбору режиссёра для user_id={user_id} (жанр пропущен)")
+                    except Exception as dir_error:
+                        logger.error(f"[RANDOM] Ошибка при переходе к режиссеру: {dir_error}", exc_info=True)
+                        bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", chat_id, call.message.message_id)
+                        if user_id in user_random_state:
+                            del user_random_state[user_id]
+                        bot.answer_callback_query(call.id)
+                    return
+                
+                # Если жанры есть - показываем их выбор
+                markup = InlineKeyboardMarkup(row_width=2)
+                for genre in sorted(all_genres):
+                    markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
+                markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+                
+                bot.edit_message_text("🎬 Выберите жанр:", chat_id, call.message.message_id, reply_markup=markup)
+                bot.answer_callback_query(call.id)
+                logger.info(f"[RANDOM] Переход к выбору жанра для user_id={user_id} после пропуска периода")
+            except Exception as db_error:
+                logger.error(f"[RANDOM] Ошибка БД при получении жанров: {db_error}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка при получении списка жанров", show_alert=True)
+            return
         elif period_data == "done":
             # Готово - переходим к выбору жанра
             if user_id not in user_random_state or 'periods' not in user_random_state[user_id]:
