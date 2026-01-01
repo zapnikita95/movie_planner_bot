@@ -3831,198 +3831,451 @@ logger.info(f"Токен: {TOKEN[:10] if TOKEN else 'не установлен'}
 logger.info("=" * 50)
 
 # --- /random — рандомный фильм с фильтрами ---
-# --- /random — рандомный фильм с фильтрами ---
-user_random_state = {}  # user_id: состояние рандомайзера
+user_random_state = {}  # user_id: {'step': str, 'periods': [], 'genre': str, 'director': str, 'actor': str}
 
 @bot.message_handler(commands=['random'])
 def random_start(message):
-    logger.info(f"[RANDOM] Entering random_start, user_id={message.from_user.id}")
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    user_random_state[user_id] = {'periods': []}
-    
-    markup = InlineKeyboardMarkup(row_width=2)
-    periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
-    for i in range(0, len(periods), 2):
-        row = []
-        row.append(InlineKeyboardButton(periods[i], callback_data=f"rand_period:{periods[i]}"))
-        if i+1 < len(periods):
-            row.append(InlineKeyboardButton(periods[i+1], callback_data=f"rand_period:{periods[i+1]}"))
-        markup.row(*row)
-    markup.add(InlineKeyboardButton("Готово", callback_data="rand_period:done"))
-    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
-    
-    bot.send_message(chat_id, "🎲 Выберите периоды (можно несколько). Нажмите 'Готово' или 'Пропустить':", reply_markup=markup)
-    logger.info(f"[RANDOM] Sent period keyboard, user_id={user_id}")
+    try:
+        logger.info(f"[RANDOM] ===== START: user_id={message.from_user.id}, chat_id={message.chat.id}")
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        # Инициализируем состояние
+        user_random_state[user_id] = {
+            'step': 'period',
+            'periods': [],
+            'genre': None,
+            'director': None,
+            'actor': None
+        }
+        
+        # Шаг 1: Выбор периода
+        markup = InlineKeyboardMarkup(row_width=2)
+        periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+        for i in range(0, len(periods), 2):
+            row = []
+            row.append(InlineKeyboardButton(periods[i], callback_data=f"rand_period:{periods[i]}"))
+            if i+1 < len(periods):
+                row.append(InlineKeyboardButton(periods[i+1], callback_data=f"rand_period:{periods[i+1]}"))
+            markup.row(*row)
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+        
+        bot.send_message(chat_id, "🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)", reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[RANDOM] Step 1 sent: periods, user_id={user_id}")
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_start: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Ошибка при запуске рандомайзера. Попробуйте позже.")
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_period:"))
 def random_period_handler(call):
-    logger.info(f"[RANDOM] Entering random_period_handler, data={call.data}")
-    user_id = call.from_user.id
-    chat_id = call.message.chat.id
-    data = call.data.split(":", 1)[1]
-    
-    if user_id not in user_random_state:
-        user_random_state[user_id] = {'periods': []}
-    
-    if data in ["skip", "done"]:
-        # Переходим к жанрам
+    try:
+        logger.info(f"[RANDOM] ===== PERIOD HANDLER: data={call.data}, user_id={call.from_user.id}")
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        data = call.data.split(":", 1)[1]
+        
+        if user_id not in user_random_state:
+            logger.warning(f"[RANDOM] State not found for user {user_id}, reinitializing")
+            user_random_state[user_id] = {'step': 'period', 'periods': [], 'genre': None, 'director': None, 'actor': None}
+        
+        if data == "skip":
+            logger.info(f"[RANDOM] Period skipped, moving to genre")
+            user_random_state[user_id]['periods'] = []
+            user_random_state[user_id]['step'] = 'genre'
+            _show_genre_step(call, chat_id, user_id)
+        else:
+            # Toggle периода
+            periods = user_random_state[user_id].get('periods', [])
+            if data in periods:
+                periods.remove(data)
+                logger.info(f"[RANDOM] Period removed: {data}")
+            else:
+                periods.append(data)
+                logger.info(f"[RANDOM] Period added: {data}")
+            
+            user_random_state[user_id]['periods'] = periods
+            
+            # Обновляем кнопки
+            markup = InlineKeyboardMarkup(row_width=2)
+            all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+            for i in range(0, len(all_periods), 2):
+                row = []
+                for j in range(2):
+                    if i + j < len(all_periods):
+                        p = all_periods[i + j]
+                        label = f"✓ {p}" if p in periods else p
+                        row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
+                markup.row(*row)
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            
+            selected = ', '.join(periods) if periods else 'ничего'
+            try:
+                bot.edit_message_text(f"🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)", 
+                                    chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.answer_callback_query(call.id)
+                logger.info(f"[RANDOM] Period keyboard updated, selected={selected}")
+            except Exception as e:
+                logger.error(f"[RANDOM] Error updating period keyboard: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка обновления")
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_period_handler: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка обработки")
+        except:
+            pass
+
+def _show_genre_step(call, chat_id, user_id):
+    """Показывает шаг выбора жанра"""
+    try:
+        logger.info(f"[RANDOM] Showing genre step for user {user_id}")
         with db_lock:
             cursor.execute("""
                 SELECT DISTINCT TRIM(UNNEST(string_to_array(genres, ', '))) as genre
                 FROM movies
-                WHERE chat_id = %s AND watched = 0 AND genres IS NOT NULL AND genres != '' AND genres != '—'
+                WHERE chat_id = %s AND watched = 0 
+                AND genres IS NOT NULL AND genres != '' AND genres != '—'
             """, (chat_id,))
-            genres = [row[0] for row in cursor.fetchall() if row[0].strip()]
-            logger.info(f"[RANDOM] Genres found: {len(genres)}, genres={genres}")
+            rows = cursor.fetchall()
+            genres = [row[0] if isinstance(row, dict) else row[0] for row in rows if row[0] and row[0].strip()]
+            logger.info(f"[RANDOM] Genres found: {len(genres)}")
         
         markup = InlineKeyboardMarkup(row_width=2)
-        for genre in sorted(genres):
-            markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
+        if genres:
+            for genre in sorted(genres)[:20]:  # Ограничиваем до 20 жанров
+                markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
         
-        bot.edit_message_text("🎬 Выберите жанр:", chat_id, call.message.message_id, reply_markup=markup)
-        bot.answer_callback_query(call.id)
-        logger.info(f"[RANDOM] Sent genre keyboard, user_id={user_id}")
-    else:
-        # Toggle периода
-        periods = user_random_state[user_id]['periods']
-        if data in periods:
-            periods.remove(data)
-            logger.info(f"[RANDOM] Removed period: {data}")
-        else:
-            periods.append(data)
-            logger.info(f"[RANDOM] Added period: {data}")
-        
-        # Обновляем кнопки
-        markup = InlineKeyboardMarkup(row_width=2)
-        all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
-        for i in range(0, len(all_periods), 2):
-            row = []
-            for j in range(2):
-                if i + j < len(all_periods):
-                    p = all_periods[i + j]
-                    label = f"✓ {p}" if p in periods else p
-                    row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
-            markup.row(*row)
-        markup.add(InlineKeyboardButton("Готово", callback_data="rand_period:done"))
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
-        
-        selected = ', '.join(periods) or 'ничего'
-        bot.edit_message_text(f"Выбрано: {selected}\nНажмите 'Готово' или 'Пропустить':", chat_id, call.message.message_id, reply_markup=markup)
-        bot.answer_callback_query(call.id)
-        logger.info(f"[RANDOM] Updated period keyboard, selected={selected}")
+        try:
+            bot.edit_message_text("🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(или пропустите)", 
+                                chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.answer_callback_query(call.id)
+            logger.info(f"[RANDOM] Genre step shown, user_id={user_id}")
+        except Exception as e:
+            logger.error(f"[RANDOM] Error showing genre step: {e}", exc_info=True)
+            # Пробуем отправить новое сообщение
+            bot.send_message(chat_id, "🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(или пропустите)", 
+                            reply_markup=markup, parse_mode='HTML')
+            bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in _show_genre_step: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка загрузки жанров")
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
 def random_genre_handler(call):
-    logger.info(f"[RANDOM] Entering random_genre_handler, data={call.data}")
-    user_id = call.from_user.id
-    chat_id = call.message.chat.id
-    data = call.data.split(":", 1)[1]
-    
-    if data == "skip":
-        genre = None
-        logger.info(f"[RANDOM] Genre skipped")
-    else:
-        genre = data
-        logger.info(f"[RANDOM] Genre selected: {genre}")
-    
-    user_random_state[user_id]['genre'] = genre
-    
-    # Показываем топ режиссёров
-    with db_lock:
-        cursor.execute("""
-            SELECT director, COUNT(*) as cnt
-            FROM movies
-            WHERE chat_id = %s AND watched = 0 AND director IS NOT NULL AND director != 'Не указан'
-            GROUP BY director
-            ORDER BY cnt DESC
-            LIMIT 6
-        """, (chat_id,))
-        directors = [row[0] for row in cursor.fetchall()]
-        logger.info(f"[RANDOM] Directors found: {len(directors)}, directors={directors}")
-    
-    markup = InlineKeyboardMarkup(row_width=2)
-    for d in directors:
-        markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
-    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
-    
-    bot.edit_message_text("🎥 Выберите режиссёра из топа группы:", chat_id, call.message.message_id, reply_markup=markup)
-    bot.answer_callback_query(call.id)
-    logger.info(f"[RANDOM] Sent director keyboard, user_id={user_id}")
+    try:
+        logger.info(f"[RANDOM] ===== GENRE HANDLER: data={call.data}, user_id={call.from_user.id}")
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        data = call.data.split(":", 1)[1]
+        
+        if user_id not in user_random_state:
+            logger.warning(f"[RANDOM] State not found for user {user_id}")
+            bot.answer_callback_query(call.id, "Ошибка: сессия устарела. Начните заново /random")
+            return
+        
+        if data == "skip":
+            genre = None
+            logger.info(f"[RANDOM] Genre skipped")
+        else:
+            genre = data
+            logger.info(f"[RANDOM] Genre selected: {genre}")
+        
+        user_random_state[user_id]['genre'] = genre
+        user_random_state[user_id]['step'] = 'director'
+        
+        _show_director_step(call, chat_id, user_id)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_genre_handler: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка обработки")
+        except:
+            pass
+
+def _show_director_step(call, chat_id, user_id):
+    """Показывает шаг выбора режиссёра"""
+    try:
+        logger.info(f"[RANDOM] Showing director step for user {user_id}")
+        with db_lock:
+            cursor.execute("""
+                SELECT director, COUNT(*) as cnt
+                FROM movies
+                WHERE chat_id = %s AND watched = 0 
+                AND director IS NOT NULL AND director != 'Не указан' AND director != ''
+                GROUP BY director
+                ORDER BY cnt DESC
+                LIMIT 10
+            """, (chat_id,))
+            rows = cursor.fetchall()
+            directors = [row[0] if isinstance(row, dict) else row[0] for row in rows if row[0]]
+            logger.info(f"[RANDOM] Directors found: {len(directors)}")
+        
+        markup = InlineKeyboardMarkup(row_width=2)
+        if directors:
+            for d in directors:
+                markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
+        
+        try:
+            bot.edit_message_text("🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(или пропустите)", 
+                                chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.answer_callback_query(call.id)
+            logger.info(f"[RANDOM] Director step shown, user_id={user_id}")
+        except Exception as e:
+            logger.error(f"[RANDOM] Error showing director step: {e}", exc_info=True)
+            bot.send_message(chat_id, "🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(или пропустите)", 
+                            reply_markup=markup, parse_mode='HTML')
+            bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in _show_director_step: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка загрузки режиссёров")
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
-def random_final(call):
-    logger.info(f"[RANDOM] Entering random_final, data={call.data}")
-    user_id = call.from_user.id
-    chat_id = call.message.chat.id
-    data = call.data.split(":", 1)[1]
-    
-    if data == "skip":
-        director = None
-        logger.info(f"[RANDOM] Director skipped")
-    else:
-        director = data
-        logger.info(f"[RANDOM] Director selected: {director}")
-    
-    state = user_random_state[user_id]
-    
-    # Формируем запрос
-    query = "SELECT id, title, year, genres, director, actors, description, link FROM movies WHERE chat_id = %s AND watched = 0"
-    params = [chat_id]
-    
-    # Фильтр по периодам
-    if state.get('periods'):
-        period_conditions = []
-        for p in state['periods']:
-            if p == "До 1980":
-                period_conditions.append("year < 1980")
-            elif p == "1980–1990":
-                period_conditions.append("(year >= 1980 AND year <= 1990)")
-            elif p == "1990–2000":
-                period_conditions.append("(year >= 1990 AND year <= 2000)")
-            elif p == "2000–2010":
-                period_conditions.append("(year >= 2000 AND year <= 2010)")
-            elif p == "2010–2020":
-                period_conditions.append("(year >= 2010 AND year <= 2020)")
-            elif p == "2020–сейчас":
-                period_conditions.append("year >= 2020")
-        if period_conditions:
-            query += " AND (" + " OR ".join(period_conditions) + ")"
-    
-    if state.get('genre'):
-        query += " AND genres ILIKE %s"
-        params.append(f"%{state['genre']}%")
-    
-    if director:
-        query += " AND director = %s"
-        params.append(director)
-    
-    with db_lock:
-        cursor.execute(query, params)
-        candidates = cursor.fetchall()
-        logger.info(f"[RANDOM] Candidates found: {len(candidates)}")
-    
-    if not candidates:
-        bot.edit_message_text("😔 Нет фильмов по вашим фильтрам.", chat_id, call.message.message_id)
+def random_director_handler(call):
+    try:
+        logger.info(f"[RANDOM] ===== DIRECTOR HANDLER: data={call.data}, user_id={call.from_user.id}")
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        data = call.data.split(":", 1)[1]
+        
+        if user_id not in user_random_state:
+            logger.warning(f"[RANDOM] State not found for user {user_id}")
+            bot.answer_callback_query(call.id, "Ошибка: сессия устарела. Начните заново /random")
+            return
+        
+        if data == "skip":
+            director = None
+            logger.info(f"[RANDOM] Director skipped")
+        else:
+            director = data
+            logger.info(f"[RANDOM] Director selected: {director}")
+        
+        user_random_state[user_id]['director'] = director
+        user_random_state[user_id]['step'] = 'actor'
+        
+        _show_actor_step(call, chat_id, user_id)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_director_handler: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка обработки")
+        except:
+            pass
+
+def _show_actor_step(call, chat_id, user_id):
+    """Показывает шаг выбора актёра"""
+    try:
+        logger.info(f"[RANDOM] Showing actor step for user {user_id}")
+        with db_lock:
+            cursor.execute("""
+                SELECT DISTINCT TRIM(UNNEST(string_to_array(actors, ', '))) as actor
+                FROM movies
+                WHERE chat_id = %s AND watched = 0 
+                AND actors IS NOT NULL AND actors != '' AND actors != '—'
+            """, (chat_id,))
+            rows = cursor.fetchall()
+            actors = [row[0] if isinstance(row, dict) else row[0] for row in rows if row[0] and row[0].strip()]
+            logger.info(f"[RANDOM] Actors found: {len(actors)}")
+        
+        markup = InlineKeyboardMarkup(row_width=2)
+        if actors:
+            # Берем топ актёров по частоте
+            actor_counts = {}
+            with db_lock:
+                cursor.execute("""
+                    SELECT actors FROM movies
+                    WHERE chat_id = %s AND watched = 0 AND actors IS NOT NULL AND actors != '' AND actors != '—'
+                """, (chat_id,))
+                for row in cursor.fetchall():
+                    actors_str = row[0] if isinstance(row, dict) else row[0]
+                    if actors_str:
+                        for actor in actors_str.split(', '):
+                            actor = actor.strip()
+                            if actor:
+                                actor_counts[actor] = actor_counts.get(actor, 0) + 1
+            
+            top_actors = sorted(actor_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+            for actor, _ in top_actors:
+                markup.add(InlineKeyboardButton(actor, callback_data=f"rand_actor:{actor}"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
+        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+        
+        try:
+            bot.edit_message_text("🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(или пропустите и нажмите 'Найти фильм')", 
+                                chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.answer_callback_query(call.id)
+            logger.info(f"[RANDOM] Actor step shown, user_id={user_id}")
+        except Exception as e:
+            logger.error(f"[RANDOM] Error showing actor step: {e}", exc_info=True)
+            bot.send_message(chat_id, "🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(или пропустите и нажмите 'Найти фильм')", 
+                            reply_markup=markup, parse_mode='HTML')
+            bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in _show_actor_step: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка загрузки актёров")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_actor:"))
+def random_actor_handler(call):
+    try:
+        logger.info(f"[RANDOM] ===== ACTOR HANDLER: data={call.data}, user_id={call.from_user.id}")
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        data = call.data.split(":", 1)[1]
+        
+        if user_id not in user_random_state:
+            logger.warning(f"[RANDOM] State not found for user {user_id}")
+            bot.answer_callback_query(call.id, "Ошибка: сессия устарела. Начните заново /random")
+            return
+        
+        if data == "skip":
+            actor = None
+            logger.info(f"[RANDOM] Actor skipped")
+        else:
+            actor = data
+            logger.info(f"[RANDOM] Actor selected: {actor}")
+        
+        user_random_state[user_id]['actor'] = actor
+        user_random_state[user_id]['step'] = 'final'
+        
+        # Сразу переходим к финалу
+        _random_final(call, chat_id, user_id)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_actor_handler: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка обработки")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_final:"))
+def random_final_handler(call):
+    try:
+        logger.info(f"[RANDOM] ===== FINAL HANDLER: data={call.data}, user_id={call.from_user.id}")
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        if user_id not in user_random_state:
+            logger.warning(f"[RANDOM] State not found for user {user_id}")
+            bot.answer_callback_query(call.id, "Ошибка: сессия устарела. Начните заново /random")
+            return
+        
+        _random_final(call, chat_id, user_id)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_final_handler: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка обработки")
+        except:
+            pass
+
+def _random_final(call, chat_id, user_id):
+    """Финальный шаг - поиск и показ фильма"""
+    try:
+        logger.info(f"[RANDOM] ===== FINAL: user_id={user_id}, chat_id={chat_id}")
+        state = user_random_state.get(user_id, {})
+        logger.info(f"[RANDOM] State: {state}")
+        
+        # Формируем запрос
+        query = "SELECT id, title, year, genres, director, actors, description, link FROM movies WHERE chat_id = %s AND watched = 0"
+        params = [chat_id]
+        
+        # Фильтр по периодам
+        periods = state.get('periods', [])
+        if periods:
+            period_conditions = []
+            for p in periods:
+                if p == "До 1980":
+                    period_conditions.append("year < 1980")
+                elif p == "1980–1990":
+                    period_conditions.append("(year >= 1980 AND year <= 1990)")
+                elif p == "1990–2000":
+                    period_conditions.append("(year >= 1990 AND year <= 2000)")
+                elif p == "2000–2010":
+                    period_conditions.append("(year >= 2000 AND year <= 2010)")
+                elif p == "2010–2020":
+                    period_conditions.append("(year >= 2010 AND year <= 2020)")
+                elif p == "2020–сейчас":
+                    period_conditions.append("year >= 2020")
+            if period_conditions:
+                query += " AND (" + " OR ".join(period_conditions) + ")"
+        
+        # Фильтр по жанру
+        genre = state.get('genre')
+        if genre:
+            query += " AND genres ILIKE %s"
+            params.append(f"%{genre}%")
+        
+        # Фильтр по режиссёру
+        director = state.get('director')
+        if director:
+            query += " AND director = %s"
+            params.append(director)
+        
+        # Фильтр по актёру
+        actor = state.get('actor')
+        if actor:
+            query += " AND actors ILIKE %s"
+            params.append(f"%{actor}%")
+        
+        logger.info(f"[RANDOM] Query: {query}")
+        logger.info(f"[RANDOM] Params: {params}")
+        
+        with db_lock:
+            cursor.execute(query, params)
+            candidates = cursor.fetchall()
+            logger.info(f"[RANDOM] Candidates found: {len(candidates)}")
+        
+        if not candidates:
+            try:
+                bot.edit_message_text("😔 Нет фильмов по вашим фильтрам.\n\nПопробуйте изменить критерии поиска.", 
+                                    chat_id, call.message.message_id, parse_mode='HTML')
+                bot.answer_callback_query(call.id)
+            except:
+                bot.send_message(chat_id, "😔 Нет фильмов по вашим фильтрам.\n\nПопробуйте изменить критерии поиска.")
+            del user_random_state[user_id]
+            return
+        
+        movie = random.choice(candidates)
+        film_id = movie[0] if isinstance(movie, tuple) else movie.get('id')
+        title = movie[1] if isinstance(movie, tuple) else movie.get('title')
+        year = movie[2] if isinstance(movie, tuple) else movie.get('year') or '—'
+        link = movie[7] if isinstance(movie, tuple) else movie.get('link')
+        
+        text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
+        
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
+            bot.answer_callback_query(call.id)
+        except Exception as e:
+            logger.error(f"[RANDOM] Error editing message: {e}", exc_info=True)
+            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            bot.answer_callback_query(call.id)
+        
+        # Сохраняем для реакции
+        try:
+            sent = bot.send_message(chat_id, "Поставьте ✅, если посмотрели!")
+            bot_messages[sent.message_id] = link
+        except Exception as e:
+            logger.error(f"[RANDOM] Error sending reaction message: {e}", exc_info=True)
+        
         del user_random_state[user_id]
-        return
-    
-    movie = random.choice(candidates)
-    title = movie[1]
-    year = movie[2] or '—'
-    link = movie[7]
-    
-    text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
-    bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
-    bot.answer_callback_query(call.id)
-    
-    # Сохраняем для реакции
-    sent = bot.send_message(chat_id, "Поставьте ✅, если посмотрели!")
-    bot_messages[sent.message_id] = link
-    
-    del user_random_state[user_id]
-    logger.info(f"[RANDOM] Film shown, random process completed")
+        logger.info(f"[RANDOM] ===== COMPLETED: Film shown - {title}")
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in _random_final: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка поиска фильма")
+            if user_id in user_random_state:
+                del user_random_state[user_id]
+        except:
+            pass
 
 logger.info("[DEBUG] Перед созданием Flask app")
 logger.info(f"[DEBUG] sys.argv={sys.argv}, sys.executable={sys.executable}")
