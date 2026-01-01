@@ -2370,13 +2370,14 @@ def rate_movie(message):
         return
     
     # Если аргументов нет - показываем список как раньше
-    # Получаем все просмотренные фильмы
+    # Получаем все просмотренные фильмы (максимум 10)
     with db_lock:
         cursor.execute('''
             SELECT m.id, m.kp_id, m.title, m.year
             FROM movies m
             WHERE m.chat_id = %s AND m.watched = 1
             ORDER BY m.title
+            LIMIT 10
         ''', (chat_id,))
         movies = cursor.fetchall()
     
