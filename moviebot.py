@@ -418,6 +418,47 @@ def is_watched_emoji(reaction_emoji, chat_id):
     # Если сохранено несколько эмодзи, проверяем каждый
     return reaction_emoji in watched_emojis
 
+def get_user_timezone(user_id):
+    """Получает часовой пояс пользователя. Возвращает pytz.timezone объект или None"""
+    try:
+        with db_lock:
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (user_id, 'user_timezone'))
+            row = cursor.fetchone()
+            if row:
+                tz_name = row.get('value') if isinstance(row, dict) else row[0]
+                if tz_name == 'Moscow':
+                    return pytz.timezone('Europe/Moscow')
+                elif tz_name == 'Serbia':
+                    return pytz.timezone('Europe/Belgrade')
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка получения часового пояса для user_id={user_id}: {e}", exc_info=True)
+        return None
+
+def get_user_timezone_or_default(user_id):
+    """Получает часовой пояс пользователя или возвращает часовой пояс по умолчанию (Москва)"""
+    tz = get_user_timezone(user_id)
+    if tz:
+        return tz
+    return pytz.timezone('Europe/Moscow')
+
+def set_user_timezone(user_id, timezone_name):
+    """Устанавливает часовой пояс пользователя. timezone_name: 'Moscow' или 'Serbia'"""
+    try:
+        with db_lock:
+            cursor.execute("""
+                INSERT INTO settings (chat_id, key, value) 
+                VALUES (%s, %s, %s) 
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (user_id, 'user_timezone', timezone_name))
+            conn.commit()
+            logger.info(f"Часовой пояс установлен для user_id={user_id}: {timezone_name}")
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка установки часового пояса для user_id={user_id}: {e}", exc_info=True)
+        conn.rollback()
+        return False
+
 def get_watched_reactions(chat_id):
     """Возвращает словарь с обычными и кастомными эмодзи для реакций"""
     with db_lock:
@@ -2377,6 +2418,34 @@ def settings_command(message):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("timezone:"))
+def handle_timezone_callback(call):
+    """Обработчик выбора часового пояса"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        timezone_name = call.data.split(":", 1)[1]  # "Moscow" или "Serbia"
+        
+        if set_user_timezone(user_id, timezone_name):
+            tz_display = "Москва" if timezone_name == "Moscow" else "Сербия"
+            bot.edit_message_text(
+                f"✅ Часовой пояс установлен: <b>{tz_display}</b>\n\n"
+                f"Все время будет отображаться и планироваться в часовом поясе {tz_display}.",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode='HTML'
+            )
+            logger.info(f"Часовой пояс установлен для user_id={user_id}: {timezone_name}")
+        else:
+            bot.answer_callback_query(call.id, "Ошибка сохранения часового пояса", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SETTINGS] Ошибка в handle_timezone_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
 def handle_settings_callback(call):
     """Обработчик callback для кнопок настроек"""
@@ -2384,7 +2453,52 @@ def handle_settings_callback(call):
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
-        action = call.data.split(":", 1)[1]  # "add", "replace" или "reset"
+        action = call.data.split(":", 1)[1]  # "add", "replace", "reset" или "timezone"
+        
+        if action == "timezone":
+            # Показываем выбор часового пояса
+            current_tz = get_user_timezone(user_id)
+            current_tz_name = "Москва" if not current_tz or current_tz.zone == 'Europe/Moscow' else "Сербия"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🇷🇺 Москва (Europe/Moscow)", callback_data="timezone:Moscow"))
+            markup.add(InlineKeyboardButton("🇷🇸 Сербия (Europe/Belgrade)", callback_data="timezone:Serbia"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+            
+            bot.edit_message_text(
+                f"🕐 <b>Выбор часового пояса</b>\n\n"
+                f"Текущий: <b>{current_tz_name}</b>\n\n"
+                f"Выберите часовой пояс. Все время будет отображаться и планироваться в выбранном часовом поясе.",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        
+        if action == "back":
+            # Возврат к главному меню settings
+            current = get_watched_emojis(chat_id)
+            user_tz = get_user_timezone(user_id)
+            current_tz = "Москва" if not user_tz or user_tz.zone == 'Europe/Moscow' else "Сербия"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
+            markup.add(InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
+            markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
+            markup.add(InlineKeyboardButton(f"🕐 Часовой пояс: {current_tz}", callback_data="settings:timezone"))
+            
+            bot.edit_message_text(
+                f"⚙️ <b>Настройки</b>\n\n"
+                f"<b>Реакции:</b> {current}\n"
+                f"<b>Часовой пояс:</b> {current_tz}\n\n"
+                f"Выберите действие или поставьте реакцию на это сообщение — она автоматически добавится к текущим.",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
         
         if action == "reset":
             # Сброс к значению по умолчанию для этого чата
@@ -2761,7 +2875,9 @@ def handle_emoji_input(message):
 def process_plan(user_id, chat_id, link, plan_type, day_or_date):
     """Планирует просмотр фильма. Возвращает True при успехе, False при ошибке"""
     plan_dt = None
-    now = datetime.now(plans_tz)
+    # Используем часовой пояс пользователя или по умолчанию Москва
+    user_tz = get_user_timezone_or_default(user_id)
+    now = datetime.now(user_tz)
     
     # Обработка "сегодня"
     day_lower = day_or_date.lower().strip()
@@ -2772,7 +2888,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
         else:
             hour = 9
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = plans_tz.localize(plan_dt)
+        plan_dt = user_tz.localize(plan_dt)
         if plan_dt < now:
             # Если время уже прошло, переносим на завтра
             plan_dt = plan_dt + timedelta(days=1)
@@ -2800,7 +2916,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
             hour = 9
         
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = plans_tz.localize(plan_dt)
+        plan_dt = user_tz.localize(plan_dt)
     
     elif plan_type == 'cinema':
         # Если день недели не найден — пытаемся распарсить дату (только для "в кино")
@@ -2812,11 +2928,11 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
             if month:
                 try:
                     year = now.year
-                    candidate = plans_tz.localize(datetime(year, month, day_num))
+                    candidate = user_tz.localize(datetime(year, month, day_num))
                     if candidate < now:
                         year += 1
                     plan_date = datetime(year, month, day_num)
-                    plan_dt = plans_tz.localize(plan_date.replace(hour=9, minute=0))
+                    plan_dt = user_tz.localize(plan_date.replace(hour=9, minute=0))
                 except ValueError:
                     return False
             else:
@@ -2862,7 +2978,9 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
             conn.commit()
         
         plan_type_text = "в кино" if plan_type == 'cinema' else "дома"
-        bot.send_message(chat_id, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на {plan_dt.strftime('%d.%m.%Y %H:%M')} MSK", parse_mode='HTML')
+        # Определяем название часового пояса для отображения
+        tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+        bot.send_message(chat_id, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на {plan_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}", parse_mode='HTML')
         
         # Планируем уведомление на время плана
         scheduler.add_job(
@@ -3050,7 +3168,9 @@ def get_plan_day_or_date(message):
     plan_type = user_plan_state[user_id]['type']
     link = user_plan_state[user_id]['link']
     
-    now_msk = datetime.now(plans_tz)
+    # Используем часовой пояс пользователя
+    user_tz = get_user_timezone_or_default(user_id)
+    now = datetime.now(user_tz)
     plan_dt = None
 
     # Поиск дня недели
@@ -3062,11 +3182,11 @@ def get_plan_day_or_date(message):
 
     if target_weekday is not None:
         # Вычисляем ближайший указанный день (вперёд)
-        current_wd = now_msk.weekday()
+        current_wd = now.weekday()
         delta = (target_weekday - current_wd + 7) % 7
         if delta == 0:  # если сегодня — переносим на следующую неделю
             delta = 7
-        plan_date = now_msk.date() + timedelta(days=delta)
+        plan_date = now.date() + timedelta(days=delta)
 
         if plan_type == 'home':
             # Пятница — 19:00, остальные — 10:00
@@ -3075,20 +3195,20 @@ def get_plan_day_or_date(message):
             hour = 9
 
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = plans_tz.localize(plan_dt)
+        plan_dt = user_tz.localize(plan_dt)
 
     else:
         # Если день недели не найден — пытаемся распарсить дату (только для "в кино")
         if plan_type == 'cinema':
             if 'четверг' in text or any(p in text for p in ['чт', 'в четверг']):
                 target_weekday = 3
-                current_wd = now_msk.weekday()
+                current_wd = now.weekday()
                 delta = (3 - current_wd + 7) % 7
                 if delta == 0:
                     delta = 7
-                plan_date = now_msk.date() + timedelta(days=delta)
+                plan_date = now.date() + timedelta(days=delta)
                 plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
-                plan_dt = plans_tz.localize(plan_dt)
+                plan_dt = user_tz.localize(plan_dt)
             else:
                 # Парсинг "15 января"
                 date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
@@ -3098,12 +3218,12 @@ def get_plan_day_or_date(message):
                     month = months_map.get(month_str)
                     if month:
                         try:
-                            year = now_msk.year
-                            candidate = plans_tz.localize(datetime(year, month, day_num))
-                            if candidate < now_msk:
+                            year = now.year
+                            candidate = user_tz.localize(datetime(year, month, day_num))
+                            if candidate < now:
                                 year += 1
                             plan_date = datetime(year, month, day_num)
-                            plan_dt = plans_tz.localize(plan_date.replace(hour=9, minute=0))
+                            plan_dt = user_tz.localize(plan_date.replace(hour=9, minute=0))
                         except ValueError:
                             bot.reply_to(message, "Некорректная дата. Попробуйте снова.")
                             return
@@ -3163,7 +3283,9 @@ def get_plan_day_or_date(message):
 
         day_name = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'][plan_dt.weekday()]
         plan_type_text = "в кино" if plan_type == 'cinema' else "дома"
-        bot.reply_to(message, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на <b>{day_name} {plan_dt.strftime('%d.%m.%Y в %H:%M')}</b> МСК", parse_mode='HTML')
+        # Определяем название часового пояса для отображения
+        tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+        bot.reply_to(message, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на <b>{day_name} {plan_dt.strftime('%d.%m.%Y в %H:%M')}</b> {tz_name}", parse_mode='HTML')
 
         # Планируем уведомление
         scheduler.add_job(
@@ -3185,6 +3307,10 @@ def show_schedule(message):
         logger.info(f"Команда /schedule от пользователя {message.from_user.id}")
         
         chat_id = message.chat.id
+        user_id = message.from_user.id
+        # Используем часовой пояс пользователя для отображения
+        user_tz = get_user_timezone_or_default(user_id)
+        
         with db_lock:
             cursor.execute('''
                 SELECT m.title, p.plan_datetime, p.plan_type
@@ -3208,31 +3334,31 @@ def show_schedule(message):
             title = row.get('title') if isinstance(row, dict) else row[0]
             plan_dt_value = row.get('plan_datetime') if isinstance(row, dict) else row[1]
             plan_type = row.get('plan_type') if isinstance(row, dict) else row[2]
-            # Преобразуем TIMESTAMP в дату МСК
+            # Преобразуем TIMESTAMP в дату в часовом поясе пользователя
             try:
                 # psycopg2 возвращает объект datetime для TIMESTAMP WITH TIME ZONE
                 if isinstance(plan_dt_value, datetime):
                     # Если уже объект datetime, конвертируем в нужную таймзону
                     if plan_dt_value.tzinfo is None:
                         # Если нет таймзоны, предполагаем UTC
-                        plan_dt = pytz.utc.localize(plan_dt_value).astimezone(plans_tz)
+                        plan_dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
                     else:
-                        plan_dt = plan_dt_value.astimezone(plans_tz)
+                        plan_dt = plan_dt_value.astimezone(user_tz)
                 elif isinstance(plan_dt_value, str):
                     # Fallback для старых данных (если миграция еще не применена)
                     plan_dt_iso = plan_dt_value
                     if plan_dt_iso.endswith('Z'):
-                        plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(plans_tz)
+                        plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(user_tz)
                     elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
-                        plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(plans_tz)
+                        plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(user_tz)
                     else:
-                        plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(plans_tz)
+                        plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(user_tz)
                 else:
                     # Неожиданный тип
                     logger.warning(f"Неожиданный тип plan_datetime: {type(plan_dt_value)}")
                     continue
                 
-                date_str = plan_dt.strftime('%d.%m.%Y')
+                date_str = plan_dt.strftime('%d.%m.%Y %H:%M')
                 plan_info = (title, date_str)
                 
                 if plan_type == 'cinema':
@@ -3245,7 +3371,7 @@ def show_schedule(message):
                 if isinstance(plan_dt_value, str):
                     date_str = plan_dt_value[:10] if len(plan_dt_value) >= 10 else plan_dt_value
                 else:
-                    date_str = datetime.now(plans_tz).strftime('%d.%m.%Y')
+                    date_str = datetime.now(user_tz).strftime('%d.%m.%Y')
                 plan_info = (title, date_str)
                 
                 if plan_type == 'cinema':
