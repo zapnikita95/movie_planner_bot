@@ -83,13 +83,14 @@ days_map = days_full  # Для обратной совместимости
 commands = [
     BotCommand("start", "Приветствие и инструкция по использованию"),
     BotCommand("list", "Список непросмотренных фильмов"),
-    BotCommand("random", "Рандомный фильм с фильтрами (год, жанр, режиссёр)"),
+    BotCommand("random", "Рандомный фильм с фильтрами"),
     BotCommand("plan", "Запланировать просмотр дома или в кино"),
     BotCommand("schedule", "Список запланированных просмотров"),
-    BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры, оценки"),
+    BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
     BotCommand("rate", "Оценить просмотренные фильмы"),
     BotCommand("settings", "Настроить эмодзи просмотра"),
-    BotCommand("help", "Помощь")
+    BotCommand("clean", "Очистить базу данных (чат или данные о просмотрах)"),
+    BotCommand("help", "Помощь по командам")
 ]
 bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
 bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
