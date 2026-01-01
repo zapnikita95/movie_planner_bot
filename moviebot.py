@@ -2603,6 +2603,8 @@ def handle_settings_callback(call):
         if action == "back":
             # Возврат к главному меню settings
             current = get_watched_emojis(chat_id)
+            # Преобразуем список эмодзи в строку для корректного отображения
+            current_emojis_str = ''.join(current) if isinstance(current, list) else str(current)
             user_tz = get_user_timezone(user_id)
             current_tz = "Москва" if not user_tz or user_tz.zone == 'Europe/Moscow' else "Сербия"
             
@@ -2614,7 +2616,7 @@ def handle_settings_callback(call):
             
             bot.edit_message_text(
                 f"⚙️ <b>Настройки</b>\n\n"
-                f"<b>Реакции:</b> {current}\n"
+                f"<b>Реакции:</b> {current_emojis_str}\n"
                 f"<b>Часовой пояс:</b> {current_tz}\n\n"
                 f"Выберите действие или поставьте реакцию на это сообщение — она автоматически добавится к текущим.",
                 call.message.chat.id,
