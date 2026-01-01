@@ -1004,16 +1004,39 @@ def extract_movie_info(link):
 # Новая функция для поиска фильмов через API
 def search_films(query, page=1):
     """Поиск фильмов через Kinopoisk API"""
+    if not KP_TOKEN:
+        logger.error("[SEARCH] KP_TOKEN не установлен")
+        return [], 0
+    
     url = "https://kinopoiskapiunofficial.tech/api/v2.2/films/search-by-keyword"
     params = {"keyword": query, "page": page}
-    headers = {"X-API-KEY": KP_TOKEN, "accept": "application/json"}
+    headers = {
+        "X-API-KEY": KP_TOKEN,
+        "accept": "application/json
+    }
+    
+    logger.info(f"[SEARCH] Запрос: query='{query}', page={page}")
+    
     try:
         response = requests.get(url, params=params, headers=headers, timeout=15)
-        response.raise_for_status()
+        logger.info(f"[SEARCH] Статус ответа: {response.status_code}")
+        
+        if response.status_code != 200:
+            logger.error(f"[SEARCH] Ошибка API: статус {response.status_code}, ответ: {response.text[:200]}")
+            return [], 0
+        
         data = response.json()
-        return data.get("items", []), data.get("totalPages", 1)  # Возвращаем список фильмов и общее кол-во страниц
+        items = data.get("items", [])
+        total_pages = data.get("totalPages", 1)
+        logger.info(f"[SEARCH] Найдено результатов: {len(items)}, всего страниц: {total_pages}")
+        return items, total_pages
     except requests.exceptions.RequestException as e:
-        logger.error(f"Ошибка поиска фильмов: {e}")
+        logger.error(f"[SEARCH] Ошибка запроса: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            logger.error(f"[SEARCH] Ответ сервера: {e.response.text[:200]}")
+        return [], 0
+    except Exception as e:
+        logger.error(f"[SEARCH] Неожиданная ошибка: {e}", exc_info=True)
         return [], 0
 
 # Добавление и анонс
