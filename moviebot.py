@@ -2282,16 +2282,17 @@ def total_stats(message):
             fav_genre = max(genre_counts, key=genre_counts.get) if genre_counts else "—"
 
             # Режиссёры
-            cursor.execute('SELECT director, rating FROM movies WHERE chat_id = %s AND watched = 1 AND director IS NOT NULL AND director != "Не указан"', (chat_id,))
+            cursor.execute('SELECT director, rating FROM movies WHERE chat_id = %s AND watched = 1 AND director IS NOT NULL AND director != %s', (chat_id, 'Не указан'))
             director_stats = {}
             for row in cursor.fetchall():
-                d = row.get('director') if isinstance(row, dict) else row[0]
-                r = row.get('rating') if isinstance(row, dict) else row[1]
-                if d not in director_stats:
+                d = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                r = row.get('rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                if d and d not in director_stats:
                     director_stats[d] = {'count': 0, 'sum_rating': 0}
-                director_stats[d]['count'] += 1
-                if r:
-                    director_stats[d]['sum_rating'] += r
+                if d:
+                    director_stats[d]['count'] += 1
+                    if r:
+                        director_stats[d]['sum_rating'] += r
             top_directors = sorted(director_stats.items(), key=lambda x: (-x[1]['count'], -(x[1]['sum_rating']/x[1]['count'] if x[1]['count'] > 0 else 0)))[:3]
 
             # Актёры
