@@ -230,6 +230,12 @@ def log_request(user_id, username, command_or_action, chat_id=None):
             conn.commit()
     except Exception as e:
         logger.error(f"Ошибка логирования запроса: {e}")
+        # КРИТИЧНО: откатываем транзакцию при ошибке, иначе все последующие запросы будут игнорироваться
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
 
 def print_daily_stats():
     """Выводит статистику за текущий день в консоль"""
@@ -486,10 +492,12 @@ def add_and_announce(link, chat_id):
         text = f"🎞️ <b>Уже добавлено ранее в базу!</b>\n\n"
         text += f"<b>{existing_title}</b>\n"
         
-        # Если фильм просмотрен, рассчитываем среднее из ratings
+        # Если фильм просмотрен, рассчитываем среднее из ratings (внутри db_lock)
         if watched:
-            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            avg = cursor.fetchone()[0]
+            with db_lock:
+                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                avg_result = cursor.fetchone()
+                avg = avg_result[0] if avg_result and avg_result[0] else None
             
             text += f"\n✅ <b>Просмотрено</b>\n"
             if avg:
@@ -783,12 +791,15 @@ def list_movies(message):
             return
         
         text = "*⏳ Непросмотренные фильмы:*\n\n"
-        for film_id, title, year, link in rows:
-            # Рассчитываем среднее из ratings
-            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            avg = cursor.fetchone()[0]
-            rate_str = f" 🌟 {avg:.1f}/10" if avg else ""
-            text += f"• <b>{title}</b> ({year}){rate_str}\n{link}\n\n"
+        # Все запросы к БД должны быть внутри db_lock
+        with db_lock:
+            for film_id, title, year, link in rows:
+                # Рассчитываем среднее из ratings
+                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                avg_result = cursor.fetchone()
+                avg = avg_result[0] if avg_result and avg_result[0] else None
+                rate_str = f" 🌟 {avg:.1f}/10" if avg else ""
+                text += f"• <b>{title}</b> ({year}){rate_str}\n{link}\n\n"
         
         bot.reply_to(message, text, parse_mode='HTML', disable_web_page_preview=True)
         logger.info(f"✅ Ответ на /list отправлен пользователю {message.from_user.id}")
@@ -1223,17 +1234,18 @@ def rate_movie(message):
         bot.reply_to(message, "Нет просмотренных фильмов.")
         return
     
-    # Получаем всех пользователей чата из stats
-    cursor.execute('''
-        SELECT DISTINCT user_id, username
-        FROM stats
-        WHERE chat_id = %s AND user_id IS NOT NULL
-    ''', (chat_id,))
-    chat_users = {}
-    for row in cursor.fetchall():
-        user_id = row.get('user_id') if isinstance(row, dict) else row[0]
-        username = row.get('username') if isinstance(row, dict) else row[1]
-        chat_users[user_id] = username or f"user_{user_id}"
+    # Получаем всех пользователей чата из stats (внутри db_lock)
+    with db_lock:
+        cursor.execute('''
+            SELECT DISTINCT user_id, username
+            FROM stats
+            WHERE chat_id = %s AND user_id IS NOT NULL
+        ''', (chat_id,))
+        chat_users = {}
+        for row in cursor.fetchall():
+            user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+            username = row.get('username') if isinstance(row, dict) else row[1]
+            chat_users[user_id] = username or f"user_{user_id}"
     
     # Для каждого фильма находим, кто не оценил
     text = "📊 <b>Список просмотренных фильмов для оценки:</b>\n\n"
