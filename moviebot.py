@@ -2399,12 +2399,21 @@ def handle_settings_reply(message):
 
 # Обработка ответа с эмодзи на сообщение /settings (расширенная версия с режимами)
 # Этот обработчик должен иметь высокий приоритет, чтобы сработать раньше handle_message
-@bot.message_handler(func=lambda message: (
-    message.reply_to_message and 
-    message.from_user.id in user_settings_state and 
-    user_settings_state[message.from_user.id].get('adding_reactions') and
-    message.reply_to_message.message_id == user_settings_state[message.from_user.id].get('settings_msg_id')
-), priority=10)  # Высокий приоритет
+def add_reactions_check(message):
+    """Проверка для обработчика add_reactions"""
+    if not message.reply_to_message:
+        return False
+    if message.from_user.id not in user_settings_state:
+        return False
+    state = user_settings_state.get(message.from_user.id, {})
+    if not state.get('adding_reactions'):
+        return False
+    if message.reply_to_message.message_id != state.get('settings_msg_id'):
+        return False
+    logger.info(f"[SETTINGS CHECK] add_reactions_check: True для user_id={message.from_user.id}")
+    return True
+
+@bot.message_handler(func=add_reactions_check, priority=10)  # Высокий приоритет
 def add_reactions(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
