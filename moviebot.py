@@ -1004,16 +1004,10 @@ def add_and_announce(link, chat_id):
 # /start — приветственное сообщение
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    logger.info(f"[HANDLER] /start вызван от {message.from_user.id}")
+    logger.info(f"[HANDLER] /start вызван от {message.from_user.id}, chat_type={message.chat.type}")
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/start', message.chat.id)
     logger.info(f"Команда /start от пользователя {message.from_user.id}")
-    
-    # Проверяем, не является ли это автоматическим /start из лички (когда пользователь пишет боту впервые)
-    # Если это личный чат и нет текста после /start - это автоматический /start, пропускаем
-    if message.chat.type == 'private' and (not message.text or message.text.strip() == '/start'):
-        logger.info(f"Автоматический /start в личке - пропускаем приветствие")
-        return
     
     emoji = get_watched_emoji(message.chat.id)  # Берёт актуальный эмодзи из настроек
 
