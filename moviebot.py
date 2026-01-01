@@ -1000,6 +1000,21 @@ def extract_movie_info(link):
         logger.error(f"Ошибка получения данных для {kp_id}: {e}")
         return None
 
+# Новая функция для поиска фильмов через API
+def search_films(query, page=1):
+    """Поиск фильмов через Kinopoisk API"""
+    url = "https://kinopoiskapiunofficial.tech/api/v2.2/films/search-by-keyword"
+    params = {"keyword": query, "page": page}
+    headers = {"X-API-KEY": KP_TOKEN, "accept": "application/json"}
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        response.raise_for_status()
+        data = response.json()
+        return data.get("items", []), data.get("totalPages", 1)  # Возвращаем список фильмов и общее кол-во страниц
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Ошибка поиска фильмов: {e}")
+        return [], 0
+
 # Добавление и анонс
 def add_and_announce(link, chat_id):
     info = extract_movie_info(link)
@@ -2339,6 +2354,66 @@ def total_stats(message):
         logger.error(f"❌ Ошибка в /total: {e}", exc_info=True)
         try:
             bot.reply_to(message, "Произошла ошибка при обработке команды /total")
+        except:
+            pass
+
+# /search — поиск фильмов
+@bot.message_handler(commands=['search'])
+def handle_search(message):
+    logger.info(f"[HANDLER] /search вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/search', message.chat.id)
+        
+        query = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+        if not query:
+            bot.reply_to(message, "❌ Укажите запрос, например: /search джон уик")
+            return
+        
+        logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
+        
+        films, total_pages = search_films(query, page=1)
+        if not films:
+            bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+            return
+        
+        # Формируем сообщение с результатами
+        results_text = f"🔍 Результаты поиска '{query}':\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for film in films[:10]:  # Показываем максимум 10 результатов на странице
+            title = film.get('nameRu') or film.get('nameEn') or "Без названия"
+            year = film.get('year', 'N/A')
+            rating = film.get('ratingKinopoisk') or 'N/A'
+            kp_id = film.get('kinopoiskId')
+            
+            if kp_id:
+                # Ограничиваем длину текста кнопки
+                button_text = f"{title} ({year})"
+                if len(button_text) > 50:
+                    button_text = button_text[:47] + "..."
+                results_text += f"• <b>{title}</b> ({year})"
+                if rating != 'N/A':
+                    results_text += f" ⭐ {rating}"
+                results_text += "\n"
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}"))
+        
+        # Добавляем пагинацию, если нужно
+        if total_pages > 1:
+            pagination_row = []
+            # Кодируем запрос для callback_data (заменяем пробелы на подчеркивания)
+            query_encoded = query.replace(' ', '_')
+            pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+            if total_pages > 1:
+                pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+            markup.row(*pagination_row)
+        
+        bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /search отправлен пользователю {message.from_user.id}, найдено {len(films)} результатов")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /search: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /search")
         except:
             pass
 
