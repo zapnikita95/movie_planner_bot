@@ -1465,6 +1465,104 @@ def random_genre(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("rand_year:"))
+def handle_random_year(call):
+    """Обработчик выбора года для рандомайзера с поддержкой форматов 2020-2025 и 2020_2025"""
+    try:
+        bot.answer_callback_query(call.id)  # убираем "часики" на кнопке
+        
+        try:
+            data = call.data.split(":", 1)[1].strip()  # всё после "rand_year:"
+        except (IndexError, AttributeError) as e:
+            logger.error(f"[RANDOM] Ошибка парсинга rand_year data: {e}, call.data={call.data}", exc_info=True)
+            bot.answer_callback_query(call.id, "Ошибка при обработке выбора года", show_alert=True)
+            return
+        
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Инициализируем состояние пользователя, если нет
+        if user_id not in user_random_state:
+            user_random_state[user_id] = {}
+        
+        try:
+            if data == "any":
+                year_range = None
+                logger.info(f"[RANDOM] Пользователь {user_id} пропустил выбор года")
+            elif data == "old":  # если есть кнопка "До 2000"
+                year_range = (1900, 1999)
+                logger.info(f"[RANDOM] Пользователь {user_id} выбрал период до 2000")
+            else:
+                # Поддерживаем оба формата: 2020-2025 и 2020_2025
+                separator = "-" if "-" in data else "_"
+                try:
+                    start_str, end_str = data.split(separator)
+                    start = int(start_str.strip())
+                    end = int(end_str.strip())
+                    year_range = (start, end)
+                    logger.info(f"[RANDOM] Пользователь {user_id} выбрал период {start}-{end}")
+                except ValueError as ve:
+                    logger.error(f"[RANDOM] Ошибка парсинга периода для {user_id}: {data} — {ve}", exc_info=True)
+                    bot.answer_callback_query(call.id, "Неверный формат периода", show_alert=True)
+                    return
+            
+            # Сохраняем в состояние
+            user_random_state[user_id]["year_range"] = year_range
+            
+            # Переходим к следующему шагу — выбор жанра
+            # Используем существующую логику перехода к выбору жанра
+            try:
+                with db_lock:
+                    cursor.execute("""
+                        SELECT genres FROM movies 
+                        WHERE chat_id = %s AND watched = 0 
+                        AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+                    """, (chat_id, chat_id))
+                    all_genres = set()
+                    for row in cursor.fetchall():
+                        genres = row.get('genres') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                        if genres:
+                            for g in str(genres).split(', '):
+                                if g.strip():
+                                    all_genres.add(g.strip())
+                
+                if not all_genres:
+                    bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", chat_id, call.message.message_id)
+                    if user_id in user_random_state:
+                        del user_random_state[user_id]
+                    bot.answer_callback_query(call.id, "Нет доступных жанров", show_alert=True)
+                    return
+                
+                markup = InlineKeyboardMarkup(row_width=2)
+                for genre in sorted(all_genres):
+                    markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
+                markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+                
+                bot.edit_message_text("🎬 Выберите жанр:", chat_id, call.message.message_id, reply_markup=markup)
+                logger.info(f"[RANDOM] Переход к выбору жанра для user_id={user_id} после выбора года")
+            except Exception as db_error:
+                logger.error(f"[RANDOM] Ошибка БД при получении жанров: {db_error}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка при получении списка жанров", show_alert=True)
+                
+        except ValueError as ve:
+            logger.error(f"[RANDOM] Ошибка парсинга периода для {user_id}: {data} — {ve}", exc_info=True)
+            try:
+                bot.send_message(chat_id, "⚠️ Неверный формат периода. Начните заново: /random")
+            except:
+                pass
+        except Exception as e:
+            logger.error(f"[RANDOM] Критическая ошибка в handle_random_year: {e}", exc_info=True)
+            try:
+                bot.send_message(chat_id, "Произошла ошибка при обработке выбора периода.")
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"[RANDOM] Критическая ошибка в handle_random_year (внешний блок): {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
 def random_director(call):
     try:
