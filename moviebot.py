@@ -480,16 +480,32 @@ def extract_movie_info(link):
 
         # Режиссёр
         director = "Не указан"
+        if staff and len(staff) > 0:
+            # Логируем структуру первого элемента для отладки
+            logger.debug(f"Пример структуры staff элемента: {list(staff[0].keys()) if isinstance(staff[0], dict) else 'не словарь'}")
+        
         for person in staff:
-            if person.get('professionKey') == 'DIRECTOR':
-                director = person.get('nameRu') or person.get('nameEn') or "Не указан"
-                break
+            if not isinstance(person, dict):
+                continue
+            # Проверяем разные варианты полей для профессии
+            profession = person.get('professionKey') or person.get('professionText') or person.get('profession')
+            if profession and ('DIRECTOR' in str(profession).upper() or 'РЕЖИССЕР' in str(profession).upper() or profession == 'DIRECTOR'):
+                # Проверяем разные варианты полей для имени
+                name = person.get('nameRu') or person.get('nameEn') or person.get('name') or person.get('staffName')
+                if name:
+                    director = name
+                    break
 
         # Актёры (top 6)
         actors_list = []
         for person in staff:
-            if person.get('professionKey') == 'ACTOR' and len(actors_list) < 6:
-                name = person.get('nameRu') or person.get('nameEn')
+            if not isinstance(person, dict):
+                continue
+            # Проверяем разные варианты полей для профессии
+            profession = person.get('professionKey') or person.get('professionText') or person.get('profession')
+            if profession and ('ACTOR' in str(profession).upper() or 'АКТЕР' in str(profession).upper() or profession == 'ACTOR') and len(actors_list) < 6:
+                # Проверяем разные варианты полей для имени
+                name = person.get('nameRu') or person.get('nameEn') or person.get('name') or person.get('staffName')
                 if name:
                     actors_list.append(name)
         actors = ', '.join(actors_list) if actors_list else "—"
