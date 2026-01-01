@@ -1763,21 +1763,22 @@ def random_show_movie(call):
         if plan_dt:
             try:
                 chat_id = call.message.chat.id
-            film_id = movie.get('id')
-            kp_id = movie.get('kp_id')
-            
-            # Если нет kp_id, пытаемся извлечь из ссылки
-            if not kp_id and movie.get('link'):
-                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', movie['link'])
-                if match:
-                    kp_id = match.group(2)
-            
-            if not kp_id:
-                logger.error(f"Не удалось определить kp_id для фильма {movie.get('title')}")
-                bot.answer_callback_query(call.id, "Ошибка: не удалось определить ID фильма", show_alert=True)
-                return
-            
-            with db_lock:
+                film_id = movie.get('id')
+                kp_id = movie.get('kp_id')
+                
+                # Если нет kp_id, пытаемся извлечь из ссылки
+                if not kp_id and movie.get('link'):
+                    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', movie['link'])
+                    if match:
+                        kp_id = match.group(2)
+                
+                if not kp_id:
+                    logger.error(f"Не удалось определить kp_id для фильма {movie.get('title')}")
+                    bot.answer_callback_query(call.id, "Ошибка: не удалось определить ID фильма", show_alert=True)
+                    return
+                
+                try:
+                    with db_lock:
                 # Проверяем, есть ли фильм в базе по kp_id
                 if kp_id:
                     cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
