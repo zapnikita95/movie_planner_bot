@@ -70,6 +70,7 @@ bot_messages = {}  # message_id: link (храним карточки бота)
 list_messages = {}  # message_id: chat_id (храним сообщения /list для обработки ответов)
 # Состояния настроек
 user_settings_state = {}  # user_id: {'waiting_emoji': bool}
+settings_messages = {}  # message_id: {'user_id': int, 'action': str, 'chat_id': int} - для отслеживания сообщений settings
 # Состояния очистки
 user_clean_state = {}  # user_id: {'action': str, 'target': str}
 clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
@@ -906,6 +907,66 @@ def handle_reaction(reaction):
     
     chat_id = reaction.chat.id
     message_id = reaction.message_id
+    
+    # Проверяем, не это ли реакция на сообщение settings
+    if message_id in settings_messages:
+        settings_info = settings_messages[message_id]
+        if reaction.new_reaction:
+            for r in reaction.new_reaction:
+                new_emoji = None
+                new_custom_id = None
+                
+                if r.type == 'emoji' and hasattr(r, 'emoji'):
+                    new_emoji = r.emoji
+                elif r.type == 'custom_emoji' and hasattr(r, 'custom_emoji_id'):
+                    new_custom_id = str(r.custom_emoji_id)
+                
+                if new_emoji or new_custom_id:
+                    # Получаем текущие эмодзи
+                    current_emojis = get_watched_emojis()
+                    current_custom_ids = get_watched_custom_emoji_ids()
+                    
+                    action = settings_info.get('action', 'add')
+                    
+                    if action == "add":
+                        # Добавляем к текущим
+                        if new_emoji:
+                            if new_emoji not in current_emojis:
+                                current_emojis.append(new_emoji)
+                        if new_custom_id:
+                            if new_custom_id not in current_custom_ids:
+                                current_custom_ids.append(new_custom_id)
+                    else:
+                        # Заменяем полностью (но добавляем новое)
+                        if new_emoji:
+                            current_emojis = [new_emoji] if new_emoji not in current_emojis else current_emojis
+                        if new_custom_id:
+                            current_custom_ids = [new_custom_id] if new_custom_id not in current_custom_ids else current_custom_ids
+                    
+                    # Формируем строку для сохранения
+                    emojis_str = ''.join(current_emojis)
+                    if current_custom_ids:
+                        custom_str = ','.join([f"custom:{cid}" for cid in current_custom_ids])
+                        emojis_str = emojis_str + (',' + custom_str if emojis_str else custom_str)
+                    
+                    # Сохраняем в БД
+                    try:
+                        with db_lock:
+                            cursor.execute("""
+                                INSERT INTO settings (chat_id, key, value) 
+                                VALUES (-1, 'watched_emoji', %s) 
+                                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                            """, (emojis_str,))
+                            conn.commit()
+                            logger.info(f"[SETTINGS REACTION] Эмодзи сохранено: {emojis_str}")
+                            
+                            # Отправляем подтверждение
+                            emoji_display = new_emoji if new_emoji else f"custom:{new_custom_id}"
+                            bot.send_message(chat_id, f"✅ Эмодзи {emoji_display} добавлен! Теперь он отмечает фильмы как просмотренные.")
+                    except Exception as e:
+                        conn.rollback()
+                        logger.error(f"[SETTINGS REACTION] Ошибка сохранения: {e}", exc_info=True)
+        return
     
     # Сначала проверяем, не это ли голосование по обнулению базы
     if message_id in clean_votes:
@@ -2251,14 +2312,25 @@ def handle_settings_callback(call):
             'action': action  # "add" или "replace"
         }
         
-        mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
-        bot.edit_message_text(
-            f"⚙️ <b>Настройки реакций</b>\n\n📝 Отправьте эмодзи в ответ на это сообщение.\n\nНовые реакции будут {mode_text}.",
-            call.message.chat.id,
-            call.message.message_id,
-            parse_mode='HTML'
-        )
-        logger.info(f"[SETTINGS] Пользователь {user_id} выбрал режим: {action}")
+               mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
+               bot.edit_message_text(
+                   f"⚙️ <b>Настройки реакций</b>\n\n"
+                   f"📝 Отправьте эмодзи в ответ на это сообщение ИЛИ поставьте реакцию на это сообщение.\n\n"
+                   f"Новые реакции будут {mode_text}.",
+                   call.message.chat.id,
+                   call.message.message_id,
+                   parse_mode='HTML'
+               )
+               # Обновляем информацию о сообщении settings
+               if call.message.message_id in settings_messages:
+                   settings_messages[call.message.message_id]['action'] = action
+               else:
+                   settings_messages[call.message.message_id] = {
+                       'user_id': user_id,
+                       'action': action,
+                       'chat_id': call.message.chat.id
+                   }
+               logger.info(f"[SETTINGS] Пользователь {user_id} выбрал режим: {action}")
     except Exception as e:
         logger.error(f"[SETTINGS] Ошибка в handle_settings_callback: {e}", exc_info=True)
         try:
