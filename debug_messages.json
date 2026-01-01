@@ -1,0 +1,12 @@
+[
+    {
+        "id": 1,
+        "date": "2026-01-01 07:37:51+00:00",
+        "text_length": 0,
+        "has_media": false,
+        "sender_id": null,
+        "entities_count": 0,
+        "urls_from_entities": [],
+        "all_links_found": []
+    }
+]
