@@ -2274,7 +2274,21 @@ def clean_command(message):
     markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
     markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
     
-    bot.reply_to(message, "🧹 <b>Что вы хотите удалить?</b>\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
+    help_text = (
+        "🧹 <b>Что вы хотите удалить?</b>\n\n"
+        "<b>💥 Обнулить базу чата</b> — удаляет <b>ВСЕ данные чата</b>:\n"
+        "• Все фильмы\n"
+        "• Все оценки всех пользователей\n"
+        "• Все планы всех пользователей\n"
+        "• Все настройки\n\n"
+        "<b>👤 Обнулить базу пользователя</b> — удаляет <b>только ваши данные</b>:\n"
+        "• Ваши оценки\n"
+        "• Ваши планы\n"
+        "• Ваша статистика\n\n"
+        "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
+        "Выберите действие:"
+    )
+    bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("clean:"))
 def clean_action_choice(call):
@@ -2404,9 +2418,19 @@ def clean_action_choice(call):
             user_clean_state[user_id]['confirm_needed'] = True
     
     elif action == 'user_db':
-        # Обнуление базы пользователя
-        bot.edit_message_text("⚠️ Вы уверены, что хотите удалить все ваши данные из базы?\n\nЭто удалит:\n• Все ваши оценки\n• Все ваши планы\n\nОтправьте 'ДА, УДАЛИТЬ' для подтверждения.", call.message.chat.id, call.message.message_id)
+        # Обнуление базы пользователя - удаляет только данные конкретного пользователя
+        bot.edit_message_text(
+            "⚠️ <b>Обнуление базы данных пользователя</b>\n\n"
+            "Это удалит <b>только ваши данные</b>:\n"
+            "• Все ваши оценки\n"
+            "• Все ваши планы\n"
+            "• Вашу статистику\n\n"
+            "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
+            "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+            call.message.chat.id, call.message.message_id, parse_mode='HTML'
+        )
         user_clean_state[user_id]['confirm_needed'] = True
+        user_clean_state[user_id]['target'] = 'user'
     
     elif action == 'cancel':
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
@@ -2479,12 +2503,18 @@ def clean_plan_execute(call):
         del user_clean_state[user_id]
 
 # Обработка подтверждения удаления базы
-@bot.message_handler(func=lambda m: m.text and m.text.upper() == 'ДА, УДАЛИТЬ' and m.from_user.id in user_clean_state)
+@bot.message_handler(func=lambda m: m.text and m.text.upper().strip() == 'ДА, УДАЛИТЬ' and m.from_user.id in user_clean_state)
 def clean_confirm_execute(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     state = user_clean_state.get(user_id, {})
     action = state.get('action')
+    confirm_needed = state.get('confirm_needed', False)
+    
+    # Проверяем, что подтверждение действительно требуется
+    if not confirm_needed:
+        logger.warning(f"Попытка подтверждения без установленного confirm_needed для пользователя {user_id}")
+        return
     
     try:
         if action == 'chat_db':
@@ -2498,7 +2528,7 @@ def clean_confirm_execute(message):
                     cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
                     cursor.execute('DELETE FROM cinema_votes WHERE chat_id = %s', (chat_id,))
                     conn.commit()
-                    bot.reply_to(message, "✅ База данных чата полностью обнулена.")
+                    bot.reply_to(message, "✅ База данных чата полностью обнулена.\n\nВсе фильмы, оценки, планы и настройки удалены.")
                     logger.info(f"База данных чата {chat_id} обнулена пользователем {user_id}")
                 except Exception as e:
                     conn.rollback()
@@ -2514,7 +2544,7 @@ def clean_confirm_execute(message):
                     cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
                     cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
                     conn.commit()
-                    bot.reply_to(message, "✅ Все ваши данные удалены из базы.")
+                    bot.reply_to(message, "✅ Все ваши данные удалены из базы.\n\nВаши оценки, планы и статистика удалены. Фильмы и данные других пользователей остались без изменений.")
                     logger.info(f"Данные пользователя {user_id} удалены из чата {chat_id}")
                 except Exception as e:
                     conn.rollback()
