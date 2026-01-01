@@ -1200,30 +1200,174 @@ def rate_movie(message):
     log_request(message.from_user.id, username, '/rate', message.chat.id)
     logger.info(f"Команда /rate от пользователя {message.from_user.id}")
     chat_id = message.chat.id
+    
+    # Получаем все просмотренные фильмы
     with db_lock:
-        cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND watched = 1 AND rating IS NULL ORDER BY title', (chat_id,))
+        cursor.execute('''
+            SELECT m.id, m.kp_id, m.title, m.year
+            FROM movies m
+            WHERE m.chat_id = %s AND m.watched = 1
+            ORDER BY m.title
+        ''', (chat_id,))
         movies = cursor.fetchall()
+    
     if not movies:
-        bot.reply_to(message, "Нет просмотренных фильмов без оценки.")
+        bot.reply_to(message, "Нет просмотренных фильмов.")
         return
     
-    keyboard = InlineKeyboardMarkup(row_width=1)
-    for movie_id, title in movies[:20]:
-        keyboard.add(InlineKeyboardButton(title, callback_data=f"select_rate:{movie_id}"))
+    # Получаем всех пользователей чата из stats
+    cursor.execute('''
+        SELECT DISTINCT user_id, username
+        FROM stats
+        WHERE chat_id = %s AND user_id IS NOT NULL
+    ''', (chat_id,))
+    chat_users = {row['user_id']: row['username'] or f"user_{row['user_id']}" for row in cursor.fetchall()}
     
-    bot.reply_to(message, "Выберите фильм для оценки:", reply_markup=keyboard)
+    # Для каждого фильма находим, кто не оценил
+    text = "📊 <b>Список просмотренных фильмов для оценки:</b>\n\n"
+    text += "💬 <i>Ответьте на это сообщение списком оценок в формате:</i>\n"
+    text += "<code>kp_id оценка</code>\n\n"
+    text += "<i>Пример:</i>\n"
+    text += "<code>123 10\n31341 8\n123123 4</code>\n\n"
+    text += "=" * 40 + "\n\n"
+    
+    for movie in movies:
+        film_id = movie['id']
+        kp_id = movie['kp_id']
+        title = movie['title']
+        year = movie['year'] or '—'
+        
+        # Получаем всех, кто оценил этот фильм
+        cursor.execute('''
+            SELECT user_id FROM ratings
+            WHERE chat_id = %s AND film_id = %s
+        ''', (chat_id, film_id))
+        rated_users = {row['user_id'] for row in cursor.fetchall()}
+        
+        # Находим, кто не оценил
+        not_rated = []
+        for user_id, username in chat_users.items():
+            if user_id not in rated_users:
+                not_rated.append(username)
+        
+        not_rated_text = ", ".join(not_rated[:5])
+        if len(not_rated) > 5:
+            not_rated_text += f" и ещё {len(not_rated) - 5}"
+        
+        text += f"<b>{kp_id}</b> — {title} ({year})\n"
+        if not_rated:
+            text += f"   ⚠️ Не оценили: {not_rated_text}\n"
+        else:
+            text += f"   ✅ Все оценили\n"
+        text += "\n"
+    
+    # Сохраняем message_id для обработки реплая
+    rate_list_messages[message.chat.id] = message.message_id + 1  # Будет ID следующего сообщения
+    
+    bot.reply_to(message, text, parse_mode='HTML')
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("select_rate:"))
-def select_movie_for_rating(call):
-    movie_id = int(call.data.split(":")[1])
-    bot.edit_message_text(
-        chat_id=call.message.chat.id,
-        message_id=call.message.message_id,
-        text="💬 Ответьте числом от 1 до 10 на это сообщение, чтобы поставить оценку.",
-        reply_markup=None
-    )
-    # Сохраняем message_id для обработки ответа
-    rating_messages[call.message.message_id] = movie_id
+# Обработка реплая на список фильмов с оценками
+rate_list_messages = {}  # chat_id: message_id (сообщение со списком фильмов)
+
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == bot.get_me().id and m.text)
+def handle_rate_list_reply(message):
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    # Проверяем, что это реплай на список фильмов
+    if message.reply_to_message.message_id not in [rate_list_messages.get(chat_id, 0)]:
+        # Проверяем, есть ли в тексте реплая упоминание о списке фильмов
+        reply_text = message.reply_to_message.text or ""
+        if "Список просмотренных фильмов для оценки" not in reply_text:
+            return
+    
+    text = message.text.strip()
+    if not text:
+        return
+    
+    # Парсим оценки: kp_id оценка (разделители: пробел, запятая, точка с запятой, таб)
+    import re
+    ratings_pattern = r'(\d+)\s*[,;:\t]?\s*(\d+)'
+    matches = re.findall(ratings_pattern, text)
+    
+    if not matches:
+        bot.reply_to(message, "❌ Не удалось распознать оценки. Используйте формат: <code>kp_id оценка</code>", parse_mode='HTML')
+        return
+    
+    results = []
+    errors = []
+    
+    with db_lock:
+        for kp_id_str, rating_str in matches:
+            try:
+                kp_id = kp_id_str.strip()
+                rating = int(rating_str.strip())
+                
+                if not (1 <= rating <= 10):
+                    errors.append(f"{kp_id}: оценка должна быть от 1 до 10")
+                    continue
+                
+                # Находим фильм по kp_id
+                cursor.execute('''
+                    SELECT id, title FROM movies
+                    WHERE chat_id = %s AND kp_id = %s AND watched = 1
+                ''', (chat_id, kp_id))
+                film_row = cursor.fetchone()
+                
+                if not film_row:
+                    errors.append(f"{kp_id}: фильм не найден или не просмотрен")
+                    continue
+                
+                film_id = film_row['id']
+                title = film_row['title']
+                
+                # Проверяем, не оценил ли уже пользователь этот фильм
+                cursor.execute('''
+                    SELECT rating FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                ''', (chat_id, film_id, user_id))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    errors.append(f"{kp_id}: вы уже оценили этот фильм")
+                    continue
+                
+                # Сохраняем оценку
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, film_id, user_id, rating))
+                
+                results.append((kp_id, title, rating))
+                
+            except ValueError:
+                errors.append(f"{kp_id_str}: неверный формат оценки")
+            except Exception as e:
+                logger.error(f"Ошибка при сохранении оценки {kp_id_str}: {e}")
+                errors.append(f"{kp_id_str}: ошибка обработки")
+        
+        conn.commit()
+    
+    # Формируем ответ
+    response_text = ""
+    
+    if results:
+        user_name = message.from_user.first_name or f"user_{user_id}"
+        response_text += f"✅ <b>{user_name}</b> поставил(а) оценки:\n\n"
+        for kp_id, title, rating in results:
+            response_text += f"• <b>{kp_id}</b> — {title}: {rating}/10\n"
+        response_text += "\n"
+    
+    if errors:
+        response_text += "⚠️ <b>Ошибки:</b>\n"
+        for error in errors:
+            response_text += f"• {error}\n"
+    
+    if not results and not errors:
+        response_text = "❌ Не удалось обработать оценки. Проверьте формат."
+    
+    bot.reply_to(message, response_text, parse_mode='HTML')
 
 # /settings
 @bot.message_handler(commands=['settings'])
