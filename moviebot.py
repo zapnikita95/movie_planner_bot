@@ -1740,10 +1740,10 @@ def stats_command(message):
         if users_stats:
             text += "👥 <b>Участники группы:</b>\n"
             for idx, user_row in enumerate(users_stats[:10], 1):  # Показываем топ-10
-                user_id = user_row.get('user_id') if isinstance(user_row, dict) else user_row[0]
-                username = user_row.get('username') if isinstance(user_row, dict) else user_row[1]
-                command_count = user_row.get('command_count') if isinstance(user_row, dict) else user_row[2]
-                last_activity = user_row.get('last_activity') if isinstance(user_row, dict) else user_row[3]
+                # users_stats теперь список словарей
+                user_id = user_row.get('user_id')
+                username = user_row.get('username')
+                command_count = user_row.get('command_count', 0)
                 
                 user_display = username or f"user_{user_id}"
                 rating_info = ratings_by_user.get(user_id, {})
@@ -1771,6 +1771,43 @@ def stats_command(message):
             bot.reply_to(message, "Произошла ошибка при обработке команды /stats")
         except Exception as reply_error:
             logger.error(f"❌ Ошибка при отправке сообщения об ошибке: {reply_error}", exc_info=True)
+
+# /join — регистрация участника группы
+@bot.message_handler(commands=['join'])
+def join_command(message):
+    logger.info(f"[HANDLER] /join вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/join', message.chat.id)
+        logger.info(f"Команда /join от пользователя {message.from_user.id}, chat_id={message.chat.id}")
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        
+        # Проверяем, есть ли упоминание другого пользователя
+        text = message.text or ""
+        mentioned_user = None
+        
+        # Ищем упоминание пользователя в формате @username
+        if '@' in text:
+            import re
+            mentions = re.findall(r'@(\w+)', text)
+            if mentions:
+                mentioned_username = mentions[0]
+                # Пытаемся найти пользователя по username (это сложно без дополнительных данных)
+                # Пока просто регистрируем текущего пользователя
+                logger.info(f"[JOIN] Упоминание пользователя @{mentioned_username}, но регистрируем текущего {user_id}")
+        
+        # Регистрируем пользователя в базе через log_request (уже вызвано выше)
+        # Дополнительно можно добавить запись в отдельную таблицу участников, но пока достаточно stats
+        
+        bot.reply_to(message, f"✅ Вы зарегистрированы как участник группы!\n\nТеперь вы будете учитываться в статистике /stats.")
+        logger.info(f"✅ Пользователь {user_id} зарегистрирован через /join")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /join: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /join")
+        except:
+            pass
 
 @bot.message_handler(commands=['total'])
 def total_stats(message):
