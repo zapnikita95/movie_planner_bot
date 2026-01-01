@@ -734,8 +734,13 @@ def add_and_announce(link, chat_id):
                 cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 duplicate_check = cursor.fetchone()
                 if duplicate_check:
-                    logger.info(f"Фильм с kp_id={kp_id} уже существует в базе, пропускаем вставку")
+                    logger.info(f"Фильм с kp_id={kp_id} уже существует в базе (обнаружен перед вставкой), пропускаем")
                     return False
+                
+                # Получаем количество записей до вставки
+                cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                count_before_row = cursor.fetchone()
+                count_before = count_before_row.get('count') if isinstance(count_before_row, dict) else (count_before_row[0] if count_before_row else 0)
                 
                 cursor.execute('''
                     INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
@@ -743,8 +748,19 @@ def add_and_announce(link, chat_id):
                     ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
                 ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                 conn.commit()
-                inserted = cursor.rowcount > 0
-                logger.debug(f"Попытка вставки фильма: rowcount={cursor.rowcount}, inserted={inserted}")
+                
+                # Проверяем, был ли фильм действительно добавлен (а не обновлен)
+                cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                count_after_row = cursor.fetchone()
+                count_after = count_after_row.get('count') if isinstance(count_after_row, dict) else (count_after_row[0] if count_after_row else 0)
+                
+                # Фильм был добавлен только если его не было до вставки
+                inserted = (count_before == 0 and count_after == 1)
+                logger.debug(f"Попытка вставки фильма: count_before={count_before}, count_after={count_after}, inserted={inserted}, kp_id={kp_id}")
+                
+                if not inserted and count_before > 0:
+                    logger.info(f"Фильм с kp_id={kp_id} уже существовал (count_before={count_before}), вставка не выполнена")
+                    return False
             except Exception as db_error:
                 conn.rollback()
                 logger.error(f"Ошибка при добавлении фильма в БД: {db_error}", exc_info=True)
