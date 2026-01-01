@@ -825,20 +825,35 @@ def handle_rating(message):
                             film_id = row.get('id') if isinstance(row, dict) else row[0]
     
     if film_id:
-        with db_lock:
-            cursor.execute('''
-                INSERT INTO ratings (chat_id, film_id, user_id, rating)
-                VALUES (%s, %s, %s, %s)
-                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
-            ''', (chat_id, film_id, user_id, rating))
-            conn.commit()
-            
-            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            avg_row = cursor.fetchone()
-            avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
-            
-            avg_str = f"{avg:.1f}" if avg else "—"
-            bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+        try:
+            with db_lock:
+                try:
+                    # Проверяем, не в состоянии ли ошибки транзакция
+                    try:
+                        cursor.execute('SELECT 1')
+                        cursor.fetchone()
+                    except:
+                        conn.rollback()
+                    
+                    cursor.execute('''
+                        INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                    ''', (chat_id, film_id, user_id, rating))
+                    conn.commit()
+                    
+                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                    avg_row = cursor.fetchone()
+                    avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
+                    
+                    avg_str = f"{avg:.1f}" if avg else "—"
+                    bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                except Exception as db_error:
+                    conn.rollback()
+                    logger.error(f"Ошибка при сохранении оценки: {db_error}", exc_info=True)
+                    bot.reply_to(message, "Произошла ошибка при сохранении оценки. Попробуйте позже.")
+        except Exception as e:
+            logger.error(f"Критическая ошибка в handle_rating: {e}", exc_info=True)
         
         # Удаляем из rating_messages после сохранения
         if message.reply_to_message:
