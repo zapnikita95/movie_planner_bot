@@ -101,7 +101,8 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 
 if not DATABASE_URL:
     logger.error("DATABASE_URL не задан! Бот не может подключиться к БД.")
-    raise ValueError("Добавьте DATABASE_URL в Render environment variables")
+    logger.error("Проверьте, что переменная окружения DATABASE_URL установлена в настройках вашей платформы (Railway/Render/etc.)")
+    raise ValueError("DATABASE_URL не задан! Добавьте DATABASE_URL в environment variables вашей платформы (Railway/Render/etc.)")
 
 try:
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
