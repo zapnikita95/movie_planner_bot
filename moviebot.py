@@ -2331,7 +2331,12 @@ def handle_settings_callback(call):
             pass
 
 # Обработка ответа с эмодзи на сообщение /settings (упрощенная версия)
-@bot.message_handler(func=lambda m: m.reply_to_message and m.from_user.id in user_settings_state)
+# Этот обработчик срабатывает только если НЕ установлен режим add/replace (т.е. если пользователь напрямую отправил эмодзи без выбора режима)
+@bot.message_handler(func=lambda m: (
+    m.reply_to_message and 
+    m.from_user.id in user_settings_state and 
+    not user_settings_state[m.from_user.id].get('adding_reactions')  # Только если НЕ выбран режим add/replace
+))
 def handle_settings_reply(message):
     user_id = message.from_user.id
     state = user_settings_state.get(user_id)
@@ -2358,14 +2363,21 @@ def handle_settings_reply(message):
         bot.reply_to(message, "⚠️ Не найдено эмодзи. Отправь только эмодзи.")
         return
     
-    # Простая проверка эмодзи
-    emojis = ''.join(c for c in message.text if '\U0001F300' <= c <= '\U0001F9FF' or c in '✅💋🙏❤️😍😘☺️👍😁☑️😊😂🥰🎉⭐🔥')
+    # Расширенная проверка эмодзи
+    emojis = ''.join(c for c in message.text if (
+        '\U0001F300' <= c <= '\U0001F9FF' or  # Различные символы и пиктограммы
+        '\U0001F600' <= c <= '\U0001F64F' or  # Эмодзи лиц
+        '\U0001F680' <= c <= '\U0001F6FF' or  # Транспорт и карты
+        '\U00002600' <= c <= '\U000026FF' or  # Разные символы
+        '\U00002700' <= c <= '\U000027BF' or  # Dingbats
+        c in '✅💋🙏❤️😍😘☺️👍😁☑️😊😂🥰🎉⭐🔥'
+    ))
     
     if not emojis:
         bot.reply_to(message, "⚠️ Не найдено эмодзи. Отправь только эмодзи.")
         return
     
-    # Сохраняем в БД (глобально, chat_id=-1)
+    # Сохраняем в БД (глобально, chat_id=-1) - режим replace по умолчанию
     try:
         with db_lock:
             cursor.execute("""
