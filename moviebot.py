@@ -272,8 +272,12 @@ def print_daily_stats():
                 WHERE DATE(timestamp) = DATE(%s)
             ''', (today,))
             row = cursor.fetchone()
-            total_requests = row[0] if row else 0
-            unique_users = row[1] if row else 0
+            if row:
+                total_requests = row.get('total_requests') if isinstance(row, dict) else (row[0] if len(row) > 0 else 0)
+                unique_users = row.get('unique_users') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0)
+            else:
+                total_requests = 0
+                unique_users = 0
             
             # Статистика по командам
             cursor.execute('''
