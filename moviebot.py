@@ -2873,8 +2873,8 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
             id=f'plan_notify_{chat_id}_{film_id}_{int(plan_utc.timestamp())}'  # уникальный ID
         )
         
-        return True
         logger.info(f"[PLAN] Уведомление запланировано на {plan_dt} МСК для фильма {title}")
+        return True
 
 @bot.message_handler(commands=['plan'])
 def plan_handler(message):
