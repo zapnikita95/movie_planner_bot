@@ -16,6 +16,7 @@ import pytz
 import dateutil.parser
 import logging
 import json
+import sys
 from flask import Flask, request, abort
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -2280,15 +2281,33 @@ def webhook():
 # Проверяем несколько признаков Render окружения
 RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
 RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
-RENDER = os.getenv('RENDER')  # Может быть установлена Render
+RENDER = os.getenv('RENDER')
 PORT = os.getenv('PORT')  # На Render всегда есть PORT
 
-# Считаем, что это Render, если есть хотя бы один из признаков
-IS_RENDER = bool(RENDER_EXTERNAL_URL or RENDER_SERVICE_ID or (RENDER and PORT))
+# Дополнительная проверка: путь выполнения (Render использует /opt/render/)
+IS_RENDER_PATH = '/opt/render' in sys.executable or '/opt/render' in str(sys.path)
+
+# Явная переменная для отключения polling (можно установить в Render env vars)
+USE_POLLING = os.getenv('USE_POLLING', '').lower() in ('true', '1', 'yes')
+
+# ВАЖНО: Если есть PORT или путь Render, это точно Render
+# Polling НИКОГДА не должен запускаться на Render, если не установлена явно USE_POLLING=True
+IS_RENDER = bool(PORT or RENDER_EXTERNAL_URL or RENDER_SERVICE_ID or RENDER or IS_RENDER_PATH)
+
+# Если это Render, принудительно отключаем polling (если не установлена явно USE_POLLING)
+if IS_RENDER and not USE_POLLING:
+    IS_RENDER = True  # Гарантируем, что это Render
+    logger.info(f"Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}")
+else:
+    logger.info(f"Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
 
 if IS_RENDER:
     # На Render - используем ТОЛЬКО webhook, НИКОГДА не polling!
-    logger.info("Обнаружено окружение Render - используется webhook режим")
+    logger.info("=" * 50)
+    logger.info("ОБНАРУЖЕНО ОКРУЖЕНИЕ RENDER - ИСПОЛЬЗУЕТСЯ WEBHOOK РЕЖИМ")
+    logger.info("POLLING НЕ БУДЕТ ЗАПУЩЕН!")
+    logger.info("=" * 50)
+    
     bot.remove_webhook()
     
     if RENDER_EXTERNAL_URL:
@@ -2297,14 +2316,24 @@ if IS_RENDER:
         logger.info(f"Webhook установлен: {webhook_url}")
     else:
         logger.warning("RENDER_EXTERNAL_URL не установлен! Webhook не будет установлен.")
+        logger.warning("Убедитесь, что переменная RENDER_EXTERNAL_URL установлена в настройках Render.")
     
     # Запускаем Flask сервер только если запускается напрямую
     # Если запускается через gunicorn/uvicorn, они сами запустят app
     if __name__ == '__main__':
+        logger.info(f"Запуск Flask сервера на порту {PORT or 10000}")
         app.run(host='0.0.0.0', port=int(PORT or 10000))
+    else:
+        logger.info("Приложение запущено через WSGI сервер (gunicorn/uvicorn)")
 else:
-    # Локальный запуск - используем polling
-    if __name__ == '__main__':
+    # Локальный запуск - используем polling (только если IS_RENDER=False)
+    if IS_RENDER:
+        # Дополнительная защита: если по какой-то причине IS_RENDER=True, но мы в блоке else
+        logger.error("ОШИБКА: IS_RENDER=True, но код попал в блок else! Polling НЕ будет запущен!")
+    elif __name__ == '__main__':
+        logger.info("Локальное окружение - будет использован polling")
         bot.remove_webhook()
         logger.info("Локальный запуск: используется polling")
         bot.infinity_polling()
+    else:
+        logger.warning("Код выполняется не как main, но IS_RENDER=False. Polling не будет запущен автоматически.")
