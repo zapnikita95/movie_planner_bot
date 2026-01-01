@@ -223,11 +223,11 @@ def get_watched_reactions(chat_id):
             if value:
                 try:
                     reactions = json.loads(value)
-                emojis = [r for r in reactions if not r.startswith('custom:')]
-                custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
-                return {'emoji': emojis, 'custom': custom_ids}
-            except:
-                pass
+                    emojis = [r for r in reactions if not r.startswith('custom:')]
+                    custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
+                    return {'emoji': emojis, 'custom': custom_ids}
+                except:
+                    pass
     # Дефолт
     return {'emoji': ['✅'], 'custom': []}
 
