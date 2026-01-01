@@ -2414,6 +2414,7 @@ def add_reactions(message):
     action = state.get('action', 'replace')  # По умолчанию replace
     
     logger.info(f"[SETTINGS] add_reactions вызван для user_id={user_id}, reply_to_message={message.reply_to_message is not None}, settings_msg_id={settings_msg_id}, action={action}")
+    logger.info(f"[SETTINGS] add_reactions: state={state}, message.text={message.text[:50] if message.text else None}")
     
     if not message.reply_to_message:
         logger.warning(f"[SETTINGS] Нет reply_to_message для user_id={user_id}")
