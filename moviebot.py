@@ -3049,8 +3049,9 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
         plan_dt = user_tz.localize(plan_dt)
     
-    elif plan_type == 'cinema':
-        # Если день недели не найден — пытаемся распарсить дату (только для "в кино")
+    else:
+        # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
+        # Формат "15 января" или "15 янв"
         date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', day_lower)
         if date_match:
             day_num = int(date_match.group(1))
@@ -3063,13 +3064,49 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     if candidate < now:
                         year += 1
                     plan_date = datetime(year, month, day_num)
-                    plan_dt = user_tz.localize(plan_date.replace(hour=9, minute=0))
+                    hour = 9 if plan_type == 'cinema' else (19 if plan_date.weekday() == 4 else 10)
+                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                 except ValueError:
+                    logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
+                    return False
+            else:
+                logger.warning(f"[PLAN] Не распознан месяц: {month_str}")
+                return False
+        else:
+            # Формат "15.01", "15/01", "15.01.25", "15.01.2025"
+            date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', day_lower)
+            if date_match:
+                day_num = int(date_match.group(1))
+                month_num = int(date_match.group(2))
+                year_str = date_match.group(3) if date_match.group(3) else None
+                
+                if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                    try:
+                        if year_str:
+                            # Если указан год
+                            if len(year_str) == 2:
+                                # Двузначный год: 25 -> 2025, 24 -> 2024
+                                year = 2000 + int(year_str)
+                            else:
+                                year = int(year_str)
+                        else:
+                            # Год не указан, используем текущий или следующий
+                            year = now.year
+                            candidate = user_tz.localize(datetime(year, month_num, day_num))
+                            if candidate < now:
+                                year += 1
+                        
+                        plan_date = datetime(year, month_num, day_num)
+                        hour = 9 if plan_type == 'cinema' else (19 if plan_date.weekday() == 4 else 10)
+                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
+                    except ValueError as e:
+                        logger.error(f"[PLAN] Некорректная дата: {day_num}.{month_num}.{year_str if year_str else 'N/A'}: {e}")
+                        return False
+                else:
                     return False
             else:
                 return False
-        else:
-            return False
     
     if plan_dt:
         # Извлекаем kp_id из ссылки для поиска
