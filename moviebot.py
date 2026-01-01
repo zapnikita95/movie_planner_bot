@@ -53,6 +53,7 @@ scheduler.start()
 user_plan_state = {}  # user_id: {'step': int, 'link': str, 'type': str, 'day_or_date': str}
 bot_messages = {}  # message_id: link (храним карточки бота)
 list_messages = {}  # message_id: chat_id (храним сообщения /list для обработки ответов)
+plan_notification_messages = {}  # message_id: {'kp_id': str, 'chat_id': int, 'link': str} (храним напоминания о планах)
 # Состояния настроек
 user_settings_state = {}  # user_id: {'action': str, 'settings_msg_id': int, 'chat_id': int}
 # Состояния очистки
@@ -453,11 +454,25 @@ scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
 
 def send_plan_notification(chat_id, title, link, plan_type):
+    # Извлекаем kp_id из ссылки для сохранения связи
+    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+    kp_id = match.group(2) if match else None
+    
     if plan_type == 'home':
         text = f"Привет! Вы планировали посмотреть дома фильм <b>{title}</b>: {link}"
     else:
         text = f"Привет! Вы планировали сходить в кино на <b>{title}</b>: {link}"
-    bot.send_message(chat_id, text, parse_mode='HTML')
+    
+    msg = bot.send_message(chat_id, text, parse_mode='HTML')
+    
+    # Сохраняем связь message_id -> kp_id для обработки реакций на напоминания
+    if kp_id and msg:
+        plan_notification_messages[msg.message_id] = {
+            'kp_id': kp_id,
+            'chat_id': chat_id,
+            'link': link
+        }
+        logger.info(f"[PLAN_NOTIFICATION] Сохранена связь message_id={msg.message_id} с kp_id={kp_id} для чата {chat_id}")
 
 # Получение информации о фильме через прямой запрос к API
 def extract_movie_info(link):
@@ -774,6 +789,44 @@ def handle_reaction(update):
             is_watched = reaction.emoji in watched['emoji']
         
         if is_watched:
+            # Сначала проверяем, не это ли напоминание о плане
+            notification_data = plan_notification_messages.get(message_id)
+            if notification_data:
+                # Это реакция на напоминание о плане
+                kp_id = notification_data['kp_id']
+                link = notification_data['link']
+                try:
+                    logger.info(f"[REACTION] Обрабатываем реакцию на напоминание о плане с kp_id={kp_id}")
+                    film_id = None
+                    title = None
+                    with db_lock:
+                        cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        conn.commit()
+                        
+                        cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        row = cursor.fetchone()
+                        if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+                            title = row.get('title') if isinstance(row, dict) else row[1]
+                            logger.info(f"[REACTION] Фильм {title} (ID: {film_id}, kp_id: {kp_id}) отмечен как просмотренный по реакции на напоминание пользователем {user_id}")
+                        else:
+                            logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в базе")
+                    
+                    # Отправляем сообщение только если фильм найден
+                    if film_id and title:
+                        user_name = update.user.first_name if update.user else "Кто-то"
+                        try:
+                            msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
+                            # Сохраняем связь message_id -> film_id для обработки оценки
+                            rating_messages[msg.message_id] = film_id
+                            logger.info(f"[REACTION] Сообщение об отметке фильма отправлено для {title}")
+                        except Exception as send_error:
+                            logger.error(f"[REACTION] Ошибка при отправке сообщения: {send_error}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"Ошибка реакции на напоминание: {e}", exc_info=True)
+                continue  # Пропускаем дальнейшую обработку, так как уже обработали напоминание
+            
+            # Обычная обработка реакций на сообщения с фильмами
             link = bot_messages.get(message_id)
             if link:
                 try:
