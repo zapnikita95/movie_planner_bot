@@ -1290,10 +1290,10 @@ def random_show_movie(call):
             chat_id = call.message.chat.id
             with db_lock:
                 # Проверяем, есть ли фильм в базе
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND link = %s', (chat_id, movie['link']))
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, movie['kp_id']))
                 row = cursor.fetchone()
                 if row:
-                    film_id = row[0]
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
                 else:
                     # Добавляем фильм в базу, если его нет
                     cursor.execute('''
