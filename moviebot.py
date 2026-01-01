@@ -1414,27 +1414,50 @@ def random_show_movie(call):
     if plan_dt:
         try:
             chat_id = call.message.chat.id
+            film_id = movie.get('id')
+            kp_id = movie.get('kp_id')
+            
+            # Если нет kp_id, пытаемся извлечь из ссылки
+            if not kp_id and movie.get('link'):
+                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', movie['link'])
+                if match:
+                    kp_id = match.group(2)
+            
+            if not kp_id:
+                logger.error(f"Не удалось определить kp_id для фильма {movie.get('title')}")
+                bot.answer_callback_query(call.id, "Ошибка: не удалось определить ID фильма", show_alert=True)
+                return
+            
             with db_lock:
-                # Проверяем, есть ли фильм в базе
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, movie['kp_id']))
+                # Проверяем, есть ли фильм в базе по kp_id
+                if kp_id:
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                else:
+                    # Fallback на id, если kp_id нет
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND id = %s', (chat_id, film_id))
                 row = cursor.fetchone()
                 if row:
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
                 else:
                     # Добавляем фильм в базу, если его нет
+                    if not kp_id:
+                        logger.error(f"Не удалось добавить фильм в базу: нет kp_id")
+                        bot.answer_callback_query(call.id, "Ошибка: не удалось добавить фильм в базу", show_alert=True)
+                        return
+                    
                     cursor.execute('''
                         INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                    ''', (chat_id, movie['link'], movie['kp_id'], movie['title'], movie['year'], movie['genres'], movie['description'], movie['director'], movie['actors']))
+                    ''', (chat_id, movie.get('link'), kp_id, movie.get('title'), movie.get('year'), movie.get('genres'), movie.get('description'), movie.get('director'), movie.get('actors')))
                     conn.commit()
-                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, movie['kp_id']))
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                     row = cursor.fetchone()
                     if row:
                         film_id = row.get('id') if isinstance(row, dict) else row[0]
                     else:
                         logger.error(f"Не удалось добавить фильм в базу для планирования")
-                        del user_random_state[user_id]
+                        bot.answer_callback_query(call.id, "Ошибка: не удалось добавить фильм в базу", show_alert=True)
                         return
                 
                 # Добавляем план
@@ -1443,9 +1466,14 @@ def random_show_movie(call):
                               (chat_id, film_id, 'home', plan_utc_iso, user_id))
                 conn.commit()
             
-            logger.info(f"Фильм {movie['title']} автоматически запланирован на {plan_dt.strftime('%d.%m.%Y %H:%M')}")
+            bot.answer_callback_query(call.id, f"Фильм запланирован на {plan_dt.strftime('%d.%m.%Y')}")
+            logger.info(f"Фильм {movie.get('title')} автоматически запланирован на {plan_dt.strftime('%d.%m.%Y %H:%M')}")
         except Exception as e:
             logger.error(f"Ошибка при автоматическом планировании фильма: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, f"Ошибка при планировании: {str(e)[:50]}", show_alert=True)
+            except:
+                pass
     
     del user_random_state[user_id]
 
