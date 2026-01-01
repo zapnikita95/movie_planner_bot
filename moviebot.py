@@ -3547,37 +3547,64 @@ def plan_handler(message):
             reply_msg = message.reply_to_message
             reply_msg_id = reply_msg.message_id
             
+            logger.info(f"[PLAN] Обработка реплая: reply_msg_id={reply_msg_id}, chat_id={chat_id}")
+            logger.info(f"[PLAN] bot_messages keys (первые 10): {list(bot_messages.keys())[:10]}")
+            logger.info(f"[PLAN] plan_notification_messages keys (первые 10): {list(plan_notification_messages.keys())[:10]}")
+            
             # 1. Проверяем bot_messages и plan_notification_messages
             link = bot_messages.get(reply_msg_id)
-            if not link:
+            if link:
+                logger.info(f"[PLAN] ✅ Найдена ссылка в bot_messages: {link}")
+            else:
                 plan_data = plan_notification_messages.get(reply_msg_id)
                 if plan_data:
                     link = plan_data.get('link')
-                    logger.info(f"[PLAN] Найдена ссылка в plan_notification_messages: {link}")
+                    logger.info(f"[PLAN] ✅ Найдена ссылка в plan_notification_messages: {link}")
             
             # 2. Ищем ссылку в тексте сообщения (обычная ссылка)
             if not link:
-                link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', reply_msg.text or '')
+                reply_text = reply_msg.text or ''
+                logger.info(f"[PLAN] Текст реплая (первые 200 символов): {reply_text[:200]}")
+                link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', reply_text)
                 if link_match:
                     link = link_match.group(1)
-                    logger.info(f"[PLAN] Найдена ссылка в тексте реплая: {link}")
+                    logger.info(f"[PLAN] ✅ Найдена ссылка в тексте реплая: {link}")
             
             # 3. Ищем HTML-ссылку "Кинопоиск" в тексте сообщения
+            # Telegram может не возвращать HTML в text, но entities должны содержать ссылку
             if not link:
-                html_link_match = re.search(r"<a\s+href=['\"](https?://[\w\./-]*kinopoisk\.ru/(?:film|series)/\d+)['\"]", reply_msg.text or '')
+                reply_text = reply_msg.text or ''
+                # Пробуем найти HTML-тег (хотя Telegram обычно не возвращает HTML в text)
+                html_link_match = re.search(r"<a\s+href=['\"](https?://[\w\./-]*kinopoisk\.ru/(?:film|series)/\d+)['\"]", reply_text)
                 if html_link_match:
                     link = html_link_match.group(1)
-                    logger.info(f"[PLAN] Найдена HTML-ссылка в реплае: {link}")
+                    logger.info(f"[PLAN] ✅ Найдена HTML-ссылка в тексте реплая: {link}")
             
-            # 4. Проверяем entities сообщения (URL entities)
+            # 4. Проверяем entities сообщения (URL entities) - это основной способ для HTML-ссылок
             if not link and reply_msg.entities:
-                for entity in reply_msg.entities:
+                logger.info(f"[PLAN] Проверяем entities реплая: {len(reply_msg.entities)} entities")
+                for idx, entity in enumerate(reply_msg.entities):
+                    logger.info(f"[PLAN] Entity {idx}: type={entity.type}, offset={entity.offset}, length={entity.length}")
                     if entity.type == 'url' or entity.type == 'text_link':
-                        url = entity.url if hasattr(entity, 'url') else (reply_msg.text[entity.offset:entity.offset + entity.length] if reply_msg.text else None)
+                        if hasattr(entity, 'url') and entity.url:
+                            url = entity.url
+                        elif reply_msg.text:
+                            url = reply_msg.text[entity.offset:entity.offset + entity.length]
+                        else:
+                            url = None
+                        
+                        logger.info(f"[PLAN] Entity URL: {url}")
                         if url and 'kinopoisk.ru' in url and ('/film/' in url or '/series/' in url):
                             link = url
-                            logger.info(f"[PLAN] Найдена ссылка в entities реплая: {link}")
+                            logger.info(f"[PLAN] ✅ Найдена ссылка в entities реплая: {link}")
                             break
+            else:
+                logger.info(f"[PLAN] Нет entities в реплае или ссылка уже найдена")
+            
+            if not link:
+                logger.warning(f"[PLAN] ❌ Не удалось найти ссылку в реплае message_id={reply_msg_id}")
+        else:
+            logger.info(f"[PLAN] Нет реплая в сообщении")
         
         # Ищем ссылку в тексте команды (используем оригинальный текст для правильного извлечения)
         if not link:
