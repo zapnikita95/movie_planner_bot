@@ -732,7 +732,7 @@ def add_and_announce(link, chat_id):
     # Новый фильм - добавляем
     inserted = False
     try:
-    with db_lock:
+        with db_lock:
             try:
                 # Проверяем, не в состоянии ли ошибки транзакция
                 try:
