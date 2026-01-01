@@ -3779,6 +3779,7 @@ logger.info(f"Токен: {TOKEN[:10] if TOKEN else 'не установлен'}
 logger.info("=" * 50)
 
 # --- /random — рандомный фильм с фильтрами ---
+# --- /random — рандомный фильм с фильтрами ---
 user_random_state = {}  # user_id: состояние рандомайзера
 
 @bot.message_handler(commands=['random'])
@@ -3786,7 +3787,7 @@ def random_start(message):
     logger.info(f"[RANDOM] /random вызван от {message.from_user.id}")
     user_id = message.from_user.id
     chat_id = message.chat.id
-    user_random_state[user_id] = {}
+    user_random_state[user_id] = {'periods': []}
     
     markup = InlineKeyboardMarkup(row_width=2)
     periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
@@ -3803,6 +3804,7 @@ def random_start(message):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_period:"))
 def random_period_handler(call):
+    logger.info(f"[RANDOM] Обработка периода: {call.data}")
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     data = call.data.split(":", 1)[1]
@@ -3810,24 +3812,28 @@ def random_period_handler(call):
     if user_id not in user_random_state:
         user_random_state[user_id] = {'periods': []}
     
-    if data == "skip" or data == "done":
-        # Переход к жанрам
+    if data in ["skip", "done"]:
+        # Переходим к жанрам
         with db_lock:
             cursor.execute("""
                 SELECT DISTINCT TRIM(UNNEST(string_to_array(genres, ', '))) as genre
                 FROM movies
-                WHERE chat_id = %s AND watched = 0 AND genres IS NOT NULL AND genres != ''
+                WHERE chat_id = %s AND watched = 0 AND genres IS NOT NULL AND genres != '' AND genres != '—'
             """, (chat_id,))
             genres = [row[0] for row in cursor.fetchall() if row[0].strip()]
         
+        if not genres:
+            bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", chat_id, call.message.message_id)
+            del user_random_state[user_id]
+            return
+        
         markup = InlineKeyboardMarkup(row_width=2)
-        for genre in sorted(set(genres)):
+        for genre in sorted(genres):
             markup.add(InlineKeyboardButton(genre, callback_data=f"rand_genre:{genre}"))
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
         
         bot.edit_message_text("🎬 Выберите жанр:", chat_id, call.message.message_id, reply_markup=markup)
         bot.answer_callback_query(call.id)
-        user_random_state[user_id]['period_done'] = True
     else:
         # Toggle периода
         periods = user_random_state[user_id]['periods']
@@ -3850,11 +3856,13 @@ def random_period_handler(call):
         markup.add(InlineKeyboardButton("Готово", callback_data="rand_period:done"))
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
         
-        bot.edit_message_text(f"Выбрано: {', '.join(periods) or 'ничего'}\nНажмите 'Готово' или 'Пропустить':", chat_id, call.message.message_id, reply_markup=markup)
+        selected = ', '.join(periods) or 'ничего'
+        bot.edit_message_text(f"Выбрано: {selected}\nНажмите 'Готово' или 'Пропустить':", chat_id, call.message.message_id, reply_markup=markup)
         bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
 def random_genre_handler(call):
+    logger.info(f"[RANDOM] Обработка жанра: {call.data}")
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     data = call.data.split(":", 1)[1]
@@ -3866,7 +3874,7 @@ def random_genre_handler(call):
     
     user_random_state[user_id]['genre'] = genre
     
-    # Показываем топ режиссёров
+    # Переход к режиссёрам
     with db_lock:
         cursor.execute("""
             SELECT director, COUNT(*) as cnt
@@ -3887,7 +3895,8 @@ def random_genre_handler(call):
     bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
-def random_director_handler(call):
+def random_final(call):
+    logger.info(f"[RANDOM] Обработка режиссёра: {call.data}")
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     data = call.data.split(":", 1)[1]
@@ -3897,19 +3906,14 @@ def random_director_handler(call):
     else:
         director = data
     
-    user_random_state[user_id]['director'] = director
-    
-    # Выбираем фильм
     state = user_random_state[user_id]
-    query = """
-        SELECT id, title, year, genres, director, actors, description, link
-        FROM movies
-        WHERE chat_id = %s AND watched = 0
-    """
+    
+    # Формируем запрос
+    query = "SELECT id, title, year, genres, director, actors, description, link FROM movies WHERE chat_id = %s AND watched = 0"
     params = [chat_id]
     
-    if state.get('periods') and len(state['periods']) > 0:
-        # Фильтр по периодам
+    # Фильтр по периодам
+    if state.get('periods'):
         period_conditions = []
         for p in state['periods']:
             if p == "До 1980":
@@ -3924,7 +3928,6 @@ def random_director_handler(call):
                 period_conditions.append("(year >= 2010 AND year <= 2020)")
             elif p == "2020–сейчас":
                 period_conditions.append("year >= 2020")
-        
         if period_conditions:
             query += " AND (" + " OR ".join(period_conditions) + ")"
     
@@ -3932,9 +3935,9 @@ def random_director_handler(call):
         query += " AND genres ILIKE %s"
         params.append(f"%{state['genre']}%")
     
-    if state.get('director'):
+    if director:
         query += " AND director = %s"
-        params.append(state['director'])
+        params.append(director)
     
     with db_lock:
         cursor.execute(query, params)
@@ -3946,23 +3949,11 @@ def random_director_handler(call):
         return
     
     movie = random.choice(candidates)
-    film_id = movie[0]
     title = movie[1]
     year = movie[2] or '—'
-    genres = movie[3] or '—'
-    director = movie[4] or 'Не указан'
-    actors = movie[5] or '—'
-    description = movie[6] or 'Нет описания'
     link = movie[7]
     
-    text = f"🍿 <b>Рандомный фильм:</b>\n\n"
-    text += f"<b>{title}</b> ({year})\n"
-    text += f"🎬 Режиссёр: {director}\n"
-    text += f"🎭 Жанры: {genres}\n"
-    text += f"👥 В ролях: {actors}\n\n"
-    text += f"{description}\n\n"
-    text += f"<a href='{link}'>Кинопоиск</a>"
-    
+    text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
     bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
     bot.answer_callback_query(call.id)
     
