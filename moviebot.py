@@ -1607,7 +1607,10 @@ def stats_command(message):
         chat_id = message.chat.id
         
         with db_lock:
-            # Получаем статистику по участникам
+            # Получаем всех участников из разных источников: stats, ratings, watched_movies, plans
+            all_users = {}
+            
+            # Из stats (команды)
             cursor.execute('''
                 SELECT 
                     user_id,
@@ -1617,9 +1620,75 @@ def stats_command(message):
                 FROM stats
                 WHERE chat_id = %s AND user_id IS NOT NULL
                 GROUP BY user_id, username
-                ORDER BY command_count DESC, last_activity DESC
             ''', (chat_id,))
-            users_stats = cursor.fetchall()
+            for row in cursor.fetchall():
+                user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                username = row.get('username') if isinstance(row, dict) else row[1]
+                command_count = row.get('command_count') if isinstance(row, dict) else row[2]
+                last_activity = row.get('last_activity') if isinstance(row, dict) else row[3]
+                all_users[user_id] = {
+                    'username': username,
+                    'command_count': command_count,
+                    'last_activity': last_activity
+                }
+            
+            # Из ratings (оценки)
+            cursor.execute('''
+                SELECT DISTINCT user_id
+                FROM ratings
+                WHERE chat_id = %s AND user_id IS NOT NULL
+            ''', (chat_id,))
+            for row in cursor.fetchall():
+                user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                if user_id not in all_users:
+                    all_users[user_id] = {
+                        'username': None,
+                        'command_count': 0,
+                        'last_activity': None
+                    }
+            
+            # Из watched_movies (просмотренные фильмы)
+            cursor.execute('''
+                SELECT DISTINCT user_id
+                FROM watched_movies
+                WHERE chat_id = %s AND user_id IS NOT NULL
+            ''', (chat_id,))
+            for row in cursor.fetchall():
+                user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                if user_id not in all_users:
+                    all_users[user_id] = {
+                        'username': None,
+                        'command_count': 0,
+                        'last_activity': None
+                    }
+            
+            # Из plans (планы)
+            cursor.execute('''
+                SELECT DISTINCT user_id
+                FROM plans
+                WHERE chat_id = %s AND user_id IS NOT NULL
+            ''', (chat_id,))
+            for row in cursor.fetchall():
+                user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                if user_id not in all_users:
+                    all_users[user_id] = {
+                        'username': None,
+                        'command_count': 0,
+                        'last_activity': None
+                    }
+            
+            # Преобразуем в список и сортируем
+            users_stats = []
+            for user_id, data in all_users.items():
+                users_stats.append({
+                    'user_id': user_id,
+                    'username': data['username'],
+                    'command_count': data['command_count'],
+                    'last_activity': data['last_activity']
+                })
+            
+            # Сортируем по количеству команд и последней активности
+            users_stats.sort(key=lambda x: (x['command_count'], x['last_activity'] or ''), reverse=True)
             
             # Получаем общую статистику чата
             cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
