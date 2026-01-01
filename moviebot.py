@@ -3796,7 +3796,8 @@ def clean_action_choice(call):
             "Это удалит <b>только ваши данные</b>:\n"
             "• Все ваши оценки\n"
             "• Все ваши планы\n"
-            "• Вашу статистику\n\n"
+            "• Вашу статистику\n"
+            "• Ваши настройки (включая часовой пояс)\n\n"
             "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
             "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
             call.message.chat.id, call.message.message_id, parse_mode='HTML'
@@ -3923,8 +3924,9 @@ def clean_confirm_execute(message):
                     cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
                     cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
                     cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    cursor.execute('DELETE FROM settings WHERE chat_id = %s AND key = %s', (user_id, 'user_timezone'))
                     conn.commit()
-                    bot.reply_to(message, "✅ Все ваши данные удалены из базы.\n\nВаши оценки, планы и статистика удалены. Фильмы и данные других пользователей остались без изменений.")
+                    bot.reply_to(message, "✅ Все ваши данные удалены из базы.\n\nВаши оценки, планы, статистика и настройки (включая часовой пояс) удалены. Фильмы и данные других пользователей остались без изменений.")
                     logger.info(f"Данные пользователя {user_id} удалены из чата {chat_id}")
                 except Exception as e:
                     conn.rollback()
