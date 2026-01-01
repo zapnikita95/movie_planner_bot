@@ -2495,6 +2495,8 @@ def settings_command(message):
             return
         
         current = get_watched_emojis(chat_id)
+        # Преобразуем список эмодзи в строку для корректного отображения
+        current_emojis_str = ''.join(current) if isinstance(current, list) else str(current)
         
         # Получаем текущий часовой пояс пользователя
         user_tz = get_user_timezone(user_id)
@@ -2509,7 +2511,7 @@ def settings_command(message):
         
         sent = bot.send_message(chat_id,
             f"⚙️ <b>Настройки</b>\n\n"
-            f"<b>Реакции:</b> {current}\n"
+            f"<b>Реакции:</b> {current_emojis_str}\n"
             f"<b>Часовой пояс:</b> {current_tz}\n\n"
             f"Выберите действие или поставьте реакцию на это сообщение — она автоматически добавится к текущим.",
             reply_markup=markup,
