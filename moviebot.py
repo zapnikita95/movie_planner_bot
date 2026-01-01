@@ -3550,27 +3550,12 @@ if IS_RENDER:
     else:
         logger.error("RENDER_EXTERNAL_URL не задан!")
 
-    # Проверяем, запускается ли через gunicorn или напрямую через Python
-    # Если используется gunicorn, он сам запустит app, и app.run() не нужен
-    # Если запускается через python moviebot.py, нужен app.run()
-    
-    # Проверяем, есть ли gunicorn в процессе (простая проверка через переменную окружения)
-    # Если команда запуска - gunicorn, то app.run() не вызываем
-    # Если команда запуска - python moviebot.py, то вызываем app.run()
-    
-    # Для gunicorn: просто логируем, что приложение готово
-    # Gunicorn сам запустит app через: gunicorn moviebot:app
+    # На Render используется gunicorn для запуска Flask приложения
+    # Gunicorn сам запускает app через: gunicorn moviebot:app
+    # Поэтому app.run() НЕ вызываем - gunicorn сам запустит приложение
     logger.info("Flask приложение готово к запуску через gunicorn")
     logger.info(f"Зарегистрированные маршруты: {[str(rule) for rule in app.url_map.iter_rules()]}")
-    
-    # Если запускается НЕ через gunicorn (например, python moviebot.py), запускаем app.run()
-    # Проверяем, запущен ли через gunicorn (если в sys.argv нет gunicorn, значит запущен напрямую)
-    if 'gunicorn' not in ' '.join(sys.argv):
-        port = int(os.getenv('PORT', 10000))
-        logger.info(f"Запуск Flask сервера напрямую на порту {port} (не через gunicorn)")
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-    else:
-        logger.info("Запуск через gunicorn - app.run() не вызывается")
+    logger.info("Gunicorn запустит приложение автоматически")
 else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
     if IS_RENDER:
