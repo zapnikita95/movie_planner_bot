@@ -1,5 +1,9 @@
 from dotenv import load_dotenv
-load_dotenv()  # загружает .env
+load_dotenv()  # загружает .env (для локальной разработки)
+
+# В Railway переменные окружения должны быть доступны напрямую через os.getenv()
+# Но иногда Railway не подставляет значения из ${{Service.VAR}}
+# Поэтому проверяем и логируем все доступные переменные
 
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
