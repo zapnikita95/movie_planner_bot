@@ -844,7 +844,13 @@ def list_movies(message):
         text = "*⏳ Непросмотренные фильмы:*\n\n"
         # Все запросы к БД должны быть внутри db_lock
         with db_lock:
-            for film_id, title, year, link in rows:
+            for row in rows:
+                # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
+                year = row.get('year') if isinstance(row, dict) else row[2]
+                link = row.get('link') if isinstance(row, dict) else row[3]
+                
                 # Рассчитываем среднее из ratings
                 cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                 avg_result = cursor.fetchone()
@@ -872,17 +878,26 @@ def total_stats(message):
         chat_id = message.chat.id
         with db_lock:
             cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
-            total = cursor.fetchone()[0] or 0
+            total_row = cursor.fetchone()
+            total = total_row[0] if total_row and total_row[0] else 0
+            
             cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
-            watched = cursor.fetchone()[0] or 0
+            watched_row = cursor.fetchone()
+            watched = watched_row[0] if watched_row and watched_row[0] else 0
             unwatched = total - watched
+            
+            # Если нет данных, отправляем сообщение
+            if total == 0:
+                bot.reply_to(message, "📊 Нет данных о вашей статистике.\n\nОцените первый фильм, чтобы статистика начала собираться.")
+                return
 
             # Жанры
             cursor.execute('SELECT genres FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
             genre_counts = {}
             for row in cursor.fetchall():
-                if row[0]:
-                    for g in str(row[0]).split(', '):
+                genres = row.get('genres') if isinstance(row, dict) else row[0]
+                if genres:
+                    for g in str(genres).split(', '):
                         if g.strip():
                             genre_counts[g.strip()] = genre_counts.get(g.strip(), 0) + 1
             fav_genre = max(genre_counts, key=genre_counts.get) if genre_counts else "—"
@@ -890,7 +905,9 @@ def total_stats(message):
             # Режиссёры
             cursor.execute('SELECT director, rating FROM movies WHERE chat_id = %s AND watched = 1 AND director IS NOT NULL AND director != "Не указан"', (chat_id,))
             director_stats = {}
-            for d, r in cursor.fetchall():
+            for row in cursor.fetchall():
+                d = row.get('director') if isinstance(row, dict) else row[0]
+                r = row.get('rating') if isinstance(row, dict) else row[1]
                 if d not in director_stats:
                     director_stats[d] = {'count': 0, 'sum_rating': 0}
                 director_stats[d]['count'] += 1
@@ -901,7 +918,9 @@ def total_stats(message):
             # Актёры
             cursor.execute('SELECT actors, rating FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
             actor_stats = {}
-            for actors_str, r in cursor.fetchall():
+            for row in cursor.fetchall():
+                actors_str = row.get('actors') if isinstance(row, dict) else row[0]
+                r = row.get('rating') if isinstance(row, dict) else row[1]
                 if actors_str:
                     for a in actors_str.split(', '):
                         a = a.strip()
@@ -915,7 +934,8 @@ def total_stats(message):
 
             # Рассчитываем среднее из ratings (не из movies.rating)
             cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s', (chat_id,))
-            avg_rating = cursor.fetchone()[0]
+            avg_row = cursor.fetchone()
+            avg_rating = avg_row[0] if avg_row and avg_row[0] else None
             avg_str = f"{avg_rating:.1f}/10" if avg_rating else "—"
 
         text = f"📊 <b>Статистика кино-группы</b>\n\n"
@@ -2055,7 +2075,7 @@ def clean_command(message):
     markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
     markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
     
-        bot.reply_to(message, "🧹 <b>Что вы хотите удалить?</b>\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
+    bot.reply_to(message, "🧹 <b>Что вы хотите удалить?</b>\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("clean:"))
 def clean_action_choice(call):
