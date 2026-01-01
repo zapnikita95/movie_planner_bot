@@ -3582,8 +3582,6 @@ if IS_RENDER:
         except Exception as e:
             logger.error(f"[DEBUG] Ошибка при запуске app.run(): {e}", exc_info=True)
 else:
-    logger.info(f"[DEBUG] IS_RENDER=False, код идет в блок else")
-else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
     if IS_RENDER:
         # Дополнительная защита: если по какой-то причине IS_RENDER=True, но мы в блоке else
