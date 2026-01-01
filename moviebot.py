@@ -653,9 +653,31 @@ def add_and_announce(link, chat_id):
 
     # Проверяем, существует ли уже фильм в этом чате по kp_id (не по ссылке, так как ссылки могут отличаться)
     kp_id = info.get('kp_id')
-    with db_lock:
-        cursor.execute('SELECT id, title, watched, rating FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-        existing = cursor.fetchone()
+    if not kp_id:
+        logger.error(f"kp_id не найден в info для ссылки {link}")
+        return False
+    
+    existing = None
+    try:
+        with db_lock:
+            # Проверяем состояние транзакции перед выполнением запроса
+            try:
+                cursor.execute('SELECT 1')
+                cursor.fetchone()
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"Транзакция была в состоянии ошибки, выполнен rollback перед проверкой существующего фильма: {e}")
+            
+            cursor.execute('SELECT id, title, watched, rating FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            existing = cursor.fetchone()
+    except Exception as e:
+        logger.error(f"Ошибка при проверке существующего фильма в БД: {e}", exc_info=True)
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
+        # Продолжаем выполнение, чтобы попытаться отправить сообщение
     
     if existing:
         # RealDictCursor возвращает словари, но поддерживает доступ по индексу
@@ -669,10 +691,14 @@ def add_and_announce(link, chat_id):
         
         # Если фильм просмотрен, рассчитываем среднее из ratings (внутри db_lock)
         if watched:
-            with db_lock:
-                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-                avg_result = cursor.fetchone()
-                avg = avg_result[0] if avg_result and avg_result[0] else None
+            avg = None
+            try:
+                with db_lock:
+                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                    avg_result = cursor.fetchone()
+                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else (avg_result[0] if avg_result and len(avg_result) > 0 else None)
+            except Exception as e:
+                logger.error(f"Ошибка при расчете среднего рейтинга для существующего фильма: {e}", exc_info=True)
             
             text += f"\n✅ <b>Просмотрено</b>\n"
             if avg:
@@ -704,27 +730,51 @@ def add_and_announce(link, chat_id):
                     conn.rollback()
                     logger.debug("Транзакция была в состоянии ошибки, выполнен rollback")
                 
+                # Дополнительная проверка перед вставкой (на случай race condition)
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                duplicate_check = cursor.fetchone()
+                if duplicate_check:
+                    logger.info(f"Фильм с kp_id={kp_id} уже существует в базе, пропускаем вставку")
+                    return False
+                
                 cursor.execute('''
                     INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
                 ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                 conn.commit()
-                inserted = cursor.rowcount == 1
+                inserted = cursor.rowcount > 0
                 logger.debug(f"Попытка вставки фильма: rowcount={cursor.rowcount}, inserted={inserted}")
             except Exception as db_error:
                 conn.rollback()
                 logger.error(f"Ошибка при добавлении фильма в БД: {db_error}", exc_info=True)
-                # Продолжаем выполнение, чтобы отправить сообщение даже при ошибке БД
-                inserted = True  # Считаем, что нужно отправить сообщение
+                # Проверяем, не был ли фильм добавлен из-за конфликта
+                try:
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    if cursor.fetchone():
+                        logger.info(f"Фильм с kp_id={kp_id} уже существует (обнаружен после ошибки)")
+                        return False
+                except:
+                    pass
+                return False
     except Exception as e:
         logger.error(f"Критическая ошибка при работе с БД: {e}", exc_info=True)
-        # Продолжаем выполнение, чтобы отправить сообщение
-        inserted = True  # Отправляем сообщение даже при ошибке
+        try:
+            with db_lock:
+                conn.rollback()
+        except:
+            pass
+        return False
     
-    logger.info(f"Готовимся отправить сообщение: inserted={inserted}, title={info['title']}")
+    logger.info(f"Готовимся отправить сообщение: inserted={inserted}, title={info['title']}, link={link}")
     
     if inserted:
+        # Убеждаемся, что link - это валидная ссылка
+        if not link or not link.startswith('http'):
+            logger.warning(f"Некорректная ссылка: {link}, генерируем новую")
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            logger.info(f"Используем сгенерированную ссылку: {link}")
+        
         text = f"🎬 <b>Добавлено в базу!</b>\n\n"
         text += f"<b>{info['title']}</b> ({info['year'] or '—'})\n"
         text += f"<i>Режиссёр:</i> {info['director']}\n"
@@ -734,13 +784,13 @@ def add_and_announce(link, chat_id):
         text += f"<a href='{link}'>Кинопоиск</a>"
         
         try:
-            logger.info(f"Отправляем сообщение в чат {chat_id}")
+            logger.info(f"Отправляем сообщение в чат {chat_id}, ссылка в тексте: {link}")
             msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
             bot_messages[msg.message_id] = link  # запоминаем для реакции
-            logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}")
+            logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}, message_id={msg.message_id}")
             return True
-        except Exception as e:
-            logger.error(f"❌ Ошибка при отправке сообщения: {e}", exc_info=True)
+        except Exception as send_e:
+            logger.error(f"❌ Ошибка при отправке сообщения: {send_e}", exc_info=True)
             return False
     else:
         logger.warning(f"Фильм не был вставлен (возможно, уже существует), сообщение не отправляется")
