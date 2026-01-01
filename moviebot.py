@@ -1216,56 +1216,54 @@ def handle_reaction(reaction):
     rating_messages[msg.message_id] = film_id
     logger.info(f"[REACTION] Сообщение об оценке отправлено для {user_name}, message_id={msg.message_id}, film_id={film_id}")
     
-    # Проверяем, есть ли план "дома" для этого фильма - если да, планируем напоминание на следующий день
+    # Планируем напоминание на следующий день после просмотра (только для планов "дома")
     try:
         with db_lock:
+            # Проверяем, есть ли план "дома" для этого фильма
             cursor.execute("""
-                SELECT plan_datetime, plan_type 
+                SELECT plan_type 
                 FROM plans 
                 WHERE chat_id = %s AND film_id = %s AND plan_type = 'home'
-                ORDER BY plan_datetime DESC
                 LIMIT 1
             """, (chat_id, film_id))
             plan_row = cursor.fetchone()
             
             if plan_row:
-                plan_datetime = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[0]
-                if isinstance(plan_datetime, str):
-                    from datetime import datetime
-                    plan_datetime = datetime.fromisoformat(plan_datetime.replace('Z', '+00:00'))
-                
-                # Напоминание на следующий день после просмотра
-                from datetime import timedelta
-                reminder_datetime = plan_datetime + timedelta(days=1)
-                
-                # Планируем напоминание всем участникам чата, которые просмотрели
+                # Получаем дату просмотра для этого пользователя
                 cursor.execute("""
-                    SELECT DISTINCT user_id 
+                    SELECT watched_at 
                     FROM watched_movies 
-                    WHERE chat_id = %s AND film_id = %s
-                """, (chat_id, film_id))
-                watched_users = cursor.fetchall()
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                """, (chat_id, film_id, user_id))
+                watched_row = cursor.fetchone()
                 
-                for user_row in watched_users:
-                    watched_user_id = user_row.get('user_id') if isinstance(user_row, dict) else user_row[0]
+                if watched_row:
+                    watched_at = watched_row.get('watched_at') if isinstance(watched_row, dict) else watched_row[0]
+                    if isinstance(watched_at, str):
+                        from datetime import datetime
+                        watched_at = datetime.fromisoformat(watched_at.replace('Z', '+00:00'))
                     
                     # Проверяем, не оценил ли уже пользователь
                     cursor.execute("""
                         SELECT id FROM ratings 
                         WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                    """, (chat_id, film_id, watched_user_id))
+                    """, (chat_id, film_id, user_id))
                     has_rating = cursor.fetchone()
                     
                     if not has_rating:
+                        # Напоминание на следующий день после просмотра
+                        from datetime import timedelta
+                        reminder_datetime = watched_at + timedelta(days=1)
+                        
                         # Планируем напоминание
                         scheduler.add_job(
                             send_rating_reminder,
                             'date',
                             run_date=reminder_datetime.astimezone(pytz.utc),
-                            args=[chat_id, film_id, film_title, watched_user_id],
-                            id=f'rating_reminder_{chat_id}_{film_id}_{watched_user_id}'
+                            args=[chat_id, film_id, film_title, user_id],
+                            id=f'rating_reminder_{chat_id}_{film_id}_{user_id}'
                         )
-                        logger.info(f"[REACTION] Запланировано напоминание об оценке для user_id={watched_user_id}, film_id={film_id}, datetime={reminder_datetime}")
+                        logger.info(f"[REACTION] Запланировано напоминание об оценке для user_id={user_id}, film_id={film_id}, datetime={reminder_datetime}")
     except Exception as e:
         logger.error(f"[REACTION] Ошибка при планировании напоминания: {e}", exc_info=True)
 
