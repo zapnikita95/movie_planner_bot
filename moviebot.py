@@ -2318,25 +2318,25 @@ def handle_settings_callback(call):
             'action': action  # "add" или "replace"
         }
         
-               mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
-               bot.edit_message_text(
-                   f"⚙️ <b>Настройки реакций</b>\n\n"
-                   f"📝 Отправьте эмодзи в ответ на это сообщение ИЛИ поставьте реакцию на это сообщение.\n\n"
-                   f"Новые реакции будут {mode_text}.",
-                   call.message.chat.id,
-                   call.message.message_id,
-                   parse_mode='HTML'
-               )
-               # Обновляем информацию о сообщении settings
-               if call.message.message_id in settings_messages:
-                   settings_messages[call.message.message_id]['action'] = action
-               else:
-                   settings_messages[call.message.message_id] = {
-                       'user_id': user_id,
-                       'action': action,
-                       'chat_id': call.message.chat.id
-                   }
-               logger.info(f"[SETTINGS] Пользователь {user_id} выбрал режим: {action}")
+        mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
+        bot.edit_message_text(
+            f"⚙️ <b>Настройки реакций</b>\n\n"
+            f"📝 Отправьте эмодзи в ответ на это сообщение ИЛИ поставьте реакцию на это сообщение.\n\n"
+            f"Новые реакции будут {mode_text}.",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode='HTML'
+        )
+        # Обновляем информацию о сообщении settings
+        if call.message.message_id in settings_messages:
+            settings_messages[call.message.message_id]['action'] = action
+        else:
+            settings_messages[call.message.message_id] = {
+                'user_id': user_id,
+                'action': action,
+                'chat_id': call.message.chat.id
+            }
+        logger.info(f"[SETTINGS] Пользователь {user_id} выбрал режим: {action}")
     except Exception as e:
         logger.error(f"[SETTINGS] Ошибка в handle_settings_callback: {e}", exc_info=True)
         try:
