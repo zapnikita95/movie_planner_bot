@@ -2669,7 +2669,9 @@ def rate_movie(message):
         if len(not_rated) > 5:
             not_rated_text += f" и ещё {len(not_rated) - 5}"
         
-        text += f"<b>{kp_id}</b> — {title} ({year})\n"
+        # Формируем ссылку на кинопоиск
+        kp_link = f"https://kinopoisk.ru/film/{kp_id}"
+        text += f"<b>{kp_id}</b> — <a href=\"{kp_link}\">{title}</a> ({year})\n"
         if not_rated:
             text += f"   ⚠️ Не оценили: {not_rated_text}\n"
         else:
