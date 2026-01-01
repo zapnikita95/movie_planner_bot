@@ -1427,7 +1427,7 @@ def random_genre(call):
                     if genres:
                         for g in str(genres).split(', '):
                             if g.strip():
-                            all_genres.add(g.strip())
+                                all_genres.add(g.strip())
             
             if not all_genres:
                 bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", call.message.chat.id, call.message.message_id)
