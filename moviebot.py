@@ -972,8 +972,22 @@ def handle_reaction(update):
             elif reaction.type == 'custom_emoji':
                 if hasattr(reaction, 'custom_emoji_id'):
                     custom_id = str(reaction.custom_emoji_id)
+                    # Проверяем, есть ли этот кастомный эмодзи в настройках
                     is_watched = custom_id in watched['custom']
                     logger.info(f"[REACTION DEBUG] Custom emoji ID: {custom_id}, is_watched: {is_watched}")
+                    
+                    # Если кастомный эмодзи не найден в настройках, но пользователь использует кастомную версию стандартного эмодзи
+                    # (например, кастомный ✅), то считаем его как watched, если в настройках есть обычный ✅
+                    # Это работает для случаев, когда пользователь использует кастомную версию стандартного эмодзи из Telegram
+                    if not is_watched:
+                        # Если в настройках есть обычный ✅, то кастомный эмодзи тоже считается watched
+                        # (предполагаем, что это кастомная версия стандартного эмодзи)
+                        if watched_emojis_global and '✅' in watched_emojis_global:
+                            is_watched = True
+                            logger.info(f"[REACTION DEBUG] Кастомный эмодзи {custom_id} распознан как watched (кастомная версия ✅)")
+                        elif watched['emoji'] and '✅' in watched['emoji']:
+                            is_watched = True
+                            logger.info(f"[REACTION DEBUG] Кастомный эмодзи {custom_id} распознан как watched (кастомная версия ✅)")
         elif hasattr(reaction, 'emoji'):
             # Старый формат для обратной совместимости
             reaction_emoji = reaction.emoji
