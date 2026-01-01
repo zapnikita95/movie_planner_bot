@@ -237,55 +237,48 @@ conn.commit()
 def save_rating_statistics(chat_id, user_id, film_id, rating):
     """Сохраняет статистику по жанрам, режиссерам и актерам при сохранении оценки"""
     try:
-        with db_lock:
-            # Получаем информацию о фильме
-            cursor.execute('SELECT genres, director, actors FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            row = cursor.fetchone()
-            if not row:
-                return
-            
-            genres_str = row.get('genres') if isinstance(row, dict) else row[0]
-            director = row.get('director') if isinstance(row, dict) else row[1]
-            actors_str = row.get('actors') if isinstance(row, dict) else row[2]
-            
-            # Сохраняем первый жанр
-            if genres_str and genres_str != "—":
-                first_genre = genres_str.split(',')[0].strip()
-                if first_genre:
-                    cursor.execute('''
-                        INSERT INTO genre_ratings (chat_id, user_id, genre, rating, film_id)
-                        VALUES (%s, %s, %s, %s, %s)
-                        ON CONFLICT (chat_id, user_id, genre, film_id) DO UPDATE SET rating = EXCLUDED.rating
-                    ''', (chat_id, user_id, first_genre, rating, film_id))
-            
-            # Сохраняем первого режиссера
-            if director and director != "Не указан" and director != "—":
+        # Получаем информацию о фильме (без db_lock, так как вызывается изнутри db_lock)
+        cursor.execute('SELECT genres, director, actors FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        row = cursor.fetchone()
+        if not row:
+            return
+        
+        genres_str = row.get('genres') if isinstance(row, dict) else row[0]
+        director = row.get('director') if isinstance(row, dict) else row[1]
+        actors_str = row.get('actors') if isinstance(row, dict) else row[2]
+        
+        # Сохраняем первый жанр
+        if genres_str and genres_str != "—":
+            first_genre = genres_str.split(',')[0].strip()
+            if first_genre:
                 cursor.execute('''
-                    INSERT INTO director_ratings (chat_id, user_id, director, rating, film_id)
+                    INSERT INTO genre_ratings (chat_id, user_id, genre, rating, film_id)
                     VALUES (%s, %s, %s, %s, %s)
-                    ON CONFLICT (chat_id, user_id, director, film_id) DO UPDATE SET rating = EXCLUDED.rating
-                ''', (chat_id, user_id, director, rating, film_id))
-            
-            # Сохраняем первых 3 актеров
-            if actors_str and actors_str != "—":
-                actors_list = [a.strip() for a in actors_str.split(',')[:3]]
-                for actor in actors_list:
-                    if actor and actor != "—":
-                        cursor.execute('''
-                            INSERT INTO actor_ratings (chat_id, user_id, actor, rating, film_id)
-                            VALUES (%s, %s, %s, %s, %s)
-                            ON CONFLICT (chat_id, user_id, actor, film_id) DO UPDATE SET rating = EXCLUDED.rating
-                        ''', (chat_id, user_id, actor, rating, film_id))
-            
-            conn.commit()
-            logger.debug(f"Статистика по оценке сохранена: chat_id={chat_id}, user_id={user_id}, film_id={film_id}, rating={rating}")
+                    ON CONFLICT (chat_id, user_id, genre, film_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, user_id, first_genre, rating, film_id))
+        
+        # Сохраняем первого режиссера
+        if director and director != "Не указан" and director != "—":
+            cursor.execute('''
+                INSERT INTO director_ratings (chat_id, user_id, director, rating, film_id)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (chat_id, user_id, director, film_id) DO UPDATE SET rating = EXCLUDED.rating
+            ''', (chat_id, user_id, director, rating, film_id))
+        
+        # Сохраняем первых 3 актеров
+        if actors_str and actors_str != "—":
+            actors_list = [a.strip() for a in actors_str.split(',')[:3]]
+            for actor in actors_list:
+                if actor and actor != "—":
+                    cursor.execute('''
+                        INSERT INTO actor_ratings (chat_id, user_id, actor, rating, film_id)
+                        VALUES (%s, %s, %s, %s, %s)
+                        ON CONFLICT (chat_id, user_id, actor, film_id) DO UPDATE SET rating = EXCLUDED.rating
+                    ''', (chat_id, user_id, actor, rating, film_id))
+        
+        logger.debug(f"Статистика по оценке сохранена: chat_id={chat_id}, user_id={user_id}, film_id={film_id}, rating={rating}")
     except Exception as e:
         logger.error(f"Ошибка при сохранении статистики оценки: {e}", exc_info=True)
-        try:
-            with db_lock:
-                conn.rollback()
-        except:
-            pass
 
 def get_watched_emoji(chat_id):
     """Возвращает строку с эмодзи для отметки просмотренных (может быть несколько) для конкретного чата"""
