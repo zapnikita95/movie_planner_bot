@@ -707,7 +707,7 @@ def add_and_announce(link, chat_id):
             avg = None
             try:
                 with db_lock:
-            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                     avg_result = cursor.fetchone()
                     avg = avg_result.get('avg') if isinstance(avg_result, dict) else (avg_result[0] if avg_result and len(avg_result) > 0 else None)
             except Exception as e:
