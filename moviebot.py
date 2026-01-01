@@ -2279,12 +2279,17 @@ def handle_settings_callback(call):
         action = call.data.split(":", 1)[1]  # "add", "replace" или "reset"
         
         if action == "reset":
-            # Сброс к значению по умолчанию
+            # Сброс к значению по умолчанию (глобально, chat_id=-1)
             with db_lock:
-                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
+                cursor.execute("DELETE FROM settings WHERE chat_id = -1 AND key = 'watched_emoji'", ())
                 conn.commit()
-            bot.edit_message_text("✅ Реакции сброшены к значению по умолчанию (✅)", call.message.chat.id, call.message.message_id)
-            logger.info(f"Реакции сброшены для чата {chat_id}")
+            bot.edit_message_text(
+                "✅ Реакции сброшены к значению по умолчанию (✅)",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode='HTML'
+            )
+            logger.info(f"Реакции сброшены (глобально) пользователем {user_id}")
             if user_id in user_settings_state:
                 del user_settings_state[user_id]
             return
