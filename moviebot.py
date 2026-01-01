@@ -606,14 +606,20 @@ def add_and_announce(link, chat_id):
                     conn.rollback()
                     logger.debug("Транзакция была в состоянии ошибки, выполнен rollback")
                 
+                # Проверяем, существует ли фильм до вставки
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
+                exists_before = cursor.fetchone() is not None
+                
                 cursor.execute('''
                     INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
                 ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                 conn.commit()
-                inserted = cursor.rowcount == 1
-                logger.debug(f"Попытка вставки фильма: rowcount={cursor.rowcount}, inserted={inserted}")
+                
+                # Фильм был добавлен только если его не было до вставки
+                inserted = not exists_before
+                logger.info(f"Попытка вставки фильма: exists_before={exists_before}, rowcount={cursor.rowcount}, inserted={inserted}, kp_id={info['kp_id']}, title={info['title']}")
             except Exception as db_error:
                 conn.rollback()
                 logger.error(f"Ошибка при добавлении фильма в БД: {db_error}", exc_info=True)
@@ -931,8 +937,22 @@ def list_movies(message):
         logger.info(f"Команда /list от пользователя {message.from_user.id}")
         chat_id = message.chat.id
         with db_lock:
-            cursor.execute('SELECT id, title, year, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
+            # Сначала проверяем общее количество фильмов в базе
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
+            total_count = cursor.fetchone()
+            total = total_count.get('count') if isinstance(total_count, dict) else (total_count[0] if total_count else 0)
+            logger.info(f"[LIST] Всего фильмов в базе для chat_id={chat_id}: {total}")
+            
+            # Проверяем количество просмотренных
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            watched_count = cursor.fetchone()
+            watched = watched_count.get('count') if isinstance(watched_count, dict) else (watched_count[0] if watched_count else 0)
+            logger.info(f"[LIST] Просмотренных фильмов для chat_id={chat_id}: {watched}")
+            
+            # Получаем непросмотренные
+            cursor.execute('SELECT id, kp_id, title, year, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
             rows = cursor.fetchall()
+            logger.info(f"[LIST] Непросмотренных фильмов для chat_id={chat_id}: {len(rows) if rows else 0}")
         
         if not rows:
             bot.reply_to(message, "⏳ Нет непросмотренных фильмов!")
