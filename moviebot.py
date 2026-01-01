@@ -1835,8 +1835,17 @@ def random_show_movie(call):
                     bot.answer_callback_query(call.id, "Ошибка при планировании фильма", show_alert=True)
                 except:
                     pass
-    
-    del user_random_state[user_id]
+        
+        if user_id in user_random_state:
+            del user_random_state[user_id]
+    except Exception as e:
+        logger.error(f"[RANDOM] Критическая ошибка в random_show_movie: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка при обработке выбора дня", show_alert=True)
+        except:
+            pass
+        if 'user_id' in locals() and user_id in user_random_state:
+            del user_random_state[user_id]
 
 # /rate
 @bot.message_handler(commands=['rate'])
