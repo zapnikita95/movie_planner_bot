@@ -3678,23 +3678,48 @@ def plan_handler(message):
         
         # Если день недели не найден, ищем дату (для обоих режимов)
         if not day_or_date:
-            # Пробуем разные форматы даты: "15 января", "с 20 февраля", "15.01", "15/01", "15.01.25", "15.01.2025"
-            # Убираем предлоги "с", "на" и т.д. перед датой
-            date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
-            if date_match:
-                day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
-                logger.info(f"[PLAN] Найдена дата (текстовый формат): {day_or_date}")
-            else:
-                # Формат "15.01", "15/01", "15.01.25", "15.01.2025", "15/01/25", "15/01/2025"
-                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+            # Сначала проверяем специальные форматы: "завтра", "следующая неделя"
+            if 'завтра' in text:
+                day_or_date = 'завтра'
+                logger.info(f"[PLAN] Найден формат 'завтра'")
+            elif 'следующая неделя' in text or 'след неделя' in text or 'след. неделя' in text:
+                day_or_date = 'следующая неделя'
+                logger.info(f"[PLAN] Найден формат 'следующая неделя'")
+            # Затем проверяем формат "в апреле", "в марте" и т.д. (без числа)
+            elif re.search(r'в\s+([а-яё]+)', text):
+                month_match = re.search(r'в\s+([а-яё]+)', text)
+            if month_match:
+                month_str = month_match.group(1)
+                # Проверяем, что это действительно месяц
+                months_map = {
+                    'январь': 1, 'янв': 1, 'февраль': 2, 'фев': 2, 'март': 3, 'мар': 3,
+                    'апрель': 4, 'апр': 4, 'май': 5, 'июнь': 6, 'июн': 6,
+                    'июль': 7, 'июл': 7, 'август': 8, 'авг': 8, 'сентябрь': 9, 'сент': 9, 'сен': 9,
+                    'октябрь': 10, 'окт': 10, 'ноябрь': 11, 'ноя': 11, 'декабрь': 12, 'дек': 12
+                }
+                    if month_str.lower() in months_map:
+                        day_or_date = f"в {month_str}"
+                        logger.info(f"[PLAN] Найден месяц (формат 'в [месяц]'): {day_or_date}")
+        
+        # Если специальные форматы не найдены, пробуем другие форматы
+        if not day_or_date:
+                # Пробуем разные форматы даты: "15 января", "с 20 февраля", "15.01", "15/01", "15.01.25", "15.01.2025"
+                # Убираем предлоги "с", "на" и т.д. перед датой
+                date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
                 if date_match:
-                    day_num = int(date_match.group(1))
-                    month_num = int(date_match.group(2))
-                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
-                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
-                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+                    day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+                    logger.info(f"[PLAN] Найдена дата (текстовый формат): {day_or_date}")
+                else:
+                    # Формат "15.01", "15/01", "15.01.25", "15.01.2025", "15/01/25", "15/01/2025"
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         logger.info(f"[PLAN] link={link}, plan_type={plan_type}, day_or_date={day_or_date}")
         
