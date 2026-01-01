@@ -1499,12 +1499,35 @@ def random_director(call):
                     if director:
                         directors.append(director)
                 top_directors = [d for d in sorted(set(directors), key=directors.count, reverse=True)[:3]]
+        except Exception as db_error:
+            logger.error(f"[RANDOM] Ошибка БД при получении режиссёров: {db_error}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при получении списка режиссёров", show_alert=True)
+            except:
+                pass
+            return
 
-    markup = InlineKeyboardMarkup(row_width=2)
-    for d in top_directors:
-        markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
-    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
-    bot.edit_message_text("🎥 Выберите режиссёра из любимых группы:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+        markup = InlineKeyboardMarkup(row_width=2)
+        for d in top_directors:
+            markup.add(InlineKeyboardButton(d, callback_data=f"rand_dir:{d}"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
+        
+        try:
+            bot.edit_message_text("🎥 Выберите режиссёра из любимых группы:", call.message.chat.id, call.message.message_id, reply_markup=markup)
+            bot.answer_callback_query(call.id)
+            logger.info(f"[RANDOM] Переход к выбору режиссёра для user_id={user_id}")
+        except Exception as e:
+            logger.error(f"[RANDOM] Ошибка при переходе к выбору режиссёра: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при переходе к выбору режиссёра", show_alert=True)
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"[RANDOM] Критическая ошибка в random_director: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка при обработке выбора жанра", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
 def random_final(call):
