@@ -146,7 +146,7 @@ cursor.execute('''
         chat_id BIGINT,
         film_id INTEGER,
         plan_type TEXT,
-        plan_datetime TEXT,
+        plan_datetime TIMESTAMP WITH TIME ZONE,
         user_id BIGINT
     )
 ''')
@@ -223,6 +223,18 @@ try:
     logger.info("Миграция: cinema_votes.chat_id и cinema_votes.message_id изменены на BIGINT")
 except Exception as e:
     logger.debug(f"Миграция cinema_votes: {e}")
+
+# Миграция: изменяем тип plan_datetime с TEXT на TIMESTAMP WITH TIME ZONE
+try:
+    cursor.execute("ALTER TABLE plans ALTER COLUMN plan_datetime TYPE TIMESTAMP WITH TIME ZONE USING plan_datetime::TIMESTAMP WITH TIME ZONE")
+    logger.info("Миграция: plan_datetime в plans изменён на TIMESTAMP WITH TIME ZONE")
+    conn.commit()
+except Exception as e:
+    logger.debug(f"Миграция plan_datetime: {e}")
+    try:
+        conn.rollback()
+    except:
+        pass
 
 # Ключевой блок: очистка дубликатов и создание уникального индекса
 try:
@@ -427,14 +439,14 @@ scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 # Очистка планов
 def clean_home_plans():
     """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок"""
-    yesterday = (datetime.now(plans_tz) - timedelta(days=1)).date().isoformat()
+    yesterday = (datetime.now(plans_tz) - timedelta(days=1)).date()
     
     with db_lock:
-        # Находим планы дома на вчера
+        # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
         cursor.execute('''
             SELECT p.id, p.film_id, p.chat_id
             FROM plans p
-            WHERE p.plan_type = 'home' AND date(p.plan_datetime) = %s
+            WHERE p.plan_type = 'home' AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') = %s
         ''', (yesterday,))
         rows = cursor.fetchall()
         
@@ -1917,10 +1929,10 @@ def random_show_movie(call):
                                 bot.answer_callback_query(call.id, "Ошибка: не удалось добавить фильм в базу", show_alert=True)
                                 return
                         
-                        # Добавляем план
-                        plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
+                        # Добавляем план (передаем объект datetime, psycopg2 сам конвертирует в TIMESTAMP)
+                        plan_utc = plan_dt.astimezone(pytz.utc)
                         cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)', 
-                                      (chat_id, film_id, 'home', plan_utc_iso, user_id))
+                                      (chat_id, film_id, 'home', plan_utc, user_id))
                         conn.commit()
                     
                     bot.answer_callback_query(call.id, f"Фильм запланирован на {plan_dt.strftime('%d.%m.%Y')}")
@@ -2364,9 +2376,9 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
                 title = row.get('title') if isinstance(row, dict) else row[1]
             
-            plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
+            plan_utc = plan_dt.astimezone(pytz.utc)
             cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)', 
-                          (chat_id, film_id, plan_type, plan_utc_iso, user_id))
+                          (chat_id, film_id, plan_type, plan_utc, user_id))
             conn.commit()
         
         plan_type_text = "в кино" if plan_type == 'cinema' else "дома"
@@ -2695,11 +2707,11 @@ def get_plan_day_or_date(message):
                 title = row.get('title') if isinstance(row, dict) else row[1]
 
             # Сохраняем план
-            plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
+            plan_utc = plan_dt.astimezone(pytz.utc)
             cursor.execute('''
                 INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
             VALUES (%s, %s, %s, %s, %s)
-        ''', (chat_id, film_id, plan_type, plan_utc_iso, user_id))
+        ''', (chat_id, film_id, plan_type, plan_utc, user_id))
         conn.commit()
 
         day_name = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'][plan_dt.weekday()]
@@ -2747,19 +2759,31 @@ def show_schedule(message):
         for row in rows:
             # RealDictCursor возвращает словари, но поддерживает доступ по индексу
             title = row.get('title') if isinstance(row, dict) else row[0]
-            plan_dt_iso = row.get('plan_datetime') if isinstance(row, dict) else row[1]
+            plan_dt_value = row.get('plan_datetime') if isinstance(row, dict) else row[1]
             plan_type = row.get('plan_type') if isinstance(row, dict) else row[2]
-            # Преобразуем ISO в дату МСК без времени
+            # Преобразуем TIMESTAMP в дату МСК
             try:
-                # Обрабатываем разные форматы ISO строк
-                if plan_dt_iso.endswith('Z'):
-                    plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(plans_tz)
-                elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
-                    # Уже есть timezone
-                    plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(plans_tz)
+                # psycopg2 возвращает объект datetime для TIMESTAMP WITH TIME ZONE
+                if isinstance(plan_dt_value, datetime):
+                    # Если уже объект datetime, конвертируем в нужную таймзону
+                    if plan_dt_value.tzinfo is None:
+                        # Если нет таймзоны, предполагаем UTC
+                        plan_dt = pytz.utc.localize(plan_dt_value).astimezone(plans_tz)
+                    else:
+                        plan_dt = plan_dt_value.astimezone(plans_tz)
+                elif isinstance(plan_dt_value, str):
+                    # Fallback для старых данных (если миграция еще не применена)
+                    plan_dt_iso = plan_dt_value
+                    if plan_dt_iso.endswith('Z'):
+                        plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(plans_tz)
+                    elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
+                        plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(plans_tz)
+                    else:
+                        plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(plans_tz)
                 else:
-                    # Нет timezone, предполагаем UTC
-                    plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(plans_tz)
+                    # Неожиданный тип
+                    logger.warning(f"Неожиданный тип plan_datetime: {type(plan_dt_value)}")
+                    continue
                 
                 date_str = plan_dt.strftime('%d.%m.%Y')
                 plan_info = (title, date_str)
