@@ -2473,27 +2473,32 @@ def add_reactions(message):
                 except:
                     conn.rollback()
                 
+                # Используем глобальные настройки (chat_id=-1) для watched_emoji
+                # Получаем текущие реакции
+                current_emojis_global = get_watched_emojis()  # Получаем строку эмодзи
+                
                 if action == "add":
                     # Добавляем к текущим
-                    current_reactions = get_watched_reactions(chat_id)
-                    current_emoji = current_reactions['emoji']
-                    current_custom = [f"custom:{cid}" for cid in current_reactions['custom']]
-                    all_reactions = list(set(current_emoji + current_custom + new_reactions))  # Убираем дубликаты
+                    # Объединяем текущие эмодзи с новыми
+                    all_emojis = current_emojis_global + ''.join(emojis)
+                    # Убираем дубликаты, сохраняя порядок
+                    seen = set()
+                    unique_emojis = ''.join(c for c in all_emojis if c not in seen and not seen.add(c))
                 else:
                     # Заменяем полностью
-                    all_reactions = new_reactions
+                    unique_emojis = ''.join(emojis)
                 
+                # Сохраняем в БД (глобально, chat_id=-1)
                 cursor.execute('''
                     INSERT INTO settings (chat_id, key, value)
-                    VALUES (%s, %s, %s)
+                    VALUES (-1, 'watched_emoji', %s)
                     ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-                ''', (chat_id, "watched_reactions", json.dumps(all_reactions)))
+                ''', (unique_emojis,))
                 conn.commit()
                 
-                reactions_str = ', '.join(all_reactions)
                 action_text = "добавлены к текущим" if action == "add" else "заменены"
-                bot.reply_to(message, f"✅ Готово! Реакции {action_text}:\n{reactions_str}")
-                logger.info(f"[SETTINGS] Реакции сохранены для chat_id={chat_id} (режим: {action}): {reactions_str}")
+                bot.reply_to(message, f"✅ Готово! Реакции {action_text}:\n{unique_emojis}")
+                logger.info(f"[SETTINGS] Реакции сохранены (глобально, режим: {action}): {unique_emojis}")
             except Exception as db_error:
                 conn.rollback()
                 logger.error(f"[SETTINGS] Ошибка БД при сохранении реакций: {db_error}", exc_info=True)
