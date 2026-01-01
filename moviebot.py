@@ -672,7 +672,7 @@ def add_and_announce(link, chat_id):
     
     existing = None
     try:
-    with db_lock:
+        with db_lock:
             # Проверяем состояние транзакции перед выполнением запроса
             try:
                 cursor.execute('SELECT 1')
