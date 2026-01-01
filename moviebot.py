@@ -17,7 +17,7 @@ import dateutil.parser
 import logging
 import json
 import sys
-from flask import Flask, request, abort
+from flask import Flask, request, abort, jsonify
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -3443,12 +3443,14 @@ def webhook():
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint для Render"""
-    return {'status': 'ok'}, 200
+    logger.info("[HEALTH] Health check запрос получен")
+    return jsonify({'status': 'ok'}), 200
 
 @app.route('/', methods=['GET'])
 def root():
     """Root endpoint"""
-    return {'status': 'ok', 'service': 'moviebot'}, 200
+    logger.info("[ROOT] Root запрос получен")
+    return jsonify({'status': 'ok', 'service': 'moviebot'}), 200
 
 # Определяем, где запускается бот: на Render или локально
 # Проверяем несколько признаков Render окружения
@@ -3515,10 +3517,14 @@ if IS_RENDER:
     # Render ожидает, что приложение будет слушать на порту из переменной PORT
     port = int(PORT or 10000)
     logger.info(f"Запуск Flask сервера на порту {port} (IS_RENDER={IS_RENDER}, PORT={PORT})")
+    logger.info(f"Зарегистрированные маршруты: {[str(rule) for rule in app.url_map.iter_rules()]}")
     
     # Запускаем Flask сервер (блокирующий вызов, чтобы скрипт не завершился)
     # На Render это будет основной процесс
     logger.info(f"Flask сервер запускается на 0.0.0.0:{port}")
+    logger.info("=" * 50)
+    logger.info("FLASK СЕРВЕР ЗАПУЩЕН И ГОТОВ К РАБОТЕ")
+    logger.info("=" * 50)
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
