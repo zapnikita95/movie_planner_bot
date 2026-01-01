@@ -3555,9 +3555,10 @@ try:
     RENDER = os.getenv('RENDER')
     RAILWAY_ENVIRONMENT = os.getenv('RAILWAY_ENVIRONMENT')
     RAILWAY_PUBLIC_DOMAIN = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+    RAILWAY_PRIVATE_DOMAIN = os.getenv('RAILWAY_PRIVATE_DOMAIN')
     PORT = os.getenv('PORT')  # На Render и Railway всегда есть PORT
 
-    logger.info(f"[DEBUG] Переменные окружения: PORT={PORT}, RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}, RAILWAY_ENVIRONMENT={RAILWAY_ENVIRONMENT}, RAILWAY_PUBLIC_DOMAIN={RAILWAY_PUBLIC_DOMAIN}")
+    logger.info(f"[DEBUG] Переменные окружения: PORT={PORT}, RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}, RAILWAY_ENVIRONMENT={RAILWAY_ENVIRONMENT}, RAILWAY_PUBLIC_DOMAIN={RAILWAY_PUBLIC_DOMAIN}, RAILWAY_PRIVATE_DOMAIN={RAILWAY_PRIVATE_DOMAIN}")
 except Exception as e:
     logger.error(f"[DEBUG] Ошибка при получении переменных окружения: {e}", exc_info=True)
     raise
