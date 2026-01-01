@@ -3925,7 +3925,7 @@ def random_start(message):
             'periods': [],
             'genre': None,
             'director': None,
-            'actor': None
+            'actors': []  # Список выбранных актёров
         }
         
         # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
@@ -4188,6 +4188,12 @@ def _show_actor_step(call, chat_id, user_id):
     """Показывает шаг выбора актёра"""
     try:
         logger.info(f"[RANDOM] Showing actor step for user {user_id}")
+        
+        # Получаем список выбранных актёров
+        if user_id not in user_random_state:
+            user_random_state[user_id] = {'actors': []}
+        selected_actors = user_random_state[user_id].get('actors', [])
+        
         # Берем топ актёров по частоте
         actor_counts = {}
         with db_lock:
@@ -4206,21 +4212,28 @@ def _show_actor_step(call, chat_id, user_id):
         
         markup = InlineKeyboardMarkup(row_width=2)
         if actor_counts:
-            
             top_actors = sorted(actor_counts.items(), key=lambda x: x[1], reverse=True)[:10]
             for actor, _ in top_actors:
-                markup.add(InlineKeyboardButton(actor, callback_data=f"rand_actor:{actor}"))
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
-        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                # Показываем галочку, если актёр выбран
+                label = f"✓ {actor}" if actor in selected_actors else actor
+                markup.add(InlineKeyboardButton(label, callback_data=f"rand_actor:{actor}"))
         
+        # Кнопка "Пропустить" всегда есть
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
+        
+        # Кнопка "Найти фильм" только если выбран хотя бы один актёр
+        if selected_actors:
+            markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+        
+        selected_text = f"\n\nВыбрано: {', '.join(selected_actors)}" if selected_actors else ""
         try:
-            bot.edit_message_text("🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(или пропустите и нажмите 'Найти фильм')", 
+            bot.edit_message_text(f"🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(можно выбрать несколько){selected_text}", 
                                 chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             bot.answer_callback_query(call.id)
-            logger.info(f"[RANDOM] Actor step shown, user_id={user_id}")
+            logger.info(f"[RANDOM] Actor step shown, user_id={user_id}, selected={len(selected_actors)}")
         except Exception as e:
             logger.error(f"[RANDOM] Error showing actor step: {e}", exc_info=True)
-            bot.send_message(chat_id, "🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(или пропустите и нажмите 'Найти фильм')", 
+            bot.send_message(chat_id, f"🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(можно выбрать несколько){selected_text}", 
                             reply_markup=markup, parse_mode='HTML')
             bot.answer_callback_query(call.id)
     except Exception as e:
@@ -4244,17 +4257,26 @@ def random_actor_handler(call):
             return
         
         if data == "skip":
-            actor = None
-            logger.info(f"[RANDOM] Actor skipped")
+            # Пропускаем выбор актёров - переходим к финалу
+            user_random_state[user_id]['actors'] = []
+            user_random_state[user_id]['step'] = 'final'
+            logger.info(f"[RANDOM] Actors skipped, moving to final")
+            _random_final(call, chat_id, user_id)
         else:
-            actor = data
-            logger.info(f"[RANDOM] Actor selected: {actor}")
-        
-        user_random_state[user_id]['actor'] = actor
-        user_random_state[user_id]['step'] = 'final'
-        
-        # Сразу переходим к финалу
-        _random_final(call, chat_id, user_id)
+            # Toggle актёра
+            actors = user_random_state[user_id].get('actors', [])
+            if data in actors:
+                actors.remove(data)
+                logger.info(f"[RANDOM] Actor removed: {data}")
+            else:
+                actors.append(data)
+                logger.info(f"[RANDOM] Actor added: {data}")
+            
+            user_random_state[user_id]['actors'] = actors
+            user_random_state[user_id]['step'] = 'actor'
+            
+            # Обновляем клавиатуру
+            _show_actor_step(call, chat_id, user_id)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_actor_handler: {e}", exc_info=True)
         try:
@@ -4325,11 +4347,15 @@ def _random_final(call, chat_id, user_id):
             query += " AND director = %s"
             params.append(director)
         
-        # Фильтр по актёру
-        actor = state.get('actor')
-        if actor:
-            query += " AND actors ILIKE %s"
-            params.append(f"%{actor}%")
+        # Фильтр по актёрам (можно несколько, OR условие)
+        actors = state.get('actors', [])
+        if actors:
+            actor_conditions = []
+            for actor in actors:
+                actor_conditions.append("actors ILIKE %s")
+                params.append(f"%{actor}%")
+            if actor_conditions:
+                query += " AND (" + " OR ".join(actor_conditions) + ")"
         
         logger.info(f"[RANDOM] Query: {query}")
         logger.info(f"[RANDOM] Params: {params}")
