@@ -864,9 +864,14 @@ def add_and_announce(link, chat_id):
         # Если фильм просмотрен, рассчитываем среднее из ratings (внутри db_lock)
         if watched:
             with db_lock:
-                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                 avg_result = cursor.fetchone()
-                avg = avg_result[0] if avg_result and avg_result[0] else None
+                if avg_result:
+                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                    # Проверяем, что avg не None
+                    avg = float(avg) if avg is not None else None
+                else:
+                    avg = None
             
             text += f"\n✅ <b>Просмотрено</b>\n"
             if avg:
