@@ -3588,23 +3588,29 @@ def plan_handler(message):
                     logger.info(f"[PLAN] ✅ Найдена HTML-ссылка в тексте реплая: {link}")
             
             # 4. Проверяем entities сообщения (URL entities) - это основной способ для HTML-ссылок
+            # В Telegram HTML-ссылки доступны через entities типа 'text_link' с полем 'url'
             if not link and reply_msg.entities:
                 logger.info(f"[PLAN] Проверяем entities реплая: {len(reply_msg.entities)} entities")
                 for idx, entity in enumerate(reply_msg.entities):
                     logger.info(f"[PLAN] Entity {idx}: type={entity.type}, offset={entity.offset}, length={entity.length}")
-                    if entity.type == 'url' or entity.type == 'text_link':
+                    if entity.type == 'text_link':
+                        # text_link - это HTML-ссылка, URL хранится в entity.url
                         if hasattr(entity, 'url') and entity.url:
                             url = entity.url
-                        elif reply_msg.text:
+                            logger.info(f"[PLAN] Entity text_link URL: {url}")
+                            if 'kinopoisk.ru' in url and ('/film/' in url or '/series/' in url):
+                                link = url
+                                logger.info(f"[PLAN] ✅ Найдена ссылка в text_link entity: {link}")
+                                break
+                    elif entity.type == 'url':
+                        # url - это обычная ссылка в тексте, извлекаем из текста
+                        if reply_msg.text:
                             url = reply_msg.text[entity.offset:entity.offset + entity.length]
-                        else:
-                            url = None
-                        
-                        logger.info(f"[PLAN] Entity URL: {url}")
-                        if url and 'kinopoisk.ru' in url and ('/film/' in url or '/series/' in url):
-                            link = url
-                            logger.info(f"[PLAN] ✅ Найдена ссылка в entities реплая: {link}")
-                            break
+                            logger.info(f"[PLAN] Entity url из текста: {url}")
+                            if 'kinopoisk.ru' in url and ('/film/' in url or '/series/' in url):
+                                link = url
+                                logger.info(f"[PLAN] ✅ Найдена ссылка в url entity: {link}")
+                                break
             else:
                 logger.info(f"[PLAN] Нет entities в реплае или ссылка уже найдена")
             
