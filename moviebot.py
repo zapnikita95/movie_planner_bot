@@ -3291,6 +3291,15 @@ def clean_action_choice(call):
         if call.message.chat.type in ['group', 'supergroup']:
             try:
                 members_count = bot.get_chat_members_count(chat_id)
+                # Получаем список активных участников
+                # Сначала пробуем получить реальное количество участников через Telegram API
+                try:
+                    chat_member_count = bot.get_chat_member_count(chat_id)
+                    logger.info(f"[CLEAN] Количество участников чата через API: {chat_member_count}")
+                except Exception as api_error:
+                    logger.warning(f"[CLEAN] Не удалось получить количество участников через API: {api_error}")
+                    chat_member_count = None
+                
                 # Получаем список активных участников из stats (за последние 30 дней)
                 with db_lock:
                     # Используем тот же формат, что и в log_request: '%Y-%m-%d %H:%M:%S'
@@ -3315,13 +3324,30 @@ def clean_action_choice(call):
                         WHERE chat_id = %s AND timestamp > %s
                     ''', (chat_id, thirty_days_ago))
                     rows = cursor.fetchall()
-                    active_members = set()
+                    active_members_from_stats = set()
                     for row in rows:
                         user_id = row.get('user_id') if isinstance(row, dict) else row[0]
-                        active_members.add(user_id)
-                    logger.info(f"[CLEAN] Найдено активных участников: {len(active_members)}, user_ids: {list(active_members)}")
+                        active_members_from_stats.add(user_id)
+                    logger.info(f"[CLEAN] Найдено активных участников в stats: {len(active_members_from_stats)}, user_ids: {list(active_members_from_stats)}")
                 
-                if not active_members:
+                # Определяем количество участников для голосования
+                # Если получили через API и оно больше, используем его
+                # Иначе используем количество из stats, но минимум 2 (чтобы учесть хотя бы двух участников)
+                if chat_member_count and chat_member_count > len(active_members_from_stats):
+                    active_members_count = chat_member_count
+                    logger.info(f"[CLEAN] Используем количество участников из API: {active_members_count}")
+                    # Для голосования используем всех участников чата (не только активных в stats)
+                    active_members = active_members_from_stats  # Это будут те, кто может проголосовать
+                else:
+                    # Используем количество из stats, но минимум 2
+                    active_members_count = max(len(active_members_from_stats), 2)
+                    active_members = active_members_from_stats
+                    logger.info(f"[CLEAN] Используем количество участников из stats (минимум 2): {active_members_count}")
+                
+                logger.info(f"[CLEAN] Итоговое количество участников для голосования: {active_members_count}, активных в stats: {len(active_members)}")
+                
+                # Проверяем, есть ли хотя бы минимальное количество участников
+                if active_members_count < 2:
                     # Показываем более подробное сообщение с диагностикой
                     with db_lock:
                         cursor.execute('SELECT COUNT(*) FROM stats WHERE chat_id = %s', (chat_id,))
@@ -3332,6 +3358,7 @@ def clean_action_choice(call):
                         f"⚠️ Не найдено активных участников чата за последние 30 дней.\n\n"
                         f"📊 Диагностика:\n"
                         f"• Всего записей в stats для этого чата: {total_count}\n"
+                        f"• Участников в чате (через API): {chat_member_count if chat_member_count else 'неизвестно'}\n"
                         f"• Используйте /dbcheck для подробной диагностики БД"
                     )
                     bot.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
@@ -3339,16 +3366,16 @@ def clean_action_choice(call):
                 
                 msg = bot.send_message(chat_id, 
                     f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено полное обнуление базы данных чата.\n\n"
-                    f"Активных участников: {len(active_members)}\n"
-                    f"Для подтверждения все активные участники должны поставить 👍 (лайк) на это сообщение.\n\n"
+                    f"Участников в чате: {active_members_count}\n"
+                    f"Для подтверждения все участники должны поставить 👍 (лайк) на это сообщение.\n\n"
                     f"Если не все проголосуют, база не будет удалена.",
                     parse_mode='HTML')
                 
                 clean_votes[msg.message_id] = {
                     'chat_id': chat_id,
-                    'members_count': len(active_members),
+                    'members_count': active_members_count,
                     'voted': set(),
-                    'active_members': active_members
+                    'active_members': active_members  # Те, кто активен в stats (для логирования)
                 }
                 
                 bot.edit_message_text("✅ Запрос на обнуление базы отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
