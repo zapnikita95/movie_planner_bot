@@ -1827,25 +1827,65 @@ def join_command(message):
         chat_id = message.chat.id
         user_id = message.from_user.id
         
-        # Проверяем, есть ли упоминание другого пользователя
+        # Регистрируем текущего пользователя
+        registered_users = [{'user_id': user_id, 'username': username}]
+        
+        # Парсим текст сообщения для поиска упоминаний
         text = message.text or ""
-        mentioned_user = None
+        logger.info(f"[JOIN] Текст сообщения: {text}")
         
-        # Ищем упоминание пользователя в формате @username
-        if '@' in text:
-            import re
-            mentions = re.findall(r'@(\w+)', text)
-            if mentions:
-                mentioned_username = mentions[0]
-                # Пытаемся найти пользователя по username (это сложно без дополнительных данных)
-                # Пока просто регистрируем текущего пользователя
-                logger.info(f"[JOIN] Упоминание пользователя @{mentioned_username}, но регистрируем текущего {user_id}")
+        # Извлекаем упоминания из entities (если есть реальные упоминания пользователей)
+        mentioned_user_ids = set()
+        if message.entities:
+            for entity in message.entities:
+                if entity.type == 'mention' and hasattr(entity, 'user') and entity.user:
+                    mentioned_user = entity.user
+                    mentioned_user_ids.add(mentioned_user.id)
+                    mentioned_username = mentioned_user.username or f"user_{mentioned_user.id}"
+                    registered_users.append({
+                        'user_id': mentioned_user.id,
+                        'username': mentioned_username
+                    })
+                    logger.info(f"[JOIN] Найдено упоминание через entity: user_id={mentioned_user.id}, username={mentioned_username}")
         
-        # Регистрируем пользователя в базе через log_request (уже вызвано выше)
-        # Дополнительно можно добавить запись в отдельную таблицу участников, но пока достаточно stats
+        # Также парсим текст для поиска @username (на случай, если entities не сработали)
+        # Разбиваем по пробелам и знакам препинания
+        import re
+        # Ищем все @username в тексте
+        text_mentions = re.findall(r'@(\w+)', text)
+        logger.info(f"[JOIN] Найдено упоминаний в тексте: {text_mentions}")
         
-        bot.reply_to(message, f"✅ Вы зарегистрированы как участник группы!\n\nТеперь вы будете учитываться в статистике /stats.")
-        logger.info(f"✅ Пользователь {user_id} зарегистрирован через /join")
+        # Если есть упоминания в тексте, но их нет в entities, пытаемся найти через get_chat_member
+        for mention_username in text_mentions:
+            # Пропускаем, если уже зарегистрировали через entities
+            found_in_entities = False
+            for reg_user in registered_users:
+                if reg_user['username'].lower() == mention_username.lower():
+                    found_in_entities = True
+                    break
+            
+            if not found_in_entities:
+                # Пытаемся найти пользователя в группе по username
+                try:
+                    # В группах можно попробовать найти через поиск, но это ограничено
+                    # Пока просто сохраняем username для будущего сопоставления
+                    logger.info(f"[JOIN] Упоминание @{mention_username} найдено в тексте, но user_id неизвестен")
+                except Exception as e:
+                    logger.warning(f"[JOIN] Не удалось обработать упоминание @{mention_username}: {e}")
+        
+        # Регистрируем всех найденных пользователей
+        response_text = "✅ Зарегистрированы участники:\n"
+        for reg_user in registered_users:
+            log_request(reg_user['user_id'], reg_user['username'], '/join', chat_id)
+            response_text += f"• @{reg_user['username']}\n"
+        
+        if len(registered_users) == 1:
+            response_text = f"✅ Вы зарегистрированы как участник группы!\n\nТеперь вы будете учитываться в статистике /stats."
+        else:
+            response_text += "\nТеперь вы будете учитываться в статистике /stats."
+        
+        bot.reply_to(message, response_text)
+        logger.info(f"✅ Зарегистрировано пользователей через /join: {len(registered_users)}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /join: {e}", exc_info=True)
         try:
@@ -3784,7 +3824,7 @@ user_random_state = {}  # user_id: состояние рандомайзера
 
 @bot.message_handler(commands=['random'])
 def random_start(message):
-    logger.info(f"[RANDOM] /random вызван от {message.from_user.id}")
+    logger.info(f"[RANDOM] Entering random_start, user_id={message.from_user.id}")
     user_id = message.from_user.id
     chat_id = message.chat.id
     user_random_state[user_id] = {'periods': []}
@@ -3801,10 +3841,11 @@ def random_start(message):
     markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
     
     bot.send_message(chat_id, "🎲 Выберите периоды (можно несколько). Нажмите 'Готово' или 'Пропустить':", reply_markup=markup)
+    logger.info(f"[RANDOM] Sent period keyboard, user_id={user_id}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_period:"))
 def random_period_handler(call):
-    logger.info(f"[RANDOM] Обработка периода: {call.data}")
+    logger.info(f"[RANDOM] Entering random_period_handler, data={call.data}")
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     data = call.data.split(":", 1)[1]
@@ -3821,11 +3862,7 @@ def random_period_handler(call):
                 WHERE chat_id = %s AND watched = 0 AND genres IS NOT NULL AND genres != '' AND genres != '—'
             """, (chat_id,))
             genres = [row[0] for row in cursor.fetchall() if row[0].strip()]
-        
-        if not genres:
-            bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", chat_id, call.message.message_id)
-            del user_random_state[user_id]
-            return
+            logger.info(f"[RANDOM] Genres found: {len(genres)}, genres={genres}")
         
         markup = InlineKeyboardMarkup(row_width=2)
         for genre in sorted(genres):
@@ -3834,13 +3871,16 @@ def random_period_handler(call):
         
         bot.edit_message_text("🎬 Выберите жанр:", chat_id, call.message.message_id, reply_markup=markup)
         bot.answer_callback_query(call.id)
+        logger.info(f"[RANDOM] Sent genre keyboard, user_id={user_id}")
     else:
         # Toggle периода
         periods = user_random_state[user_id]['periods']
         if data in periods:
             periods.remove(data)
+            logger.info(f"[RANDOM] Removed period: {data}")
         else:
             periods.append(data)
+            logger.info(f"[RANDOM] Added period: {data}")
         
         # Обновляем кнопки
         markup = InlineKeyboardMarkup(row_width=2)
@@ -3859,22 +3899,25 @@ def random_period_handler(call):
         selected = ', '.join(periods) or 'ничего'
         bot.edit_message_text(f"Выбрано: {selected}\nНажмите 'Готово' или 'Пропустить':", chat_id, call.message.message_id, reply_markup=markup)
         bot.answer_callback_query(call.id)
+        logger.info(f"[RANDOM] Updated period keyboard, selected={selected}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
 def random_genre_handler(call):
-    logger.info(f"[RANDOM] Обработка жанра: {call.data}")
+    logger.info(f"[RANDOM] Entering random_genre_handler, data={call.data}")
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     data = call.data.split(":", 1)[1]
     
     if data == "skip":
         genre = None
+        logger.info(f"[RANDOM] Genre skipped")
     else:
         genre = data
+        logger.info(f"[RANDOM] Genre selected: {genre}")
     
     user_random_state[user_id]['genre'] = genre
     
-    # Переход к режиссёрам
+    # Показываем топ режиссёров
     with db_lock:
         cursor.execute("""
             SELECT director, COUNT(*) as cnt
@@ -3885,6 +3928,7 @@ def random_genre_handler(call):
             LIMIT 6
         """, (chat_id,))
         directors = [row[0] for row in cursor.fetchall()]
+        logger.info(f"[RANDOM] Directors found: {len(directors)}, directors={directors}")
     
     markup = InlineKeyboardMarkup(row_width=2)
     for d in directors:
@@ -3893,18 +3937,21 @@ def random_genre_handler(call):
     
     bot.edit_message_text("🎥 Выберите режиссёра из топа группы:", chat_id, call.message.message_id, reply_markup=markup)
     bot.answer_callback_query(call.id)
+    logger.info(f"[RANDOM] Sent director keyboard, user_id={user_id}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
 def random_final(call):
-    logger.info(f"[RANDOM] Обработка режиссёра: {call.data}")
+    logger.info(f"[RANDOM] Entering random_final, data={call.data}")
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     data = call.data.split(":", 1)[1]
     
     if data == "skip":
         director = None
+        logger.info(f"[RANDOM] Director skipped")
     else:
         director = data
+        logger.info(f"[RANDOM] Director selected: {director}")
     
     state = user_random_state[user_id]
     
@@ -3942,6 +3989,7 @@ def random_final(call):
     with db_lock:
         cursor.execute(query, params)
         candidates = cursor.fetchall()
+        logger.info(f"[RANDOM] Candidates found: {len(candidates)}")
     
     if not candidates:
         bot.edit_message_text("😔 Нет фильмов по вашим фильтрам.", chat_id, call.message.message_id)
@@ -3962,6 +4010,7 @@ def random_final(call):
     bot_messages[sent.message_id] = link
     
     del user_random_state[user_id]
+    logger.info(f"[RANDOM] Film shown, random process completed")
 
 logger.info("[DEBUG] Перед созданием Flask app")
 logger.info(f"[DEBUG] sys.argv={sys.argv}, sys.executable={sys.executable}")
