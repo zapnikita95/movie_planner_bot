@@ -3061,9 +3061,20 @@ def clean_action_choice(call):
             return
         
         markup = InlineKeyboardMarkup(row_width=1)
-        for plan_id, title, plan_type, plan_dt in plans:
+        for plan_id, title, plan_type, plan_dt_value in plans:
             try:
-                dt = datetime.fromisoformat(plan_dt.replace('Z', '+00:00')).astimezone(plans_tz)
+                # psycopg2 возвращает объект datetime для TIMESTAMP WITH TIME ZONE
+                if isinstance(plan_dt_value, datetime):
+                    if plan_dt_value.tzinfo is None:
+                        dt = pytz.utc.localize(plan_dt_value).astimezone(plans_tz)
+                    else:
+                        dt = plan_dt_value.astimezone(plans_tz)
+                elif isinstance(plan_dt_value, str):
+                    # Fallback для старых данных
+                    dt = datetime.fromisoformat(plan_dt_value.replace('Z', '+00:00')).astimezone(plans_tz)
+                else:
+                    logger.warning(f"Неожиданный тип plan_datetime: {type(plan_dt_value)}")
+                    continue
                 date_str = dt.strftime('%d.%m.%Y %H:%M')
                 type_text = "🎦 кино" if plan_type == 'cinema' else "🏠 дома"
                 markup.add(InlineKeyboardButton(f"{title} — {date_str} ({type_text})", callback_data=f"clean_plan:{plan_id}"))
