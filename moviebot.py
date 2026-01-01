@@ -3931,26 +3931,52 @@ def clean_action_choice(call):
             bot.edit_message_text("Нет запланированных фильмов для удаления.", call.message.chat.id, call.message.message_id)
             return
         
+        # Получаем часовой пояс пользователя для отображения даты
+        user_tz = get_user_timezone_or_default(user_id)
+        
         markup = InlineKeyboardMarkup(row_width=1)
         for plan_id, title, plan_type, plan_dt_value in plans:
             try:
                 # psycopg2 возвращает объект datetime для TIMESTAMP WITH TIME ZONE
                 if isinstance(plan_dt_value, datetime):
                     if plan_dt_value.tzinfo is None:
-                        dt = pytz.utc.localize(plan_dt_value).astimezone(plans_tz)
+                        dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
                     else:
-                        dt = plan_dt_value.astimezone(plans_tz)
+                        dt = plan_dt_value.astimezone(user_tz)
                 elif isinstance(plan_dt_value, str):
                     # Fallback для старых данных
-                    dt = datetime.fromisoformat(plan_dt_value.replace('Z', '+00:00')).astimezone(plans_tz)
+                    dt = datetime.fromisoformat(plan_dt_value.replace('Z', '+00:00')).astimezone(user_tz)
                 else:
                     logger.warning(f"Неожиданный тип plan_datetime: {type(plan_dt_value)}")
                     continue
-                date_str = dt.strftime('%d.%m.%Y %H:%M')
+                
+                # Форматируем дату: только дата без времени для компактности
+                date_str = dt.strftime('%d.%m')
+                # Добавляем день недели для удобства
+                day_names = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
+                day_name = day_names[dt.weekday()]
+                type_text = "🎦" if plan_type == 'cinema' else "🏠"
+                
+                # Формат: "Название фильма | 15.01 пт 🏠" или "Название фильма | 15.01 пт 🎦"
+                button_text = f"{title} | {date_str} {day_name} {type_text}"
+                
+                # Ограничиваем длину текста кнопки (Telegram ограничение ~64 символа)
+                if len(button_text) > 60:
+                    # Сокращаем название фильма
+                    max_title_len = 60 - len(f" | {date_str} {day_name} {type_text}")
+                    short_title = title[:max_title_len - 3] + "..." if len(title) > max_title_len else title
+                    button_text = f"{short_title} | {date_str} {day_name} {type_text}"
+                
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_plan:{plan_id}"))
+            except Exception as e:
+                logger.error(f"[CLEAN] Ошибка форматирования плана {plan_id}: {e}", exc_info=True)
+                # Fallback: показываем хотя бы название и тип
                 type_text = "🎦 кино" if plan_type == 'cinema' else "🏠 дома"
-                markup.add(InlineKeyboardButton(f"{title} — {date_str} ({type_text})", callback_data=f"clean_plan:{plan_id}"))
-            except:
-                markup.add(InlineKeyboardButton(f"{title} ({plan_type})", callback_data=f"clean_plan:{plan_id}"))
+                button_text = f"{title} ({type_text})"
+                if len(button_text) > 60:
+                    short_title = title[:50] + "..."
+                    button_text = f"{short_title} ({type_text})"
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"clean_plan:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="clean:cancel"))
         
         bot.edit_message_text("📅 <b>Выберите план для удаления:</b>", call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
