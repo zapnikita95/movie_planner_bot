@@ -3541,6 +3541,13 @@ def plan_handler(message):
         original_text = message.text or ''
         text = original_text.lower().replace('/plan', '').strip()
         
+        logger.info(f"[PLAN] ===== НАЧАЛО ОБРАБОТКИ /plan =====")
+        logger.info(f"[PLAN] user_id={user_id}, chat_id={chat_id}")
+        logger.info(f"[PLAN] original_text='{original_text}'")
+        logger.info(f"[PLAN] Есть реплай: {message.reply_to_message is not None}")
+        if message.reply_to_message:
+            logger.info(f"[PLAN] reply_to_message.message_id={message.reply_to_message.message_id}")
+        
         # Проверяем реплай на сообщение со ссылкой
         link = None
         if message.reply_to_message:
