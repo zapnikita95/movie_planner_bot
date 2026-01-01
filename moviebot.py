@@ -124,7 +124,7 @@ cursor.execute('''
         actors TEXT,
         watched INTEGER DEFAULT 0,
         rating REAL DEFAULT NULL,
-        UNIQUE(chat_id, link)
+        UNIQUE(chat_id, kp_id)
     )
 ''')
 cursor.execute('''
@@ -523,9 +523,10 @@ def add_and_announce(link, chat_id):
         logger.warning(f"Не удалось извлечь информацию о фильме: {link}")
         return False
 
-    # Проверяем, существует ли уже фильм в этом чате
+    # Проверяем, существует ли уже фильм в этом чате по kp_id (не по ссылке, так как ссылки могут отличаться)
+    kp_id = info.get('kp_id')
     with db_lock:
-        cursor.execute('SELECT id, title, watched, rating FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+        cursor.execute('SELECT id, title, watched, rating FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
         existing = cursor.fetchone()
     
     if existing:
@@ -578,7 +579,7 @@ def add_and_announce(link, chat_id):
                 cursor.execute('''
                     INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (chat_id, link) DO NOTHING
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
                 ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                 conn.commit()
                 inserted = cursor.rowcount == 1
@@ -747,15 +748,24 @@ def handle_reaction(update):
             if link:
                 try:
                     logger.info(f"[REACTION] Обрабатываем реакцию для фильма с ссылкой {link}")
-                    with db_lock:
-                        cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND link = %s', (chat_id, link))
-                        conn.commit()
-                        
-                        cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
-                        row = cursor.fetchone()
-                        if row:
-                            film_id, title = row
-                            logger.info(f"[REACTION] Фильм {title} (ID: {film_id}) отмечен как просмотренный пользователем {user_id}")
+                    # Извлекаем kp_id из ссылки для поиска фильма
+                    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+                    if match:
+                        kp_id = match.group(2)
+                        with db_lock:
+                            cursor.execute('UPDATE movies SET watched = 1 WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                            conn.commit()
+                            
+                            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                            row = cursor.fetchone()
+                            if row:
+                                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                                title = row.get('title') if isinstance(row, dict) else row[1]
+                                logger.info(f"[REACTION] Фильм {title} (ID: {film_id}, kp_id: {kp_id}) отмечен как просмотренный пользователем {user_id}")
+                            else:
+                                logger.warning(f"[REACTION] Фильм с kp_id={kp_id} не найден в базе")
+                    else:
+                        logger.warning(f"[REACTION] Не удалось извлечь kp_id из ссылки: {link}")
                     
                     user_name = update.user.first_name if update.user else "Кто-то"
                     msg = bot.send_message(chat_id, f"🎉 {user_name} отметил фильм <b>{title}</b> просмотренным!\n\n💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.", parse_mode='HTML')
@@ -1289,13 +1299,13 @@ def random_show_movie(call):
                     cursor.execute('''
                         INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (chat_id, link) DO NOTHING
+                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
                     ''', (chat_id, movie['link'], movie['kp_id'], movie['title'], movie['year'], movie['genres'], movie['description'], movie['director'], movie['actors']))
                     conn.commit()
-                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND link = %s', (chat_id, movie['link']))
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, movie['kp_id']))
                     row = cursor.fetchone()
                     if row:
-                        film_id = row[0]
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
                     else:
                         logger.error(f"Не удалось добавить фильм в базу для планирования")
                         del user_random_state[user_id]
@@ -1499,21 +1509,34 @@ def handle_rate_list_reply(message):
 # /settings
 @bot.message_handler(commands=['settings'])
 def settings_command(message):
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    # Проверяем на reset
-    if message.text and 'reset' in message.text.lower():
-        with db_lock:
-            cursor.execute('DELETE FROM settings WHERE chat_id = %s AND key = "watched_reactions"', (chat_id,))
-            conn.commit()
-        bot.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
-        return
-    
-    reactions = get_watched_reactions(chat_id)
-    current = ', '.join(reactions['emoji'] + [f"custom:{cid}" for cid in reactions['custom']]) or "не настроено"
-    bot.reply_to(message, f"⚙️ Текущие реакции для просмотренных: {current}\n\nОтправьте эмодзи (обычные или кастомные), которые хотите использовать (можно несколько в одном сообщении). Для сброса — /settings reset")
-    user_settings_state[user_id] = {'adding_reactions': True}
+    logger.info(f"[HANDLER] /settings вызван от {message.from_user.id}")
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        username = message.from_user.username or f"user_{user_id}"
+        log_request(user_id, username, '/settings', chat_id)
+        logger.info(f"Команда /settings от пользователя {user_id}")
+        
+        # Проверяем на reset
+        if message.text and 'reset' in message.text.lower():
+            with db_lock:
+                cursor.execute('DELETE FROM settings WHERE chat_id = %s AND key = "watched_reactions"', (chat_id,))
+                conn.commit()
+            bot.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
+            logger.info(f"Реакции сброшены для чата {chat_id}")
+            return
+        
+        reactions = get_watched_reactions(chat_id)
+        current = ', '.join(reactions['emoji'] + [f"custom:{cid}" for cid in reactions['custom']]) or "не настроено"
+        bot.reply_to(message, f"⚙️ Текущие реакции для просмотренных: {current}\n\nОтправьте эмодзи (обычные или кастомные), которые хотите использовать (можно несколько в одном сообщении). Для сброса — /settings reset")
+        user_settings_state[user_id] = {'adding_reactions': True}
+        logger.info(f"Настройки открыты для пользователя {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /settings")
+        except:
+            pass
 
 @bot.message_handler(func=lambda m: user_settings_state.get(m.from_user.id, {}).get('adding_reactions'))
 def add_reactions(message):
@@ -1639,7 +1662,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
             if not row:
                 info = extract_movie_info(link)
                 if info:
-                    cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, link) DO NOTHING', 
+                    cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link', 
                                  (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                     conn.commit()
                     cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
@@ -1725,7 +1748,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
             if not row:
                 info = extract_movie_info(link)
                 if info:
-                    cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, link) DO NOTHING', 
+                    cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link', 
                                  (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                     conn.commit()
                     cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
@@ -1943,7 +1966,7 @@ def get_plan_day_or_date(message):
                 cursor.execute('''
                     INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (chat_id, link) DO NOTHING
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
                 ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                 conn.commit()
                 cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
