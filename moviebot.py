@@ -1416,20 +1416,20 @@ def random_genre(call):
         chat_id = call.message.chat.id
         try:
             with db_lock:
-            cursor.execute("""
-                SELECT genres FROM movies 
-                WHERE chat_id = %s AND watched = 0 
-                AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
-            """, (chat_id, chat_id))
-            all_genres = set()
-            for row in cursor.fetchall():
-                genres = row.get('genres') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                if genres:
-                    for g in str(genres).split(', '):
-                        if g.strip():
-                            all_genres.add(g.strip())
-        
-        if not all_genres:
+                cursor.execute("""
+                    SELECT genres FROM movies 
+                    WHERE chat_id = %s AND watched = 0 
+                    AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
+                """, (chat_id, chat_id))
+                all_genres = set()
+                for row in cursor.fetchall():
+                    genres = row.get('genres') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                    if genres:
+                        for g in str(genres).split(', '):
+                            if g.strip():
+                                all_genres.add(g.strip())
+            
+            if not all_genres:
             bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", call.message.chat.id, call.message.message_id)
             if user_id in user_random_state:
                 del user_random_state[user_id]
