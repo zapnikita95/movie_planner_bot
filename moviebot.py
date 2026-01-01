@@ -2231,7 +2231,10 @@ def add_reactions(message):
     
     action = state.get('action')
     if not action:
+        logger.warning(f"[SETTINGS] Нет action в состоянии для пользователя {user_id}, state={state}")
         return
+    
+    logger.info(f"[SETTINGS] Действие: {action}, начинаем обработку эмодзи")
     
     # Собираем обычные эмодзи и custom_id из сообщения
     emojis = []
