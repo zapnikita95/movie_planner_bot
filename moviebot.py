@@ -1412,6 +1412,68 @@ def save_movie_message(message):
     except Exception as e:
         logger.warning(f"[SAVE MESSAGE] Ошибка при обработке сообщения с фильмом: {e}", exc_info=True)
 
+# Обработка реплаев для планирования фильмов из /random
+@bot.message_handler(func=lambda m: (
+    m.text and 
+    m.reply_to_message and 
+    m.reply_to_message.message_id in bot_messages and
+    not m.text.strip().startswith('/') and
+    m.from_user.id not in user_plan_state
+))
+def handle_random_plan_reply(message):
+    """Обрабатывает реплаи на сообщения фильмов из /random для планирования"""
+    try:
+        reply_msg_id = message.reply_to_message.message_id
+        link = bot_messages.get(reply_msg_id)
+        
+        if not link:
+            return
+        
+        text = message.text.strip().lower()
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        
+        logger.info(f"[RANDOM PLAN] Reply received: text={text}, link={link}, user_id={user_id}")
+        
+        # Парсим тип планирования и дату
+        plan_type = None
+        day_or_date = None
+        
+        # Проверяем "дома" или "в кино"
+        if 'дома' in text:
+            plan_type = 'home'
+            # Убираем "дома" из текста для парсинга даты
+            day_or_date = text.replace('дома', '').strip()
+        elif 'в кино' in text or 'кино' in text:
+            plan_type = 'cinema'
+            # Убираем "в кино" из текста для парсинга даты
+            day_or_date = re.sub(r'в\s*кино|кино', '', text).strip()
+        
+        if not plan_type:
+            # Если тип не указан, пытаемся определить по контексту или используем "дома" по умолчанию
+            plan_type = 'home'
+            day_or_date = text
+        
+        if not day_or_date:
+            # Если дата не указана, используем "сегодня" для дома или "суббота" для кино
+            if plan_type == 'home':
+                day_or_date = 'сегодня'
+            else:
+                day_or_date = 'суббота'
+        
+        logger.info(f"[RANDOM PLAN] Parsed: plan_type={plan_type}, day_or_date={day_or_date}")
+        
+        # Вызываем process_plan
+        result = process_plan(user_id, chat_id, link, plan_type, day_or_date)
+        if result:
+            logger.info(f"[RANDOM PLAN] Plan created successfully for link={link}")
+    except Exception as e:
+        logger.error(f"[RANDOM PLAN] Error processing plan reply: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Ошибка при планировании. Используйте формат: <code>дома в субботу</code> или <code>в кино 15 февраля</code>", parse_mode='HTML')
+        except:
+            pass
+
 # Обработка оценок текстом
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 1 <= int(m.text) <= 10 and m.reply_to_message)
 def handle_rating(message):
@@ -2697,16 +2759,31 @@ def handle_emoji_input(message):
 
 # /plan — планирование просмотра
 def process_plan(user_id, chat_id, link, plan_type, day_or_date):
+    """Планирует просмотр фильма. Возвращает True при успехе, False при ошибке"""
     plan_dt = None
     now = datetime.now(plans_tz)
     
+    # Обработка "сегодня"
+    day_lower = day_or_date.lower().strip()
+    if 'сегодня' in day_lower:
+        plan_date = now.date()
+        if plan_type == 'home':
+            hour = 19 if now.weekday() == 4 else 10
+        else:
+            hour = 9
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = plans_tz.localize(plan_dt)
+        if plan_dt < now:
+            # Если время уже прошло, переносим на завтра
+            plan_dt = plan_dt + timedelta(days=1)
+    
     # Ищем день недели в расширенном словаре
-    target_weekday = None
-    day_lower = day_or_date.lower()
-    for phrase, wd in days_full.items():
-        if phrase in day_lower:
-            target_weekday = wd
-            break
+    if not plan_dt:
+        target_weekday = None
+        for phrase, wd in days_full.items():
+            if phrase in day_lower:
+                target_weekday = wd
+                break
     
     if target_weekday is not None:
         # Вычисляем ближайший указанный день (вперёд)
@@ -2771,10 +2848,10 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
                         title = row.get('title') if isinstance(row, dict) else row[1]
                     else:
                         bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
-                        return
+                        return False
                 else:
                     bot.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
-                    return
+                    return False
             else:
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
                 title = row.get('title') if isinstance(row, dict) else row[1]
@@ -2795,6 +2872,8 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
             args=[chat_id, film_id, title, link, plan_type],
             id=f'plan_notify_{chat_id}_{film_id}_{int(plan_utc.timestamp())}'  # уникальный ID
         )
+        
+        return True
         logger.info(f"[PLAN] Уведомление запланировано на {plan_dt} МСК для фильма {title}")
 
 @bot.message_handler(commands=['plan'])
@@ -3849,15 +3928,43 @@ def random_start(message):
             'actor': None
         }
         
-        # Шаг 1: Выбор периода
+        # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
+        all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+        available_periods = []
+        
+        with db_lock:
+            for period in all_periods:
+                if period == "До 1980":
+                    condition = "year < 1980"
+                elif period == "1980–1990":
+                    condition = "(year >= 1980 AND year <= 1990)"
+                elif period == "1990–2000":
+                    condition = "(year >= 1990 AND year <= 2000)"
+                elif period == "2000–2010":
+                    condition = "(year >= 2000 AND year <= 2010)"
+                elif period == "2010–2020":
+                    condition = "(year >= 2010 AND year <= 2020)"
+                elif period == "2020–сейчас":
+                    condition = "year >= 2020"
+                
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM movies 
+                    WHERE chat_id = %s AND watched = 0 AND {condition}
+                """, (chat_id,))
+                count_row = cursor.fetchone()
+                count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                
+                if count > 0:
+                    available_periods.append(period)
+        
         markup = InlineKeyboardMarkup(row_width=2)
-        periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
-        for i in range(0, len(periods), 2):
-            row = []
-            row.append(InlineKeyboardButton(periods[i], callback_data=f"rand_period:{periods[i]}"))
-            if i+1 < len(periods):
-                row.append(InlineKeyboardButton(periods[i+1], callback_data=f"rand_period:{periods[i+1]}"))
-            markup.row(*row)
+        if available_periods:
+            for i in range(0, len(available_periods), 2):
+                row = []
+                row.append(InlineKeyboardButton(available_periods[i], callback_data=f"rand_period:{available_periods[i]}"))
+                if i+1 < len(available_periods):
+                    row.append(InlineKeyboardButton(available_periods[i+1], callback_data=f"rand_period:{available_periods[i+1]}"))
+                markup.row(*row)
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
         
         bot.send_message(chat_id, "🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)", reply_markup=markup, parse_mode='HTML')
@@ -4257,20 +4364,36 @@ def _random_final(call, chat_id, user_id):
         
         text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
         
+        film_message_id = None
         try:
             bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
+            film_message_id = call.message.message_id
             bot.answer_callback_query(call.id)
         except Exception as e:
             logger.error(f"[RANDOM] Error editing message: {e}", exc_info=True)
-            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            sent_msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            film_message_id = sent_msg.message_id
             bot.answer_callback_query(call.id)
         
-        # Сохраняем для реакции
+        # Сохраняем message_id фильма для обработки реакций и реплаев
+        if film_message_id:
+            bot_messages[film_message_id] = link
+            logger.info(f"[RANDOM] Saved film message_id={film_message_id} with link={link}")
+        
+        # Отправляем инструкцию
         try:
-            sent = bot.send_message(chat_id, "Поставьте ✅, если посмотрели!")
+            instruction_text = (
+                "💬 <b>Что дальше?</b>\n\n"
+                "• Ответьте на это сообщение в формате <code>дома/в кино + дата</code>, "
+                "чтобы запланировать фильм\n"
+                "• Поставьте реакцию просмотра на это сообщение или сообщение фильма, "
+                "чтобы отметить фильм как просмотренный"
+            )
+            sent = bot.send_message(chat_id, instruction_text, parse_mode='HTML')
+            # Также сохраняем для обработки реплаев
             bot_messages[sent.message_id] = link
         except Exception as e:
-            logger.error(f"[RANDOM] Error sending reaction message: {e}", exc_info=True)
+            logger.error(f"[RANDOM] Error sending instruction message: {e}", exc_info=True)
         
         del user_random_state[user_id]
         logger.info(f"[RANDOM] ===== COMPLETED: Film shown - {title}")
