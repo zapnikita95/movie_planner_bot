@@ -3540,6 +3540,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
 
 @bot.message_handler(func=lambda m: m.text and m.text.strip().startswith('/plan'), priority=1)
 def plan_text_handler(message):
+    logger.info(f"[PLAN TEXT HANDLER] Перехвачено сообщение: {message.text[:100] if message.text else None}")
     plan_handler(message)
 
 @bot.message_handler(commands=['plan'], priority=1)
@@ -4918,8 +4919,13 @@ def clean_confirm_execute(message):
 
 
 # Обработка реплаев на сообщения бота (для settings и других случаев)
-@bot.message_handler(content_types=['text'], func=lambda message: message.reply_to_message and message.reply_to_message.from_user.is_bot, priority=10)
+@bot.message_handler(content_types=['text'], func=lambda message: message.reply_to_message and message.reply_to_message.from_user.is_bot and not (message.text and message.text.strip().startswith('/')), priority=10)
 def handle_reply_to_bot(message):
+    # Пропускаем команды - они обрабатываются отдельными обработчиками
+    if message.text and message.text.strip().startswith('/'):
+        logger.info(f"[REPLY TO BOT] Пропущена команда: {message.text[:50]}")
+        return
+    
     logger.info(f"[REPLY TO BOT] Получен реплай на сообщение бота от {message.from_user.id}, text: '{message.text}'")
     
     # Обработка для /settings
