@@ -201,7 +201,9 @@ def get_watched_emoji(chat_id):
         cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
         row = cursor.fetchone()
         if row:
-            return row[0]
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            if value:
+                return value
         # Дефолт, если не настроено
         return "✅"
 
@@ -216,9 +218,11 @@ def get_watched_reactions(chat_id):
     with db_lock:
         cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
         row = cursor.fetchone()
-        if row and row[0]:
-            try:
-                reactions = json.loads(row[0])
+        if row:
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            if value:
+                try:
+                    reactions = json.loads(value)
                 emojis = [r for r in reactions if not r.startswith('custom:')]
                 custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
                 return {'emoji': emojis, 'custom': custom_ids}
