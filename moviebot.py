@@ -570,6 +570,7 @@ def send_welcome(message):
 
 # Реакции + сбор оценок
 rating_messages = {}  # message_id: film_id (связь сообщения о просмотренном фильме с film_id)
+rate_list_messages = {}  # chat_id: message_id (сообщение со списком фильмов для /rate)
 
 @bot.message_reaction_handler(func=lambda r: True)
 def handle_reaction(update):
