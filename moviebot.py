@@ -199,6 +199,16 @@ cursor.execute('''
     )
 ''')
 cursor.execute('''
+    CREATE TABLE IF NOT EXISTS watched_movies (
+        id SERIAL PRIMARY KEY,
+        chat_id BIGINT,
+        film_id INTEGER,
+        user_id BIGINT,
+        watched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(chat_id, film_id, user_id)
+    )
+''')
+cursor.execute('''
     CREATE TABLE IF NOT EXISTS cinema_votes (
         id SERIAL PRIMARY KEY,
         chat_id BIGINT,
@@ -637,6 +647,80 @@ def resolve_cinema_votes():
 scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
 scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
+
+def send_rating_reminder(chat_id, film_id, film_title, user_id):
+    """Отправляет напоминание пользователю об оценке фильма на следующий день после просмотра"""
+    try:
+        # Проверяем, не оценил ли уже пользователь
+        with db_lock:
+            cursor.execute("""
+                SELECT id FROM ratings 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s
+            """, (chat_id, film_id, user_id))
+            has_rating = cursor.fetchone()
+            
+            if has_rating:
+                logger.info(f"[RATING REMINDER] Пользователь {user_id} уже оценил фильм {film_id}, пропускаем")
+                return
+            
+            # Получаем ссылку на фильм
+            cursor.execute("SELECT link FROM movies WHERE id = %s", (film_id,))
+            film_row = cursor.fetchone()
+            link = film_row.get('link') if isinstance(film_row, dict) else (film_row[0] if film_row else None)
+            
+            # Отправляем напоминание
+            message_text = (
+                f"📅 Напоминание: вы просмотрели фильм <b>{film_title}</b> вчера.\n\n"
+                f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку."
+            )
+            
+            if link:
+                message_text += f"\n\n{link}"
+            
+            msg = bot.send_message(chat_id, message_text, parse_mode='HTML')
+            
+            # Сохраняем связь для обработки оценки
+            rating_messages[msg.message_id] = film_id
+            logger.info(f"[RATING REMINDER] Напоминание отправлено user_id={user_id}, film_id={film_id}, message_id={msg.message_id}")
+    except Exception as e:
+        logger.error(f"[RATING REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
+
+def send_rating_reminder(chat_id, film_id, film_title, user_id):
+    """Отправляет напоминание пользователю об оценке фильма на следующий день после просмотра"""
+    try:
+        # Проверяем, не оценил ли уже пользователь
+        with db_lock:
+            cursor.execute("""
+                SELECT id FROM ratings 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s
+            """, (chat_id, film_id, user_id))
+            has_rating = cursor.fetchone()
+            
+            if has_rating:
+                logger.info(f"[RATING REMINDER] Пользователь {user_id} уже оценил фильм {film_id}, пропускаем")
+                return
+            
+            # Получаем ссылку на фильм
+            cursor.execute("SELECT link FROM movies WHERE id = %s", (film_id,))
+            film_row = cursor.fetchone()
+            link = film_row.get('link') if isinstance(film_row, dict) else (film_row[0] if film_row else None)
+            
+            # Отправляем напоминание
+            message_text = (
+                f"📅 Напоминание: вы просмотрели фильм <b>{film_title}</b> вчера.\n\n"
+                f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку."
+            )
+            
+            if link:
+                message_text += f"\n\n{link}"
+            
+            msg = bot.send_message(chat_id, message_text, parse_mode='HTML')
+            
+            # Сохраняем связь для обработки оценки
+            rating_messages[msg.message_id] = film_id
+            logger.info(f"[RATING REMINDER] Напоминание отправлено user_id={user_id}, film_id={film_id}, message_id={msg.message_id}")
+    except Exception as e:
+        logger.error(f"[RATING REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
 
 def send_plan_notification(chat_id, title, link, plan_type):
     if plan_type == 'home':
@@ -1077,23 +1161,113 @@ def handle_reaction(reaction):
         logger.info("[REACTION] Нет link в bot_messages")
         return
     
+    user_id = reaction.user.id if reaction.user else None
+    if not user_id:
+        logger.warning("[REACTION] Не удалось получить user_id")
+        return
+    
     with db_lock:
-        cursor.execute("SELECT id, title FROM movies WHERE link = %s AND chat_id = %s AND watched = 0", (link, chat_id))
+        cursor.execute("SELECT id, title FROM movies WHERE link = %s AND chat_id = %s", (link, chat_id))
         film = cursor.fetchone()
         if not film:
-            logger.info("[REACTION] Фильм не найден или уже просмотрен")
+            logger.info("[REACTION] Фильм не найден")
             return
         
-        cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s", (film['id'],))
+        film_id = film['id']
+        film_title = film['title']
+        
+        # Проверяем, не просмотрел ли уже этот пользователь
+        cursor.execute("SELECT id FROM watched_movies WHERE chat_id = %s AND film_id = %s AND user_id = %s", 
+                      (chat_id, film_id, user_id))
+        already_watched = cursor.fetchone()
+        
+        if already_watched:
+            logger.info(f"[REACTION] Пользователь {user_id} уже отметил фильм {film_title} как просмотренный")
+            return
+        
+        # Сохраняем просмотр для конкретного пользователя
+        cursor.execute("""
+            INSERT INTO watched_movies (chat_id, film_id, user_id, watched_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (chat_id, film_id, user_id) DO NOTHING
+        """, (chat_id, film_id, user_id))
+        
+        # Обновляем watched для фильма (если хотя бы один просмотрел)
+        cursor.execute("""
+            UPDATE movies 
+            SET watched = 1 
+            WHERE id = %s AND (
+                SELECT COUNT(*) FROM watched_movies WHERE film_id = %s AND chat_id = %s
+            ) > 0
+        """, (film_id, film_id, chat_id))
+        
         conn.commit()
-        logger.info(f"[REACTION] Фильм {film['title']} отмечен просмотренным")
+        logger.info(f"[REACTION] Фильм {film_title} отмечен просмотренным пользователем {user_id}")
     
-    markup = InlineKeyboardMarkup(row_width=5)
-    for i in range(1, 11):
-        markup.add(InlineKeyboardButton(str(i), callback_data=f"rate:{film['id']}:{i}"))
+    # Отправляем персональное сообщение пользователю с упоминанием
+    user_name = reaction.user.first_name if reaction.user else "Вы"
+    user_mention = f"@{reaction.user.username}" if reaction.user and reaction.user.username else user_name
+    msg = bot.send_message(chat_id, 
+        f"🎬 {user_mention}, фильм <b>{film_title}</b> отмечен как просмотренный!\n\n"
+        f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.",
+        parse_mode='HTML')
     
-    bot.send_message(chat_id, f"🎬 <b>{film['title']}</b> отмечен как просмотренный!\nОцени от 1 до 10:", 
-                     reply_markup=markup, parse_mode='HTML')
+    # Сохраняем связь message_id -> film_id для обработки оценки
+    rating_messages[msg.message_id] = film_id
+    logger.info(f"[REACTION] Сообщение об оценке отправлено для {user_name}, message_id={msg.message_id}, film_id={film_id}")
+    
+    # Проверяем, есть ли план "дома" для этого фильма - если да, планируем напоминание на следующий день
+    try:
+        with db_lock:
+            cursor.execute("""
+                SELECT plan_datetime, plan_type 
+                FROM plans 
+                WHERE chat_id = %s AND film_id = %s AND plan_type = 'home'
+                ORDER BY plan_datetime DESC
+                LIMIT 1
+            """, (chat_id, film_id))
+            plan_row = cursor.fetchone()
+            
+            if plan_row:
+                plan_datetime = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[0]
+                if isinstance(plan_datetime, str):
+                    from datetime import datetime
+                    plan_datetime = datetime.fromisoformat(plan_datetime.replace('Z', '+00:00'))
+                
+                # Напоминание на следующий день после просмотра
+                from datetime import timedelta
+                reminder_datetime = plan_datetime + timedelta(days=1)
+                
+                # Планируем напоминание всем участникам чата, которые просмотрели
+                cursor.execute("""
+                    SELECT DISTINCT user_id 
+                    FROM watched_movies 
+                    WHERE chat_id = %s AND film_id = %s
+                """, (chat_id, film_id))
+                watched_users = cursor.fetchall()
+                
+                for user_row in watched_users:
+                    watched_user_id = user_row.get('user_id') if isinstance(user_row, dict) else user_row[0]
+                    
+                    # Проверяем, не оценил ли уже пользователь
+                    cursor.execute("""
+                        SELECT id FROM ratings 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                    """, (chat_id, film_id, watched_user_id))
+                    has_rating = cursor.fetchone()
+                    
+                    if not has_rating:
+                        # Планируем напоминание
+                        scheduler.add_job(
+                            send_rating_reminder,
+                            'date',
+                            run_date=reminder_datetime.astimezone(pytz.utc),
+                            args=[chat_id, film_id, film_title, watched_user_id],
+                            id=f'rating_reminder_{chat_id}_{film_id}_{watched_user_id}'
+                        )
+                        logger.info(f"[REACTION] Запланировано напоминание об оценке для user_id={watched_user_id}, film_id={film_id}, datetime={reminder_datetime}")
+    except Exception as e:
+        logger.error(f"[REACTION] Ошибка при планировании напоминания: {e}", exc_info=True)
 
 # Обработка оценок текстом
 @bot.message_handler(func=lambda m: m.text and m.text.isdigit() and 1 <= int(m.text) <= 10 and m.reply_to_message)
