@@ -1758,9 +1758,9 @@ def random_show_movie(call):
                 bot.answer_callback_query(call.id, "Ошибка при отображении фильма", show_alert=True)
             except:
                 pass
-    
-    # Автоматически планируем фильм на выбранную дату
-    if plan_dt:
+        
+        # Автоматически планируем фильм на выбранную дату
+        if plan_dt:
         try:
             chat_id = call.message.chat.id
             film_id = movie.get('id')
