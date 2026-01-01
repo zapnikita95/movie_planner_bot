@@ -2635,10 +2635,11 @@ def rate_movie(message):
 
 # Обработка реплая на список фильмов с оценками
 
-@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == bot.get_me().id and m.text)
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == bot.get_me().id and m.text, priority=2)
 def handle_rate_list_reply(message):
     # Пропускаем команды - они обрабатываются отдельными обработчиками
     if message.text and message.text.startswith('/'):
+        logger.info(f"[RATE LIST REPLY] Пропущена команда: {message.text[:50]}")
         return
     
     chat_id = message.chat.id
