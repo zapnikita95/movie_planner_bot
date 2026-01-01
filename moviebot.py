@@ -323,10 +323,16 @@ def clean_home_plans():
         rows = cursor.fetchall()
         
         deleted_count = 0
-        for plan_id, film_id, chat_id in rows:
+        for row in rows:
+            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+            plan_id = row.get('id') if isinstance(row, dict) else row[0]
+            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
             # Проверяем, есть ли оценки по фильму
             cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            if cursor.fetchone()[0] == 0:
+            count_row = cursor.fetchone()
+            count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+            if count == 0:
                 cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
                 deleted_count += 1
                 try:
@@ -363,10 +369,18 @@ def start_cinema_votes():
         ''')
         rows = cursor.fetchall()
         
-        for plan_id, film_id, chat_id, title, link in rows:
+        for row in rows:
+            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+            plan_id = row.get('id') if isinstance(row, dict) else row[0]
+            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
+            title = row.get('title') if isinstance(row, dict) else row[3]
+            link = row.get('link') if isinstance(row, dict) else row[4]
             # Проверяем, есть ли оценки
             cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            if cursor.fetchone()[0] > 0:
+            count_row = cursor.fetchone()
+            count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+            if count > 0:
                 continue  # оценки есть — не запускаем голосование
             
             # Запускаем голосование
@@ -397,7 +411,13 @@ def resolve_cinema_votes():
         ''')
         rows = cursor.fetchall()
         
-        for chat_id, film_id, yes_json, no_json, title in rows:
+        for row in rows:
+            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
+            yes_json = row.get('yes_votes') if isinstance(row, dict) else row[2]
+            no_json = row.get('no_votes') if isinstance(row, dict) else row[3]
+            title = row.get('title') if isinstance(row, dict) else row[4]
             yes_count = len(json.loads(yes_json or '[]'))
             no_count = len(json.loads(no_json or '[]'))
             
@@ -794,11 +814,15 @@ def handle_rating(message):
         if not film_id:
             reply_link = bot_messages.get(reply_msg_id)
             if reply_link:
-                with db_lock:
-                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND link = %s', (chat_id, reply_link))
-                    row = cursor.fetchone()
-                    if row:
-                        film_id = row[0]
+                # Извлекаем kp_id из ссылки для поиска
+                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                if match:
+                    kp_id = match.group(2)
+                    with db_lock:
+                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        row = cursor.fetchone()
+                        if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
     
     if film_id:
         with db_lock:
@@ -810,7 +834,8 @@ def handle_rating(message):
             conn.commit()
             
             cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            avg = cursor.fetchone()[0]
+            avg_row = cursor.fetchone()
+            avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
             
             avg_str = f"{avg:.1f}" if avg else "—"
             bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
@@ -1661,8 +1686,15 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
                 return False
     
     if plan_dt:
+        # Извлекаем kp_id из ссылки для поиска
+        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+        kp_id = match.group(2) if match else None
+        
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+            if kp_id:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            else:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
             row = cursor.fetchone()
             if not row:
                 info = extract_movie_info(link)
@@ -1670,10 +1702,11 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
                     cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link', 
                                  (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                     conn.commit()
-                    cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+                    cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
                     row = cursor.fetchone()
                     if row:
-                        film_id, title = row
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
                     else:
                         bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
                         return
@@ -1681,7 +1714,8 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
                     bot.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
                     return
             else:
-                film_id, title = row
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
             
             plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
             cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)', 
@@ -1747,8 +1781,15 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
             return False
     
     if plan_dt:
+        # Извлекаем kp_id из ссылки для поиска
+        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+        kp_id = match.group(2) if match else None
+        
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+            if kp_id:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            else:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
             row = cursor.fetchone()
             if not row:
                 info = extract_movie_info(link)
@@ -1756,10 +1797,11 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
                     cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link', 
                                  (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                     conn.commit()
-                    cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+                    cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
                     row = cursor.fetchone()
                     if row:
-                        film_id, title = row
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
                     else:
                         bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
                         return
@@ -1767,10 +1809,11 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date):
                     bot.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
                     return
             else:
-                film_id, title = row
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
             
             plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
-            cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)', 
+            cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)',
                           (chat_id, film_id, plan_type, plan_utc_iso, user_id))
             conn.commit()
         
@@ -1960,8 +2003,15 @@ def get_plan_day_or_date(message):
     if plan_dt:
         # Получаем/создаём фильм
         chat_id = message.chat.id
+        # Извлекаем kp_id из ссылки для поиска
+        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+        kp_id = match.group(2) if match else None
+        
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+            if kp_id:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            else:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
             row = cursor.fetchone()
             if not row:
                 info = extract_movie_info(link)
@@ -1974,15 +2024,17 @@ def get_plan_day_or_date(message):
                     ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
                 ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
                 conn.commit()
-                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
                 row = cursor.fetchone()
                 if row:
-                    film_id, title = row
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
                 else:
                     bot.reply_to(message, "Не удалось добавить фильм в базу.")
                     return
             else:
-                film_id, title = row
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
 
             # Сохраняем план
             plan_utc_iso = plan_dt.astimezone(pytz.utc).isoformat()
@@ -2034,7 +2086,11 @@ def show_schedule(message):
         cinema_plans = []
         home_plans = []
         
-        for title, plan_dt_iso, plan_type in rows:
+        for row in rows:
+            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
+            title = row.get('title') if isinstance(row, dict) else row[0]
+            plan_dt_iso = row.get('plan_datetime') if isinstance(row, dict) else row[1]
+            plan_type = row.get('plan_type') if isinstance(row, dict) else row[2]
             # Преобразуем ISO в дату МСК без времени
             try:
                 # Обрабатываем разные форматы ISO строк
