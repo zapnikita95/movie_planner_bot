@@ -952,20 +952,43 @@ def handle_reaction(update):
         is_watched = False
         reaction_emoji = None
         
+        # Детальное логирование структуры реакции
+        logger.info(f"[REACTION DEBUG] Reaction object: type={type(reaction)}, dir={[attr for attr in dir(reaction) if not attr.startswith('_')][:10]}")
+        
+        # Проверяем разные форматы реакции
         if hasattr(reaction, 'type'):
-            if reaction.type == 'emoji' and hasattr(reaction, 'emoji'):
-                reaction_emoji = reaction.emoji
+            logger.info(f"[REACTION DEBUG] Reaction has type: {reaction.type}")
+            if reaction.type == 'emoji':
+                if hasattr(reaction, 'emoji'):
+                    reaction_emoji = reaction.emoji
+                    logger.info(f"[REACTION DEBUG] Emoji reaction found: {reaction_emoji}")
+                elif hasattr(reaction, 'emoji_id'):
+                    reaction_emoji = reaction.emoji_id
+                    logger.info(f"[REACTION DEBUG] Emoji ID reaction found: {reaction_emoji}")
                 # Проверяем и в глобальных настройках, и в локальных
-                is_watched = reaction.emoji in watched_emojis_global or reaction.emoji in watched['emoji']
-            elif reaction.type == 'custom_emoji' and hasattr(reaction, 'custom_emoji_id'):
-                custom_id = str(reaction.custom_emoji_id)
-                is_watched = custom_id in watched['custom']
+                if reaction_emoji:
+                    is_watched = reaction_emoji in watched_emojis_global or reaction_emoji in watched['emoji']
+            elif reaction.type == 'custom_emoji':
+                if hasattr(reaction, 'custom_emoji_id'):
+                    custom_id = str(reaction.custom_emoji_id)
+                    is_watched = custom_id in watched['custom']
+                    logger.info(f"[REACTION DEBUG] Custom emoji ID: {custom_id}, is_watched: {is_watched}")
         elif hasattr(reaction, 'emoji'):
             # Старый формат для обратной совместимости
             reaction_emoji = reaction.emoji
+            logger.info(f"[REACTION DEBUG] Old format emoji: {reaction_emoji}")
             is_watched = reaction.emoji in watched_emojis_global or reaction.emoji in watched['emoji']
+        else:
+            # Пробуем получить эмодзи через другие атрибуты
+            for attr in ['emoji', 'emoji_id', 'reaction']:
+                if hasattr(reaction, attr):
+                    reaction_emoji = getattr(reaction, attr)
+                    logger.info(f"[REACTION DEBUG] Found emoji via {attr}: {reaction_emoji}")
+                    if reaction_emoji:
+                        is_watched = str(reaction_emoji) in watched_emojis_global or str(reaction_emoji) in watched['emoji']
+                        break
         
-        logger.info(f"[REACTION DEBUG] Reaction emoji: {reaction_emoji}, is_watched: {is_watched}")
+        logger.info(f"[REACTION DEBUG] Final: Reaction emoji: {reaction_emoji}, is_watched: {is_watched}")
         
         if is_watched:
             link = bot_messages.get(message_id)
