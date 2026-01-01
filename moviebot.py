@@ -1771,7 +1771,7 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
         
         with db_lock:
             # Получаем все непросмотренные фильмы, отсортированные по алфавиту
-            cursor.execute('SELECT id, kp_id, title, year, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
+            cursor.execute('SELECT id, kp_id, title, year, genres, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
             rows = cursor.fetchall()
         
         if not rows:
@@ -1794,10 +1794,20 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
                 kp_id = row.get('kp_id') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
                 title = row.get('title') if isinstance(row, dict) else row[2]
                 year = row.get('year') if isinstance(row, dict) else (row[3] if len(row) > 3 else '—')
-                link = row.get('link') if isinstance(row, dict) else (row[4] if len(row) > 4 else '')
+                genres = row.get('genres') if isinstance(row, dict) else (row[4] if len(row) > 4 else None)
+                link = row.get('link') if isinstance(row, dict) else (row[5] if len(row) > 5 else '')
+                
+                # Извлекаем первый жанр
+                first_genre = None
+                if genres and genres != '—' and genres.strip():
+                    genres_list = [g.strip() for g in genres.split(',')]
+                    if genres_list:
+                        first_genre = genres_list[0]
+                
                 # Используем kp_id если есть, иначе film_id
                 movie_id = kp_id or film_id
-                text += f"• <b>{title}</b> ({year}) [ID: {movie_id}]\n<a href='{link}'>{link}</a>\n\n"
+                genre_str = f" • {first_genre}" if first_genre else ""
+                text += f"• <b>{title}</b> ({year}){genre_str} [ID: {movie_id}]\n<a href='{link}'>{link}</a>\n\n"
             
             text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
             
@@ -1821,9 +1831,12 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
         if message_id:
             try:
                 bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
+                # Обновляем message_id в list_messages для обработки ответов
+                list_messages[message_id] = chat_id
             except Exception as e:
                 logger.error(f"[LIST] Ошибка редактирования сообщения: {e}", exc_info=True)
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
+                msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
+                list_messages[msg.message_id] = chat_id
         else:
             msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
             # Сохраняем message_id для обработки ответов
