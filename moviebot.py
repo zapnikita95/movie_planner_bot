@@ -1271,7 +1271,6 @@ def rate_movie(message):
     rate_list_messages[message.chat.id] = sent_msg.message_id
 
 # Обработка реплая на список фильмов с оценками
-rate_list_messages = {}  # chat_id: message_id (сообщение со списком фильмов)
 
 @bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == bot.get_me().id and m.text)
 def handle_rate_list_reply(message):
