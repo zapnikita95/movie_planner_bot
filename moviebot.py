@@ -306,13 +306,13 @@ def get_watched_reactions(chat_id):
         if row:
             value = row.get('value') if isinstance(row, dict) else row[0]
             if value:
-                try:
+            try:
                     reactions = json.loads(value)
-                    emojis = [r for r in reactions if not r.startswith('custom:')]
-                    custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
-                    return {'emoji': emojis, 'custom': custom_ids}
-                except:
-                    pass
+                emojis = [r for r in reactions if not r.startswith('custom:')]
+                custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
+                return {'emoji': emojis, 'custom': custom_ids}
+            except:
+                pass
     # Дефолт
     return {'emoji': ['✅'], 'custom': []}
 
@@ -331,11 +331,11 @@ def log_request(user_id, username, command_or_action, chat_id=None):
                     # Если транзакция в состоянии ошибки, откатываем
                     conn.rollback()
                 
-                cursor.execute('''
-                    INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
-                    VALUES (%s, %s, %s, %s, %s)
-                ''', (user_id, username, command_or_action, timestamp, chat_id))
-                conn.commit()
+            cursor.execute('''
+                INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
+                VALUES (%s, %s, %s, %s, %s)
+            ''', (user_id, username, command_or_action, timestamp, chat_id))
+            conn.commit()
             except Exception as db_error:
                 # КРИТИЧНО: откатываем транзакцию при ошибке
                 conn.rollback()
@@ -755,13 +755,13 @@ def add_and_announce(link, chat_id):
                 count_before_row = cursor.fetchone()
                 count_before = count_before_row.get('count') if isinstance(count_before_row, dict) else (count_before_row[0] if count_before_row else 0)
                 
-                cursor.execute('''
-                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        cursor.execute('''
+            INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
-                conn.commit()
-                
+        ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+        conn.commit()
+    
                 # Проверяем, был ли фильм действительно добавлен (а не обновлен)
                 cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 count_after_row = cursor.fetchone()
