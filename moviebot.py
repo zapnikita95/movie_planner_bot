@@ -2320,36 +2320,61 @@ def total_stats(message):
                             genre_counts[g.strip()] = genre_counts.get(g.strip(), 0) + 1
             fav_genre = max(genre_counts, key=genre_counts.get) if genre_counts else "—"
 
-            # Режиссёры
-            cursor.execute('SELECT director, rating FROM movies WHERE chat_id = %s AND watched = 1 AND director IS NOT NULL AND director != %s', (chat_id, 'Не указан'))
+            # Режиссёры - используем оценки из таблицы ratings
+            cursor.execute('''
+                SELECT m.director, AVG(r.rating) as avg_rating, COUNT(DISTINCT m.id) as film_count
+                FROM movies m
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                WHERE m.chat_id = %s AND m.watched = 1 AND m.director IS NOT NULL AND m.director != %s
+                GROUP BY m.director
+            ''', (chat_id, 'Не указан'))
             director_stats = {}
             for row in cursor.fetchall():
                 d = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                r = row.get('rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
-                if d and d not in director_stats:
-                    director_stats[d] = {'count': 0, 'sum_rating': 0}
+                avg_r = row.get('avg_rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                film_count = row.get('film_count') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0)
                 if d:
-                    director_stats[d]['count'] += 1
-                    if r:
-                        director_stats[d]['sum_rating'] += r
-            top_directors = sorted(director_stats.items(), key=lambda x: (-x[1]['count'], -(x[1]['sum_rating']/x[1]['count'] if x[1]['count'] > 0 else 0)))[:3]
+                    director_stats[d] = {
+                        'count': film_count,
+                        'sum_rating': (avg_r * film_count) if avg_r else 0,
+                        'avg_rating': avg_r if avg_r else 0
+                    }
+            top_directors = sorted(director_stats.items(), key=lambda x: (-x[1]['count'], -x[1]['avg_rating']))[:3]
 
-            # Актёры
-            cursor.execute('SELECT actors, rating FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            # Актёры - используем оценки из таблицы ratings
+            cursor.execute('''
+                SELECT m.actors, AVG(r.rating) as avg_rating, COUNT(DISTINCT m.id) as film_count
+                FROM movies m
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                WHERE m.chat_id = %s AND m.watched = 1
+                GROUP BY m.actors
+            ''', (chat_id,))
             actor_stats = {}
             for row in cursor.fetchall():
                 actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                r = row.get('rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                avg_r = row.get('avg_rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                film_count = row.get('film_count') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0)
                 if actors_str:
                     for a in actors_str.split(', '):
                         a = a.strip()
                         if a and a != "—":
                             if a not in actor_stats:
-                                actor_stats[a] = {'count': 0, 'sum_rating': 0}
-                            actor_stats[a]['count'] += 1
-                            if r:
-                                actor_stats[a]['sum_rating'] += r
-            top_actors = sorted(actor_stats.items(), key=lambda x: (-x[1]['count'], -(x[1]['sum_rating']/x[1]['count'] if x[1]['count'] > 0 else 0)))[:3]
+                                actor_stats[a] = {'count': 0, 'sum_rating': 0, 'total_ratings': 0}
+                            # Для актеров считаем количество фильмов, где они участвовали
+                            actor_stats[a]['count'] += film_count
+                            # Суммируем средние оценки, умноженные на количество фильмов
+                            if avg_r:
+                                actor_stats[a]['sum_rating'] += avg_r * film_count
+                                actor_stats[a]['total_ratings'] += film_count
+            
+            # Пересчитываем средние для актеров
+            for actor in actor_stats:
+                if actor_stats[actor]['total_ratings'] > 0:
+                    actor_stats[actor]['avg_rating'] = actor_stats[actor]['sum_rating'] / actor_stats[actor]['total_ratings']
+                else:
+                    actor_stats[actor]['avg_rating'] = 0
+            
+            top_actors = sorted(actor_stats.items(), key=lambda x: (-x[1]['count'], -x[1].get('avg_rating', 0)))[:3]
 
             # Рассчитываем среднее из ratings (не из movies.rating)
             cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s', (chat_id,))
