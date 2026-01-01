@@ -324,6 +324,18 @@ def get_watched_emoji(chat_id):
         # Дефолт, если не настроено
         return "✅"
 
+def get_watched_emojis():
+    """Возвращает глобальные эмодзи для отметки просмотренных (chat_id=-1)"""
+    with db_lock:
+        cursor.execute("SELECT value FROM settings WHERE chat_id = -1 AND key = 'watched_emoji'")
+        row = cursor.fetchone()
+        if row:
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            if value:
+                return value
+        # Дефолт, если не настроено
+        return "✅"
+
 def is_watched_emoji(reaction_emoji, chat_id):
     """Проверяет, является ли реакция одним из сохранённых эмодзи для просмотра"""
     watched_emojis = get_watched_emoji(chat_id)
@@ -897,8 +909,10 @@ def handle_reaction(update):
         return
     
     # Обычная обработка реакций для отметки просмотренных
+    # Используем глобальные настройки (get_watched_emojis) и локальные (get_watched_reactions) для обратной совместимости
+    watched_emojis_global = get_watched_emojis()
     watched = get_watched_reactions(chat_id)
-    logger.info(f"[REACTION DEBUG] Chat: {chat_id}, Msg: {message_id}, User: {user_id}, New reactions: {len(update.new_reaction) if update.new_reaction else 0}, Watched emojis: {watched}")
+    logger.info(f"[REACTION DEBUG] Chat: {chat_id}, Msg: {message_id}, User: {user_id}, New reactions: {len(update.new_reaction) if update.new_reaction else 0}, Watched emojis global: {watched_emojis_global}, Watched reactions: {watched}")
     
     for reaction in update.new_reaction:
         is_watched = False
@@ -907,14 +921,15 @@ def handle_reaction(update):
         if hasattr(reaction, 'type'):
             if reaction.type == 'emoji' and hasattr(reaction, 'emoji'):
                 reaction_emoji = reaction.emoji
-                is_watched = reaction.emoji in watched['emoji']
+                # Проверяем и в глобальных настройках, и в локальных
+                is_watched = reaction.emoji in watched_emojis_global or reaction.emoji in watched['emoji']
             elif reaction.type == 'custom_emoji' and hasattr(reaction, 'custom_emoji_id'):
                 custom_id = str(reaction.custom_emoji_id)
                 is_watched = custom_id in watched['custom']
         elif hasattr(reaction, 'emoji'):
             # Старый формат для обратной совместимости
             reaction_emoji = reaction.emoji
-            is_watched = reaction.emoji in watched['emoji']
+            is_watched = reaction.emoji in watched_emojis_global or reaction.emoji in watched['emoji']
         
         logger.info(f"[REACTION DEBUG] Reaction emoji: {reaction_emoji}, is_watched: {is_watched}")
         
@@ -1521,8 +1536,8 @@ def handle_random_year(call):
             # Сохраняем в состояние
             user_random_state[user_id]["year_range"] = year_range
             
-            # Переходим к следующему шагу — выбор жанра
-            # Используем существующую логику перехода к выбору жанра
+            # Переходим к следующему шагу — выбор жанра (вызываем random_genre логику)
+            # Используем существующую логику перехода к выбору жанра из random_genre
             try:
                 with db_lock:
                     cursor.execute("""
@@ -1542,7 +1557,6 @@ def handle_random_year(call):
                     bot.edit_message_text("😔 Нет доступных жанров в непросмотренных фильмах.", chat_id, call.message.message_id)
                     if user_id in user_random_state:
                         del user_random_state[user_id]
-                    bot.answer_callback_query(call.id, "Нет доступных жанров", show_alert=True)
                     return
                 
                 markup = InlineKeyboardMarkup(row_width=2)
@@ -2163,28 +2177,26 @@ def settings_command(message):
         # Проверяем на reset
         if message.text and 'reset' in message.text.lower():
             with db_lock:
-                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
+                cursor.execute("DELETE FROM settings WHERE chat_id = -1 AND key = 'watched_emoji'", ())
                 conn.commit()
             bot.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
-            logger.info(f"Реакции сброшены для чата {chat_id}")
+            logger.info(f"Реакции сброшены (глобально)")
             return
         
-        reactions = get_watched_reactions(chat_id)
-        current = ', '.join(reactions['emoji'] + [f"custom:{cid}" for cid in reactions['custom']]) or "не настроено"
+        current = get_watched_emojis()
         
-        # Создаем inline keyboard с тремя режимами
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
-        markup.add(InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
-        markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
+        sent = bot.send_message(chat_id,
+            f"⚙️ Текущие реакции для просмотренных: {current}\n\n"
+            "Отправьте эмодзи в ответ на это сообщение (можно несколько). "
+            "Для сброса — /settings reset",
+            reply_markup=None)
         
-        settings_msg = bot.reply_to(message, f"⚙️ <b>Настройки реакций</b>\n\nТекущие реакции для просмотренных: {current}\n\nВыберите действие:", reply_markup=markup, parse_mode='HTML')
+        # Сохраняем состояние
         user_settings_state[user_id] = {
-            'waiting_action': True, 
-            'settings_msg_id': settings_msg.message_id,
+            'settings_msg_id': sent.message_id,
             'chat_id': chat_id
         }
-        logger.info(f"Настройки открыты для пользователя {user_id}, message_id: {settings_msg.message_id}")
+        logger.info(f"Настройки открыты для {user_id}, msg_id: {sent.message_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
         try:
@@ -2234,7 +2246,48 @@ def handle_settings_callback(call):
         except:
             pass
 
-# Обработка ответа с эмодзи на сообщение /settings
+# Обработка ответа с эмодзи на сообщение /settings (упрощенная версия)
+@bot.message_handler(func=lambda m: m.reply_to_message and m.from_user.id in user_settings_state)
+def handle_settings_reply(message):
+    user_id = message.from_user.id
+    state = user_settings_state.get(user_id)
+    
+    if not state or message.reply_to_message.message_id != state.get('settings_msg_id'):
+        return
+    
+    # Извлекаем эмодзи (упрощенная версия)
+    if not message.text:
+        bot.reply_to(message, "⚠️ Не найдено эмодзи. Отправь только эмодзи.")
+        return
+    
+    # Простая проверка эмодзи
+    emojis = ''.join(c for c in message.text if '\U0001F300' <= c <= '\U0001F9FF' or c in '✅💋🙏❤️😍😘☺️👍😁☑️😊😂🥰🎉⭐🔥')
+    
+    if not emojis:
+        bot.reply_to(message, "⚠️ Не найдено эмодзи. Отправь только эмодзи.")
+        return
+    
+    # Сохраняем в БД (глобально, chat_id=-1)
+    try:
+        with db_lock:
+            cursor.execute("""
+                INSERT INTO settings (chat_id, key, value) 
+                VALUES (-1, 'watched_emoji', %s) 
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (emojis,))
+            conn.commit()
+        
+        bot.reply_to(message, f"✅ Реакции обновлены:\n{emojis}")
+        logger.info(f"[SETTINGS] Реакции обновлены для user_id={user_id}: {emojis}")
+    except Exception as e:
+        logger.error(f"[SETTINGS] Ошибка при сохранении реакций: {e}", exc_info=True)
+        bot.reply_to(message, "❌ Произошла ошибка при сохранении реакций.")
+    
+    # Очищаем состояние
+    if user_id in user_settings_state:
+        del user_settings_state[user_id]
+
+# Обработка ответа с эмодзи на сообщение /settings (расширенная версия с режимами)
 @bot.message_handler(func=lambda message: (
     message.reply_to_message and 
     message.from_user.id in user_settings_state and 
