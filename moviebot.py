@@ -31,14 +31,18 @@ logger = logging.getLogger(__name__)
 
 # Детальное логирование для отладки
 logger.info("[DEBUG] Проверка переменных окружения...")
-logger.info(f"[DEBUG] os.environ keys: {list(os.environ.keys())[:10]}...")  # Первые 10 ключей
+all_env_keys = list(os.environ.keys())
+logger.info(f"[DEBUG] Всего переменных окружения: {len(all_env_keys)}")
+logger.info(f"[DEBUG] Первые 20 ключей: {all_env_keys[:20]}")
 logger.info(f"[DEBUG] BOT_TOKEN присутствует: {'BOT_TOKEN' in os.environ}")
 logger.info(f"[DEBUG] DATABASE_URL присутствует: {'DATABASE_URL' in os.environ}")
 
 TOKEN = os.getenv('BOT_TOKEN')
-if not TOKEN:
+if TOKEN:
+    logger.info(f"[DEBUG] BOT_TOKEN получен, длина: {len(TOKEN)} символов")
+else:
     logger.error("BOT_TOKEN не задан! Бот не может работать.")
-    logger.error(f"[DEBUG] Все переменные окружения: {list(os.environ.keys())}")
+    logger.error(f"[DEBUG] Все переменные окружения: {all_env_keys}")
     raise ValueError("Добавьте BOT_TOKEN в environment variables")
 
 bot = telebot.TeleBot(TOKEN)
@@ -106,9 +110,17 @@ bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
 # БД
 DATABASE_URL = os.getenv('DATABASE_URL')
 
-if not DATABASE_URL:
+if DATABASE_URL:
+    # Проверяем, не является ли это ссылкой на другую переменную (Railway синтаксис)
+    if DATABASE_URL.startswith('${{') and DATABASE_URL.endswith('}}'):
+        logger.error(f"[DEBUG] DATABASE_URL содержит ссылку на другую переменную: {DATABASE_URL}")
+        logger.error("[DEBUG] Railway не подставил значение автоматически. Попробуйте использовать прямой connection string.")
+    else:
+        logger.info(f"[DEBUG] DATABASE_URL получен, длина: {len(DATABASE_URL)} символов")
+        logger.info(f"[DEBUG] DATABASE_URL начинается с: {DATABASE_URL[:20]}...")
+else:
     logger.error("DATABASE_URL не задан! Бот не может подключиться к БД.")
-    logger.error(f"[DEBUG] Все переменные окружения: {list(os.environ.keys())}")
+    logger.error(f"[DEBUG] Все переменные окружения: {all_env_keys}")
     logger.error("Проверьте, что переменная окружения DATABASE_URL установлена в настройках вашей платформы (Railway/Render/etc.)")
     raise ValueError("DATABASE_URL не задан! Добавьте DATABASE_URL в environment variables вашей платформы (Railway/Render/etc.)")
 
