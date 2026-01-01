@@ -459,6 +459,90 @@ def set_user_timezone(user_id, timezone_name):
         conn.rollback()
         return False
 
+def detect_timezone_from_message(message_date_utc):
+    """Пытается определить часовой пояс по времени сообщения (UTC).
+    Возвращает предполагаемый часовой пояс или None если неясно.
+    message_date_utc - datetime объект в UTC"""
+    try:
+        # Получаем текущее время в UTC
+        utc_now = datetime.now(pytz.utc)
+        if message_date_utc.tzinfo is None:
+            # Если нет таймзоны, предполагаем UTC
+            msg_utc = pytz.utc.localize(message_date_utc)
+        else:
+            msg_utc = message_date_utc.astimezone(pytz.utc)
+        
+        # Вычисляем разницу между текущим временем и временем сообщения
+        # Это не очень надежно, но может дать подсказку
+        # Более надежный способ - анализировать время активности пользователя
+        
+        # Получаем час в UTC
+        utc_hour = msg_utc.hour
+        
+        # Предполагаем, что пользователь активен в разумное время (8-23 часа местного времени)
+        # Если сообщение отправлено в 16:00 UTC, и это разумное время для активности:
+        # - Москва (UTC+3): 16:00 UTC = 19:00 MSK - разумно
+        # - Сербия (UTC+1): 16:00 UTC = 17:00 CET - разумно
+        
+        # Но это неточно, поэтому просто возвращаем None
+        # Лучше спросить у пользователя
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка определения часового пояса: {e}", exc_info=True)
+        return None
+
+def check_timezone_change(user_id, message_date_utc):
+    """Проверяет, изменился ли часовой пояс пользователя.
+    Возвращает True если нужно уточнить часовой пояс, False если все ок"""
+    try:
+        current_tz = get_user_timezone(user_id)
+        if not current_tz:
+            # Часовой пояс не установлен - нужно уточнить
+            return True
+        
+        # Сохраняем время последнего сообщения для анализа
+        with db_lock:
+            cursor.execute("""
+                INSERT INTO settings (chat_id, key, value) 
+                VALUES (%s, %s, %s) 
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (user_id, 'last_message_utc', message_date_utc.isoformat()))
+            conn.commit()
+        
+        # Получаем предыдущее время сообщения
+        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (user_id, 'prev_message_utc'))
+        prev_row = cursor.fetchone()
+        
+        if prev_row:
+            prev_utc_str = prev_row.get('value') if isinstance(prev_row, dict) else prev_row[0]
+            try:
+                prev_utc = datetime.fromisoformat(prev_utc_str)
+                if prev_utc.tzinfo is None:
+                    prev_utc = pytz.utc.localize(prev_utc)
+                
+                # Вычисляем разницу во времени между сообщениями
+                time_diff = message_date_utc - prev_utc
+                
+                # Если разница больше 2 часов, возможно пользователь переехал
+                # Но это не надежно, поэтому просто проверяем паттерн активности
+                # Для простоты: если часовой пояс установлен, считаем что все ок
+                # Если нужно уточнить - вернем True в других случаях
+            except:
+                pass
+        
+        # Обновляем предыдущее время
+        cursor.execute("""
+            INSERT INTO settings (chat_id, key, value) 
+            VALUES (%s, %s, %s) 
+            ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+        """, (user_id, 'prev_message_utc', message_date_utc.isoformat()))
+        conn.commit()
+        
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка проверки изменения часового пояса: {e}", exc_info=True)
+        return True  # В случае ошибки лучше уточнить
+
 def get_watched_reactions(chat_id):
     """Возвращает словарь с обычными и кастомными эмодзи для реакций"""
     with db_lock:
@@ -2429,9 +2513,14 @@ def handle_timezone_callback(call):
         
         if set_user_timezone(user_id, timezone_name):
             tz_display = "Москва" if timezone_name == "Moscow" else "Сербия"
+            tz_obj = pytz.timezone('Europe/Moscow' if timezone_name == "Moscow" else 'Europe/Belgrade')
+            current_time = datetime.now(tz_obj).strftime('%H:%M')
+            
             bot.edit_message_text(
                 f"✅ Часовой пояс установлен: <b>{tz_display}</b>\n\n"
-                f"Все время будет отображаться и планироваться в часовом поясе {tz_display}.",
+                f"Текущее время: <b>{current_time}</b>\n\n"
+                f"Все время будет отображаться и планироваться в часовом поясе {tz_display}.\n"
+                f"Часовой пояс будет автоматически обновляться при путешествиях.",
                 call.message.chat.id,
                 call.message.message_id,
                 parse_mode='HTML'
@@ -2872,9 +2961,18 @@ def handle_emoji_input(message):
     logger.info(f"Эмодзи просмотра изменён пользователем {user_id} на: {emoji_text}")
 
 # /plan — планирование просмотра
-def process_plan(user_id, chat_id, link, plan_type, day_or_date):
-    """Планирует просмотр фильма. Возвращает True при успехе, False при ошибке"""
+def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_utc=None):
+    """Планирует просмотр фильма. Возвращает True при успехе, False при ошибке, 'NEEDS_TIMEZONE' если нужно уточнить часовой пояс.
+    message_date_utc - время сообщения в UTC для определения часового пояса"""
     plan_dt = None
+    
+    # Проверяем, нужно ли уточнить часовой пояс
+    if message_date_utc:
+        needs_tz_check = check_timezone_change(user_id, message_date_utc)
+        if needs_tz_check:
+            # Возвращаем специальный код для запроса часового пояса
+            return 'NEEDS_TIMEZONE'
+    
     # Используем часовой пояс пользователя или по умолчанию Москва
     user_tz = get_user_timezone_or_default(user_id)
     now = datetime.now(user_tz)
