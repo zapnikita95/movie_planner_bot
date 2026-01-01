@@ -646,6 +646,19 @@ def extract_movie_info(link):
 
 # Добавление и анонс
 def add_and_announce(link, chat_id):
+    # Нормализуем ссылку (убираем лишние пробелы, проверяем формат)
+    if link:
+        link = link.strip()
+        # Если ссылка не начинается с http, добавляем https://
+        if not link.startswith('http'):
+            if 'kinopoisk.ru' in link:
+                link = 'https://' + link.lstrip('/')
+            else:
+                logger.error(f"Некорректная ссылка: {link}")
+                return False
+    
+    logger.info(f"[ADD_AND_ANNOUNCE] Обрабатываем ссылку: {link} для чата {chat_id}")
+    
     info = extract_movie_info(link)
     if not info:
         logger.warning(f"Не удалось извлечь информацию о фильме: {link}")
