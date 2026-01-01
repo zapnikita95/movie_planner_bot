@@ -1028,7 +1028,7 @@ def total_stats(message):
             # Рассчитываем среднее из ratings (не из movies.rating)
             cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s', (chat_id,))
             avg_row = cursor.fetchone()
-            avg_rating = avg_row[0] if avg_row and avg_row[0] else None
+            avg_rating = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
             avg_str = f"{avg_rating:.1f}/10" if avg_rating else "—"
 
         text = f"📊 <b>Статистика кино-группы</b>\n\n"
@@ -1147,8 +1147,9 @@ def random_genre(call):
         """, (chat_id, chat_id))
         all_genres = set()
         for row in cursor.fetchall():
-            if row[0]:
-                for g in str(row[0]).split(', '):
+            genres = row.get('genres') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+            if genres:
+                for g in str(genres).split(', '):
                     if g.strip():
                         all_genres.add(g.strip())
     markup = InlineKeyboardMarkup(row_width=2)
@@ -1174,7 +1175,11 @@ def random_director(call):
             AND director IS NOT NULL AND director != "Не указан"
             AND id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s AND plan_datetime > NOW())
         """, (chat_id, chat_id))
-        directors = [row[0] for row in cursor.fetchall()]
+        directors = []
+        for row in cursor.fetchall():
+            director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+            if director:
+                directors.append(director)
         top_directors = [d for d in sorted(set(directors), key=directors.count, reverse=True)[:3]]
 
     markup = InlineKeyboardMarkup(row_width=2)
@@ -2381,7 +2386,7 @@ def clean_watched_execute(call):
         cursor.execute('SELECT title FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
         row = cursor.fetchone()
         if row:
-            title = row[0]
+            title = row.get('title') if isinstance(row, dict) else row[0]
             cursor.execute('UPDATE movies SET watched = 0 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
             conn.commit()
             bot.edit_message_text(f"✅ Отметка просмотра для фильма <b>{title}</b> удалена.", call.message.chat.id, call.message.message_id, parse_mode='HTML')
@@ -2406,7 +2411,7 @@ def clean_plan_execute(call):
         ''', (plan_id, chat_id))
         row = cursor.fetchone()
         if row:
-            title = row[0]
+            title = row.get('title') if isinstance(row, dict) else row[0]
             cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
             conn.commit()
             bot.edit_message_text(f"✅ План для фильма <b>{title}</b> удалён.", call.message.chat.id, call.message.message_id, parse_mode='HTML')
