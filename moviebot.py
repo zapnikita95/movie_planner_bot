@@ -3544,14 +3544,47 @@ def plan_handler(message):
         # Проверяем реплай на сообщение со ссылкой
         link = None
         if message.reply_to_message:
-            link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
-            if link_match:
-                link = link_match.group(1)
+            reply_msg = message.reply_to_message
+            reply_msg_id = reply_msg.message_id
+            
+            # 1. Проверяем bot_messages и plan_notification_messages
+            link = bot_messages.get(reply_msg_id)
+            if not link:
+                plan_data = plan_notification_messages.get(reply_msg_id)
+                if plan_data:
+                    link = plan_data.get('link')
+                    logger.info(f"[PLAN] Найдена ссылка в plan_notification_messages: {link}")
+            
+            # 2. Ищем ссылку в тексте сообщения (обычная ссылка)
+            if not link:
+                link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', reply_msg.text or '')
+                if link_match:
+                    link = link_match.group(1)
+                    logger.info(f"[PLAN] Найдена ссылка в тексте реплая: {link}")
+            
+            # 3. Ищем HTML-ссылку "Кинопоиск" в тексте сообщения
+            if not link:
+                html_link_match = re.search(r"<a\s+href=['\"](https?://[\w\./-]*kinopoisk\.ru/(?:film|series)/\d+)['\"]", reply_msg.text or '')
+                if html_link_match:
+                    link = html_link_match.group(1)
+                    logger.info(f"[PLAN] Найдена HTML-ссылка в реплае: {link}")
+            
+            # 4. Проверяем entities сообщения (URL entities)
+            if not link and reply_msg.entities:
+                for entity in reply_msg.entities:
+                    if entity.type == 'url' or entity.type == 'text_link':
+                        url = entity.url if hasattr(entity, 'url') else (reply_msg.text[entity.offset:entity.offset + entity.length] if reply_msg.text else None)
+                        if url and 'kinopoisk.ru' in url and ('/film/' in url or '/series/' in url):
+                            link = url
+                            logger.info(f"[PLAN] Найдена ссылка в entities реплая: {link}")
+                            break
         
         # Ищем ссылку в тексте команды (используем оригинальный текст для правильного извлечения)
         if not link:
             link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', original_text)
             link = link_match.group(1) if link_match else None
+            if link:
+                logger.info(f"[PLAN] Найдена ссылка в тексте команды: {link}")
         
         # Ищем ID кинопоиска (например, "/plan 484791 дома в воскресенье")
         kp_id = None
