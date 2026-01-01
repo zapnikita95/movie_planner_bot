@@ -2440,10 +2440,14 @@ def handle_search(message):
         markup = InlineKeyboardMarkup(row_width=1)
         
         for film in films[:10]:  # Показываем максимум 10 результатов на странице
-            title = film.get('nameRu') or film.get('nameEn') or "Без названия"
-            year = film.get('year', 'N/A')
-            rating = film.get('ratingKinopoisk') or 'N/A'
-            kp_id = film.get('kinopoiskId')
+            # Пробуем разные варианты полей для совместимости с разными версиями API
+            title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+            year = film.get('year') or film.get('releaseYear') or 'N/A'
+            rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+            # Пробуем разные варианты ID
+            kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+            
+            logger.info(f"[SEARCH] Фильм: title={title}, year={year}, kp_id={kp_id}")
             
             if kp_id:
                 # Ограничиваем длину текста кнопки
@@ -2455,6 +2459,8 @@ def handle_search(message):
                     results_text += f" ⭐ {rating}"
                 results_text += "\n"
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}"))
+            else:
+                logger.warning(f"[SEARCH] Фильм без ID: {film}")
         
         # Добавляем пагинацию, если нужно
         if total_pages > 1:
@@ -5673,10 +5679,12 @@ def handle_search_pagination_callback(call):
         markup = InlineKeyboardMarkup(row_width=1)
         
         for film in films[:10]:  # Показываем максимум 10 результатов на странице
-            title = film.get('nameRu') or film.get('nameEn') or "Без названия"
-            year = film.get('year', 'N/A')
-            rating = film.get('ratingKinopoisk') or 'N/A'
-            kp_id = film.get('kinopoiskId')
+            # Пробуем разные варианты полей для совместимости с разными версиями API
+            title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+            year = film.get('year') or film.get('releaseYear') or 'N/A'
+            rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+            # Пробуем разные варианты ID
+            kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
             
             if kp_id:
                 # Ограничиваем длину текста кнопки
@@ -5688,6 +5696,8 @@ def handle_search_pagination_callback(call):
                     results_text += f" ⭐ {rating}"
                 results_text += "\n"
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}"))
+            else:
+                logger.warning(f"[SEARCH PAGINATION] Фильм без ID: {film}")
         
         # Пагинация
         if total_pages > 1:
