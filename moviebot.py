@@ -3592,7 +3592,11 @@ def handle_message(message):
     if message.reply_to_message and message.from_user.id in user_settings_state:
         state = user_settings_state.get(message.from_user.id, {})
         if state.get('adding_reactions') and message.reply_to_message.message_id == state.get('settings_msg_id'):
-            logger.info(f"[HANDLER] Пропускаем сообщение - это ответ на settings")
+            logger.info(f"[HANDLER] Пропускаем сообщение - это ответ на settings (должен обработать add_reactions)")
+            return
+        # Также пропускаем, если это просто ответ на settings (без режима)
+        if message.reply_to_message.message_id == state.get('settings_msg_id'):
+            logger.info(f"[HANDLER] Пропускаем сообщение - это ответ на settings (должен обработать handle_settings_reply)")
             return
     
     if not message.entities:
