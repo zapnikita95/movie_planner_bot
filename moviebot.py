@@ -1415,7 +1415,7 @@ def random_genre(call):
         # Переходим к выбору жанра
         chat_id = call.message.chat.id
         try:
-        with db_lock:
+            with db_lock:
             cursor.execute("""
                 SELECT genres FROM movies 
                 WHERE chat_id = %s AND watched = 0 
