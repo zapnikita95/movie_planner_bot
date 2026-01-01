@@ -2793,9 +2793,12 @@ def show_schedule(message):
                 else:  # home
                     home_plans.append(plan_info)
             except Exception as e:
-                logger.error(f"Ошибка при обработке даты {plan_dt_iso}: {e}")
-                # Fallback: показываем как есть
-                date_str = plan_dt_iso[:10] if len(plan_dt_iso) >= 10 else plan_dt_iso
+                logger.error(f"Ошибка при обработке даты {plan_dt_value}: {e}")
+                # Fallback: пытаемся извлечь дату из строки или использовать текущую дату
+                if isinstance(plan_dt_value, str):
+                    date_str = plan_dt_value[:10] if len(plan_dt_value) >= 10 else plan_dt_value
+                else:
+                    date_str = datetime.now(plans_tz).strftime('%d.%m.%Y')
                 plan_info = (title, date_str)
                 
                 if plan_type == 'cinema':
