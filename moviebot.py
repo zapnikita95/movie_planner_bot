@@ -1008,32 +1008,34 @@ def search_films(query, page=1):
         logger.error("[SEARCH] KP_TOKEN не установлен")
         return [], 0
     
-    url = "https://kinopoiskapiunofficial.tech/api/v2.2/films/search-by-keyword"
+    # Используем правильный endpoint для поиска
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword"
     params = {"keyword": query, "page": page}
     headers = {
         "X-API-KEY": KP_TOKEN,
         "accept": "application/json"
     }
     
-    logger.info(f"[SEARCH] Запрос: query='{query}', page={page}")
+    logger.info(f"[SEARCH] Запрос: query='{query}', page={page}, url={url}")
     
     try:
         response = requests.get(url, params=params, headers=headers, timeout=15)
         logger.info(f"[SEARCH] Статус ответа: {response.status_code}")
+        logger.info(f"[SEARCH] URL запроса: {response.url}")
         
         if response.status_code != 200:
-            logger.error(f"[SEARCH] Ошибка API: статус {response.status_code}, ответ: {response.text[:200]}")
+            logger.error(f"[SEARCH] Ошибка API: статус {response.status_code}, ответ: {response.text[:500]}")
             return [], 0
         
         data = response.json()
-        items = data.get("items", [])
-        total_pages = data.get("totalPages", 1)
+        items = data.get("films", []) or data.get("items", [])
+        total_pages = data.get("totalPages", 1) or data.get("pagesCount", 1)
         logger.info(f"[SEARCH] Найдено результатов: {len(items)}, всего страниц: {total_pages}")
         return items, total_pages
     except requests.exceptions.RequestException as e:
         logger.error(f"[SEARCH] Ошибка запроса: {e}")
         if hasattr(e, 'response') and e.response is not None:
-            logger.error(f"[SEARCH] Ответ сервера: {e.response.text[:200]}")
+            logger.error(f"[SEARCH] Ответ сервера: {e.response.text[:500]}")
         return [], 0
     except Exception as e:
         logger.error(f"[SEARCH] Неожиданная ошибка: {e}", exc_info=True)
