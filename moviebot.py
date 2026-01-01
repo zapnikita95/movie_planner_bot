@@ -502,46 +502,64 @@ def check_timezone_change(user_id, message_date_utc):
         
         # Сохраняем время последнего сообщения для анализа
         with db_lock:
+            # Получаем предыдущее время сообщения
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (user_id, 'prev_message_utc'))
+            prev_row = cursor.fetchone()
+            
+            if prev_row:
+                prev_utc_str = prev_row.get('value') if isinstance(prev_row, dict) else prev_row[0]
+                try:
+                    prev_utc = datetime.fromisoformat(prev_utc_str)
+                    if prev_utc.tzinfo is None:
+                        prev_utc = pytz.utc.localize(prev_utc)
+                    
+                    # Вычисляем разницу во времени между сообщениями
+                    time_diff = message_date_utc - prev_utc
+                    
+                    # Если разница больше 2 часов, возможно пользователь переехал
+                    # Но это не надежно, поэтому просто проверяем паттерн активности
+                    # Для простоты: если часовой пояс установлен, считаем что все ок
+                except:
+                    pass
+            
+            # Обновляем предыдущее время
             cursor.execute("""
                 INSERT INTO settings (chat_id, key, value) 
                 VALUES (%s, %s, %s) 
                 ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-            """, (user_id, 'last_message_utc', message_date_utc.isoformat()))
+            """, (user_id, 'prev_message_utc', message_date_utc.isoformat()))
             conn.commit()
-        
-        # Получаем предыдущее время сообщения
-        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (user_id, 'prev_message_utc'))
-        prev_row = cursor.fetchone()
-        
-        if prev_row:
-            prev_utc_str = prev_row.get('value') if isinstance(prev_row, dict) else prev_row[0]
-            try:
-                prev_utc = datetime.fromisoformat(prev_utc_str)
-                if prev_utc.tzinfo is None:
-                    prev_utc = pytz.utc.localize(prev_utc)
-                
-                # Вычисляем разницу во времени между сообщениями
-                time_diff = message_date_utc - prev_utc
-                
-                # Если разница больше 2 часов, возможно пользователь переехал
-                # Но это не надежно, поэтому просто проверяем паттерн активности
-                # Для простоты: если часовой пояс установлен, считаем что все ок
-                # Если нужно уточнить - вернем True в других случаях
-            except:
-                pass
-        
-        # Обновляем предыдущее время
-        cursor.execute("""
-            INSERT INTO settings (chat_id, key, value) 
-            VALUES (%s, %s, %s) 
-            ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-        """, (user_id, 'prev_message_utc', message_date_utc.isoformat()))
-        conn.commit()
         
         return False
     except Exception as e:
         logger.error(f"Ошибка проверки изменения часового пояса: {e}", exc_info=True)
         return True  # В случае ошибки лучше уточнить
+
+def show_timezone_selection(chat_id, user_id, prompt_text="Выберите часовой пояс:"):
+    """Показывает выбор часового пояса пользователю"""
+    current_tz = get_user_timezone(user_id)
+    current_tz_name = "Москва" if not current_tz or current_tz.zone == 'Europe/Moscow' else "Сербия"
+    current_tz_display = current_tz_name if current_tz else "не установлен"
+    
+    # Получаем текущее время в обоих часовых поясах для отображения
+    moscow_tz = pytz.timezone('Europe/Moscow')
+    serbia_tz = pytz.timezone('Europe/Belgrade')
+    now_utc = datetime.now(pytz.utc)
+    moscow_time = now_utc.astimezone(moscow_tz).strftime('%H:%M')
+    serbia_time = now_utc.astimezone(serbia_tz).strftime('%H:%M')
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton(f"🇷🇺 Москва (MSK) — сейчас {moscow_time}", callback_data="timezone:Moscow"))
+    markup.add(InlineKeyboardButton(f"🇷🇸 Сербия (CET) — сейчас {serbia_time}", callback_data="timezone:Serbia"))
+    
+    bot.send_message(
+        chat_id,
+        f"🕐 {prompt_text}\n\n"
+        f"Текущий: <b>{current_tz_display}</b>\n\n"
+        f"Часовой пояс будет автоматически обновляться при путешествиях.",
+        reply_markup=markup,
+        parse_mode='HTML'
+    )
 
 def get_watched_reactions(chat_id):
     """Возвращает словарь с обычными и кастомными эмодзи для реакций"""
@@ -1588,9 +1606,18 @@ def handle_random_plan_reply(message):
         
         logger.info(f"[RANDOM PLAN] Parsed: plan_type={plan_type}, day_or_date={day_or_date}")
         
+        # Получаем время сообщения в UTC
+        message_date_utc = None
+        if message.date:
+            message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc)
+        
         # Вызываем process_plan
-        result = process_plan(user_id, chat_id, link, plan_type, day_or_date)
-        if result:
+        result = process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_utc)
+        if result == 'NEEDS_TIMEZONE':
+            # Нужно уточнить часовой пояс
+            show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+            return
+        elif result:
             logger.info(f"[RANDOM PLAN] Plan created successfully for link={link}")
     except Exception as e:
         logger.error(f"[RANDOM PLAN] Error processing plan reply: {e}", exc_info=True)
