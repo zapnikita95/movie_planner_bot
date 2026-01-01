@@ -3416,8 +3416,9 @@ def get_plan_day_or_date(message):
         scheduler.add_job(
             send_plan_notification,
             'date',
-            run_date=plan_dt.astimezone(pytz.utc),
-            args=[message.chat.id, title, link, plan_type]
+            run_date=plan_utc,
+            args=[chat_id, film_id, title, link, plan_type],
+            id=f'plan_notify_{chat_id}_{film_id}_{int(plan_utc.timestamp())}'
         )
 
         del user_plan_state[user_id]
