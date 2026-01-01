@@ -118,6 +118,7 @@ commands = [
     BotCommand("start", "Приветствие и инструкция по использованию"),
     BotCommand("list", "Список непросмотренных фильмов"),
     BotCommand("random", "Рандомный фильм с фильтрами"),
+    BotCommand("search", "Поиск фильмов через Kinopoisk API"),
     BotCommand("plan", "Запланировать просмотр дома или в кино"),
     BotCommand("schedule", "Список запланированных просмотров"),
     BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
