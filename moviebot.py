@@ -237,6 +237,7 @@ def log_request(user_id, username, command_or_action, chat_id=None):
     """Логирует запрос пользователя в БД"""
     try:
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        logger.debug(f"[LOG_REQUEST] Попытка логирования: user_id={user_id}, username={username}, command={command_or_action}, chat_id={chat_id}, timestamp={timestamp}")
         with db_lock:
             try:
                 # Проверяем, не в состоянии ли ошибки транзакция
@@ -252,12 +253,14 @@ def log_request(user_id, username, command_or_action, chat_id=None):
                     VALUES (%s, %s, %s, %s, %s)
                 ''', (user_id, username, command_or_action, timestamp, chat_id))
                 conn.commit()
+                logger.debug(f"[LOG_REQUEST] Успешно залогировано: user_id={user_id}, command={command_or_action}, chat_id={chat_id}")
             except Exception as db_error:
                 # КРИТИЧНО: откатываем транзакцию при ошибке
                 conn.rollback()
+                logger.error(f"[LOG_REQUEST] Ошибка БД при логировании: {db_error}", exc_info=True)
                 raise db_error
     except Exception as e:
-        logger.error(f"Ошибка логирования запроса: {e}")
+        logger.error(f"Ошибка логирования запроса: {e}", exc_info=True)
         # Убеждаемся, что транзакция откачена
         try:
             with db_lock:
@@ -2371,6 +2374,107 @@ def help_command(message):
     bot.reply_to(message, text, parse_mode='Markdown')
 
 # /clean
+@bot.message_handler(commands=['dbcheck'])
+def dbcheck_command(message):
+    """Диагностическая команда для проверки данных в БД"""
+    logger.info(f"[HANDLER] /dbcheck вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/dbcheck', message.chat.id)
+        chat_id = message.chat.id
+        
+        text = "🔍 <b>Диагностика базы данных</b>\n\n"
+        
+        with db_lock:
+            # Проверяем таблицу movies
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
+            movies_count = cursor.fetchone()
+            movies_total = movies_count.get('count') if isinstance(movies_count, dict) else (movies_count[0] if movies_count else 0)
+            
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 0', (chat_id,))
+            movies_unwatched = cursor.fetchone()
+            unwatched = movies_unwatched.get('count') if isinstance(movies_unwatched, dict) else (movies_unwatched[0] if movies_unwatched else 0)
+            
+            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            movies_watched = cursor.fetchone()
+            watched = movies_watched.get('count') if isinstance(movies_watched, dict) else (movies_watched[0] if movies_watched else 0)
+            
+            text += f"🎬 <b>Фильмы:</b>\n"
+            text += f"• Всего: {movies_total}\n"
+            text += f"• Непросмотренных: {unwatched}\n"
+            text += f"• Просмотренных: {watched}\n\n"
+            
+            # Проверяем таблицу stats
+            cursor.execute('SELECT COUNT(*) FROM stats WHERE chat_id = %s', (chat_id,))
+            stats_count = cursor.fetchone()
+            stats_total = stats_count.get('count') if isinstance(stats_count, dict) else (stats_count[0] if stats_count else 0)
+            
+            cursor.execute('SELECT COUNT(DISTINCT user_id) FROM stats WHERE chat_id = %s', (chat_id,))
+            stats_users = cursor.fetchone()
+            unique_users = stats_users.get('count') if isinstance(stats_users, dict) else (stats_users[0] if stats_users else 0)
+            
+            # Проверяем записи за последние 30 дней
+            thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+            cursor.execute('SELECT COUNT(*) FROM stats WHERE chat_id = %s AND timestamp > %s', (chat_id, thirty_days_ago))
+            stats_recent = cursor.fetchone()
+            recent_stats = stats_recent.get('count') if isinstance(stats_recent, dict) else (stats_recent[0] if stats_recent else 0)
+            
+            cursor.execute('SELECT COUNT(DISTINCT user_id) FROM stats WHERE chat_id = %s AND timestamp > %s', (chat_id, thirty_days_ago))
+            stats_recent_users = cursor.fetchone()
+            recent_users = stats_recent_users.get('count') if isinstance(stats_recent_users, dict) else (stats_recent_users[0] if stats_recent_users else 0)
+            
+            text += f"📊 <b>Статистика (stats):</b>\n"
+            text += f"• Всего записей: {stats_total}\n"
+            text += f"• Уникальных пользователей: {unique_users}\n"
+            text += f"• Записей за 30 дней: {recent_stats}\n"
+            text += f"• Активных пользователей за 30 дней: {recent_users}\n\n"
+            
+            # Последние 5 записей из stats
+            cursor.execute('''
+                SELECT user_id, username, command_or_action, timestamp
+                FROM stats
+                WHERE chat_id = %s
+                ORDER BY timestamp DESC
+                LIMIT 5
+            ''', (chat_id,))
+            recent_actions = cursor.fetchall()
+            
+            if recent_actions:
+                text += f"📝 <b>Последние действия:</b>\n"
+                for row in recent_actions:
+                    user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                    username = row.get('username') if isinstance(row, dict) else row[1]
+                    command = row.get('command_or_action') if isinstance(row, dict) else row[2]
+                    timestamp = row.get('timestamp') if isinstance(row, dict) else row[3]
+                    text += f"• {username} ({user_id}): {command} [{timestamp}]\n"
+            else:
+                text += f"⚠️ <b>Нет записей в stats для этого чата!</b>\n"
+                text += f"Это означает, что команды не логируются в БД.\n"
+                text += f"Проверьте логи на наличие ошибок в log_request().\n"
+            
+            # Проверяем таблицу ratings
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s', (chat_id,))
+            ratings_count = cursor.fetchone()
+            ratings_total = ratings_count.get('count') if isinstance(ratings_count, dict) else (ratings_count[0] if ratings_count else 0)
+            
+            text += f"\n⭐ <b>Оценки:</b> {ratings_total}\n"
+            
+            # Проверяем таблицу plans
+            cursor.execute('SELECT COUNT(*) FROM plans WHERE chat_id = %s', (chat_id,))
+            plans_count = cursor.fetchone()
+            plans_total = plans_count.get('count') if isinstance(plans_count, dict) else (plans_count[0] if plans_count else 0)
+            
+            text += f"📅 <b>Планы:</b> {plans_total}\n"
+        
+        bot.reply_to(message, text, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /dbcheck отправлен пользователю {message.from_user.id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /dbcheck: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, f"Произошла ошибка при проверке БД: {e}")
+        except:
+            pass
+
 @bot.message_handler(commands=['clean'])
 def clean_command(message):
     logger.info(f"[HANDLER] /clean вызван от {message.from_user.id}")
@@ -2492,16 +2596,48 @@ def clean_action_choice(call):
                 members_count = bot.get_chat_members_count(chat_id)
                 # Получаем список активных участников из stats (за последние 30 дней)
                 with db_lock:
-                    thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+                    # Используем тот же формат, что и в log_request: '%Y-%m-%d %H:%M:%S'
+                    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+                    logger.info(f"[CLEAN] Поиск активных участников для chat_id={chat_id}, thirty_days_ago={thirty_days_ago}")
+                    
+                    # Сначала проверим, есть ли вообще записи в stats для этого чата
+                    cursor.execute('SELECT COUNT(*) FROM stats WHERE chat_id = %s', (chat_id,))
+                    total_stats = cursor.fetchone()
+                    total_count = total_stats.get('count') if isinstance(total_stats, dict) else (total_stats[0] if total_stats else 0)
+                    logger.info(f"[CLEAN] Всего записей в stats для chat_id={chat_id}: {total_count}")
+                    
+                    # Проверим записи за последние 30 дней
+                    cursor.execute('SELECT COUNT(*) FROM stats WHERE chat_id = %s AND timestamp > %s', (chat_id, thirty_days_ago))
+                    recent_stats = cursor.fetchone()
+                    recent_count = recent_stats.get('count') if isinstance(recent_stats, dict) else (recent_stats[0] if recent_stats else 0)
+                    logger.info(f"[CLEAN] Записей в stats за последние 30 дней для chat_id={chat_id}: {recent_count}")
+                    
                     cursor.execute('''
                         SELECT DISTINCT user_id
                         FROM stats
                         WHERE chat_id = %s AND timestamp > %s
                     ''', (chat_id, thirty_days_ago))
-                    active_members = set(row[0] for row in cursor.fetchall())
+                    rows = cursor.fetchall()
+                    active_members = set()
+                    for row in rows:
+                        user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                        active_members.add(user_id)
+                    logger.info(f"[CLEAN] Найдено активных участников: {len(active_members)}, user_ids: {list(active_members)}")
                 
                 if not active_members:
-                    bot.edit_message_text("⚠️ Не найдено активных участников чата за последние 30 дней.", call.message.chat.id, call.message.message_id)
+                    # Показываем более подробное сообщение с диагностикой
+                    with db_lock:
+                        cursor.execute('SELECT COUNT(*) FROM stats WHERE chat_id = %s', (chat_id,))
+                        total_stats = cursor.fetchone()
+                        total_count = total_stats.get('count') if isinstance(total_stats, dict) else (total_stats[0] if total_stats else 0)
+                    
+                    error_msg = (
+                        f"⚠️ Не найдено активных участников чата за последние 30 дней.\n\n"
+                        f"📊 Диагностика:\n"
+                        f"• Всего записей в stats для этого чата: {total_count}\n"
+                        f"• Используйте /dbcheck для подробной диагностики БД"
+                    )
+                    bot.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
                     return
                 
                 msg = bot.send_message(chat_id, 
