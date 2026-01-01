@@ -755,13 +755,13 @@ def add_and_announce(link, chat_id):
                 count_before_row = cursor.fetchone()
                 count_before = count_before_row.get('count') if isinstance(count_before_row, dict) else (count_before_row[0] if count_before_row else 0)
                 
-        cursor.execute('''
-            INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                cursor.execute('''
+                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-        ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
-        conn.commit()
-    
+                ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                conn.commit()
+                
                 # Проверяем, был ли фильм действительно добавлен (а не обновлен)
                 cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 count_after_row = cursor.fetchone()
