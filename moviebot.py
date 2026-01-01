@@ -4062,17 +4062,10 @@ def clean_plan_execute(call):
         del user_clean_state[user_id]
 
 # Обработка подтверждения удаления базы
-# Работает как с реплаем, так и без реплая
+# Работает независимо от того, реплай это или нет
 @bot.message_handler(func=lambda m: m.text and m.text.upper().strip() == 'ДА, УДАЛИТЬ' and m.from_user.id in user_clean_state)
 def clean_confirm_execute(message):
     user_id = message.from_user.id
-    
-    # Проверяем, что это либо сообщение без реплая, либо реплай на сообщение от бота
-    if message.reply_to_message:
-        # Если есть реплай, проверяем, что это сообщение от бота
-        if message.reply_to_message.from_user.id != bot.get_me().id:
-            # Реплай не на сообщение бота - игнорируем
-            return
     chat_id = message.chat.id
     state = user_clean_state.get(user_id, {})
     action = state.get('action')
