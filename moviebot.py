@@ -2496,15 +2496,21 @@ def settings_command(message):
         
         current = get_watched_emojis(chat_id)
         
-        # Создаем inline keyboard с тремя режимами
+        # Получаем текущий часовой пояс пользователя
+        user_tz = get_user_timezone(user_id)
+        current_tz = "Москва" if not user_tz or user_tz.zone == 'Europe/Moscow' else "Сербия"
+        
+        # Создаем inline keyboard
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
         markup.add(InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
         markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
+        markup.add(InlineKeyboardButton(f"🕐 Часовой пояс: {current_tz}", callback_data="settings:timezone"))
         
         sent = bot.send_message(chat_id,
-            f"⚙️ <b>Настройки реакций</b>\n\n"
-            f"Текущие реакции: {current}\n\n"
+            f"⚙️ <b>Настройки</b>\n\n"
+            f"<b>Реакции:</b> {current}\n"
+            f"<b>Часовой пояс:</b> {current_tz}\n\n"
             f"Выберите действие или поставьте реакцию на это сообщение — она автоматически добавится к текущим.",
             reply_markup=markup,
             parse_mode='HTML')
