@@ -1157,15 +1157,19 @@ def random_genre(call):
     user_id = call.from_user.id
     period_data = call.data.split(":", 1)[1]
     
+    logger.info(f"[RANDOM] Обработка выбора периода: user_id={user_id}, period_data={period_data}")
+    
     if period_data == "skip":
         # Пропустить выбор периодов
         if user_id not in user_random_state:
             user_random_state[user_id] = {}
         user_random_state[user_id]['periods'] = []
+        logger.info(f"[RANDOM] Периоды пропущены для user_id={user_id}")
     elif period_data == "done":
         # Готово - переходим к выбору жанра
         if user_id not in user_random_state or 'periods' not in user_random_state[user_id]:
             user_random_state[user_id] = {'periods': []}
+        logger.info(f"[RANDOM] Периоды выбраны, переходим к жанру для user_id={user_id}, periods={user_random_state[user_id]['periods']}")
     else:
         # Переключение периода (toggle)
         if user_id not in user_random_state:
@@ -1177,9 +1181,11 @@ def random_genre(call):
         if period_data in periods_list:
             # Убираем период, если он уже выбран
             periods_list.remove(period_data)
+            logger.info(f"[RANDOM] Период {period_data} убран для user_id={user_id}")
         else:
             # Добавляем период
             periods_list.append(period_data)
+            logger.info(f"[RANDOM] Период {period_data} добавлен для user_id={user_id}")
         
         # Обновляем кнопки с отметками выбранных периодов
         markup = InlineKeyboardMarkup(row_width=2)
@@ -1198,9 +1204,17 @@ def random_genre(call):
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
         
         selected_text = f"Выбрано: {', '.join(periods_list)}" if periods_list else "Периоды не выбраны"
-        bot.edit_message_text(
-            f"🎲 Выберите периоды (можно несколько). Нажмите 'Готово' для продолжения:\n\n{selected_text}",
-            call.message.chat.id, call.message.message_id, reply_markup=markup)
+        try:
+            bot.edit_message_text(
+                f"🎲 Выберите периоды (можно несколько). Нажмите 'Готово' для продолжения:\n\n{selected_text}",
+                call.message.chat.id, call.message.message_id, reply_markup=markup)
+            bot.answer_callback_query(call.id)  # Подтверждаем нажатие кнопки
+        except Exception as e:
+            logger.error(f"[RANDOM] Ошибка при обновлении сообщения с периодами: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка при обновлении", show_alert=True)
+            except:
+                pass
         return
     
     # Переходим к выбору жанра
@@ -2703,11 +2717,23 @@ if IS_RENDER:
     
     if RENDER_EXTERNAL_URL:
         webhook_url = RENDER_EXTERNAL_URL + '/webhook'
+        
+        # Список разрешённых обновлений для поддержки реакций
+        allowed_updates = [
+            "message",
+            "edited_message",
+            "callback_query",
+            "message_reaction",
+            "message_reaction_count",
+            "chat_member",
+            "my_chat_member"
+        ]
+        
         try:
-            bot.set_webhook(url=webhook_url)
-            logger.info(f"Webhook установлен: {webhook_url}")
+            bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
+            logger.info(f"Webhook установлен с allowed_updates: {webhook_url}")
         except Exception as e:
-            logger.error(f"Не удалось установить webhook: {e}")
+            logger.error(f"Не удалось установить webhook: {e}", exc_info=True)
     else:
         logger.warning("RENDER_EXTERNAL_URL не установлен! Webhook не будет установлен.")
         logger.warning("Убедитесь, что переменная RENDER_EXTERNAL_URL установлена в настройках Render.")
