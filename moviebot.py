@@ -3919,15 +3919,6 @@ def random_start(message):
         user_id = message.from_user.id
         chat_id = message.chat.id
         
-        # Инициализируем состояние
-        user_random_state[user_id] = {
-            'step': 'period',
-            'periods': [],
-            'genre': None,
-            'director': None,
-            'actors': []  # Список выбранных актёров
-        }
-        
         # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
         all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
         available_periods = []
@@ -3956,6 +3947,16 @@ def random_start(message):
                 
                 if count > 0:
                     available_periods.append(period)
+        
+        # Инициализируем состояние с доступными периодами
+        user_random_state[user_id] = {
+            'step': 'period',
+            'periods': [],
+            'available_periods': available_periods,  # Сохраняем доступные периоды
+            'genre': None,
+            'director': None,
+            'actors': []  # Список выбранных актёров
+        }
         
         markup = InlineKeyboardMarkup(row_width=2)
         if available_periods:
@@ -3993,6 +3994,11 @@ def random_period_handler(call):
             user_random_state[user_id]['periods'] = []
             user_random_state[user_id]['step'] = 'genre'
             _show_genre_step(call, chat_id, user_id)
+        elif data == "done":
+            # Переход к следующему шагу
+            logger.info(f"[RANDOM] Periods confirmed, moving to genre")
+            user_random_state[user_id]['step'] = 'genre'
+            _show_genre_step(call, chat_id, user_id)
         else:
             # Toggle периода
             periods = user_random_state[user_id].get('periods', [])
@@ -4005,22 +4011,59 @@ def random_period_handler(call):
             
             user_random_state[user_id]['periods'] = periods
             
-            # Обновляем кнопки
+            # Получаем доступные периоды из состояния
+            available_periods = user_random_state[user_id].get('available_periods', [])
+            if not available_periods:
+                # Если нет в состоянии, получаем заново
+                all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+                with db_lock:
+                    for period in all_periods:
+                        if period == "До 1980":
+                            condition = "year < 1980"
+                        elif period == "1980–1990":
+                            condition = "(year >= 1980 AND year <= 1990)"
+                        elif period == "1990–2000":
+                            condition = "(year >= 1990 AND year <= 2000)"
+                        elif period == "2000–2010":
+                            condition = "(year >= 2000 AND year <= 2010)"
+                        elif period == "2010–2020":
+                            condition = "(year >= 2010 AND year <= 2020)"
+                        elif period == "2020–сейчас":
+                            condition = "year >= 2020"
+                        
+                        cursor.execute(f"""
+                            SELECT COUNT(*) FROM movies 
+                            WHERE chat_id = %s AND watched = 0 AND {condition}
+                        """, (chat_id,))
+                        count_row = cursor.fetchone()
+                        count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                        
+                        if count > 0:
+                            available_periods.append(period)
+                user_random_state[user_id]['available_periods'] = available_periods
+            
+            # Обновляем кнопки - используем только доступные периоды
             markup = InlineKeyboardMarkup(row_width=2)
-            all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
-            for i in range(0, len(all_periods), 2):
-                row = []
-                for j in range(2):
-                    if i + j < len(all_periods):
-                        p = all_periods[i + j]
-                        label = f"✓ {p}" if p in periods else p
-                        row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
-                markup.row(*row)
-            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            if available_periods:
+                for i in range(0, len(available_periods), 2):
+                    row = []
+                    for j in range(2):
+                        if i + j < len(available_periods):
+                            p = available_periods[i + j]
+                            label = f"✓ {p}" if p in periods else p
+                            row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
+                    markup.row(*row)
+            
+            # Кнопка "Продолжить" появляется только если выбран хотя бы один период
+            # "Пропустить" убирается, если выбран хотя бы один период
+            if periods:
+                markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_period:done"))
+            else:
+                markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
             
             selected = ', '.join(periods) if periods else 'ничего'
             try:
-                bot.edit_message_text(f"🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)", 
+                bot.edit_message_text(f"🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько)", 
                                     chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 bot.answer_callback_query(call.id)
                 logger.info(f"[RANDOM] Period keyboard updated, selected={selected}")
