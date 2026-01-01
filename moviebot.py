@@ -3511,8 +3511,11 @@ RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
 RENDER = os.getenv('RENDER')
 PORT = os.getenv('PORT')  # На Render всегда есть PORT
 
+logger.info(f"[DEBUG] Переменные окружения: PORT={PORT}, RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}, RENDER_SERVICE_ID={RENDER_SERVICE_ID}, RENDER={RENDER}")
+
 # Дополнительная проверка: путь выполнения (Render использует /opt/render/)
 IS_RENDER_PATH = '/opt/render' in sys.executable or '/opt/render' in str(sys.path)
+logger.info(f"[DEBUG] IS_RENDER_PATH={IS_RENDER_PATH}, sys.executable={sys.executable}")
 
 # Явная переменная для отключения polling (можно установить в Render env vars)
 USE_POLLING = os.getenv('USE_POLLING', '').lower() in ('true', '1', 'yes')
@@ -3521,15 +3524,18 @@ USE_POLLING = os.getenv('USE_POLLING', '').lower() in ('true', '1', 'yes')
 # Polling НИКОГДА не должен запускаться на Render, если не установлена явно USE_POLLING=True
 IS_RENDER = bool(PORT or RENDER_EXTERNAL_URL or RENDER_SERVICE_ID or RENDER or IS_RENDER_PATH)
 
+logger.info(f"[DEBUG] IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
+
 # Если это Render, принудительно отключаем polling (если не установлена явно USE_POLLING)
 if IS_RENDER and not USE_POLLING:
     IS_RENDER = True  # Гарантируем, что это Render
-    logger.info(f"Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}")
+    logger.info(f"[DEBUG] Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}")
 else:
-    logger.info(f"Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
+    logger.info(f"[DEBUG] Определение окружения: PORT={PORT}, RENDER_EXTERNAL_URL={bool(RENDER_EXTERNAL_URL)}, IS_RENDER_PATH={IS_RENDER_PATH}, IS_RENDER={IS_RENDER}, USE_POLLING={USE_POLLING}")
 
 if IS_RENDER:
     logger.info("=== RENDER MODE: WEBHOOK + FLASK SERVER ===")
+    logger.info(f"[DEBUG] Вход в блок IS_RENDER, sys.argv={sys.argv}")
     
     # Очистка и установка webhook
     try:
@@ -3557,6 +3563,8 @@ if IS_RENDER:
     # Проверяем, есть ли 'gunicorn' в sys.argv (если запущен через gunicorn)
     is_gunicorn = any('gunicorn' in arg for arg in sys.argv) or 'gunicorn' in os.environ.get('_', '')
     
+    logger.info(f"[DEBUG] is_gunicorn={is_gunicorn}, sys.argv={sys.argv}")
+    
     if is_gunicorn:
         # Запуск через gunicorn - gunicorn сам запустит app
         logger.info("Flask приложение готово к запуску через gunicorn")
@@ -3565,9 +3573,16 @@ if IS_RENDER:
     else:
         # Запуск напрямую через Python - нужно вызвать app.run()
         port = int(os.getenv('PORT', 10000))
-        logger.info(f"Запуск Flask сервера напрямую через Python на порту {port}")
+        logger.info(f"[DEBUG] Запуск Flask сервера напрямую через Python на порту {port}")
         logger.info(f"Зарегистрированные маршруты: {[str(rule) for rule in app.url_map.iter_rules()]}")
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+        logger.info(f"[DEBUG] Вызов app.run() на 0.0.0.0:{port}")
+        try:
+            app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+            logger.info("[DEBUG] app.run() завершился")
+        except Exception as e:
+            logger.error(f"[DEBUG] Ошибка при запуске app.run(): {e}", exc_info=True)
+else:
+    logger.info(f"[DEBUG] IS_RENDER=False, код идет в блок else")
 else:
     # Локальный запуск - используем polling (только если IS_RENDER=False)
     if IS_RENDER:
