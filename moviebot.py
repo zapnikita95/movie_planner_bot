@@ -4176,6 +4176,10 @@ def random_director_handler(call):
         user_random_state[user_id]['director'] = director
         user_random_state[user_id]['step'] = 'actor'
         
+        # Инициализируем список актёров, если его нет
+        if 'actors' not in user_random_state[user_id]:
+            user_random_state[user_id]['actors'] = []
+        
         _show_actor_step(call, chat_id, user_id)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_director_handler: {e}", exc_info=True)
