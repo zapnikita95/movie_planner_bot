@@ -1012,7 +1012,7 @@ def search_films(query, page=1):
     params = {"keyword": query, "page": page}
     headers = {
         "X-API-KEY": KP_TOKEN,
-        "accept": "application/json
+        "accept": "application/json"
     }
     
     logger.info(f"[SEARCH] Запрос: query='{query}', page={page}")
