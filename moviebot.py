@@ -3493,17 +3493,13 @@ def webhook():
     else:
         abort(403)
 
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint для Render"""
-    logger.info("[HEALTH] Health check запрос получен")
-    return jsonify({'status': 'ok'}), 200
-
-@app.route('/', methods=['GET'])
+@app.route('/')
 def root():
-    """Root endpoint"""
-    logger.info("[ROOT] Root запрос получен")
     return jsonify({'status': 'ok', 'service': 'moviebot'}), 200
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok'}), 200
 
 # Определяем, где запускается бот: на Render или локально
 # Проверяем несколько признаков Render окружения
