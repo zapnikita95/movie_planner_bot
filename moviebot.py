@@ -3544,9 +3544,19 @@ def plan_handler(message):
         logger.info(f"[PLAN] ===== НАЧАЛО ОБРАБОТКИ /plan =====")
         logger.info(f"[PLAN] user_id={user_id}, chat_id={chat_id}")
         logger.info(f"[PLAN] original_text='{original_text}'")
+        logger.info(f"[PLAN] message.reply_to_message={message.reply_to_message}")
         logger.info(f"[PLAN] Есть реплай: {message.reply_to_message is not None}")
         if message.reply_to_message:
-            logger.info(f"[PLAN] reply_to_message.message_id={message.reply_to_message.message_id}")
+            reply_msg = message.reply_to_message
+            logger.info(f"[PLAN] reply_to_message.message_id={reply_msg.message_id}")
+            logger.info(f"[PLAN] reply_to_message.text (первые 200 символов)='{reply_msg.text[:200] if reply_msg.text else None}'")
+            logger.info(f"[PLAN] reply_to_message.entities={reply_msg.entities}")
+            if reply_msg.entities:
+                logger.info(f"[PLAN] reply_to_message.entities count={len(reply_msg.entities)}")
+                for idx, entity in enumerate(reply_msg.entities):
+                    logger.info(f"[PLAN] Entity {idx}: type={entity.type}, offset={entity.offset}, length={entity.length}")
+                    if hasattr(entity, 'url'):
+                        logger.info(f"[PLAN] Entity {idx} url={entity.url}")
         
         # Проверяем реплай на сообщение со ссылкой
         link = None
