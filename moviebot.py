@@ -78,6 +78,7 @@ user_plan_state = {}  # user_id: {'step': int, 'link': str, 'type': str, 'day_or
 bot_messages = {}  # message_id: link (храним карточки бота)
 plan_notification_messages = {}  # message_id: {'link': str} (храним сообщения о планах для обработки реакций)
 list_messages = {}  # message_id: chat_id (храним сообщения /list для обработки ответов)
+plan_error_messages = {}  # message_id: {'user_id': int, 'chat_id': int, 'link': str, 'plan_type': str or None, 'day_or_date': str or None, 'missing': str}
 # Состояния настроек
 user_settings_state = {}  # user_id: {'waiting_emoji': bool}
 settings_messages = {}  # message_id: {'user_id': int, 'action': str, 'chat_id': int} - для отслеживания сообщений settings
@@ -3460,11 +3461,31 @@ def plan_handler(message):
             return
         
         if not plan_type:
-            bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+            error_msg = bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+            # Сохраняем состояние для обработки ответа
+            if error_msg:
+                plan_error_messages[error_msg.message_id] = {
+                    'user_id': user_id,
+                    'chat_id': chat_id,
+                    'link': link,
+                    'plan_type': None,
+                    'day_or_date': day_or_date,
+                    'missing': 'plan_type'
+                }
             return
         
         if not day_or_date:
-            bot.reply_to(message, "Не указан день/дата. Для дома укажите день недели (пн, вт, ср, чт, пт, сб, вс или 'в сб'), для кино - день недели или дату (15 января).")
+            error_msg = bot.reply_to(message, "Не указан день/дата. Для дома укажите день недели (пн, вт, ср, чт, пт, сб, вс или 'в сб'), для кино - день недели или дату (15 января).")
+            # Сохраняем состояние для обработки ответа
+            if error_msg:
+                plan_error_messages[error_msg.message_id] = {
+                    'user_id': user_id,
+                    'chat_id': chat_id,
+                    'link': link,
+                    'plan_type': plan_type,
+                    'day_or_date': None,
+                    'missing': 'day_or_date'
+                }
             return
     except Exception as e:
         logger.error(f"❌ Ошибка в /plan: {e}", exc_info=True)
