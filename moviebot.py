@@ -4502,12 +4502,14 @@ def _show_genre_step(call, chat_id, user_id):
                 label = f"✓ {genre}" if genre in selected_genres else genre
                 markup.add(InlineKeyboardButton(label, callback_data=f"rand_genre:{genre}"))
         
-        # Кнопка "Продолжить" появляется только если выбран хотя бы один жанр
-        # "Пропустить" убирается, если выбран хотя бы один жанр
+        # Кнопки навигации: "Назад" и "Пропустить"/"Продолжить" в одной строке
+        nav_buttons = []
+        nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="rand_genre:back"))
         if selected_genres:
-            markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_genre:done"))
+            nav_buttons.append(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_genre:done"))
         else:
-            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+            nav_buttons.append(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+        markup.row(*nav_buttons)
         
         selected_text = f"\n\nВыбрано: {', '.join(selected_genres)}" if selected_genres else ""
         try:
@@ -4550,6 +4552,40 @@ def random_genre_handler(call):
             logger.info(f"[RANDOM] Genres confirmed, moving to director")
             user_random_state[user_id]['step'] = 'director'
             _show_director_step(call, chat_id, user_id)
+        elif data == "back":
+            # Возврат к предыдущему шагу (периоды)
+            logger.info(f"[RANDOM] Genre back, moving to period")
+            user_random_state[user_id]['step'] = 'period'
+            # Показываем шаг периодов
+            periods = user_random_state[user_id].get('periods', [])
+            available_periods = user_random_state[user_id].get('available_periods', [])
+            if not available_periods:
+                available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+            
+            markup = InlineKeyboardMarkup(row_width=2)
+            if available_periods:
+                for i in range(0, len(available_periods), 2):
+                    row = []
+                    for j in range(2):
+                        if i + j < len(available_periods):
+                            p = available_periods[i + j]
+                            label = f"✓ {p}" if p in periods else p
+                            row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
+                    markup.row(*row)
+            
+            if periods:
+                markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_period:done"))
+            else:
+                markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            
+            selected = ', '.join(periods) if periods else 'ничего'
+            try:
+                bot.edit_message_text(f"🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько)", 
+                                    chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.answer_callback_query(call.id)
+            except Exception as e:
+                logger.error(f"[RANDOM] Error going back to period: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка")
         else:
             # Toggle жанра
             genres = user_random_state[user_id].get('genres', [])
@@ -4638,12 +4674,14 @@ def _show_director_step(call, chat_id, user_id):
                 label = f"✓ {d}" if d in selected_directors else d
                 markup.add(InlineKeyboardButton(label, callback_data=f"rand_dir:{d}"))
         
-        # Кнопка "Продолжить" появляется только если выбран хотя бы один режиссер
-        # "Пропустить" убирается, если выбран хотя бы один режиссер
+        # Кнопки навигации: "Назад" и "Пропустить"/"Продолжить" в одной строке
+        nav_buttons = []
+        nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="rand_dir:back"))
         if selected_directors:
-            markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_dir:done"))
+            nav_buttons.append(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_dir:done"))
         else:
-            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
+            nav_buttons.append(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_dir:skip"))
+        markup.row(*nav_buttons)
         
         selected_text = f"\n\nВыбрано: {', '.join(selected_directors)}" if selected_directors else ""
         try:
@@ -4691,6 +4729,11 @@ def random_director_handler(call):
             if 'actors' not in user_random_state[user_id]:
                 user_random_state[user_id]['actors'] = []
             _show_actor_step(call, chat_id, user_id)
+        elif data == "back":
+            # Возврат к предыдущему шагу (жанры)
+            logger.info(f"[RANDOM] Director back, moving to genre")
+            user_random_state[user_id]['step'] = 'genre'
+            _show_genre_step(call, chat_id, user_id)
         else:
             # Toggle режиссера
             directors = user_random_state[user_id].get('directors', [])
@@ -4793,12 +4836,14 @@ def _show_actor_step(call, chat_id, user_id):
                 label = f"✓ {actor}" if actor in selected_actors else actor
                 markup.add(InlineKeyboardButton(label, callback_data=f"rand_actor:{actor}"))
         
-        # Кнопка "Пропустить" всегда есть
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
-        
-        # Кнопка "Найти фильм" только если выбран хотя бы один актёр
+        # Кнопки навигации: "Назад" и "Пропустить"/"Найти фильм" в одной строке
+        nav_buttons = []
+        nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="rand_actor:back"))
         if selected_actors:
-            markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+            nav_buttons.append(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+        else:
+            nav_buttons.append(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
+        markup.row(*nav_buttons)
         
         selected_text = f"\n\nВыбрано: {', '.join(selected_actors)}" if selected_actors else ""
         try:
@@ -4836,6 +4881,11 @@ def random_actor_handler(call):
             user_random_state[user_id]['step'] = 'final'
             logger.info(f"[RANDOM] Actors skipped, moving to final")
             _random_final(call, chat_id, user_id)
+        elif data == "back":
+            # Возврат к предыдущему шагу (режиссеры)
+            logger.info(f"[RANDOM] Actor back, moving to director")
+            user_random_state[user_id]['step'] = 'director'
+            _show_director_step(call, chat_id, user_id)
         else:
             # Toggle актёра
             actors = user_random_state[user_id].get('actors', [])
