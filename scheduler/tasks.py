@@ -8,7 +8,7 @@ import json
 from database.db_connection import get_db_connection, get_db_cursor, db_lock
 from config.settings import PLANS_TZ
 from bot.states import plan_notification_messages
-from database.db_operations import print_daily_stats, get_user_timezone_or_default
+from database.db_operations import print_daily_stats, get_user_timezone_or_default, get_notification_settings
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -263,26 +263,44 @@ def check_and_send_plan_notifications():
 
                 # Для планов в кино проверяем два типа уведомлений:
 
-                # 1. Утреннее напоминание в 9:00 в день сеанса (только если это сегодня)
+                # 1. Напоминание в день сеанса (только если это сегодня)
+                # Время зависит от дня недели и настроек
 
                 if plan_dt_local.date() == now_local.date():
+                    # Получаем настройки времени напоминаний
+                    notify_settings = get_notification_settings(chat_id)
+                    
+                    # Определяем, будний день или выходной
+                    weekday = plan_dt_local.weekday()
+                    is_weekend = weekday >= 5
+                    
+                    # Если разделение на будни/выходные отключено, используем настройки для будних дней
+                    if notify_settings.get('separate_weekdays') == 'false':
+                        reminder_hour = notify_settings.get('cinema_weekday_hour', 9)
+                        reminder_minute = notify_settings.get('cinema_weekday_minute', 0)
+                    elif is_weekend:
+                        reminder_hour = notify_settings.get('cinema_weekend_hour', 9)
+                        reminder_minute = notify_settings.get('cinema_weekend_minute', 0)
+                    else:
+                        reminder_hour = notify_settings.get('cinema_weekday_hour', 9)
+                        reminder_minute = notify_settings.get('cinema_weekday_minute', 0)
 
-                    morning_dt = plan_dt_local.replace(hour=9, minute=0)
+                    reminder_dt = plan_dt_local.replace(hour=reminder_hour, minute=reminder_minute)
 
-                    morning_utc = morning_dt.astimezone(pytz.utc)
+                    reminder_utc = reminder_dt.astimezone(pytz.utc)
                 else:
 
-                    morning_utc = None
+                    reminder_utc = None
 
                 
 
-                # Планируем утреннее напоминание, если оно еще не запланировано и время еще не прошло
+                # Планируем напоминание, если оно еще не запланировано и время еще не прошло
 
-                if morning_utc and morning_utc > now_utc:
+                if reminder_utc and reminder_utc > now_utc:
 
                     try:
 
-                        job_id = f'plan_morning_{chat_id}_{plan_id}_{int(morning_utc.timestamp())}'
+                        job_id = f'plan_reminder_{chat_id}_{plan_id}_{int(reminder_utc.timestamp())}'
 
                         existing_job = scheduler.get_job(job_id)
 
@@ -294,7 +312,7 @@ def check_and_send_plan_notifications():
 
                                 'date',
 
-                                run_date=morning_utc,
+                                run_date=reminder_utc,
 
                                 args=[chat_id, film_id, title, link, plan_type],
 
@@ -302,33 +320,41 @@ def check_and_send_plan_notifications():
 
                             )
 
-                            logger.info(f"[PLAN CHECK] Запланировано утреннее уведомление для плана {plan_id} (фильм {title}) на {morning_utc}")
+                            logger.info(f"[PLAN CHECK] Запланировано напоминание для плана кино {plan_id} (фильм {title}) на {reminder_utc} ({reminder_hour}:{reminder_minute:02d})")
 
                     except Exception as e:
 
-                        logger.warning(f"[PLAN CHECK] Не удалось запланировать утреннее уведомление для плана {plan_id}: {e}")
+                        logger.warning(f"[PLAN CHECK] Не удалось запланировать напоминание для плана {plan_id}: {e}")
 
-                elif morning_utc and morning_utc <= now_utc and morning_utc >= now_utc - timedelta(minutes=30):
+                elif reminder_utc and reminder_utc <= now_utc and reminder_utc >= now_utc - timedelta(minutes=30):
 
-                    # Время утреннего напоминания уже прошло, но не более 30 минут назад - отправляем сразу
+                    # Время напоминания уже прошло, но не более 30 минут назад - отправляем сразу
 
                     try:
 
                         send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
 
-                        logger.info(f"[PLAN CHECK] Утреннее уведомление отправлено сразу для плана {plan_id} (фильм {title})")
+                        logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана кино {plan_id} (фильм {title})")
 
                     except Exception as e:
 
-                        logger.error(f"[PLAN CHECK] Ошибка отправки утреннего уведомления для плана {plan_id}: {e}", exc_info=True)
+                        logger.error(f"[PLAN CHECK] Ошибка отправки напоминания для плана {plan_id}: {e}", exc_info=True)
 
                 
 
-                # 2. Напоминание за 10 минут до сеанса с билетами
-
-                ticket_dt = plan_dt_local - timedelta(minutes=10)
-
-                ticket_utc = ticket_dt.astimezone(pytz.utc)
+                # 2. Напоминание с билетами за N минут до сеанса (из настроек)
+                notify_settings = get_notification_settings(chat_id)
+                ticket_before_minutes = notify_settings.get('ticket_before_minutes', 10)
+                
+                # Если настройка "не присылать отдельно" или "вместе с уведомлением", пропускаем
+                if ticket_before_minutes == -1:  # -1 означает "не присылать отдельно"
+                    ticket_utc = None
+                elif ticket_before_minutes == 0:  # 0 означает "вместе с уведомлением"
+                    # Билеты будут отправлены вместе с основным уведомлением
+                    ticket_utc = None
+                else:
+                    ticket_dt = plan_dt_local - timedelta(minutes=ticket_before_minutes)
+                    ticket_utc = ticket_dt.astimezone(pytz.utc)
 
                 
 
@@ -344,7 +370,7 @@ def check_and_send_plan_notifications():
 
                 
 
-                if ticket_file_id:
+                if ticket_file_id and ticket_utc:
 
                     # Планируем напоминание с билетами, если оно еще не запланировано и время еще не прошло
 
@@ -396,23 +422,41 @@ def check_and_send_plan_notifications():
 
                 # Для планов дома проверяем два типа уведомлений:
 
-                # 1. Утреннее напоминание в 9:00 в день просмотра (только если это сегодня)
+                # 1. Напоминание в день просмотра (только если это сегодня)
+                # Время зависит от дня недели: будни 19:00, выходные 9:00
 
                 if plan_dt_local.date() == now_local.date():
+                    # Получаем настройки времени напоминаний
+                    notify_settings = get_notification_settings(chat_id)
+                    
+                    # Определяем, будний день или выходной (0 = понедельник, 6 = воскресенье)
+                    weekday = plan_dt_local.weekday()  # 0-6, где 0 = понедельник, 6 = воскресенье
+                    is_weekend = weekday >= 5  # Суббота (5) и воскресенье (6)
+                    
+                    # Если разделение на будни/выходные отключено, используем настройки для будних дней
+                    if notify_settings.get('separate_weekdays') == 'false':
+                        reminder_hour = notify_settings.get('home_weekday_hour', 19)
+                        reminder_minute = notify_settings.get('home_weekday_minute', 0)
+                    elif is_weekend:
+                        reminder_hour = notify_settings.get('home_weekend_hour', 9)
+                        reminder_minute = notify_settings.get('home_weekend_minute', 0)
+                    else:
+                        reminder_hour = notify_settings.get('home_weekday_hour', 19)
+                        reminder_minute = notify_settings.get('home_weekday_minute', 0)
 
-                    morning_dt = plan_dt_local.replace(hour=9, minute=0)
+                    reminder_dt = plan_dt_local.replace(hour=reminder_hour, minute=reminder_minute)
 
-                    morning_utc = morning_dt.astimezone(pytz.utc)
+                    reminder_utc = reminder_dt.astimezone(pytz.utc)
 
                     
 
-                    # Планируем утреннее напоминание, если оно еще не запланировано и время еще не прошло
+                    # Планируем напоминание, если оно еще не запланировано и время еще не прошло
 
-                    if morning_utc > now_utc:
+                    if reminder_utc > now_utc:
 
                         try:
 
-                            job_id = f'plan_morning_{chat_id}_{plan_id}_{int(morning_utc.timestamp())}'
+                            job_id = f'plan_reminder_{chat_id}_{plan_id}_{int(reminder_utc.timestamp())}'
 
                             existing_job = scheduler.get_job(job_id)
 
@@ -424,7 +468,7 @@ def check_and_send_plan_notifications():
 
                                     'date',
 
-                                    run_date=morning_utc,
+                                    run_date=reminder_utc,
 
                                     args=[chat_id, film_id, title, link, plan_type],
 
@@ -432,25 +476,25 @@ def check_and_send_plan_notifications():
 
                                 )
 
-                                logger.info(f"[PLAN CHECK] Запланировано утреннее уведомление для плана дома {plan_id} (фильм {title}) на {morning_utc}")
+                                logger.info(f"[PLAN CHECK] Запланировано напоминание для плана дома {plan_id} (фильм {title}) на {reminder_utc} ({reminder_hour}:{reminder_minute:02d})")
 
                         except Exception as e:
 
-                            logger.warning(f"[PLAN CHECK] Не удалось запланировать утреннее уведомление для плана {plan_id}: {e}")
+                            logger.warning(f"[PLAN CHECK] Не удалось запланировать напоминание для плана {plan_id}: {e}")
 
-                    elif morning_utc <= now_utc and morning_utc >= now_utc - timedelta(minutes=30):
+                    elif reminder_utc <= now_utc and reminder_utc >= now_utc - timedelta(minutes=30):
 
-                        # Время утреннего напоминания уже прошло, но не более 30 минут назад - отправляем сразу
+                        # Время напоминания уже прошло, но не более 30 минут назад - отправляем сразу
 
                         try:
 
                             send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
 
-                            logger.info(f"[PLAN CHECK] Утреннее уведомление отправлено сразу для плана дома {plan_id} (фильм {title})")
+                            logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана дома {plan_id} (фильм {title})")
 
                         except Exception as e:
 
-                            logger.error(f"[PLAN CHECK] Ошибка отправки утреннего уведомления для плана {plan_id}: {e}", exc_info=True)
+                            logger.error(f"[PLAN CHECK] Ошибка отправки напоминания для плана {plan_id}: {e}", exc_info=True)
 
                 
 
