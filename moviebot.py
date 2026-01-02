@@ -1700,20 +1700,44 @@ def handle_reaction(reaction):
     # Получаем кастомные эмодзи ID для этого чата
     custom_emoji_ids = get_watched_custom_emoji_ids(chat_id)
     
+    logger.info(f"[REACTION] Проверка watched эмодзи для чата {chat_id}")
+    logger.info(f"[REACTION] Доступные watched эмодзи: {ordinary_emojis}")
+    logger.info(f"[REACTION] Доступные кастомные ID: {custom_emoji_ids}")
+    
     is_watched = False
     
     if not reaction.new_reaction:
+        logger.info("[REACTION] Нет новых реакций")
         return
     
+    logger.info(f"[REACTION] Количество новых реакций: {len(reaction.new_reaction)}")
+    
     for r in reaction.new_reaction:
-        if r.type == 'emoji' and r.emoji in ordinary_emojis:
-            logger.info(f"[REACTION DEBUG] Обычный watched эмодзи: {r.emoji}")
-            is_watched = True
-            break
-        elif r.type == 'custom_emoji' and str(r.custom_emoji_id) in custom_emoji_ids:
-            logger.info(f"[REACTION DEBUG] Кастомный watched эмодзи ID: {r.custom_emoji_id}")
-            is_watched = True
-            break
+        logger.info(f"[REACTION DEBUG] Реакция: type={getattr(r, 'type', 'unknown')}, emoji={getattr(r, 'emoji', None)}, custom_emoji_id={getattr(r, 'custom_emoji_id', None)}")
+        
+        if hasattr(r, 'type') and r.type == 'emoji' and hasattr(r, 'emoji'):
+            if r.emoji in ordinary_emojis:
+                logger.info(f"[REACTION DEBUG] ✅ Найден watched эмодзи: {r.emoji}")
+                is_watched = True
+                break
+            else:
+                logger.info(f"[REACTION DEBUG] ❌ Эмодзи {r.emoji} не в списке watched: {ordinary_emojis}")
+        elif hasattr(r, 'type') and r.type == 'custom_emoji' and hasattr(r, 'custom_emoji_id'):
+            if str(r.custom_emoji_id) in custom_emoji_ids:
+                logger.info(f"[REACTION DEBUG] ✅ Найден watched кастомный эмодзи ID: {r.custom_emoji_id}")
+                is_watched = True
+                break
+            else:
+                logger.info(f"[REACTION DEBUG] ❌ Кастомный ID {r.custom_emoji_id} не в списке watched: {custom_emoji_ids}")
+        else:
+            # Старый формат реакции (без type)
+            if hasattr(r, 'emoji'):
+                if r.emoji in ordinary_emojis:
+                    logger.info(f"[REACTION DEBUG] ✅ Найден watched эмодзи (старый формат): {r.emoji}")
+                    is_watched = True
+                    break
+                else:
+                    logger.info(f"[REACTION DEBUG] ❌ Эмодзи {r.emoji} не в списке watched (старый формат): {ordinary_emojis}")
     
     if not is_watched:
         logger.info("[REACTION] Не watched эмодзи — игнорируем")
