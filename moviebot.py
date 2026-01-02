@@ -5401,10 +5401,21 @@ def handle_reply_to_bot(message):
 
 # ==================== ОБРАБОТКА СООБЩЕНИЙ С ФИЛЬМОМ + ДАТОЙ В РЕЖИМЕ ДОБАВЛЕНИЯ НОВОГО СЕАНСА ====================
 # Высокий приоритет: обработка ввода нового сеанса (фильм + дата)
-@bot.message_handler(func=lambda m: m.text and m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'waiting_new_session', priority=20)
+@bot.message_handler(func=lambda m: m.text and m.from_user.id in user_ticket_state, priority=20)
 def handle_new_session_input(message):
+    # Проверяем состояние внутри обработчика
+    user_id = message.from_user.id
+    state = user_ticket_state.get(user_id, {})
+    step = state.get('step')
+    
     logger.info(f"[TICKET NEW SESSION HANDLER] ===== ОБРАБОТЧИК ВЫЗВАН =====")
-    logger.info(f"[TICKET NEW SESSION HANDLER] Обработка ввода нового сеанса от {message.from_user.id}: {message.text}")
+    logger.info(f"[TICKET NEW SESSION HANDLER] Пользователь {user_id}, step={step}, state={state}")
+    
+    if step != 'waiting_new_session':
+        logger.info(f"[TICKET NEW SESSION HANDLER] Пропущено - step={step}, ожидался 'waiting_new_session'")
+        return
+    
+    logger.info(f"[TICKET NEW SESSION HANDLER] Обработка ввода нового сеанса от {user_id}: {message.text}")
     
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -5531,14 +5542,20 @@ def handle_new_session_input(message):
 
 
 # ==================== ЗАГРУЗКА БИЛЕТОВ ====================
-@bot.message_handler(content_types=['photo', 'document'], func=lambda m: m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'upload_ticket', priority=20)
+@bot.message_handler(content_types=['photo', 'document'], func=lambda m: m.from_user.id in user_ticket_state, priority=20)
 def handle_ticket_upload(message):
-    logger.info(f"[TICKET UPLOAD HANDLER] ===== ОБРАБОТЧИК ВЫЗВАН =====")
+    # Проверяем состояние внутри обработчика
     user_id = message.from_user.id
     state = user_ticket_state.get(user_id, {})
+    step = state.get('step')
     plan_id = state.get('plan_id')
     
-    logger.info(f"[TICKET UPLOAD HANDLER] Пользователь {user_id}, plan_id={plan_id}, state={state}")
+    logger.info(f"[TICKET UPLOAD HANDLER] ===== ОБРАБОТЧИК ВЫЗВАН =====")
+    logger.info(f"[TICKET UPLOAD HANDLER] Пользователь {user_id}, step={step}, plan_id={plan_id}, state={state}")
+    
+    if step != 'upload_ticket':
+        logger.info(f"[TICKET UPLOAD HANDLER] Пропущено - step={step}, ожидался 'upload_ticket'")
+        return
     
     if not plan_id:
         logger.error(f"[TICKET UPLOAD HANDLER] plan_id не найден в состоянии")
