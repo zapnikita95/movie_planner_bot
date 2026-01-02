@@ -867,6 +867,89 @@ def hourly_stats():
     """Вызывается каждый час для вывода статистики"""
     print_daily_stats()
 
+# Функции для уведомлений о планах (определяем до использования в scheduler)
+def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None):
+    """Отправляет уведомление о запланированном просмотре"""
+    try:
+        plan_type_text = "дома" if plan_type == 'home' else "в кино"
+        text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
+        text += f"<b>{title}</b>\n{link}"
+        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+        # Сохраняем message_id для обработки реакций
+        plan_notification_messages[msg.message_id] = {'link': link}
+        logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}")
+        
+        # Отмечаем как отправленное в базе данных, если plan_id передан
+        if plan_id:
+            try:
+                with db_lock:
+                    cursor.execute('''
+                        UPDATE plans 
+                        SET notification_sent = TRUE 
+                        WHERE id = %s
+                    ''', (plan_id,))
+                    conn.commit()
+                logger.info(f"[PLAN NOTIFICATION] План {plan_id} отмечен как уведомление отправлено")
+            except Exception as e:
+                logger.warning(f"[PLAN NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}")
+    except Exception as e:
+        logger.error(f"[PLAN NOTIFICATION] Ошибка отправки уведомления: {e}")
+
+def check_and_send_plan_notifications():
+    """Периодическая проверка планов и отправка пропущенных уведомлений"""
+    try:
+        now_utc = datetime.now(pytz.utc)
+        # Проверяем планы, которые должны были быть отправлены в последние 30 минут
+        # (чтобы не пропустить уведомления после перезапуска бота)
+        check_start = now_utc - timedelta(minutes=30)
+        check_end = now_utc + timedelta(minutes=5)  # Небольшой запас на будущее
+        
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
+                       m.title, m.link, p.notification_sent
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.plan_datetime >= %s 
+                  AND p.plan_datetime <= %s
+                  AND (p.notification_sent IS NULL OR p.notification_sent = FALSE)
+            ''', (check_start, check_end))
+            plans = cursor.fetchall()
+        
+        if plans:
+            logger.info(f"[PLAN CHECK] Найдено {len(plans)} планов для проверки уведомлений")
+        
+        for plan in plans:
+            if isinstance(plan, dict):
+                plan_id = plan.get('id')
+                chat_id = plan.get('chat_id')
+                film_id = plan.get('film_id')
+                plan_type = plan.get('plan_type')
+                plan_datetime = plan.get('plan_datetime')
+                user_id = plan.get('user_id')
+                title = plan.get('title')
+                link = plan.get('link')
+            else:
+                plan_id = plan[0]
+                chat_id = plan[1]
+                film_id = plan[2]
+                plan_type = plan[3]
+                plan_datetime = plan[4]
+                user_id = plan[5]
+                title = plan[6]
+                link = plan[7]
+            
+            # Проверяем, что время уже наступило (или прошло не более 30 минут назад)
+            if plan_datetime <= now_utc:
+                try:
+                    # Отправляем уведомление (plan_id передается для отметки в БД)
+                    send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                    logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
+                except Exception as e:
+                    logger.error(f"[PLAN CHECK] Ошибка отправки уведомления для плана {plan_id}: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[PLAN CHECK] Ошибка при проверке планов: {e}", exc_info=True)
+
 # Настройка периодического вывода статистики
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
@@ -1081,88 +1164,6 @@ def send_rating_reminder(chat_id, film_id, film_title, user_id):
             logger.info(f"[RATING REMINDER] Напоминание отправлено user_id={user_id}, film_id={film_id}, message_id={msg.message_id}")
     except Exception as e:
         logger.error(f"[RATING REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
-
-def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None):
-    """Отправляет уведомление о запланированном просмотре"""
-    try:
-        plan_type_text = "дома" if plan_type == 'home' else "в кино"
-        text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
-        text += f"<b>{title}</b>\n{link}"
-        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
-        # Сохраняем message_id для обработки реакций
-        plan_notification_messages[msg.message_id] = {'link': link}
-        logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}")
-        
-        # Отмечаем как отправленное в базе данных, если plan_id передан
-        if plan_id:
-            try:
-                with db_lock:
-                    cursor.execute('''
-                        UPDATE plans 
-                        SET notification_sent = TRUE 
-                        WHERE id = %s
-                    ''', (plan_id,))
-                    conn.commit()
-                logger.info(f"[PLAN NOTIFICATION] План {plan_id} отмечен как уведомление отправлено")
-            except Exception as e:
-                logger.warning(f"[PLAN NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}")
-    except Exception as e:
-        logger.error(f"[PLAN NOTIFICATION] Ошибка отправки уведомления: {e}")
-
-def check_and_send_plan_notifications():
-    """Периодическая проверка планов и отправка пропущенных уведомлений"""
-    try:
-        now_utc = datetime.now(pytz.utc)
-        # Проверяем планы, которые должны были быть отправлены в последние 30 минут
-        # (чтобы не пропустить уведомления после перезапуска бота)
-        check_start = now_utc - timedelta(minutes=30)
-        check_end = now_utc + timedelta(minutes=5)  # Небольшой запас на будущее
-        
-        with db_lock:
-            cursor.execute('''
-                SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
-                       m.title, m.link, p.notification_sent
-                FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.plan_datetime >= %s 
-                  AND p.plan_datetime <= %s
-                  AND (p.notification_sent IS NULL OR p.notification_sent = FALSE)
-            ''', (check_start, check_end))
-            plans = cursor.fetchall()
-        
-        if plans:
-            logger.info(f"[PLAN CHECK] Найдено {len(plans)} планов для проверки уведомлений")
-        
-        for plan in plans:
-            if isinstance(plan, dict):
-                plan_id = plan.get('id')
-                chat_id = plan.get('chat_id')
-                film_id = plan.get('film_id')
-                plan_type = plan.get('plan_type')
-                plan_datetime = plan.get('plan_datetime')
-                user_id = plan.get('user_id')
-                title = plan.get('title')
-                link = plan.get('link')
-            else:
-                plan_id = plan[0]
-                chat_id = plan[1]
-                film_id = plan[2]
-                plan_type = plan[3]
-                plan_datetime = plan[4]
-                user_id = plan[5]
-                title = plan[6]
-                link = plan[7]
-            
-            # Проверяем, что время уже наступило (или прошло не более 30 минут назад)
-            if plan_datetime <= now_utc:
-                try:
-                    # Отправляем уведомление (plan_id передается для отметки в БД)
-                    send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
-                    logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
-                except Exception as e:
-                    logger.error(f"[PLAN CHECK] Ошибка отправки уведомления для плана {plan_id}: {e}", exc_info=True)
-    except Exception as e:
-        logger.error(f"[PLAN CHECK] Ошибка при проверке планов: {e}", exc_info=True)
 
 # Получение информации о фильме через прямой запрос к API
 def extract_kp_id_from_text(text):
