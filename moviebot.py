@@ -11883,6 +11883,45 @@ def handle_rate_film(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("change_rating:"))
+def handle_change_rating(call):
+    """Обработчик кнопки 'Изменить оценку'"""
+    try:
+        kp_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем film_id из базы
+        with db_lock:
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            row = cursor.fetchone()
+            if not row:
+                bot.answer_callback_query(call.id, "Фильм не найден в базе", show_alert=True)
+                return
+            
+            film_id = row.get('id') if isinstance(row, dict) else row[0]
+            film_title = row.get('title') if isinstance(row, dict) else row[1]
+        
+        # Отправляем сообщение об оценке (то же самое, что и для новой оценки)
+        user_mention = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
+        rating_text = (
+            f"🎬 {user_mention}, измените оценку для фильма <b>{film_title}</b>!\n\n"
+            f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы изменить оценку."
+        )
+        
+        msg = bot.send_message(chat_id, rating_text, parse_mode='HTML')
+        
+        # Сохраняем связь message_id -> film_id для обработки оценки
+        rating_messages[msg.message_id] = film_id
+        bot.answer_callback_query(call.id, "Сообщение об изменении оценки отправлено")
+        logger.info(f"[CHANGE RATING] Сообщение об изменении оценки отправлено для {user_mention}, message_id={msg.message_id}, film_id={film_id}")
+    except Exception as e:
+        logger.error(f"[CHANGE RATING] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_emoji:"))
 def handle_add_emoji(call):
     """Обработчик кнопки 'Добавить' для эмодзи"""
