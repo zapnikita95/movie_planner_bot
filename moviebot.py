@@ -4970,7 +4970,7 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
 
 
 # ==================== ОБРАБОТКА ИЗОБРАЖЕНИЙ И ФАЙЛОВ ДЛЯ БИЛЕТОВ ====================
-@bot.message_handler(content_types=['photo', 'document'], func=lambda message: message.from_user.id in user_ticket_state and user_ticket_state.get(message.from_user.id, {}).get('step')) != 'upload_ticket', priority=10)
+@bot.message_handler(content_types=['photo', 'document'], func=lambda message: message.from_user.id in user_ticket_state and user_ticket_state.get(message.from_user.id, {}).get('step') != 'upload_ticket', priority=10)
 def handle_ticket_file(message):
     """Обработчик загрузки билетов (фото или файл)"""
     user_id = message.from_user.id
