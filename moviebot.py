@@ -5846,8 +5846,8 @@ def ticket_command(message):
     """Команда /ticket - работа с билетами в кино"""
     logger.info(f"[TICKET COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
     try:
-    user_id = message.from_user.id
-    chat_id = message.chat.id
+        user_id = message.from_user.id
+        chat_id = message.chat.id
         username = message.from_user.username or f"user_{user_id}"
         
         logger.info(f"[TICKET COMMAND] ===== НАЧАЛО ОБРАБОТКИ /ticket =====")
