@@ -3848,10 +3848,13 @@ def handle_rating_internal(message, rating):
                 kp_row = cursor.fetchone()
                 kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
                 
-                avg_str = f"{avg:.1f}" if avg else "—"
-                bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
-                
-                # Если средняя оценка > 9, показываем похожие фильмы и продолжения
+                    avg_str = f"{avg:.1f}" if avg else "—"
+                    bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                    
+                    # Проверяем, все ли активные участники оценили фильм, и удаляем план если да
+                    check_and_remove_plan_if_all_rated(chat_id, film_id)
+                    
+                    # Если средняя оценка > 9, показываем похожие фильмы и продолжения
                 if avg and avg > 9 and kp_id:
                     similars = get_similars(kp_id)
                     sequels_data = get_sequels(kp_id)
@@ -4564,6 +4567,9 @@ def handle_rating(message):
                     
                     avg_str = f"{avg:.1f}" if avg else "—"
                     bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                    
+                    # Проверяем, все ли активные участники оценили фильм, и удаляем план если да
+                    check_and_remove_plan_if_all_rated(chat_id, film_id)
                 except Exception as db_error:
                     conn.rollback()
                     logger.error(f"Ошибка при сохранении оценки: {db_error}", exc_info=True)
@@ -5502,6 +5508,9 @@ def rate_movie(message):
                 conn.commit()
                 bot.reply_to(message, f"✅ Оценка обновлена!\n\n<b>{title}</b>\nСтарая оценка: {old_rating}/10\nНовая оценка: {rating}/10", parse_mode='HTML')
                 logger.info(f"[RATE] Пользователь {user_id} обновил оценку для фильма {kp_id} с {old_rating} на {rating}")
+                
+                # Проверяем, все ли активные участники оценили фильм, и удаляем план если да
+                check_and_remove_plan_if_all_rated(chat_id, film_id)
             else:
                 # Сохраняем новую оценку
                 cursor.execute('''
@@ -5510,6 +5519,9 @@ def rate_movie(message):
                 ''', (chat_id, film_id, user_id, rating))
                 conn.commit()
                 bot.reply_to(message, f"✅ Оценка сохранена!\n\n<b>{title}</b>\nОценка: {rating}/10", parse_mode='HTML')
+                
+                # Проверяем, все ли активные участники оценили фильм, и удаляем план если да
+                check_and_remove_plan_if_all_rated(chat_id, film_id)
                 logger.info(f"[RATE] Пользователь {user_id} поставил оценку {rating} для фильма {kp_id}")
         
         return
@@ -11655,9 +11667,12 @@ def handle_rating_confirm(call):
             avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
             
             conn.commit()
-        
-        # Удаляем состояние
-        del user_rating_confirmation_state[user_id]
+            
+            # Проверяем, все ли активные участники оценили фильм, и удаляем план если да
+            check_and_remove_plan_if_all_rated(chat_id, film_id)
+            
+            # Удаляем состояние
+            del user_rating_confirmation_state[user_id]
         
         # Обновляем сообщение с подтверждением
         avg_str = f"{avg:.1f}" if avg else "—"
@@ -11716,6 +11731,49 @@ def handle_show_facts(call):
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
+
+def check_and_remove_plan_if_all_rated(chat_id, film_id):
+    """Проверяет, все ли активные участники (кто просмотрел фильм) оценили фильм.
+    Если да - удаляет план из расписания."""
+    try:
+        with db_lock:
+            # Получаем всех, кто просмотрел фильм
+            cursor.execute("""
+                SELECT DISTINCT user_id 
+                FROM watched_movies 
+                WHERE chat_id = %s AND film_id = %s
+            """, (chat_id, film_id))
+            watched_users = [row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+            
+            if not watched_users:
+                # Никто не просмотрел - не удаляем план
+                return False
+            
+            # Получаем всех, кто оценил фильм (только неимпортированные оценки)
+            cursor.execute("""
+                SELECT DISTINCT user_id 
+                FROM ratings 
+                WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+            """, (chat_id, film_id))
+            rated_users = set([row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()])
+            
+            # Проверяем, все ли просмотревшие оценили
+            watched_set = set(watched_users)
+            if watched_set.issubset(rated_users) and len(watched_set) > 0:
+                # Все просмотревшие оценили - удаляем план
+                cursor.execute("""
+                    DELETE FROM plans 
+                    WHERE chat_id = %s AND film_id = %s
+                """, (chat_id, film_id))
+                deleted_count = cursor.rowcount
+                conn.commit()
+                if deleted_count > 0:
+                    logger.info(f"[PLAN AUTO DELETE] План для фильма film_id={film_id} удален, так как все просмотревшие ({len(watched_set)} чел.) оценили фильм")
+                    return True
+        return False
+    except Exception as e:
+        logger.error(f"[PLAN AUTO DELETE] Ошибка при проверке и удалении плана: {e}", exc_info=True)
+        return False
 
 def get_ratings_info(chat_id, film_id, current_user_id):
     """Получает информацию об оценках фильма: кто оценил, кто нет"""
