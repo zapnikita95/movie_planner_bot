@@ -4805,12 +4805,17 @@ def edit_command(message):
 @bot.message_handler(commands=['ticket'], priority=10)
 def ticket_command(message):
     """Команда /ticket - работа с билетами в кино"""
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    username = message.from_user.username or f"user_{user_id}"
-    
-    logger.info(f"[TICKET COMMAND] Пользователь {user_id} ({username}) вызвал /ticket в чате {chat_id}")
-    log_request(user_id, username, '/ticket', chat_id)
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        username = message.from_user.username or f"user_{user_id}"
+        
+        logger.info(f"[TICKET COMMAND] ===== НАЧАЛО ОБРАБОТКИ /ticket =====")
+        logger.info(f"[TICKET COMMAND] Пользователь {user_id} ({username}) вызвал /ticket в чате {chat_id}")
+        logger.info(f"[TICKET COMMAND] message.text={message.text}")
+        logger.info(f"[TICKET COMMAND] message.photo={message.photo}")
+        logger.info(f"[TICKET COMMAND] message.document={message.document}")
+        log_request(user_id, username, '/ticket', chat_id)
     
     # Проверяем, есть ли файл в сообщении
     has_photo = message.photo is not None and len(message.photo) > 0
@@ -4840,6 +4845,13 @@ def ticket_command(message):
         # Нет файла - показываем список сеансов для выбора
         logger.info(f"[TICKET COMMAND] Файл не найден, показываем список сеансов без file_id")
         show_cinema_sessions(chat_id, user_id, None)
+    
+    except Exception as e:
+        logger.error(f"[TICKET COMMAND] Ошибка при обработке /ticket: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке команды /ticket")
+        except:
+            pass
 
 
 def show_cinema_sessions(chat_id, user_id, file_id=None):
@@ -5029,15 +5041,22 @@ def handle_edit_ticket_text(message):
         state = user_ticket_state[user_id]
         step = state.get('step')
         
+        logger.info(f"[TICKET TIME] Пользователь {user_id} отправил текст '{text}', step={step}, state={state}")
+        
         if step == 'waiting_session_time':
             plan_id = state.get('plan_id')
             user_tz = get_user_timezone_or_default(user_id)
             
+            logger.info(f"[TICKET TIME] Обрабатываем время сеанса для plan_id={plan_id}, текст='{text}'")
+            
             # Парсим время сеанса
             session_dt = parse_session_time(text, user_tz)
             if not session_dt:
+                logger.warning(f"[TICKET TIME] Не удалось распарсить время из текста '{text}'")
                 bot.reply_to(message, "❌ Не удалось распознать время. Попробуйте в формате:\n• 15 января 10:30\n• 17.01 15:20")
                 return
+            
+            logger.info(f"[TICKET TIME] Время успешно распарсено: {session_dt}")
             
             # Получаем информацию о плане и обновляем время сеанса
             with db_lock:
@@ -6945,6 +6964,10 @@ def webhook():
         if update.message:
             logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
             logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
+            logger.info(f"[WEBHOOK] Update.message.entities={update.message.entities if update.message.entities else None}")
+            if update.message.entities:
+                for entity in update.message.entities:
+                    logger.info(f"[WEBHOOK] Entity type={entity.type}, offset={entity.offset}, length={entity.length}")
             if update.message.reply_to_message:
                 logger.info(f"[WEBHOOK] Update содержит reply_to_message: message_id={update.message.reply_to_message.message_id}")
             else:
