@@ -11322,10 +11322,22 @@ def handle_add_film_callback(call):
         if film_in_db:
             # Фильм уже в базе - показываем кнопки планирования, фактов и оценки
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-            markup.row(
-                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
-            )
+            
+            # Получаем информацию об оценках для текущего пользователя
+            ratings_info = get_ratings_info(chat_id, film_id, user_id)
+            
+            if ratings_info['current_user_rated']:
+                # Пользователь уже оценил - показываем "Изменить оценку"
+                markup.row(
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                    InlineKeyboardButton("🔃 Изменить оценку", callback_data=f"change_rating:{kp_id}")
+                )
+            else:
+                # Пользователь еще не оценил - показываем "Оценить"
+                markup.row(
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                    InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+                )
         else:
             # Фильм не в базе - показываем кнопку добавления
             markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
@@ -11705,6 +11717,62 @@ def handle_show_facts(call):
         except:
             pass
 
+def get_ratings_info(chat_id, film_id, current_user_id):
+    """Получает информацию об оценках фильма: кто оценил, кто нет"""
+    with db_lock:
+        # Получаем всех, кто просмотрел фильм
+        cursor.execute("""
+            SELECT DISTINCT wm.user_id 
+            FROM watched_movies wm
+            WHERE wm.chat_id = %s AND wm.film_id = %s
+        """, (chat_id, film_id))
+        watched_users = [row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+        
+        # Получаем всех, кто оценил фильм
+        cursor.execute("""
+            SELECT r.user_id, r.rating
+            FROM ratings r
+            WHERE r.chat_id = %s AND r.film_id = %s AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+        """, (chat_id, film_id))
+        ratings_rows = cursor.fetchall()
+        
+        rated_users = {}  # user_id: rating
+        for row in ratings_rows:
+            uid = row.get('user_id') if isinstance(row, dict) else row[0]
+            rating = row.get('rating') if isinstance(row, dict) else row[1]
+            rated_users[uid] = rating
+        
+        # Получаем среднюю оценку
+        cursor.execute("""
+            SELECT AVG(rating) 
+            FROM ratings 
+            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+        """, (chat_id, film_id))
+        avg_row = cursor.fetchone()
+        avg_rating = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
+        
+        # Разделяем на тех, кто оценил и кто не оценил
+        rated_list = []  # (user_id, rating)
+        not_rated_list = []  # user_id
+        
+        for uid in watched_users:
+            if uid in rated_users:
+                rated_list.append((uid, rated_users[uid]))
+            else:
+                not_rated_list.append(uid)
+        
+        # Проверяем, оценил ли текущий пользователь
+        current_user_rated = current_user_id in rated_users
+        current_user_rating = rated_users.get(current_user_id)
+        
+        return {
+            'rated': rated_list,
+            'not_rated': not_rated_list,
+            'avg_rating': avg_rating,
+            'current_user_rated': current_user_rated,
+            'current_user_rating': current_user_rating
+        }
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
 def handle_rate_film(call):
     """Обработчик кнопки 'Оценить'"""
@@ -11726,7 +11794,7 @@ def handle_rate_film(call):
             
             # Проверяем, просмотрен ли фильм пользователем
             cursor.execute("SELECT id FROM watched_movies WHERE chat_id = %s AND film_id = %s AND user_id = %s", 
-                          (chat_id, film_id, user_id))
+                      (chat_id, film_id, user_id))
             already_watched = cursor.fetchone()
             
             # Если фильм не просмотрен, автоматически отмечаем как просмотренный
@@ -11749,7 +11817,53 @@ def handle_rate_film(call):
                 conn.commit()
                 logger.info(f"[RATE FILM] Фильм {film_title} автоматически отмечен как просмотренный для пользователя {user_id}")
         
-        # Отправляем сообщение об оценке
+        # Получаем информацию об оценках
+        ratings_info = get_ratings_info(chat_id, film_id, user_id)
+        
+        # Если пользователь уже оценил, показываем информацию об оценках и кнопки
+        if ratings_info['current_user_rated']:
+            text = f"💬 <b>Оценки фильма {film_title}:</b>\n\n"
+            
+            # Кто оценил
+            if ratings_info['rated']:
+                text += "✅ <b>Оценили:</b>\n"
+                for uid, rating in ratings_info['rated']:
+                    try:
+                        member = bot.get_chat_member(chat_id, uid)
+                        name = f"@{member.user.username}" if member.user.username else member.user.first_name
+                    except:
+                        name = f"Пользователь {uid}"
+                    text += f"• {name} — {rating}/10\n"
+                text += "\n"
+            
+            # Кто не оценил
+            if ratings_info['not_rated']:
+                text += "⏳ <b>Не оценили:</b>\n"
+                for uid in ratings_info['not_rated']:
+                    try:
+                        member = bot.get_chat_member(chat_id, uid)
+                        name = f"@{member.user.username}" if member.user.username else member.user.first_name
+                    except:
+                        name = f"Пользователь {uid}"
+                    text += f"• {name}\n"
+                text += "\n"
+            
+            # Средняя оценка
+            if ratings_info['avg_rating']:
+                avg_str = f"{ratings_info['avg_rating']:.1f}"
+                text += f"📊 <b>Средняя оценка:</b> {avg_str}/10\n\n"
+            
+            # Кнопки
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🔃 Изменить оценку", callback_data=f"change_rating:{kp_id}"))
+            if ratings_info['not_rated']:
+                markup.add(InlineKeyboardButton("✅ Оценить", callback_data=f"rate_film:{kp_id}"))
+            
+            bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+            bot.answer_callback_query(call.id, "Информация об оценках")
+            return
+        
+        # Если пользователь еще не оценил, отправляем стандартное сообщение об оценке
         user_mention = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
         rating_text = (
             f"🎬 {user_mention}, фильм <b>{film_title}</b> отмечен как просмотренный!\n\n"
@@ -12451,12 +12565,23 @@ def schedule_film_callback(call):
             else:
                 markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket_to_plan:{plan_id}"))
         
-        # Кнопки "Интересные факты" и "Оценить" (50/50)
+        # Получаем информацию об оценках для текущего пользователя
+        ratings_info = get_ratings_info(chat_id, film_id, user_id)
+        
+        # Кнопки "Интересные факты" и "Оценить"/"Изменить оценку" (50/50)
         if kp_id:
-            markup.row(
-                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
-            )
+            if ratings_info['current_user_rated']:
+                # Пользователь уже оценил - показываем "Изменить оценку"
+                markup.row(
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                    InlineKeyboardButton("🔃 Изменить оценку", callback_data=f"change_rating:{kp_id}")
+                )
+            else:
+                # Пользователь еще не оценил - показываем "Оценить"
+                markup.row(
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                    InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+                )
         
         # Отправляем описание
         msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
