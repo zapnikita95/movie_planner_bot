@@ -1569,6 +1569,34 @@ def handle_reaction(reaction):
                 logger.warning(f"[REACTION] Ошибка при обработке реакции: {e}")
     
     if not link:
+        # Пытаемся получить сообщение и найти ссылку в его тексте
+        try:
+            # Пробуем получить сообщение через forward_message
+            forwarded = bot.forward_message(chat_id, chat_id, message_id)
+            if forwarded:
+                if forwarded.text:
+                    # Ищем ссылку на Кинопоиск в тексте сообщения
+                    link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', forwarded.text)
+                    if link_match:
+                        link = link_match.group(1)
+                        logger.info(f"[REACTION] Найдена ссылка в тексте сообщения: {link}")
+                        # Сохраняем в bot_messages для будущих реакций
+                        bot_messages[message_id] = link
+                elif forwarded.caption:
+                    # Ищем ссылку в подписи к фото
+                    link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', forwarded.caption)
+                    if link_match:
+                        link = link_match.group(1)
+                        logger.info(f"[REACTION] Найдена ссылка в подписи к фото: {link}")
+                        bot_messages[message_id] = link
+        except Exception as e:
+            logger.warning(f"[REACTION] Ошибка при получении сообщения через forward_message: {e}")
+            # Если forward_message не работает, пробуем найти в БД по message_id
+            # Но это сложно, так как message_id не сохраняется в БД
+            # Поэтому просто логируем
+            logger.info(f"[REACTION] Не удалось получить сообщение для message_id={message_id}")
+    
+    if not link:
         logger.info(f"[REACTION] Нет link для message_id={message_id}, chat_id={chat_id}. Возможно, реакция на сообщение пользователя с фильмом.")
         return
     
