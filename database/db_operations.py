@@ -134,10 +134,6 @@ def get_watched_emojis(chat_id):
 
 
 def get_watched_custom_emoji_ids(chat_id):
-
-
-def get_watched_custom_emoji_ids(chat_id):
-
     """Возвращает список ID кастомных эмодзи для отметки просмотренных для конкретного чата"""
 
     with db_lock:
