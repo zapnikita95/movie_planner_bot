@@ -5564,6 +5564,24 @@ def handle_ticket_upload(message):
     # del user_ticket_state[user_id]  # Удаляй только по команде "готово" или кнопке
 
 
+# ==================== ОБРАБОТКА КОМАНДЫ "ГОТОВО" ДЛЯ ЗАВЕРШЕНИЯ ЗАГРУЗКИ БИЛЕТОВ ====================
+@bot.message_handler(func=lambda m: m.text and m.text.lower().strip() == 'готово' and m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'upload_ticket', priority=20)
+def ticket_done(message):
+    """Обработка команды 'готово' для завершения загрузки билетов"""
+    user_id = message.from_user.id
+    state = user_ticket_state.get(user_id, {})
+    title = state.get('film_title', 'фильм')
+    dt = state.get('plan_dt', '')
+    
+    logger.info(f"[TICKET DONE] Пользователь {user_id} завершил загрузку билетов для сеанса: {title} — {dt}")
+    
+    bot.reply_to(message, f"✅ Все билеты прикреплены к сеансу:\n\n<b>{title}</b> — {dt}\n\nПриятного просмотра! 🎬", parse_mode='HTML')
+    
+    if user_id in user_ticket_state:
+        del user_ticket_state[user_id]
+        logger.info(f"[TICKET DONE] Состояние пользователя {user_id} очищено")
+
+
 # Обработка новых ссылок (должен быть последним, чтобы не перехватывать команды)
 @bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities, priority=1)
 def handle_message(message):
