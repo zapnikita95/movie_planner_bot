@@ -2650,6 +2650,23 @@ def main_file_handler(message):
             handle_ticket_upload_internal(message, state)
             return
         
+        if step == 'waiting_ticket_file':
+            # Пользователь выбрал сеанс и загружает билет
+            plan_id = state.get('plan_id')
+            if plan_id:
+                file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+                # Сохраняем билет в БД
+                with db_lock:
+                    cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (file_id, plan_id))
+                    conn.commit()
+                logger.info(f"[TICKET FILE] Билет сохранен в БД для plan_id={plan_id}, file_id={file_id}")
+                bot.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿")
+                # Очищаем состояние пользователя, завершаем цикл работы с билетами
+                if user_id in user_ticket_state:
+                    del user_ticket_state[user_id]
+                logger.info(f"[TICKET FILE] Состояние пользователя {user_id} очищено после сохранения билета")
+                return
+        
         if step != 'upload_ticket':
             # Сохраняем file_id для последующей обработки
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
@@ -5936,7 +5953,7 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
     with db_lock:
         cursor.execute('''
             SELECT p.id, m.title, p.plan_datetime, 
-                   (SELECT COUNT(*) FROM tickets WHERE plan_id = p.id) as ticket_count
+                   CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as ticket_count
             FROM plans p
             JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
             WHERE p.chat_id = %s AND p.plan_type = 'cinema'
@@ -5977,12 +5994,12 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
                 dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
             
             date_str = dt.strftime('%d.%m %H:%M')
-            ticket_emoji = "🎟️" if ticket_count > 0 else ""
-            button_text = f"{title} | {date_str} {ticket_emoji}"
+            ticket_emoji = "🎟️ " if ticket_count > 0 else ""
+            button_text = f"{ticket_emoji}{title} | {date_str}"
             
             if len(button_text) > 60:
                 short_title = title[:50] + "..."
-                button_text = f"{short_title} | {date_str} {ticket_emoji}"
+                button_text = f"{ticket_emoji}{short_title} | {date_str}"
             
             callback_data = f"ticket_session:{plan_id}"
             if file_id:
@@ -6069,7 +6086,7 @@ def handle_ticket_file_OLD(message):
                 'plan_id': plan_id,
                 'chat_id': chat_id
             }
-            
+        
             # Проверяем, есть ли время у сеанса
             with db_lock:
                 cursor.execute('SELECT plan_datetime FROM plans WHERE id = %s', (plan_id,))
@@ -6090,7 +6107,7 @@ def handle_ticket_file_OLD(message):
                 # Если время есть, только кнопка указания времени
                 markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
-            
+        
             if not has_time:
                 bot.reply_to(message, 
                             "✅ <b>Билеты успешно добавлены!</b>\n\n"
@@ -7947,26 +7964,33 @@ def ticket_session_callback(call):
     
     # Проверяем, есть ли уже билеты для этого сеанса и есть ли время сеанса
     with db_lock:
-        cursor.execute('SELECT file_id, file_path FROM tickets WHERE plan_id = %s', (plan_id,))
-        ticket_row = cursor.fetchone()
-        # Проверяем наличие времени сеанса
-        cursor.execute('SELECT plan_datetime FROM plans WHERE id = %s', (plan_id,))
+        cursor.execute('SELECT ticket_file_id, plan_datetime FROM plans WHERE id = %s', (plan_id,))
         plan_row = cursor.fetchone()
     
-    logger.info(f"[TICKET SESSION] Билеты в БД: {ticket_row is not None}")
+    ticket_file_id = None
+    if plan_row:
+        if isinstance(plan_row, dict):
+            ticket_file_id = plan_row.get('ticket_file_id')
+            plan_dt = plan_row.get('plan_datetime')
+        else:
+            ticket_file_id = plan_row[0] if len(plan_row) > 0 else None
+            plan_dt = plan_row[1] if len(plan_row) > 1 else None
+    
+    logger.info(f"[TICKET SESSION] Билеты в БД: {ticket_file_id is not None}")
     
     # Проверяем, есть ли время у сеанса
     has_time = False
+    plan_dt = None
     if plan_row:
-        plan_dt = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[0]
+        plan_dt = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else (plan_row[1] if len(plan_row) > 1 else None)
         if plan_dt:
             has_time = True
     
     logger.info(f"[TICKET SESSION] У сеанса есть время: {has_time}")
     
-    if ticket_row and not file_id:
+    if ticket_file_id and not file_id:
         # Показываем существующие билеты
-        existing_file_id = ticket_row.get('file_id') if isinstance(ticket_row, dict) else ticket_row[0]
+        existing_file_id = ticket_file_id
         logger.info(f"[TICKET SESSION] Отправляем существующие билеты, file_id={existing_file_id}")
         if existing_file_id:
             try:
