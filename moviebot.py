@@ -5527,6 +5527,7 @@ def handle_new_session_input(message):
     }
     
     bot.reply_to(message, f"✅ Сеанс запланирован!\n\n<b>{title}</b>\n{plan_dt.strftime('%d.%m.%Y %H:%M')}\n\nПрикрепите фото билетов (можно несколько).", parse_mode='HTML')
+    logger.info(f"[TICKET NEW SESSION HANDLER] Сеанс создан, ожидаем загрузку билетов, plan_id={plan_id}")
 
 
 # ==================== ЗАГРУЗКА БИЛЕТОВ ====================
@@ -5552,14 +5553,15 @@ def handle_ticket_upload(message):
     with db_lock:
         cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (file_id, plan_id))
         conn.commit()
+        logger.info(f"[TICKET UPLOAD HANDLER] Билет сохранен в БД для plan_id={plan_id}")
     
-    title = state.get('film_title', 'Фильм')
+    title = state.get('film_title', 'фильм')
     dt = state.get('plan_dt', '')
     
-    bot.reply_to(message, f"✅ Билет прикреплён к сеансу:\n\n<b>{title}</b> — {dt}", parse_mode='HTML')
+    bot.reply_to(message, f"✅ Билет прикреплён!\n\n<b>{title}</b> — {dt}\n\nМожете отправить ещё билеты или написать 'готово'.", parse_mode='HTML')
     
-    # Если нужно несколько билетов — не удаляем состояние
-    # del user_ticket_state[user_id] — только после "Готово" или команды
+    # Не удаляем состояние — пусть отправляет сколько угодно билетов
+    # del user_ticket_state[user_id]  # Удаляй только по команде "готово" или кнопке
 
 
 # Обработка новых ссылок (должен быть последним, чтобы не перехватывать команды)
