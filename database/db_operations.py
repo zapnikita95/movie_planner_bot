@@ -161,10 +161,6 @@ def get_watched_custom_emoji_ids(chat_id):
 
 
 def is_watched_emoji(reaction_emoji, chat_id):
-
-
-def is_watched_emoji(reaction_emoji, chat_id):
-
     """Проверяет, является ли реакция одним из сохранённых эмодзи для просмотра"""
 
     watched_emojis = get_watched_emoji(chat_id)
@@ -176,10 +172,6 @@ def is_watched_emoji(reaction_emoji, chat_id):
 
 
 def get_user_timezone(user_id):
-
-
-def get_user_timezone(user_id):
-
     """Получает часовой пояс пользователя. Возвращает pytz.timezone объект или None"""
 
     try:
@@ -212,9 +204,6 @@ def get_user_timezone(user_id):
 
 
 
-def parse_session_time(text, user_tz):
-
-
 def get_user_timezone_or_default(user_id):
 
     """Получает часовой пояс пользователя или возвращает часовой пояс по умолчанию (Москва)"""
@@ -230,10 +219,6 @@ def get_user_timezone_or_default(user_id):
 
 
 def set_user_timezone(user_id, timezone_name):
-
-
-def set_user_timezone(user_id, timezone_name):
-
     """Устанавливает часовой пояс пользователя. timezone_name: 'Moscow' или 'Serbia'"""
 
     try:
@@ -264,9 +249,6 @@ def set_user_timezone(user_id, timezone_name):
 
         return False
 
-
-
-def detect_timezone_from_message(message_date_utc):
 
 
 def get_watched_reactions(chat_id):
@@ -308,10 +290,6 @@ def get_watched_reactions(chat_id):
 # Статистика
 
 def log_request(user_id, username, command_or_action, chat_id=None):
-
-
-def log_request(user_id, username, command_or_action, chat_id=None):
-
     """Логирует запрос пользователя в БД"""
 
     try:
@@ -378,8 +356,5 @@ def log_request(user_id, username, command_or_action, chat_id=None):
 
             pass
 
-
-
-def print_daily_stats():
 
 
