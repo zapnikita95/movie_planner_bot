@@ -11448,14 +11448,20 @@ if IS_PRODUCTION:
     if webhook_base_url:
         webhook_url = webhook_base_url + '/webhook'
         allowed_updates = [
-            "message", "edited_message", "callback_query",
-            "message_reaction", "message_reaction_count",
-            "chat_member", "my_chat_member",
-            "web_app_data"  # Ключевое для работы Web App!
+            "message",
+            "edited_message",
+            "callback_query",
+            "message_reaction",
+            "message_reaction_count",
+            "chat_member",
+            "my_chat_member",
+            "web_app_data"  # ОБЯЗАТЕЛЬНО для работы Web App!
         ]
+        logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
         try:
             bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
             logger.info(f"Webhook успешно установлен: {webhook_url}")
+            logger.info(f"allowed_updates включает: {', '.join(allowed_updates)}")
         except Exception as e:
             logger.error(f"ОШИБКА при set_webhook: {e}")
     else:
