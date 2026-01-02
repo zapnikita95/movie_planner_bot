@@ -2624,6 +2624,82 @@ def premiere_detail_handler(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_add:"))
+def premiere_add_to_db(call):
+    """Добавляет премьеру в базу"""
+    try:
+        bot.answer_callback_query(call.id)
+        kp_id = call.data.split(":")[1]
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Проверяем, есть ли фильм уже в базе
+        with db_lock:
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            existing = cursor.fetchone()
+        
+        if existing:
+            # Фильм уже есть - просто показываем маленькое уведомление
+            title = existing.get('title') if isinstance(existing, dict) else existing[1]
+            bot.answer_callback_query(call.id, f"ℹ️ Фильм '{title}' уже есть в базе", show_alert=False)
+            return
+        
+        # Добавляем в базу через существующую функцию
+        if add_and_announce(link, chat_id):
+            bot.answer_callback_query(call.id, "✅ Фильм добавлен в базу!")
+            # Удаляем сообщение с премьерой
+            try:
+                bot.delete_message(chat_id, message_id)
+            except Exception as e:
+                logger.warning(f"[PREMIERE ADD] Не удалось удалить сообщение: {e}")
+        else:
+            bot.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+    except Exception as e:
+        logger.error(f"[PREMIERE ADD] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_movie:"))
+def add_movie_from_random(call):
+    """Добавляет фильм из рандома по кинопоиску в базу"""
+    try:
+        bot.answer_callback_query(call.id)
+        kp_id = call.data.split(":")[1]
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Проверяем, есть ли фильм уже в базе
+        with db_lock:
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            existing = cursor.fetchone()
+        
+        if existing:
+            # Фильм уже есть - просто показываем маленькое уведомление
+            title = existing.get('title') if isinstance(existing, dict) else existing[1]
+            bot.answer_callback_query(call.id, f"ℹ️ Фильм '{title}' уже есть в базе", show_alert=False)
+            return
+        
+        # Добавляем в базу через существующую функцию
+        if add_and_announce(link, chat_id):
+            bot.answer_callback_query(call.id, "✅ Фильм добавлен в базу!")
+            # Удаляем сообщение с результатом рандома
+            try:
+                bot.delete_message(chat_id, message_id)
+            except Exception as e:
+                logger.warning(f"[RANDOM ADD] Не удалось удалить сообщение: {e}")
+        else:
+            bot.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+    except Exception as e:
+        logger.error(f"[RANDOM ADD] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 # Новая функция для поиска фильмов через API
 def search_films(query, page=1):
     """Поиск фильмов через Kinopoisk API"""
