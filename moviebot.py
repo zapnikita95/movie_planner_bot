@@ -1360,7 +1360,7 @@ def get_facts(kp_id):
             data = response.json()
             facts = data.get('items', [])
             if facts:
-                # Разделяем факты на FACTS и BLOOPERS
+                # Разделяем факты на Факты и Ошибки
                 facts_list = []
                 bloopers_list = []
                 
@@ -1377,15 +1377,15 @@ def get_facts(kp_id):
                 
                 text = "🤔 <b>Интересные факты о фильме:</b>\n\n"
                 
-                # Сначала FACTS
+                # Сначала Факты
                 if facts_list:
                     for fact_type, fact_text in facts_list[:3]:  # Максимум 3 факта
-                        text += f"• <b>{fact_type}:</b> {fact_text}\n\n"
+                        text += f"• <b>Факты:</b> {fact_text}\n\n"
                 
-                # Потом BLOOPERS
+                # Потом Ошибки
                 if bloopers_list:
                     for fact_type, fact_text in bloopers_list[:3]:  # Максимум 3 блупера
-                        text += f"• <b>{fact_type}:</b> {fact_text}\n\n"
+                        text += f"• <b>Ошибки:</b> {fact_text}\n\n"
                 
                 return text if (facts_list or bloopers_list) else None
             else:
@@ -1428,19 +1428,75 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                                 else:
                                     watched_episodes.add((w_row[0], w_row[1]))
                 
+                from datetime import datetime as dt
+                now = dt.now()
+                
+                # Получаем информацию о выходе серий
+                next_episode = None
+                next_episode_date = None
+                is_airing = False
+                
+                for season in seasons:
+                    episodes = season.get('episodes', [])
+                    for ep in episodes:
+                        release_str = ep.get('releaseDate', '')
+                        if release_str and release_str != '—':
+                            try:
+                                # Пробуем разные форматы даты
+                                release_date = None
+                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                    try:
+                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                        break
+                                    except:
+                                        continue
+                                
+                                if release_date and release_date > now:
+                                    if not next_episode_date or release_date < next_episode_date:
+                                        next_episode_date = release_date
+                                        next_episode = {
+                                            'season': season.get('number', ''),
+                                            'episode': ep.get('episodeNumber', ''),
+                                            'date': release_date
+                                        }
+                                        is_airing = True
+                            except:
+                                pass
+                
+                # Подсчитываем просмотренные сезоны
+                season_stats = {}
+                for season in seasons:
+                    number = season.get('number', '')
+                    episodes = season.get('episodes', [])
+                    watched_in_season = sum(1 for ep in episodes if (number, str(ep.get('episodeNumber', ''))) in watched_episodes)
+                    total_in_season = len(episodes)
+                    season_stats[number] = {'watched': watched_in_season, 'total': total_in_season}
+                
                 text = "📺 <b>Сезоны сериала:</b>\n\n"
                 for season in seasons:
                     number = season.get('number', '')
                     episodes = season.get('episodes', [])
-                    text += f"<b>Сезон {number}:</b>\n"
-                    for ep in episodes[:10]:  # Первые 10 эпизодов каждого сезона
-                        ep_num = ep.get('episodeNumber', '')
-                        release = ep.get('releaseDate', '—')
-                        watched_mark = "✅" if (number, ep_num) in watched_episodes else ""
-                        text += f"{watched_mark} Эпизод {ep_num} — {release}\n"
-                    if len(episodes) > 10:
-                        text += f"... и ещё {len(episodes) - 10} эпизодов\n"
-                    text += "\n"
+                    stats = season_stats.get(number, {'watched': 0, 'total': len(episodes)})
+                    
+                    # Определяем статус сезона
+                    if stats['watched'] == stats['total'] and stats['total'] > 0:
+                        status = "✅ Просмотрен полностью"
+                    elif stats['watched'] > 0:
+                        status = f"⏳ Просмотрено {stats['watched']}/{stats['total']}"
+                    else:
+                        status = "⬜ Не просмотрен"
+                    
+                    text += f"<b>Сезон {number}</b> ({stats['total']} серий) — {status}\n"
+                
+                text += "\n"
+                
+                # Информация о выходе серий
+                if is_airing and next_episode:
+                    text += f"🟢 <b>Сериал выходит сейчас</b>\n"
+                    text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n\n"
+                else:
+                    text += f"🔴 <b>Сериал не выходит</b>\n\n"
+                
                 return text
             else:
                 return None
@@ -1473,19 +1529,75 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                                     else:
                                         watched_episodes.add((w_row[0], w_row[1]))
                     
+                    from datetime import datetime as dt
+                    now = dt.now()
+                    
+                    # Получаем информацию о выходе серий
+                    next_episode = None
+                    next_episode_date = None
+                    is_airing = False
+                    
+                    for season in seasons:
+                        episodes = season.get('episodes', [])
+                        for ep in episodes:
+                            release_str = ep.get('releaseDate', '')
+                            if release_str and release_str != '—':
+                                try:
+                                    # Пробуем разные форматы даты
+                                    release_date = None
+                                    for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                        try:
+                                            release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                            break
+                                        except:
+                                            continue
+                                    
+                                    if release_date and release_date > now:
+                                        if not next_episode_date or release_date < next_episode_date:
+                                            next_episode_date = release_date
+                                            next_episode = {
+                                                'season': season.get('number', ''),
+                                                'episode': ep.get('episodeNumber', ''),
+                                                'date': release_date
+                                            }
+                                            is_airing = True
+                                except:
+                                    pass
+                    
+                    # Подсчитываем просмотренные сезоны
+                    season_stats = {}
+                    for season in seasons:
+                        number = season.get('number', '')
+                        episodes = season.get('episodes', [])
+                        watched_in_season = sum(1 for ep in episodes if (number, str(ep.get('episodeNumber', ''))) in watched_episodes)
+                        total_in_season = len(episodes)
+                        season_stats[number] = {'watched': watched_in_season, 'total': total_in_season}
+                    
                     text = "📺 <b>Сезоны сериала:</b>\n\n"
                     for season in seasons:
                         number = season.get('number', '')
                         episodes = season.get('episodes', [])
-                        text += f"<b>Сезон {number}:</b>\n"
-                        for ep in episodes[:10]:  # Первые 10 эпизодов каждого сезона
-                            ep_num = ep.get('episodeNumber', '')
-                            release = ep.get('releaseDate', '—')
-                            watched_mark = "✅" if (number, ep_num) in watched_episodes else ""
-                            text += f"{watched_mark} Эпизод {ep_num} — {release}\n"
-                        if len(episodes) > 10:
-                            text += f"... и ещё {len(episodes) - 10} эпизодов\n"
-                        text += "\n"
+                        stats = season_stats.get(number, {'watched': 0, 'total': len(episodes)})
+                        
+                        # Определяем статус сезона
+                        if stats['watched'] == stats['total'] and stats['total'] > 0:
+                            status = "✅ Просмотрен полностью"
+                        elif stats['watched'] > 0:
+                            status = f"⏳ Просмотрено {stats['watched']}/{stats['total']}"
+                        else:
+                            status = "⬜ Не просмотрен"
+                        
+                        text += f"<b>Сезон {number}</b> ({stats['total']} серий) — {status}\n"
+                    
+                    text += "\n"
+                    
+                    # Информация о выходе серий
+                    if is_airing and next_episode:
+                        text += f"🟢 <b>Сериал выходит сейчас</b>\n"
+                        text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n\n"
+                    else:
+                        text += f"🔴 <b>Сериал не выходит</b>\n\n"
+                    
                     return text
                 else:
                     return None
@@ -1856,7 +1968,7 @@ def add_and_announce(link, chat_id):
 # /start — приветственное сообщение
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    logger.info(f"[HANDLER] /start вызван от {message.from_user.id}, chat_type={message.chat.type}")
+    logger.info(f"[HANDLER] /start вызван от {message.from_user.id}, chat_type={message.chat.type}, text='{message.text}'")
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/start', message.chat.id)
     logger.info(f"Команда /start от пользователя {message.from_user.id}")
@@ -5526,6 +5638,86 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
             else:
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
                 title = row.get('title') if isinstance(row, dict) else row[1]
+                is_series = row.get('is_series') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0)
+            
+            # Для сериалов: находим следующую непросмотренную серию
+            episode_info = None
+            if is_series:
+                # Получаем информацию о просмотренных сериях
+                cursor.execute('''
+                    SELECT season_number, episode_number 
+                    FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                    ORDER BY season_number DESC, episode_number DESC
+                    LIMIT 1
+                ''', (chat_id, film_id, user_id))
+                last_watched = cursor.fetchone()
+                
+                if last_watched:
+                    last_season = last_watched.get('season_number') if isinstance(last_watched, dict) else last_watched[0]
+                    last_episode = last_watched.get('episode_number') if isinstance(last_watched, dict) else last_watched[1]
+                    
+                    # Получаем сезоны из API
+                    seasons_data = get_seasons_data(kp_id)
+                    if seasons_data:
+                        # Ищем следующую непросмотренную серию
+                        found_next = False
+                        for season in seasons_data:
+                            season_num = season.get('number', '')
+                            episodes = season.get('episodes', [])
+                            
+                            for ep in episodes:
+                                ep_num = ep.get('episodeNumber', '')
+                                
+                                # Сравниваем сезоны и эпизоды
+                                if (int(season_num) > int(last_season)) or (int(season_num) == int(last_season) and int(ep_num) > int(last_episode)):
+                                    # Проверяем, не просмотрен ли уже этот эпизод
+                                    cursor.execute('''
+                                        SELECT watched FROM series_tracking 
+                                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                                        AND season_number = %s AND episode_number = %s AND watched = TRUE
+                                    ''', (chat_id, film_id, user_id, season_num, ep_num))
+                                    already_watched = cursor.fetchone()
+                                    
+                                    if not already_watched:
+                                        episode_info = {
+                                            'season': season_num,
+                                            'episode': ep_num,
+                                            'release_date': ep.get('releaseDate', '—')
+                                        }
+                                        found_next = True
+                                        break
+                            
+                            if found_next:
+                                break
+                
+                # Если не нашли следующую серию, берем первую непросмотренную
+                if not episode_info:
+                    seasons_data = get_seasons_data(kp_id)
+                    if seasons_data:
+                        for season in seasons_data:
+                            season_num = season.get('number', '')
+                            episodes = season.get('episodes', [])
+                            
+                            for ep in episodes:
+                                ep_num = ep.get('episodeNumber', '')
+                                cursor.execute('''
+                                    SELECT watched FROM series_tracking 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                                    AND season_number = %s AND episode_number = %s AND watched = TRUE
+                                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                                already_watched = cursor.fetchone()
+                                
+                                if not already_watched:
+                                    episode_info = {
+                                        'season': season_num,
+                                        'episode': ep_num,
+                                        'release_date': ep.get('releaseDate', '—')
+                                    }
+                                    break
+                            
+                            if episode_info:
+                                break
             
             plan_utc = plan_dt.astimezone(pytz.utc)
             cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)',
@@ -5549,8 +5741,12 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     markup = InlineKeyboardMarkup()
                     markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
         
-        bot.send_message(chat_id, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на {plan_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}", 
-                        parse_mode='HTML', reply_markup=markup)
+        plan_message = f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b>"
+        if episode_info:
+            plan_message += f" — Сезон {episode_info['season']}, Эпизод {episode_info['episode']}"
+        plan_message += f" на {plan_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}"
+        
+        bot.send_message(chat_id, plan_message, parse_mode='HTML', reply_markup=markup)
         
         # Если планируем дома, показываем где посмотреть
         if plan_type == 'home' and kp_id:
@@ -5583,7 +5779,10 @@ def plan_handler(message):
         user_id = message.from_user.id
         chat_id = message.chat.id
         original_text = message.text or ''
-        text = original_text.lower().replace('/plan', '').strip()
+        # Убираем /plan и возможный @botname из текста
+        text = original_text.lower()
+        # Удаляем команду /plan и возможный @botname
+        text = re.sub(r'/plan(@\w+)?\s*', '', text, flags=re.IGNORECASE).strip()
         
         logger.info(f"[PLAN] ===== НАЧАЛО ОБРАБОТКИ /plan =====")
         logger.info(f"[PLAN] user_id={user_id}, chat_id={chat_id}")
@@ -5666,6 +5865,14 @@ def plan_handler(message):
             link = link_match.group(1) if link_match else None
             if link:
                 logger.info(f"[PLAN] Найдена ссылка в тексте команды: {link}")
+        
+        # Если ссылка найдена в тексте команды, извлекаем оставшийся текст для plan_type и day_or_date
+        if link and original_text:
+            # Удаляем /plan и ссылку из текста
+            remaining_text = original_text.replace('/plan', '').replace(link, '').strip().lower()
+            if remaining_text:
+                text = remaining_text
+                logger.info(f"[PLAN] Оставшийся текст после извлечения ссылки: {text}")
         
         # Ищем ID кинопоиска (например, "/plan 484791 дома в воскресенье")
         kp_id = None
@@ -6541,12 +6748,38 @@ def series_track_callback(call):
             bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сезонах", show_alert=True)
             return
         
-        # Показываем меню выбора сезона
+        # Показываем меню выбора сезона с отметками статуса
         markup = InlineKeyboardMarkup(row_width=1)
         for season in seasons_data:
             season_num = season.get('number', '')
-            episodes_count = len(season.get('episodes', []))
-            markup.add(InlineKeyboardButton(f"Сезон {season_num} ({episodes_count} эп.)", callback_data=f"series_season:{kp_id}:{season_num}"))
+            episodes = season.get('episodes', [])
+            episodes_count = len(episodes)
+            
+            # Проверяем статус сезона
+            watched_count = 0
+            for ep in episodes:
+                ep_num = ep.get('episodeNumber', '')
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                watched_row = cursor.fetchone()
+                if watched_row:
+                    watched_count += 1
+            
+            # Определяем статус
+            if watched_count == episodes_count and episodes_count > 0:
+                status_emoji = "✅"
+            elif watched_count > 0:
+                status_emoji = "⏳"
+            else:
+                status_emoji = "⬜"
+            
+            button_text = f"{status_emoji} Сезон {season_num} ({episodes_count} эп.)"
+            if watched_count > 0 and watched_count < episodes_count:
+                button_text += f" [{watched_count}/{episodes_count}]"
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_season:{kp_id}:{season_num}"))
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{kp_id}"))
         
         bot.edit_message_text(
@@ -6618,6 +6851,25 @@ def series_season_callback(call):
             text += f"... и ещё {len(episodes) - 20} эпизодов\n\n"
         text += "Нажмите на эпизод, чтобы отметить как просмотренный"
         
+        # Добавляем кнопку "Все просмотрены"
+        # Проверяем, все ли эпизоды просмотрены
+        all_watched = True
+        for ep in episodes:
+            ep_num = ep.get('episodeNumber', '')
+            cursor.execute('''
+                SELECT watched FROM series_tracking 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                AND season_number = %s AND episode_number = %s
+            ''', (chat_id, film_id, user_id, season_num, ep_num))
+            watched_row = cursor.fetchone()
+            is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+            if not is_watched:
+                all_watched = False
+                break
+        
+        if not all_watched:
+            markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
+        
         markup.add(InlineKeyboardButton("◀️ Назад к сезонам", callback_data=f"series_track:{kp_id}"))
         
         bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -6671,11 +6923,75 @@ def series_episode_callback(call):
             status = "✅ отмечен как просмотренный" if is_watched else "⬜ снята отметка о просмотре"
             bot.answer_callback_query(call.id, status)
             
-            # Обновляем список эпизодов
+            # Обновляем список эпизодов (визуально обновляем чекбоксы)
             call.data = f"series_season:{kp_id}:{season_num}"
             series_season_callback(call)
     except Exception as e:
         logger.error(f"[SERIES EPISODE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
+def series_season_all_callback(call):
+    """Обработчик для отметки всех эпизодов сезона как просмотренных"""
+    try:
+        parts = call.data.split(":")
+        kp_id = parts[1]
+        season_num = parts[2]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем film_id
+        with db_lock:
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            row = cursor.fetchone()
+            if not row:
+                bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
+                return
+            
+            film_id = row.get('id') if isinstance(row, dict) else row[0]
+        
+        # Получаем эпизоды сезона
+        seasons_data = get_seasons_data(kp_id)
+        season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
+        if not season:
+            bot.answer_callback_query(call.id, "❌ Сезон не найден", show_alert=True)
+            return
+        
+        episodes = season.get('episodes', [])
+        
+        # Отмечаем все эпизоды как просмотренные
+        marked_count = 0
+        with db_lock:
+            for ep in episodes:
+                ep_num = ep.get('episodeNumber', '')
+                # Проверяем, не просмотрен ли уже
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                already_watched = cursor.fetchone()
+                
+                if not already_watched:
+                    cursor.execute('''
+                        INSERT INTO series_tracking (chat_id, film_id, kp_id, user_id, season_number, episode_number, watched, watched_date)
+                        VALUES (%s, %s, %s, %s, %s, %s, TRUE, NOW())
+                        ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number)
+                        DO UPDATE SET watched = TRUE, watched_date = NOW()
+                    ''', (chat_id, film_id, kp_id, user_id, season_num, ep_num))
+                    marked_count += 1
+            conn.commit()
+        
+        bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
+        
+        # Обновляем список эпизодов
+        call.data = f"series_season:{kp_id}:{season_num}"
+        series_season_callback(call)
+    except Exception as e:
+        logger.error(f"[SERIES SEASON ALL] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
@@ -10047,10 +10363,21 @@ def webhook():
                 # Проверяем, есть ли обработчик для этой команды
                 command = update.message.text.split()[0] if update.message.text else None
                 logger.info(f"[WEBHOOK] Команда для обработки: {command}")
+                
+                # Если команда содержит @botname, убираем его для правильной обработки
+                if '@' in command:
+                    command_base = command.split('@')[0]
+                    logger.info(f"[WEBHOOK] Команда с @botname, базовая команда: {command_base}")
+                    # Обновляем текст сообщения, убирая @botname
+                    update.message.text = update.message.text.replace(command, command_base, 1)
+                    logger.info(f"[WEBHOOK] Обновленный текст сообщения: {update.message.text}")
         
         logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates")
-        bot.process_new_updates([update])
-        logger.info(f"[WEBHOOK] bot.process_new_updates завершен")
+        try:
+            bot.process_new_updates([update])
+            logger.info(f"[WEBHOOK] bot.process_new_updates завершен успешно")
+        except Exception as e:
+            logger.error(f"[WEBHOOK] Ошибка в bot.process_new_updates: {e}", exc_info=True)
         return ''
     else:
         abort(403)
