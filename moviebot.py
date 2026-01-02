@@ -6676,7 +6676,7 @@ def ticket_session_callback(call):
         # Если file_id не передан, но билеты есть в БД, отправляем их
         logger.info(f"[TICKET SESSION] file_id не найден, проверяем билеты в БД")
         if ticket_row:
-            existing_file_id = ticket_row[0] if isinstance(ticket_row, dict) else ticket_row[0]
+            existing_file_id = ticket_row.get('file_id') if isinstance(ticket_row, dict) else ticket_row[0]
             logger.info(f"[TICKET SESSION] Найдены билеты в БД, file_id={existing_file_id}")
             if existing_file_id:
                 try:
