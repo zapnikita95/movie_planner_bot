@@ -3729,28 +3729,28 @@ def handle_delete_movie_internal(message, state):
                 logger.warning(f"[DELETE MOVIE] Фильм с kp_id={kp_id} или id={kp_id} не найден в чате {chat_id}")
                 not_found.append(kp_id)
                 continue
-        
-        film_id = film.get('id') if isinstance(film, dict) else film[0]
-        title = film.get('title') if isinstance(film, dict) else film[1]
-        
-        logger.info(f"[DELETE MOVIE] Найден фильм: id={film_id}, title={title}")
-        
-        # Удаляем связанные данные
-        cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        ratings_deleted = cursor.rowcount
-        logger.info(f"[DELETE MOVIE] Удалено оценок: {ratings_deleted}")
-        
-        cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        plans_deleted = cursor.rowcount
-        logger.info(f"[DELETE MOVIE] Удалено планов: {plans_deleted}")
-        
-        cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        watched_deleted = cursor.rowcount
-        logger.info(f"[DELETE MOVIE] Удалено отметок просмотра: {watched_deleted}")
-        
-        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-        movie_deleted = cursor.rowcount
-        logger.info(f"[DELETE MOVIE] Удалено фильмов: {movie_deleted}")
+            
+            film_id = film.get('id') if isinstance(film, dict) else film[0]
+            title = film.get('title') if isinstance(film, dict) else film[1]
+            
+            logger.info(f"[DELETE MOVIE] Найден фильм: id={film_id}, title={title}")
+            
+            # Удаляем связанные данные
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            ratings_deleted = cursor.rowcount
+            logger.info(f"[DELETE MOVIE] Удалено оценок: {ratings_deleted}")
+            
+            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            plans_deleted = cursor.rowcount
+            logger.info(f"[DELETE MOVIE] Удалено планов: {plans_deleted}")
+            
+            cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            watched_deleted = cursor.rowcount
+            logger.info(f"[DELETE MOVIE] Удалено отметок просмотра: {watched_deleted}")
+            
+            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            movie_deleted = cursor.rowcount
+            logger.info(f"[DELETE MOVIE] Удалено фильмов: {movie_deleted}")
             
             if movie_deleted > 0:
                 deleted_count += 1
