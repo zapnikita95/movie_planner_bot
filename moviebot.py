@@ -5155,10 +5155,13 @@ def handle_edit_ticket_text(message):
             
             # Парсим дату и время
             user_tz = get_user_timezone_or_default(user_id)
+            logger.info(f"[TICKET NEW SESSION] Парсим время из текста: '{text}', tz={user_tz}")
             session_dt = parse_session_time(text, user_tz)
             if not session_dt:
+                logger.warning(f"[TICKET NEW SESSION] Не удалось распарсить время из текста: '{text}'")
                 bot.reply_to(message, "❌ Не удалось распознать время. Попробуйте в формате:\n• 15 января 10:30\n• 17.01 15:20")
                 return
+            logger.info(f"[TICKET NEW SESSION] Время успешно распарсено: {session_dt}")
             
             # Создаем план и добавляем билеты
             # Получаем информацию о фильме
