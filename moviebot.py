@@ -5444,7 +5444,8 @@ def stats_command(message):
             total_plans_row = cursor.fetchone()
             total_plans = total_plans_row.get('count') if isinstance(total_plans_row, dict) else (total_plans_row[0] if total_plans_row else 0)
             
-            # Получаем статистику по оценкам участников (исключаем импортированные)
+            # Получаем статистику по оценкам участников
+            # Для общей статистики исключаем импортированные, но для каждого пользователя считаем ВСЕ его оценки
             cursor.execute('''
                 SELECT 
                     r.user_id,
@@ -5462,6 +5463,26 @@ def stats_command(message):
                 count = row.get('ratings_count') if isinstance(row, dict) else row[1]
                 avg = row.get('avg_rating') if isinstance(row, dict) else row[2]
                 ratings_by_user[user_id] = {'count': count, 'avg': avg}
+            
+            # Для каждого пользователя добавляем импортированные оценки
+            cursor.execute('''
+                SELECT 
+                    r.user_id,
+                    COUNT(*) as imported_count
+                FROM ratings r
+                WHERE r.chat_id = %s AND r.is_imported = TRUE
+                GROUP BY r.user_id
+            ''', (chat_id,))
+            imported_stats = cursor.fetchall()
+            for row in imported_stats:
+                user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                imported_count = row.get('imported_count') if isinstance(row, dict) else row[1]
+                if user_id in ratings_by_user:
+                    # Добавляем импортированные к существующим
+                    ratings_by_user[user_id]['count'] += imported_count
+                else:
+                    # Если у пользователя только импортированные оценки
+                    ratings_by_user[user_id] = {'count': imported_count, 'avg': None}
         
         # Формируем сообщение
         text = "📊 <b>Детальная статистика группы</b>\n\n"
@@ -6370,12 +6391,26 @@ def rate_movie(message):
         return
     
     # Если аргументов нет - показываем список как раньше
-    # Получаем все просмотренные фильмы (максимум 10)
+    # Получаем все просмотренные фильмы (максимум 10), исключая фильмы с только импортированными оценками
     with db_lock:
         cursor.execute('''
             SELECT m.id, m.kp_id, m.title, m.year
             FROM movies m
             WHERE m.chat_id = %s AND m.watched = 1
+            AND NOT (
+                NOT EXISTS (
+                    SELECT 1 FROM ratings r 
+                    WHERE r.chat_id = m.chat_id 
+                    AND r.film_id = m.id 
+                    AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                )
+                AND EXISTS (
+                    SELECT 1 FROM ratings r 
+                    WHERE r.chat_id = m.chat_id 
+                    AND r.film_id = m.id 
+                    AND r.is_imported = TRUE
+                )
+            )
             ORDER BY m.title
             LIMIT 10
         ''', (chat_id,))
