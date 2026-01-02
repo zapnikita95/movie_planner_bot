@@ -2209,41 +2209,12 @@ def handle_web_app_data(message):
             bot.reply_to(message, "❌ Команда не указана")
             return
         
-        # Вместо создания fake_message, просто вызываем команду напрямую через bot.process_new_messages
-        # Создаём новое сообщение с командой
-        command_message = telebot.types.Message(
-            message_id=message.message_id,
-            from_user=message.from_user,
-            date=message.date,
-            chat=message.chat,
-            content_type='text',
-            options={},
-            json_string=json.dumps({
-                'message_id': message.message_id,
-                'from': {
-                    'id': message.from_user.id,
-                    'is_bot': False,
-                    'first_name': message.from_user.first_name,
-                    'username': message.from_user.username
-                },
-                'chat': {
-                    'id': message.chat.id,
-                    'type': message.chat.type
-                },
-                'date': message.date,
-                'text': f'/{command}',
-                'entities': [{
-                    'type': 'bot_command',
-                    'offset': 0,
-                    'length': len(f'/{command}')
-                }]
-            })
-        )
-        
-        # Устанавливаем текст команды
+        # Создаём простое сообщение с командой, используя существующее сообщение как основу
+        # Копируем все необходимые атрибуты
+        command_message = message
         command_message.text = f'/{command}'
         
-        logger.info(f"[WEB APP] Вызываем обработчик для команды /{command}")
+        logger.info(f"[WEB APP] Вызываем обработчик для команды /{command}, user_id={message.from_user.id}, chat_id={message.chat.id}")
         
         # Вызываем соответствующий хэндлер напрямую
         if command == 'random':
