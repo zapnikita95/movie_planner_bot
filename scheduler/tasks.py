@@ -8,7 +8,7 @@ import json
 from database.db_connection import get_db_connection, get_db_cursor, db_lock
 from config.settings import PLANS_TZ
 from bot.states import plan_notification_messages
-from database.db_operations import print_daily_stats
+from database.db_operations import print_daily_stats, get_user_timezone_or_default
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()

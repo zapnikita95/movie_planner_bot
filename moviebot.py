@@ -4366,6 +4366,57 @@ def main_text_handler(message):
             handle_edit_ticket_text_internal(message, state)
             return
     
+    # === user_search_state ===
+    if user_id in user_search_state:
+        state = user_search_state[user_id]
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_search_state")
+        
+        # Обработка ответа на /search без запроса
+        if message.reply_to_message and message.reply_to_message.message_id == state.get('message_id'):
+            query = text
+            if query:
+                # Удаляем состояние
+                del user_search_state[user_id]
+                # Вызываем обработчик поиска
+                logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}")
+                films, total_pages = search_films(query, page=1)
+                if not films:
+                    bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+                    return
+                
+                # Формируем сообщение с результатами
+                results_text = f"🔍 Результаты поиска '{query}':\n\n"
+                markup = InlineKeyboardMarkup(row_width=1)
+                
+                for film in films[:10]:  # Показываем максимум 10 результатов на странице
+                    title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                    year = film.get('year') or film.get('releaseYear') or 'N/A'
+                    rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                    kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                    
+                    if kp_id:
+                        button_text = f"{title} ({year})"
+                        if len(button_text) > 50:
+                            button_text = button_text[:47] + "..."
+                        results_text += f"• <b>{title}</b> ({year})"
+                        if rating != 'N/A':
+                            results_text += f" ⭐ {rating}"
+                        results_text += "\n"
+                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}"))
+                
+                # Добавляем пагинацию, если нужно
+                if total_pages > 1:
+                    pagination_row = []
+                    query_encoded = query.replace(' ', '_')
+                    pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+                    if total_pages > 1:
+                        pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                    markup.row(*pagination_row)
+                
+                bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов")
+            return
+    
     # === user_import_state ===
     if user_id in user_import_state:
         state = user_import_state[user_id]
@@ -4899,7 +4950,8 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
         
         with db_lock:
             # Получаем все непросмотренные фильмы, отсортированные по алфавиту
-            cursor.execute('SELECT id, kp_id, title, year, genres, link FROM movies WHERE chat_id = %s AND watched = 0 ORDER BY title', (chat_id,))
+            # Исключаем импортированные фильмы (is_imported = TRUE)
+            cursor.execute('SELECT id, kp_id, title, year, genres, link FROM movies WHERE chat_id = %s AND watched = 0 AND (is_imported IS NULL OR is_imported = FALSE) ORDER BY title', (chat_id,))
             rows = cursor.fetchall()
         
         if not rows:
@@ -5576,7 +5628,9 @@ def handle_search(message):
         
         query = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
         if not query:
-            bot.reply_to(message, "❌ Укажите запрос, например: /search джон уик")
+            reply_msg = bot.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик")
+            # Сохраняем состояние для получения запроса
+            user_search_state[message.from_user.id] = {'chat_id': message.chat.id, 'message_id': reply_msg.message_id}
             return
         
         logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
@@ -5629,6 +5683,309 @@ def handle_search(message):
         logger.error(f"❌ Ошибка в /search: {e}", exc_info=True)
         try:
             bot.reply_to(message, "Произошла ошибка при обработке команды /search")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
+def handle_add_film_callback(call):
+    """Обработчик показа описания фильма из результатов поиска"""
+    try:
+        kp_id = call.data.split("_")[-1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[SEARCH] Показ описания фильма kp_id={kp_id} от пользователя {user_id}")
+        
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # Проверяем, добавлен ли уже фильм в базу
+        film_in_db = False
+        film_id = None
+        with db_lock:
+            cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            existing = cursor.fetchone()
+            if existing:
+                film_in_db = True
+                film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+        
+        # Получаем информацию о фильме
+        info = extract_movie_info(link)
+        if not info:
+            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Формируем описание фильма
+        title = info.get('title', 'Без названия')
+        year = info.get('year', '—')
+        genres = info.get('genres', '—')
+        director = info.get('director', '—')
+        actors = info.get('actors', '—')
+        description = info.get('description', 'Нет описания')
+        
+        # Ограничиваем длину описания
+        if len(description) > 500:
+            description = description[:497] + "..."
+        
+        text = f"🎬 <b>{title}</b> ({year})\n\n"
+        if genres != '—':
+            text += f"📂 <b>Жанры:</b> {genres}\n"
+        if director != '—':
+            text += f"🎥 <b>Режиссёр:</b> {director}\n"
+        if actors != '—':
+            text += f"👥 <b>Актёры:</b> {actors}\n"
+        text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
+        text += f"<a href='{link}'>Кинопоиск</a>"
+        
+        # Создаем кнопки
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        if film_in_db:
+            # Фильм уже в базе - показываем кнопки планирования, фактов и оценки
+            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+            
+            # Получаем информацию об оценках для текущего пользователя
+            from database.db_operations import get_ratings_info
+            ratings_info = get_ratings_info(chat_id, film_id, user_id)
+            
+            if ratings_info['current_user_rated']:
+                # Пользователь уже оценил - показываем "Изменить оценку"
+                markup.row(
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                    InlineKeyboardButton("🔃 Изменить оценку", callback_data=f"change_rating:{kp_id}")
+                )
+            else:
+                # Пользователь еще не оценил - показываем "Оценить"
+                markup.row(
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                    InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+                )
+        else:
+            # Фильм не в базе - показываем кнопку добавления
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
+        
+        # Отправляем описание
+        try:
+            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+            # Сохраняем ссылку в bot_messages для обработки реакций
+            bot_messages[msg.message_id] = link
+            bot.answer_callback_query(call.id, "Описание показано")
+            logger.info(f"[SEARCH] Описание фильма {title} показано пользователю {user_id}, film_in_db={film_in_db}")
+        except Exception as e:
+            logger.error(f"[SEARCH] Ошибка отправки описания: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка отправки описания", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SEARCH] Ошибка в handle_add_film_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.message_handler(commands=['schedule'])
+def show_schedule(message):
+    logger.info(f"[SCHEDULE COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+    logger.info(f"[SCHEDULE COMMAND] /schedule вызван от {message.from_user.id}")
+    logger.info(f"[SCHEDULE COMMAND] message.text={message.text}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/schedule', message.chat.id)
+        logger.info(f"Команда /schedule от пользователя {message.from_user.id}")
+        
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        # Используем часовой пояс пользователя для отображения
+        user_tz = get_user_timezone_or_default(user_id)
+        
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s
+                ORDER BY p.plan_type DESC, p.plan_datetime ASC
+            ''', (chat_id,))
+            rows = cursor.fetchall()
+        
+        if not rows:
+            bot.reply_to(message, "📅 Нет запланированных просмотров.")
+            return
+        
+        # Разделяем на секции: сначала кино, потом дома
+        cinema_plans = []
+        home_plans = []
+        
+        for row in rows:
+            if isinstance(row, dict):
+                plan_id = row.get('id')
+                title = row.get('title')
+                kp_id = row.get('kp_id')
+                link = row.get('link')
+                plan_dt_value = row.get('plan_datetime')
+                plan_type = row.get('plan_type')
+                has_ticket = row.get('has_ticket', 0)
+            else:
+                plan_id = row[0]
+                title = row[1]
+                kp_id = row[2]
+                link = row[3]
+                plan_dt_value = row[4]
+                plan_type = row[5]
+                has_ticket = row[6] if len(row) > 6 else 0
+            
+            # Преобразуем TIMESTAMP в дату в часовом поясе пользователя
+            try:
+                if isinstance(plan_dt_value, datetime):
+                    if plan_dt_value.tzinfo is None:
+                        plan_dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                    else:
+                        plan_dt = plan_dt_value.astimezone(user_tz)
+                elif isinstance(plan_dt_value, str):
+                    plan_dt_iso = plan_dt_value
+                    if plan_dt_iso.endswith('Z'):
+                        plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(user_tz)
+                    elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
+                        plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(user_tz)
+                    else:
+                        plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(user_tz)
+                else:
+                    logger.warning(f"Неожиданный тип plan_datetime: {type(plan_dt_value)}")
+                    continue
+                
+                date_str = plan_dt.strftime('%d.%m %H:%M')
+                plan_info = (plan_id, title, kp_id, link, date_str, has_ticket)
+                
+                if plan_type == 'cinema':
+                    cinema_plans.append(plan_info)
+                else:  # home
+                    home_plans.append(plan_info)
+            except Exception as e:
+                logger.error(f"Ошибка при обработке даты {plan_dt_value}: {e}")
+                if isinstance(plan_dt_value, str):
+                    date_str = plan_dt_value[:10] if len(plan_dt_value) >= 10 else plan_dt_value
+                else:
+                    date_str = datetime.now(user_tz).strftime('%d.%m')
+                plan_info = (plan_id, title, kp_id, link, date_str, has_ticket)
+                
+                if plan_type == 'cinema':
+                    cinema_plans.append(plan_info)
+                else:  # home
+                    home_plans.append(plan_info)
+        
+        # Отправляем два отдельных сообщения: одно для кино, другое для дома
+        
+        # Сообщение 1: Премьеры в кино
+        if cinema_plans:
+            cinema_markup = InlineKeyboardMarkup(row_width=1)
+            for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
+                ticket_emoji = "🎟️ " if has_ticket else ""
+                button_text = f"{ticket_emoji}{title} | {date_str}"
+                
+                if len(button_text) > 30:
+                    button_text = button_text[:27] + "..."
+                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"plan_detail:{plan_id}"))
+            
+            cinema_text = "🎬 <b>Премьеры в кино:</b>\n\n"
+            for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
+                ticket_emoji = "🎟️ " if has_ticket else ""
+                cinema_text += f"{ticket_emoji}<b>{title}</b> — {date_str}\n"
+            
+            bot.reply_to(message, cinema_text, reply_markup=cinema_markup, parse_mode='HTML')
+        
+        # Сообщение 2: Просмотры дома
+        if home_plans:
+            home_markup = InlineKeyboardMarkup(row_width=1)
+            for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
+                button_text = f"{title} | {date_str}"
+                if len(button_text) > 30:
+                    button_text = button_text[:27] + "..."
+                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"plan_detail:{plan_id}"))
+            
+            home_text = "🏠 <b>Просмотры дома:</b>\n\n"
+            for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
+                home_text += f"<b>{title}</b> — {date_str}\n"
+            
+            if cinema_plans:
+                bot.send_message(chat_id, home_text, reply_markup=home_markup, parse_mode='HTML')
+            else:
+                bot.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
+        
+        logger.info(f"✅ Ответ на /schedule отправлен пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /schedule: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /schedule")
+        except:
+            pass
+
+@bot.message_handler(commands=['random'])
+def random_start(message):
+    try:
+        logger.info(f"[RANDOM] ===== START: user_id={message.from_user.id}, chat_id={message.chat.id}")
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(user_id, username, '/random', chat_id)
+        
+        # Инициализируем состояние
+        user_random_state[user_id] = {
+            'step': 'mode',
+            'mode': None,  # 'my_votes', 'group_votes', или None (обычный режим)
+            'periods': [],
+            'genres': [],
+            'directors': [],
+            'actors': []
+        }
+        
+        # Шаг 0: Выбор режима
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+        markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+        
+        # Проверяем, есть ли у пользователя больше 50 оценок (включая импортированные из КП)
+        with db_lock:
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            user_ratings_count = cursor.fetchone()
+            user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+            
+            if user_ratings >= 50:
+                markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+            else:
+                # Заблокированная кнопка
+                markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
+            
+            # Проверяем условие для group_votes: больше 20 групповых оценок, где хотя бы 20 фильмов оценили все участники группы
+            # Сначала получаем общее количество уникальных пользователей в группе (исключаем импортированные оценки)
+            cursor.execute('SELECT COUNT(DISTINCT user_id) FROM ratings WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id,))
+            total_users_row = cursor.fetchone()
+            total_users = total_users_row.get('count') if isinstance(total_users_row, dict) else (total_users_row[0] if total_users_row else 0)
+            
+            group_votes_available = False
+            if total_users > 0:
+                # Находим фильмы, которые оценили все участники группы (исключаем импортированные оценки)
+                cursor.execute('''
+                    SELECT film_id, COUNT(DISTINCT user_id) as user_count
+                    FROM ratings 
+                    WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                    GROUP BY film_id 
+                    HAVING COUNT(DISTINCT user_id) = %s
+                ''', (chat_id, total_users))
+                group_rated_films = cursor.fetchall()
+                
+                if len(group_rated_films) >= 20:
+                    group_votes_available = True
+            
+            if group_votes_available:
+                markup.add(InlineKeyboardButton("👥 По групповым оценкам (9-10)", callback_data="rand_mode:group_votes"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
+        
+        bot.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /random: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /random")
         except:
             pass
 
