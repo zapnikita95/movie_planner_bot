@@ -327,6 +327,15 @@ except Exception as e:
 # Ключевой блок: очистка дубликатов и создание уникального индекса
 try:
     # Удаляем старые индексы и constraints, если они существуют
+    # Добавляем поле is_series, если его нет
+    try:
+        cursor.execute('ALTER TABLE movies ADD COLUMN IF NOT EXISTS is_series INTEGER DEFAULT 0')
+        conn.commit()
+        logger.info("Поле is_series добавлено в таблицу movies")
+    except Exception as e:
+        logger.debug(f"Поле is_series уже существует или ошибка: {e}")
+        conn.rollback()
+    
     try:
         cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_key')
         cursor.execute('DROP INDEX IF EXISTS movies_chat_id_kp_id_idx')
@@ -1014,6 +1023,7 @@ def extract_movie_info(link):
         logger.warning(f"Не распознана ссылка: {link}")
         return None
     kp_id = match.group(2)
+    is_series = match.group(1) == 'series'  # Определяем, сериал это или фильм
 
     headers = {
         'X-API-KEY': KP_TOKEN,
@@ -1088,11 +1098,142 @@ def extract_movie_info(link):
             'genres': genres,
             'director': director,
             'actors': actors,
-            'description': description
+            'description': description,
+            'is_series': is_series
         }
     except Exception as e:
         logger.error(f"Ошибка получения данных для {kp_id}: {e}")
         return None
+
+# ==================== ФУНКЦИИ API KINOPOISK ====================
+
+def get_facts(kp_id):
+    """Получает интересные факты о фильме"""
+    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/facts"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            facts = data.get('items', [])
+            if facts:
+                text = "🤔 <b>Интересные факты о фильме:</b>\n\n"
+                for fact in facts[:5]:  # Топ-5 фактов
+                    fact_text = fact.get('text', '').strip()
+                    fact_type = fact.get('type', '')
+                    if fact_text:
+                        text += f"• <b>{fact_type}:</b> {fact_text}\n\n"
+                return text
+            else:
+                return None
+        else:
+            logger.error(f"Ошибка get_facts: {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"Ошибка get_facts: {e}", exc_info=True)
+        return None
+
+def get_seasons(kp_id):
+    """Получает информацию о сезонах сериала"""
+    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/{kp_id}/seasons"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            seasons = data.get('items', [])
+            if seasons:
+                text = "📺 <b>Сезоны сериала:</b>\n\n"
+                for season in seasons:
+                    number = season.get('number', '')
+                    episodes = season.get('episodes', [])
+                    text += f"<b>Сезон {number}:</b>\n"
+                    for ep in episodes[:10]:  # Первые 10 эпизодов каждого сезона
+                        ep_num = ep.get('episodeNumber', '')
+                        release = ep.get('releaseDate', '—')
+                        text += f"• Эпизод {ep_num} — {release}\n"
+                    if len(episodes) > 10:
+                        text += f"... и ещё {len(episodes) - 10} эпизодов\n"
+                    text += "\n"
+                return text
+            else:
+                return None
+        else:
+            logger.error(f"Ошибка get_seasons: {response.status_code}")
+            return None
+    except Exception as e:
+        logger.error(f"Ошибка get_seasons: {e}", exc_info=True)
+        return None
+
+def get_similars(kp_id):
+    """Получает похожие фильмы"""
+    headers = {'X-API-KEY': KP_TOKEN}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/similars"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            similars = data.get('items', [])
+            return [(s.get('filmId'), s.get('nameRu') or s.get('nameEn', 'Без названия')) for s in similars[:5]]
+        return []
+    except Exception as e:
+        logger.error(f"Ошибка get_similars: {e}", exc_info=True)
+        return []
+
+def get_sequels(kp_id):
+    """Получает продолжения и приквелы"""
+    headers = {'X-API-KEY': KP_TOKEN}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/sequels_and_prequels"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            sequels = data.get('items', [])
+            return [(s.get('filmId'), s.get('nameRu') or s.get('nameEn', 'Без названия')) for s in sequels[:5]]
+        return []
+    except Exception as e:
+        logger.error(f"Ошибка get_sequels: {e}", exc_info=True)
+        return []
+
+def get_external_sources(kp_id):
+    """Получает внешние источники для просмотра фильма"""
+    headers = {'X-API-KEY': KP_TOKEN}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/external_sources"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            sources = data.get('items', [])
+            links = []
+            for s in sources:
+                if s.get('url'):
+                    platform = s.get('platform', 'Смотреть')
+                    links.append((platform, s['url']))
+            return links
+        return []
+    except Exception as e:
+        logger.error(f"Ошибка get_external_sources: {e}", exc_info=True)
+        return []
+
+def get_premieres(year=None, month=None):
+    """Получает список премьер на указанный месяц"""
+    if not year:
+        year = datetime.now().year
+    if not month:
+        month = datetime.now().month
+    
+    headers = {'X-API-KEY': KP_TOKEN}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/premieres?year={year}&month={month}"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            premieres = data.get('releases', [])
+            return premieres
+        return []
+    except Exception as e:
+        logger.error(f"Ошибка get_premieres: {e}", exc_info=True)
+        return []
 
 # Новая функция для поиска фильмов через API
 def search_films(query, page=1):
@@ -1246,10 +1387,10 @@ def add_and_announce(link, chat_id):
                 duplicate_data = None
                 try:
                     cursor.execute('''
-                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                    ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
+                    ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors'], 1 if info.get('is_series') else 0))
                     conn.commit()
                     inserted = True
                     logger.info(f"Фильм успешно добавлен в БД: kp_id={info['kp_id']}, title={info['title']}")
@@ -1320,6 +1461,13 @@ def add_and_announce(link, chat_id):
             # Только если сообщение отправлено успешно и фильм добавлен в БД — сохраняем для реакций
             bot_messages[msg.message_id] = link
             logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}, message_id={msg.message_id}")
+            
+            # Если это сериал, показываем сезоны
+            if info.get('is_series'):
+                seasons_text = get_seasons(info['kp_id'])
+                if seasons_text:
+                    bot.send_message(chat_id, seasons_text, parse_mode='HTML')
+            
             return True
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке сообщения: {e}", exc_info=True)
@@ -1648,6 +1796,11 @@ def handle_reaction(reaction):
         
         conn.commit()
         logger.info(f"[REACTION] Фильм {film_title} отмечен просмотренным пользователем {user_id}")
+        
+        # Получаем kp_id для получения фактов
+        cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        kp_row = cursor.fetchone()
+        kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
     
     # Отправляем персональное сообщение пользователю с упоминанием
     user_name = reaction.user.first_name if reaction.user else "Вы"
@@ -1656,6 +1809,12 @@ def handle_reaction(reaction):
         f"🎬 {user_mention}, фильм <b>{film_title}</b> отмечен как просмотренный!\n\n"
         f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.",
         parse_mode='HTML')
+    
+    # Получаем и отправляем факты о фильме
+    if kp_id:
+        facts = get_facts(kp_id)
+        if facts:
+            bot.send_message(chat_id, facts, parse_mode='HTML')
     
     # Сохраняем связь message_id -> film_id для обработки оценки
     rating_messages[msg.message_id] = film_id
@@ -2420,8 +2579,35 @@ def handle_rating_internal(message, rating):
                 avg_row = cursor.fetchone()
                 avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
                 
+                # Получаем kp_id для похожих фильмов
+                cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                kp_row = cursor.fetchone()
+                kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
+                
                 avg_str = f"{avg:.1f}" if avg else "—"
                 bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                
+                # Если средняя оценка > 9, показываем похожие фильмы и продолжения
+                if avg and avg > 9 and kp_id:
+                    similars = get_similars(kp_id)
+                    sequels = get_sequels(kp_id)
+                    
+                    if similars or sequels:
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        if similars:
+                            for fid, name in similars:
+                                if len(name) > 50:
+                                    name = name[:47] + "..."
+                                markup.add(InlineKeyboardButton(f"🎬 {name}", callback_data=f"add_similar:{fid}"))
+                        
+                        if sequels:
+                            for fid, name in sequels:
+                                if len(name) > 50:
+                                    name = name[:47] + "..."
+                                markup.add(InlineKeyboardButton(f"▶️ {name}", callback_data=f"add_similar:{fid}"))
+                        
+                        if markup.keyboard:
+                            bot.send_message(chat_id, "🎥 Фильм высоко оценён! Посмотреть похожие или продолжения?", reply_markup=markup)
         except Exception as e:
             logger.error(f"Ошибка при сохранении оценки: {e}", exc_info=True)
             bot.reply_to(message, "Произошла ошибка при сохранении оценки. Попробуйте позже.")
@@ -4737,8 +4923,9 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
             if not row:
                 info = extract_movie_info(link)
                 if info:
-                    cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link', 
-                                 (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                    is_series_val = 1 if info.get('is_series') else 0
+                    cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series', 
+                                 (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors'], is_series_val))
                     conn.commit()
                     cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
                     row = cursor.fetchone()
@@ -4779,6 +4966,15 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         
         bot.send_message(chat_id, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на {plan_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}", 
                         parse_mode='HTML', reply_markup=markup)
+        
+        # Если планируем дома, показываем где посмотреть
+        if plan_type == 'home' and kp_id:
+            sources = get_external_sources(kp_id)
+            if sources:
+                sources_markup = InlineKeyboardMarkup(row_width=2)
+                for platform, url in sources[:6]:  # Максимум 6 кнопок
+                    sources_markup.add(InlineKeyboardButton(platform, url=url))
+                bot.send_message(chat_id, f"📺 Где посмотреть <b>{title}</b>?", reply_markup=sources_markup, parse_mode='HTML')
         
         # Планируем уведомление на время плана
         scheduler.add_job(
@@ -7801,6 +7997,51 @@ def handle_add_film_callback(call):
             bot.answer_callback_query(call.id, "❌ Ошибка отправки описания", show_alert=True)
     except Exception as e:
         logger.error(f"[SEARCH] Ошибка в handle_add_film_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_similar:"))
+def handle_add_similar_callback(call):
+    """Обработчик добавления похожего фильма"""
+    try:
+        kp_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        
+        link = f"https://kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        if info:
+            text = f"<b>{info['title']}</b> ({info['year']})\n"
+            text += f"Режиссёр: {info['director']}\n"
+            text += f"Жанры: {info['genres']}\n\n"
+            text += f"{info['description'][:300]}..." if len(info['description']) > 300 else info['description']
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_db:{kp_id}"))
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.error(f"[ADD SIMILAR] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_to_db:"))
+def handle_add_to_db_callback(call):
+    """Обработчик добавления фильма в базу из похожих/продолжений"""
+    try:
+        kp_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        
+        link = f"https://kinopoisk.ru/film/{kp_id}/"
+        if add_and_announce(link, chat_id):
+            bot.answer_callback_query(call.id, "✅ Фильм добавлен!")
+        else:
+            bot.answer_callback_query(call.id, "❌ Ошибка добавления", show_alert=True)
+    except Exception as e:
+        logger.error(f"[ADD TO DB] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
