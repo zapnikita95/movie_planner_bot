@@ -1,0 +1,311 @@
+"""
+Подключение к базе данных и инициализация таблиц
+"""
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import threading
+import logging
+from config.settings import DATABASE_URL, DEFAULT_WATCHED_EMOJIS
+
+logger = logging.getLogger(__name__)
+
+# Глобальные переменные для подключения
+_conn = None
+_cursor = None
+db_lock = threading.Lock()
+
+def get_db_connection():
+    """Получить подключение к БД"""
+    global _conn
+    if _conn is None:
+        if not DATABASE_URL:
+            raise ValueError("DATABASE_URL не задан!")
+        try:
+            _conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+            logger.info("Подключение к PostgreSQL успешно!")
+        except Exception as e:
+            logger.error(f"Не удалось подключиться к БД: {e}")
+            raise
+    return _conn
+
+def get_db_cursor():
+    """Получить курсор БД"""
+    global _cursor
+    if _cursor is None:
+        conn = get_db_connection()
+        _cursor = conn.cursor()
+    return _cursor
+
+def init_database():
+    """Инициализация базы данных: создание таблиц и миграции"""
+    conn = get_db_connection()
+    cursor = get_db_cursor()
+    
+    # Создание таблиц
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS movies (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            link TEXT,
+            kp_id TEXT,
+            title TEXT,
+            year INTEGER,
+            genres TEXT,
+            description TEXT,
+            director TEXT,
+            actors TEXT,
+            watched INTEGER DEFAULT 0,
+            rating REAL DEFAULT NULL,
+            is_series INTEGER DEFAULT 0,
+            UNIQUE(chat_id, kp_id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            key TEXT,
+            value TEXT,
+            UNIQUE(chat_id, key)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS plans (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            film_id INTEGER,
+            plan_type TEXT,
+            plan_datetime TIMESTAMP WITH TIME ZONE,
+            user_id BIGINT,
+            ticket_file_id TEXT,
+            notification_sent BOOLEAN DEFAULT FALSE
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS stats (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
+            username TEXT,
+            command_or_action TEXT,
+            timestamp TEXT,
+            chat_id BIGINT
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS series_tracking (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            film_id INTEGER,
+            kp_id TEXT,
+            user_id BIGINT,
+            season_number INTEGER,
+            episode_number INTEGER,
+            watched BOOLEAN DEFAULT FALSE,
+            watched_date TIMESTAMP WITH TIME ZONE,
+            UNIQUE(chat_id, film_id, user_id, season_number, episode_number)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS series_subscriptions (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            film_id INTEGER,
+            kp_id TEXT,
+            user_id BIGINT,
+            subscribed BOOLEAN DEFAULT TRUE,
+            UNIQUE(chat_id, film_id, user_id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS ratings (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            film_id INTEGER,
+            user_id BIGINT,
+            rating INTEGER CHECK(rating BETWEEN 1 AND 10),
+            is_imported BOOLEAN DEFAULT FALSE,
+            UNIQUE(chat_id, film_id, user_id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS watched_movies (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            film_id INTEGER,
+            user_id BIGINT,
+            watched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(chat_id, film_id, user_id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cinema_votes (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT,
+            film_id INTEGER,
+            deadline TEXT,
+            message_id BIGINT,
+            yes_users TEXT DEFAULT '[]',
+            no_users TEXT DEFAULT '[]'
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS tickets (
+            id SERIAL PRIMARY KEY,
+            plan_id INTEGER REFERENCES plans(id) ON DELETE CASCADE,
+            chat_id BIGINT,
+            file_id TEXT,
+            file_path TEXT,
+            session_datetime TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS premiere_reminders (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT NOT NULL,
+            user_id BIGINT NOT NULL,
+            kp_id TEXT NOT NULL,
+            film_title TEXT,
+            premiere_date DATE,
+            reminder_sent BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(chat_id, user_id, kp_id)
+        )
+    ''')
+    
+    # Дефолтные настройки
+    cursor.execute('INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING', 
+                   (-1, "watched_emoji", DEFAULT_WATCHED_EMOJIS))
+    
+    # Миграции
+    try:
+        cursor.execute('ALTER TABLE movies ALTER COLUMN chat_id TYPE BIGINT')
+        logger.info("Миграция: movies.chat_id изменён на BIGINT")
+    except Exception as e:
+        logger.debug(f"Миграция movies.chat_id: {e}")
+    
+    try:
+        cursor.execute('ALTER TABLE settings ALTER COLUMN chat_id TYPE BIGINT')
+        logger.info("Миграция: settings.chat_id изменён на BIGINT")
+    except Exception as e:
+        logger.debug(f"Миграция settings.chat_id: {e}")
+    
+    try:
+        cursor.execute('ALTER TABLE plans ALTER COLUMN chat_id TYPE BIGINT')
+        cursor.execute('ALTER TABLE plans ALTER COLUMN user_id TYPE BIGINT')
+        logger.info("Миграция: plans.chat_id и plans.user_id изменены на BIGINT")
+    except Exception as e:
+        logger.debug(f"Миграция plans: {e}")
+    
+    try:
+        cursor.execute('ALTER TABLE stats ALTER COLUMN chat_id TYPE BIGINT')
+        cursor.execute('ALTER TABLE stats ALTER COLUMN user_id TYPE BIGINT')
+        logger.info("Миграция: stats.chat_id и stats.user_id изменены на BIGINT")
+    except Exception as e:
+        logger.debug(f"Миграция stats: {e}")
+    
+    try:
+        cursor.execute('ALTER TABLE ratings ALTER COLUMN chat_id TYPE BIGINT')
+        cursor.execute('ALTER TABLE ratings ALTER COLUMN user_id TYPE BIGINT')
+        logger.info("Миграция: ratings.chat_id и ratings.user_id изменены на BIGINT")
+    except Exception as e:
+        logger.debug(f"Миграция ratings: {e}")
+    
+    try:
+        cursor.execute('ALTER TABLE ratings ADD COLUMN IF NOT EXISTS is_imported BOOLEAN DEFAULT FALSE')
+        logger.info("Миграция: поле is_imported добавлено в ratings")
+    except Exception as e:
+        logger.debug(f"Миграция ratings.is_imported: {e}")
+    
+    try:
+        cursor.execute('ALTER TABLE cinema_votes ALTER COLUMN chat_id TYPE BIGINT')
+        cursor.execute('ALTER TABLE cinema_votes ALTER COLUMN message_id TYPE BIGINT')
+        logger.info("Миграция: cinema_votes.chat_id и cinema_votes.message_id изменены на BIGINT")
+    except Exception as e:
+        logger.debug(f"Миграция cinema_votes: {e}")
+    
+    try:
+        cursor.execute("ALTER TABLE plans ALTER COLUMN plan_datetime TYPE TIMESTAMP WITH TIME ZONE USING plan_datetime::TIMESTAMP WITH TIME ZONE")
+        logger.info("Миграция: plan_datetime в plans изменён на TIMESTAMP WITH TIME ZONE")
+        conn.commit()
+    except Exception as e:
+        logger.debug(f"Миграция plan_datetime: {e}")
+        try:
+            conn.rollback()
+        except:
+            pass
+    
+    try:
+        cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS ticket_file_id TEXT")
+        conn.commit()
+        logger.info("Поле ticket_file_id добавлено в таблицу plans")
+    except Exception as e:
+        logger.warning(f"Ошибка при добавлении поля ticket_file_id: {e}")
+        conn.rollback()
+    
+    try:
+        cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS notification_sent BOOLEAN DEFAULT FALSE")
+        conn.commit()
+        logger.info("Поле notification_sent добавлено в таблицу plans")
+    except Exception as e:
+        logger.warning(f"Ошибка при добавлении поля notification_sent: {e}")
+        conn.rollback()
+    
+    try:
+        cursor.execute('ALTER TABLE movies ADD COLUMN IF NOT EXISTS is_series INTEGER DEFAULT 0')
+        conn.commit()
+        logger.info("Поле is_series добавлено в таблицу movies")
+    except Exception as e:
+        logger.debug(f"Поле is_series уже существует или ошибка: {e}")
+        conn.rollback()
+    
+    # Удаление дубликатов
+    try:
+        cursor.execute("""
+            DELETE FROM movies a USING (
+                SELECT MIN(id) as keep_id, chat_id, kp_id
+                FROM movies 
+                GROUP BY chat_id, kp_id 
+                HAVING COUNT(*) > 1
+            ) b
+            WHERE a.chat_id = b.chat_id AND a.kp_id = b.kp_id AND a.id != b.keep_id
+        """)
+        deleted_count = cursor.rowcount
+        if deleted_count > 0:
+            logger.info(f"Удалено дубликатов фильмов: {deleted_count}")
+        conn.commit()
+    except Exception as e:
+        logger.warning(f"Ошибка при удалении дубликатов: {e}")
+        conn.rollback()
+    
+    # Создание индексов
+    try:
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_movies_chat_id ON movies (chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_movies_link ON movies (link)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_ratings_chat_id ON ratings (chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_ratings_film_id ON ratings (film_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_plans_chat_id ON plans (chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_plans_film_id ON plans (film_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_plans_datetime ON plans (plan_datetime)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_settings_chat_id ON settings (chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_stats_chat_id ON stats (chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_chat_id ON cinema_votes (chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_film_id ON cinema_votes (film_id)')
+        logger.info("Индексы созданы")
+    except Exception as e:
+        logger.error(f"Ошибка при создании индексов: {e}", exc_info=True)
+        conn.rollback()
+    
+    conn.commit()
+    logger.info("База данных инициализирована")
+
