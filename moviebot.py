@@ -1711,23 +1711,47 @@ def get_premieres(year=None, month=None):
     if not month:
         month = datetime.now().month
     
-    headers = {'X-API-KEY': KP_TOKEN}
-    url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/premieres?year={year}&month={month}"
-    try:
-        logger.info(f"[PREMIERES] Запрос к API: {url}")
-        response = requests.get(url, headers=headers, timeout=15)
-        logger.info(f"[PREMIERES] Статус ответа: {response.status_code}")
-        if response.status_code == 200:
-            data = response.json()
-            premieres = data.get('releases', [])
-            logger.info(f"[PREMIERES] Получено премьер: {len(premieres)}")
-            return premieres
-        else:
-            logger.error(f"Ошибка get_premieres: {response.status_code}, response: {response.text[:200]}")
-            return []
-    except Exception as e:
-        logger.error(f"Ошибка get_premieres: {e}", exc_info=True)
-        return []
+    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+    
+    # Пробуем разные варианты URL
+    # Возможно, API изменился и нужно использовать другой формат
+    urls_to_try = [
+        # Стандартный формат
+        f"https://kinopoiskapiunofficial.tech/api/v2.1/films/premieres?year={year}&month={month}",
+        # Альтернативный формат с префиксом
+        f"https://kinopoiskapiunofficial.tech/api/v2.1/films/premieres?year={year}&month={month:02d}",
+        # v2.2
+        f"https://kinopoiskapiunofficial.tech/api/v2.2/films/premieres?year={year}&month={month}",
+    ]
+    
+    for url in urls_to_try:
+        try:
+            logger.info(f"[PREMIERES] Запрос к API: {url}")
+            response = requests.get(url, headers=headers, timeout=15)
+            logger.info(f"[PREMIERES] Статус ответа: {response.status_code}")
+            
+            if response.status_code == 200:
+                data = response.json()
+                # Пробуем разные варианты ключей в ответе
+                premieres = data.get('releases', []) or data.get('items', []) or data.get('premieres', [])
+                if premieres:
+                    logger.info(f"[PREMIERES] Получено премьер: {len(premieres)}")
+                    return premieres
+            elif response.status_code != 400:
+                # Если не 400, пробуем следующий URL
+                logger.warning(f"[PREMIERES] Ошибка {response.status_code} для {url}: {response.text[:200]}")
+                continue
+            else:
+                # 400 ошибка - пробуем следующий URL
+                logger.warning(f"[PREMIERES] Ошибка 400 для {url}: {response.text[:200]}")
+                continue
+        except Exception as e:
+            logger.warning(f"[PREMIERES] Ошибка при запросе {url}: {e}")
+            continue
+    
+    # Если все варианты не сработали
+    logger.error(f"[PREMIERES] Не удалось получить премьеры ни по одному из URL")
+    return []
 
 # Новая функция для поиска фильмов через API
 def search_films(query, page=1):
