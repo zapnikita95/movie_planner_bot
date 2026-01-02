@@ -5808,17 +5808,18 @@ def clean_confirm_execute(message):
             # Удаляем все данные пользователя ТОЛЬКО в этом конкретном чате
             with db_lock:
                 try:
+                    # Сначала получаем plan_id пользователя для удаления билетов
+                    cursor.execute('SELECT id FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    plan_ids = [row.get('id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+                    
+                    # Удаляем билеты пользователя в этом чате (ДО удаления plans)
+                    if plan_ids:
+                        cursor.execute('DELETE FROM tickets WHERE chat_id = %s AND plan_id = ANY(%s)', (chat_id, plan_ids))
+                    
                     # Удаляем оценки пользователя в этом чате
                     cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
                     # Удаляем планы пользователя в этом чате
                     cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-                    # Удаляем билеты пользователя в этом чате (через plans)
-                    cursor.execute('''
-                        DELETE FROM tickets 
-                        WHERE chat_id = %s AND plan_id IN (
-                            SELECT id FROM plans WHERE chat_id = %s AND user_id = %s
-                        )
-                    ''', (chat_id, chat_id, user_id))
                     # Удаляем просмотренные фильмы пользователя в этом чате
                     cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
                     # Удаляем статистику пользователя в этом чате
