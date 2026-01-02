@@ -7046,7 +7046,7 @@ def random_period_handler(call):
                             SELECT COUNT(DISTINCT m.id) 
                             FROM movies m
                             LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL AND m.{condition}
+                            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL AND {condition}
                         """, (chat_id,))
                         count_row = cursor.fetchone()
                         count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
