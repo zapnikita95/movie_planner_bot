@@ -5020,7 +5020,12 @@ def handle_edit_ticket_text(message):
     chat_id = message.chat.id
     text = message.text.strip() if message.text else ""
     
+    logger.info(f"[EDIT/TICKET TEXT] ===== ОБРАБОТЧИК ВЫЗВАН =====")
     logger.info(f"[EDIT/TICKET TEXT] Получено сообщение от {user_id}: '{text}'")
+    logger.info(f"[EDIT/TICKET TEXT] user_id в user_edit_state: {user_id in user_edit_state}")
+    logger.info(f"[EDIT/TICKET TEXT] user_id в user_ticket_state: {user_id in user_ticket_state}")
+    if user_id in user_ticket_state:
+        logger.info(f"[EDIT/TICKET TEXT] Состояние пользователя: {user_ticket_state.get(user_id)}")
     
     # Обработка редактирования оценки
     if user_id in user_edit_state:
