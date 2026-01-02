@@ -5836,6 +5836,129 @@ def handle_add_film_callback(call):
         except:
             pass
 
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_add_film_"))
+def handle_confirm_add_film_callback(call):
+    """Обработчик подтверждения добавления фильма в базу из результатов поиска"""
+    try:
+        kp_id = call.data.split("_")[-1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        message_id = call.message.message_id
+        
+        logger.info(f"[SEARCH] Подтверждение добавления фильма kp_id={kp_id} от пользователя {user_id}")
+        
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # Проверяем, добавлен ли уже
+        with db_lock:
+            cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            existing = cursor.fetchone()
+            if existing:
+                title = existing.get('title') if isinstance(existing, dict) else existing[1]
+                bot.answer_callback_query(call.id, f"Фильм '{title}' уже добавлен!", show_alert=False)
+                # Удаляем сообщение с описанием
+                try:
+                    bot.delete_message(chat_id, message_id)
+                except Exception as e:
+                    logger.warning(f"[SEARCH] Не удалось удалить сообщение: {e}")
+                return
+        
+        # Получаем информацию о фильме для формирования сообщения
+        info = extract_movie_info(link)
+        if not info:
+            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Добавляем фильм в БД
+        inserted = False
+        try:
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
+                ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors'], 1 if info.get('is_series') else 0))
+                conn.commit()
+                inserted = True
+                logger.info(f"[SEARCH] Фильм успешно добавлен в БД: kp_id={info['kp_id']}, title={info['title']}")
+        except Exception as e:
+            logger.error(f"[SEARCH] Ошибка при добавлении фильма в БД: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка добавления в БД", show_alert=True)
+            return
+        
+        if inserted:
+            # Удаляем предыдущее сообщение с описанием
+            try:
+                bot.delete_message(chat_id, message_id)
+            except Exception as e:
+                logger.warning(f"[SEARCH] Не удалось удалить сообщение: {e}")
+            
+            # Формируем и отправляем новое сообщение "Добавлено в базу"
+            text = f"🎬 <b>Добавлено в базу!</b>\n\n"
+            text += f"<b>{info['title']}</b> ({info['year'] or '—'})\n"
+            if info.get('genres') and info['genres'] != '—':
+                text += f"📂 <b>Жанры:</b> {info['genres']}\n"
+            if info.get('director') and info['director'] != '—':
+                text += f"🎥 <b>Режиссёр:</b> {info['director']}\n"
+            if info.get('actors') and info['actors'] != '—':
+                text += f"👥 <b>Актёры:</b> {info['actors']}\n"
+            if info.get('description') and info['description'] != '—':
+                description = info['description']
+                if len(description) > 500:
+                    description = description[:497] + "..."
+                text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
+            text += f"<a href='{link}'>Кинопоиск</a>"
+            
+            # Создаем кнопки
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+            
+            # Получаем информацию об оценках для текущего пользователя
+            cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            film_row = cursor.fetchone()
+            if film_row:
+                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                try:
+                    from database.db_operations import get_ratings_info
+                except ImportError:
+                    def get_ratings_info(chat_id, film_id, user_id):
+                        with db_lock:
+                            cursor.execute("SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)", (chat_id, film_id, user_id))
+                            row = cursor.fetchone()
+                            return {'current_user_rated': row is not None, 'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)}
+                
+                ratings_info = get_ratings_info(chat_id, film_id, user_id)
+                
+                if ratings_info['current_user_rated']:
+                    markup.row(
+                        InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                        InlineKeyboardButton("🔃 Изменить оценку", callback_data=f"change_rating:{kp_id}")
+                    )
+                else:
+                    markup.row(
+                        InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                        InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+                    )
+            
+            # Отправляем новое сообщение
+            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+            # Сохраняем ссылку в bot_messages для обработки реакций
+            if msg and msg.message_id:
+                bot_messages[msg.message_id] = link
+            
+            bot.answer_callback_query(call.id, "✅ Фильм добавлен!")
+            logger.info(f"[SEARCH] Фильм {info['title']} добавлен в базу, сообщение отправлено")
+        else:
+            bot.answer_callback_query(call.id, "❌ Ошибка добавления", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SEARCH] Ошибка в handle_confirm_add_film_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
 @bot.message_handler(commands=['schedule'])
 def show_schedule(message):
     logger.info(f"[SCHEDULE COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
