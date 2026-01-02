@@ -5400,9 +5400,11 @@ def handle_reply_to_bot(message):
             return  # Важно: возвращаемся, чтобы не обрабатывать дальше
 
 # ==================== ОБРАБОТКА СООБЩЕНИЙ С ФИЛЬМОМ + ДАТОЙ В РЕЖИМЕ ДОБАВЛЕНИЯ НОВОГО СЕАНСА ====================
+# Высокий приоритет: обработка ввода нового сеанса (фильм + дата)
 @bot.message_handler(func=lambda m: m.text and m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'waiting_new_session', priority=20)
 def handle_new_session_input(message):
-    logger.info(f"[TICKET NEW SESSION] Обработка ввода нового сеанса от {message.from_user.id}: {message.text}")
+    logger.info(f"[TICKET NEW SESSION HANDLER] ===== ОБРАБОТЧИК ВЫЗВАН =====")
+    logger.info(f"[TICKET NEW SESSION HANDLER] Обработка ввода нового сеанса от {message.from_user.id}: {message.text}")
     
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -5528,11 +5530,21 @@ def handle_new_session_input(message):
 
 
 # ==================== ЗАГРУЗКА БИЛЕТОВ ====================
-@bot.message_handler(content_types=['photo', 'document'], func=lambda m: m.from_user.id in user_ticket_state and user_ticket_state[m.from_user.id]['step'] == 'upload_ticket', priority=20)
+@bot.message_handler(content_types=['photo', 'document'], func=lambda m: m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'upload_ticket', priority=20)
 def handle_ticket_upload(message):
+    logger.info(f"[TICKET UPLOAD HANDLER] ===== ОБРАБОТЧИК ВЫЗВАН =====")
     user_id = message.from_user.id
-    state = user_ticket_state[user_id]
-    plan_id = state['plan_id']
+    state = user_ticket_state.get(user_id, {})
+    plan_id = state.get('plan_id')
+    
+    logger.info(f"[TICKET UPLOAD HANDLER] Пользователь {user_id}, plan_id={plan_id}, state={state}")
+    
+    if not plan_id:
+        logger.error(f"[TICKET UPLOAD HANDLER] plan_id не найден в состоянии")
+        bot.reply_to(message, "❌ Ошибка: план не найден.")
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
+        return
     
     file_id = message.photo[-1].file_id if message.photo else message.document.file_id
     
