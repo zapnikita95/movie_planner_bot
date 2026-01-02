@@ -11295,8 +11295,11 @@ def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         logger.info(f"[WEBHOOK] Размер JSON: {len(json_string)} байт")
-        # Логируем первые 500 символов JSON для отладки
-        logger.info(f"[WEBHOOK] JSON (первые 500 символов): {json_string[:500]}")
+        # Проверяем, есть ли web_app_data в сыром JSON
+        if 'web_app_data' in json_string.lower():
+            logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ В JSON ЕСТЬ 'web_app_data'! ⚠️⚠️⚠️")
+        # Логируем первые 1000 символов JSON для отладки
+        logger.info(f"[WEBHOOK] JSON (первые 1000 символов): {json_string[:1000]}")
         update = telebot.types.Update.de_json(json_string)
         logger.info(f"[WEBHOOK] Тип update: {type(update)}")
         logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
