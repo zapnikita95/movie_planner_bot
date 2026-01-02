@@ -1563,11 +1563,6 @@ def handle_dice_result(message):
     except Exception as e:
         logger.error(f"[RANDOM EVENTS] Ошибка в handle_dice_result: {e}", exc_info=True)
 
-# Добавляем задачи очистки и голосования в scheduler
-scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
-scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
-scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
-
 # Добавляем задачи для случайных событий
 scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri-sun', hour=10, minute=0, timezone=plans_tz, id='check_weekend_schedule')  # каждый день выходных в 10:00
 scheduler.add_job(choose_random_participant, 'cron', day_of_week='mon-sun', hour=12, minute=0, timezone=plans_tz, id='choose_random_participant')  # каждый день в 12:00 (будет проверять 14 дней)
