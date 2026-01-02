@@ -5134,6 +5134,7 @@ def handle_edit_ticket_text(message):
             del user_ticket_state[user_id]
             logger.info(f"[TICKET TIME] Состояние пользователя {user_id} очищено")
         elif step == 'waiting_new_session':
+            logger.info(f"[TICKET TIME] Обрабатываем waiting_new_session, текст='{text}'")
             # Обрабатываем создание нового сеанса с билетами
             file_id = state.get('file_id')
             
@@ -5353,6 +5354,17 @@ def handle_reply_to_bot(message):
 @bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities)
 def handle_message(message):
     logger.info(f"[HANDLER] handle_message вызван для сообщения от {message.from_user.id}")
+    
+    # Пропускаем сообщения, если пользователь работает с билетами или планированием
+    if message.from_user.id in user_ticket_state:
+        state = user_ticket_state.get(message.from_user.id, {})
+        step = state.get('step')
+        logger.info(f"[HANDLER] Пропущено сообщение - пользователь в user_ticket_state, step={step}")
+        return
+    
+    if message.from_user.id in user_plan_state:
+        logger.info(f"[HANDLER] Пропущено сообщение - пользователь в user_plan_state")
+        return
     
     # НЕ пропускаем сообщения - пусть обработчики settings сами решают, обрабатывать ли их
     # Это позволяет handle_settings_emojis корректно обработать ответы на settings
