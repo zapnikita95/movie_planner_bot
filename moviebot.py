@@ -5737,8 +5737,8 @@ def settings_command(message):
         # Сначала показываем меню выбора действия
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("😀 Эмодзи просмотра", callback_data="settings:emoji"))
-        markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
-        markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+        markup.add(InlineKeyboardButton("🕐 Часовой пояс", callback_data="settings:timezone"))
+        markup.add(InlineKeyboardButton("📥 Импорт из КП", callback_data="settings:import"))
         
         sent = bot.send_message(chat_id,
             f"⚙️ <b>Настройки</b>\n\n"
