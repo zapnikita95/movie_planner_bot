@@ -4,12 +4,24 @@
 import logging
 from datetime import datetime, timedelta
 import pytz
+import json
 from database.db_connection import get_db_connection, get_db_cursor, db_lock
 from config.settings import PLANS_TZ
+from bot.states import plan_notification_messages
+from database.db_operations import print_daily_stats
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
+plans_tz = PLANS_TZ  # Для обратной совместимости
+
+# bot будет импортирован из moviebot.py при использовании
+bot = None
+
+def set_bot_instance(bot_instance):
+    """Устанавливает экземпляр бота для использования в задачах"""
+    global bot
+    bot = bot_instance
 
 def hourly_stats():
 
@@ -360,14 +372,7 @@ def check_and_send_plan_notifications():
 
 
 # Настройка периодического вывода статистики
-
-scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
-
-
-
-# Периодическая проверка планов и отправка пропущенных уведомлений (каждые 5 минут)
-
-scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='check_plan_notifications')
+# Вызовы scheduler.add_job должны быть в moviebot.py после импорта модуля
 
 
 
@@ -628,12 +633,7 @@ def resolve_cinema_votes():
 
 
 # Добавляем задачи очистки и голосования в scheduler
-
-scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
-
-scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
-
-scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
+# Вызовы scheduler.add_job должны быть в moviebot.py после импорта модуля
 
 
 

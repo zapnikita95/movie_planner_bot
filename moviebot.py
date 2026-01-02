@@ -97,6 +97,21 @@ except Exception as e:
 scheduler = BackgroundScheduler()
 scheduler.start()
 
+# Устанавливаем экземпляр бота в модуле tasks
+from scheduler.tasks import set_bot_instance, hourly_stats, check_and_send_plan_notifications, clean_home_plans, start_cinema_votes, resolve_cinema_votes
+set_bot_instance(bot)
+
+# Настройка периодического вывода статистики
+scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
+
+# Периодическая проверка планов и отправка пропущенных уведомлений (каждые 5 минут)
+scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='check_plan_notifications')
+
+# Добавляем задачи очистки и голосования в scheduler
+scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
+scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
+scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
+
 # Состояния импортируются из bot.states
 # Для обратной совместимости создаем алиасы
 plans_tz = PLANS_TZ
