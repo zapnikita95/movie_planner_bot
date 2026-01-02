@@ -1192,7 +1192,11 @@ def add_and_announce(link, chat_id):
         text += f"\n<a href='{link}'>Кинопоиск</a>"
         try:
             logger.info(f"[DUPLICATE] Отправляем сообщение о дубликате в чат {chat_id}")
-            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            # Сохраняем ссылку в bot_messages для обработки реакций
+            if msg and msg.message_id:
+                bot_messages[msg.message_id] = link
+                logger.info(f"[DUPLICATE] Ссылка сохранена в bot_messages для message_id={msg.message_id}: {link}")
             logger.info(f"✅ Сообщение отправлено: фильм уже в базе - {existing_title}")
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке сообщения (фильм уже в базе): {e}", exc_info=True)
@@ -1283,7 +1287,11 @@ def add_and_announce(link, chat_id):
         
         try:
             logger.info(f"[DUPLICATE] Отправляем сообщение о дубликате (вторая проверка) в чат {chat_id}")
-            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            # Сохраняем ссылку в bot_messages для обработки реакций
+            if msg and msg.message_id:
+                bot_messages[msg.message_id] = duplicate_data['link']
+                logger.info(f"[DUPLICATE] Ссылка сохранена в bot_messages для message_id={msg.message_id}: {duplicate_data['link']}")
             logger.info(f"✅ Сообщение отправлено: фильм уже в базе - {duplicate_data['title']}")
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке сообщения о дубликате: {e}", exc_info=True)
@@ -1689,7 +1697,989 @@ def handle_reaction(reaction):
     except Exception as e:
         logger.error(f"[REACTION] Ошибка при планировании напоминания: {e}", exc_info=True)
 
-# Обработчик для сохранения сообщений пользователей с ссылками на фильмы
+# ==================== ВНУТРЕННИЕ ФУНКЦИИ ДЛЯ ГЛАВНОГО ХЭНДЛЕРА ====================
+
+def handle_new_session_input_internal(message, state):
+    """Внутренняя функция для обработки ввода нового сеанса"""
+    # Используем существующую логику из handle_new_session_input
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    file_id_from_state = state.get('file_id')
+    
+    # Парсим ссылку или kp_id
+    link = None
+    kp_id = None
+    
+    link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', text)
+    if link_match:
+        link = link_match.group(1)
+        kp_id = link_match.group(3)
+    
+    if not kp_id:
+        id_match = re.search(r'^(\d+)', text)
+        if id_match:
+            kp_id = id_match.group(1)
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+    
+    if not kp_id:
+        bot.reply_to(message, "⚠️ Не найдена ссылка или ID фильма. Формат: ссылка или ID + дата + время")
+        return
+    
+    # Парсим дату и время
+    user_tz = get_user_timezone_or_default(user_id)
+    session_dt = parse_session_time(text, user_tz)
+    if not session_dt:
+        bot.reply_to(message, "⚠️ Не удалось распознать дату и время. Формат: 10.01 15:20 или 10 января 20:30")
+        return
+    
+    movie_info = extract_movie_info(link)
+    if not movie_info:
+        bot.reply_to(message, "Не удалось получить данные о фильме.")
+        return
+    
+    with db_lock:
+        cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+        row = cursor.fetchone()
+        if row:
+            film_id = row['id'] if isinstance(row, dict) else row[0]
+            title = row['title'] if isinstance(row, dict) else row[1]
+        else:
+            cursor.execute('''
+                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                RETURNING id, title
+            ''', (chat_id, link, kp_id, movie_info.get('title'), movie_info.get('year'), 
+                  movie_info.get('genres'), movie_info.get('description'), 
+                  movie_info.get('director'), movie_info.get('actors')))
+            conn.commit()
+            row = cursor.fetchone()
+            film_id = row['id'] if isinstance(row, dict) else row[0]
+            title = row['title'] if isinstance(row, dict) else row[1]
+        
+        plan_utc = session_dt.astimezone(pytz.utc)
+        cursor.execute('''
+            INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id, ticket_file_id)
+            VALUES (%s, %s, 'cinema', %s, %s, %s)
+            RETURNING id
+        ''', (chat_id, film_id, plan_utc, user_id, file_id_from_state))
+        conn.commit()
+        plan_row = cursor.fetchone()
+        plan_id = plan_row['id'] if isinstance(plan_row, dict) else plan_row[0]
+    
+    # Планируем напоминания
+    morning_dt = session_dt.replace(hour=9, minute=0)
+    if morning_dt < datetime.now(user_tz):
+        morning_dt = morning_dt + timedelta(days=1)
+    morning_utc = morning_dt.astimezone(pytz.utc)
+    
+    scheduler.add_job(
+        send_plan_notification,
+        'date',
+        run_date=morning_utc,
+        args=[chat_id, film_id, title, link, 'cinema'],
+        id=f'plan_morning_{chat_id}_{plan_id}_{int(morning_utc.timestamp())}'
+    )
+    
+    if file_id_from_state:
+        ticket_dt = session_dt - timedelta(minutes=10)
+        if ticket_dt > datetime.now(user_tz):
+            ticket_utc = ticket_dt.astimezone(pytz.utc)
+            scheduler.add_job(
+                send_ticket_notification,
+                'date',
+                run_date=ticket_utc,
+                args=[chat_id, plan_id],
+                id=f'ticket_notify_{chat_id}_{plan_id}_{int(ticket_utc.timestamp())}'
+            )
+    
+    # Отправляем ответ пользователю
+    bot.reply_to(message, f"✅ Сеанс запланирован!\n\n<b>{title}</b>\n{session_dt.strftime('%d.%m.%Y %H:%M')}\n\nПрикрепите фото билетов (можно несколько).", parse_mode='HTML')
+    
+    # Переход к загрузке билетов
+    user_ticket_state[user_id] = {
+        'step': 'upload_ticket',
+        'plan_id': plan_id,
+        'film_title': title,
+        'plan_dt': session_dt.strftime('%d.%m %H:%M'),
+        'chat_id': chat_id
+    }
+
+def ticket_done_internal(message, state):
+    """Внутренняя функция для обработки команды 'готово'"""
+    user_id = message.from_user.id
+    title = state.get('film_title', 'фильм')
+    dt = state.get('plan_dt', '')
+    
+    bot.reply_to(message, f"✅ Все билеты прикреплены к сеансу:\n\n<b>{title}</b> — {dt}\n\nПриятного просмотра! 🎬", parse_mode='HTML')
+    
+    if user_id in user_ticket_state:
+        del user_ticket_state[user_id]
+
+def handle_edit_ticket_text_internal(message, state):
+    """Внутренняя функция для обработки времени сеанса"""
+    # Используем существующую логику из handle_edit_ticket_text
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    
+    if state.get('step') == 'waiting_session_time':
+        plan_id = state.get('plan_id')
+        user_tz = get_user_timezone_or_default(user_id)
+        
+        session_dt = parse_session_time(text, user_tz)
+        if not session_dt:
+            bot.reply_to(message, "❌ Не удалось распознать время. Попробуйте в формате:\n• 15 января 10:30\n• 17.01 15:20")
+            return
+        
+        with db_lock:
+            cursor.execute('''
+                SELECT m.title, m.link, p.plan_type
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s
+            ''', (plan_id,))
+            plan_info = cursor.fetchone()
+            
+            session_utc = session_dt.astimezone(pytz.utc)
+            cursor.execute('UPDATE plans SET plan_datetime = %s WHERE id = %s', (session_utc, plan_id))
+            cursor.execute('UPDATE tickets SET session_datetime = %s WHERE plan_id = %s', (session_utc, plan_id))
+            conn.commit()
+        
+        if plan_info:
+            title = plan_info.get('title') if isinstance(plan_info, dict) else plan_info[0]
+            link = plan_info.get('link') if isinstance(plan_info, dict) else plan_info[1]
+            plan_type = plan_info.get('plan_type') if isinstance(plan_info, dict) else plan_info[2]
+            
+            morning_dt = session_dt.replace(hour=9, minute=0)
+            if morning_dt < datetime.now(user_tz):
+                morning_dt = morning_dt + timedelta(days=1)
+            morning_utc = morning_dt.astimezone(pytz.utc)
+            
+            scheduler.add_job(
+                send_plan_notification,
+                'date',
+                run_date=morning_utc,
+                args=[chat_id, plan_info.get('film_id') if isinstance(plan_info, dict) else None, title, link, plan_type],
+                id=f'plan_morning_{chat_id}_{plan_id}_{int(morning_utc.timestamp())}'
+            )
+            
+            tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+            formatted_time = session_dt.strftime('%d.%m %H:%M')
+            bot.reply_to(message, f"✅ <b>Время принято!</b>\n\n🕐 Сеанс: {formatted_time} {tz_name}", parse_mode='HTML')
+            del user_ticket_state[user_id]
+
+def handle_edit_rating_internal(message, state):
+    """Внутренняя функция для обработки редактирования оценки"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    
+    try:
+        rating = int(text)
+        if 1 <= rating <= 10:
+            film_id = state.get('film_id')
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, film_id, user_id, rating))
+                conn.commit()
+            
+            bot.reply_to(message, f"✅ Оценка изменена на {rating}/10")
+            del user_edit_state[user_id]
+        else:
+            bot.reply_to(message, "❌ Оценка должна быть от 1 до 10")
+    except ValueError:
+        bot.reply_to(message, "❌ Введите число от 1 до 10")
+
+def handle_edit_plan_datetime_internal(message, state):
+    """Внутренняя функция для обработки редактирования времени плана"""
+    # Используем существующую логику из handle_edit_plan_datetime
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    plan_id = state.get('plan_id')
+    
+    user_tz = get_user_timezone_or_default(user_id)
+    session_dt = parse_session_time(text, user_tz)
+    if not session_dt:
+        bot.reply_to(message, "❌ Не удалось распознать время. Попробуйте в формате:\n• 15 января 10:30\n• 17.01 15:20")
+        return
+    
+    with db_lock:
+        cursor.execute('UPDATE plans SET plan_datetime = %s WHERE id = %s', (session_dt.astimezone(pytz.utc), plan_id))
+        conn.commit()
+    
+    tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+    formatted_time = session_dt.strftime('%d.%m %H:%M')
+    bot.reply_to(message, f"✅ <b>Время принято!</b>\n\n🕐 Сеанс: {formatted_time} {tz_name}", parse_mode='HTML')
+    del user_edit_state[user_id]
+
+def handle_settings_emojis_internal(message, state):
+    """Внутренняя функция для обработки ответа с эмодзи на /settings"""
+    # Используем существующую логику из handle_settings_emojis
+    user_id = message.from_user.id
+    chat_id = state.get('chat_id') or message.chat.id
+    
+    import re
+    emoji_pattern = re.compile(
+        r'[\U0001F300-\U0001F9FF]|[\U0001F600-\U0001F64F]|[\U0001F680-\U0001F6FF]|[\U00002600-\U000026FF]|[\U00002700-\U000027BF]|[\U0001F900-\U0001F9FF]|[\U0001FA00-\U0001FAFF]|[\U0001F1E0-\U0001F1FF]'
+    )
+    
+    emojis = emoji_pattern.findall(message.text or "")
+    
+    if not emojis:
+        bot.reply_to(message, "⚠️ Не найдено эмодзи в сообщении. Отправьте только эмодзи (можно несколько).")
+        return
+    
+    emojis_str = ''.join(set(emojis))
+    
+    action = state.get('action', 'replace')
+    if action == "add":
+        current_emojis = get_watched_emojis(chat_id)
+        emojis_str = ''.join(current_emojis) + emojis_str
+        seen = set()
+        emojis_str = ''.join(c for c in emojis_str if c not in seen and not seen.add(c))
+        action_text = "добавлены к текущим"
+    else:
+        action_text = "заменены"
+    
+    with db_lock:
+        try:
+            cursor.execute("""
+                INSERT INTO settings (chat_id, key, value) 
+                VALUES (%s, 'watched_emoji', %s) 
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (chat_id, emojis_str))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"[SETTINGS] Ошибка сохранения эмодзи: {e}", exc_info=True)
+            bot.reply_to(message, "❌ Ошибка сохранения. Попробуй позже.")
+            return
+    
+    bot.reply_to(message, f"✅ Реакции {action_text}:\n{emojis_str}")
+    
+    if user_id in user_settings_state:
+        del user_settings_state[user_id]
+
+def get_plan_link_internal(message, state):
+    """Внутренняя функция для получения ссылки на фильм в /plan"""
+    # Используем существующую логику из get_plan_link
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    link = None
+    
+    if message.reply_to_message:
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
+        if link_match:
+            link = link_match.group(0)
+    
+    if not link:
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.text)
+        if link_match:
+            link = link_match.group(0)
+    
+    if not link:
+        id_match = re.search(r'^(\d+)', message.text.strip())
+        if id_match:
+            kp_id = id_match.group(1)
+            with db_lock:
+                cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    link = row.get('link') if isinstance(row, dict) else row[0]
+                else:
+                    link = f"https://kinopoisk.ru/film/{kp_id}"
+    
+    if not link:
+        bot.reply_to(message, "Не нашёл ссылку или ID фильма. Попробуйте снова.")
+        return
+    
+    user_plan_state[user_id]['link'] = link
+    user_plan_state[user_id]['step'] = 2
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
+    markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
+    bot.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
+
+def get_plan_day_or_date_internal(message, state):
+    """Внутренняя функция для получения дня/даты в /plan"""
+    # Используем существующую логику из get_plan_day_or_date
+    user_id = message.from_user.id
+    text = message.text.lower().strip()
+    plan_type = state['type']
+    link = state['link']
+    
+    user_tz = get_user_timezone_or_default(user_id)
+    now = datetime.now(user_tz)
+    plan_dt = None
+    
+    target_weekday = None
+    for phrase, wd in days_full.items():
+        if phrase in text:
+            target_weekday = wd
+            break
+    
+    if target_weekday is not None:
+        current_wd = now.weekday()
+        delta = (target_weekday - current_wd + 7) % 7
+        if delta == 0:
+            delta = 7
+        plan_date = now.date() + timedelta(days=delta)
+        
+        if plan_type == 'home':
+            hour = 19 if target_weekday < 5 else 10
+        else:
+            hour = 9
+        
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = user_tz.localize(plan_dt)
+    else:
+        # Парсим дату
+        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+        if date_match:
+            day = int(date_match.group(1))
+            month_str = date_match.group(2).lower()
+            month = months_map.get(month_str)
+            if month:
+                year = now.year
+                try:
+                    candidate = user_tz.localize(datetime(year, month, day, 9 if plan_type == 'cinema' else 19))
+                    if candidate < now:
+                        year += 1
+                        candidate = user_tz.localize(datetime(year, month, day, 9 if plan_type == 'cinema' else 19))
+                    plan_dt = candidate
+                except ValueError:
+                    pass
+    
+    if not plan_dt:
+        bot.reply_to(message, "Не удалось распознать день/дату. Попробуйте снова.")
+        return
+    
+    # Вызываем process_plan
+    message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
+    result = process_plan(user_id, message.chat.id, link, plan_type, None, message_date_utc, plan_dt)
+    if result == 'NEEDS_TIMEZONE':
+        show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+    elif result:
+        del user_plan_state[user_id]
+
+def handle_clean_confirm_internal(message):
+    """Внутренняя функция для обработки подтверждения удаления"""
+    # Используем существующую логику из handle_clean_confirm
+    user_id = message.from_user.id
+    state = user_clean_state.get(user_id)
+    if not state:
+        return
+    
+    film_id = state.get('film_id')
+    chat_id = message.chat.id
+    
+    with db_lock:
+        cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        ratings_deleted = cursor.rowcount
+        cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        plans_deleted = cursor.rowcount
+        cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        watched_deleted = cursor.rowcount
+        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        conn.commit()
+    
+    bot.reply_to(message, f"✅ Фильм удалён из базы (удалено {ratings_deleted} оценок, {plans_deleted} планов, {watched_deleted} отметок просмотра)")
+    del user_clean_state[user_id]
+
+def handle_rate_list_reply_internal(message):
+    """Внутренняя функция для обработки реплая на список фильмов с оценками"""
+    # Используем существующую логику из handle_rate_list_reply
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    text = message.text.strip()
+    
+    ratings_pattern = r'(\d+)\s*[,;:\t]?\s*(\d+)'
+    matches = re.findall(ratings_pattern, text)
+    
+    if not matches:
+        bot.reply_to(message, "❌ Не удалось распознать оценки. Используйте формат: <code>kp_id оценка</code>", parse_mode='HTML')
+        return
+    
+    results = []
+    errors = []
+    
+    with db_lock:
+        for kp_id_str, rating_str in matches:
+            try:
+                kp_id = kp_id_str.strip()
+                rating = int(rating_str.strip())
+                
+                if not (1 <= rating <= 10):
+                    errors.append(f"{kp_id}: оценка должна быть от 1 до 10")
+                    continue
+                
+                cursor.execute('''
+                    SELECT id, title FROM movies
+                    WHERE chat_id = %s AND kp_id = %s AND watched = 1
+                ''', (chat_id, kp_id))
+                film_row = cursor.fetchone()
+                
+                if not film_row:
+                    errors.append(f"{kp_id}: фильм не найден или не просмотрен")
+                    continue
+                
+                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
+                
+                cursor.execute('''
+                    SELECT rating FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                ''', (chat_id, film_id, user_id))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    errors.append(f"{kp_id}: вы уже оценили этот фильм")
+                    continue
+                
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, film_id, user_id, rating))
+                
+                results.append((kp_id, title, rating))
+                
+            except ValueError:
+                errors.append(f"{kp_id_str}: неверный формат оценки")
+            except Exception as e:
+                logger.error(f"Ошибка при сохранении оценки {kp_id_str}: {e}")
+                errors.append(f"{kp_id_str}: ошибка обработки")
+        
+        conn.commit()
+    
+    response_text = ""
+    if results:
+        response_text += f"✅ Сохранено оценок: {len(results)}\n"
+        for kp_id, title, rating in results[:5]:
+            response_text += f"{kp_id}: {title[:30]}... — {rating}/10\n"
+        if len(results) > 5:
+            response_text += f"... и ещё {len(results) - 5}\n"
+    
+    if errors:
+        response_text += f"\n❌ Ошибки ({len(errors)}):\n"
+        for error in errors[:5]:
+            response_text += f"{error}\n"
+        if len(errors) > 5:
+            response_text += f"... и ещё {len(errors) - 5}\n"
+    
+    bot.reply_to(message, response_text or "Не удалось обработать оценки.")
+
+def handle_random_plan_reply_internal(message, link):
+    """Внутренняя функция для обработки реплая на сообщение с фильмом из /random"""
+    # Используем существующую логику из handle_random_plan_reply
+    original_text = message.text or ''
+    text = original_text.lower().strip()
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    plan_type = 'home' if 'дома' in text else 'cinema' if ('в кино' in text or 'кино' in text) else None
+    
+    if not plan_type:
+        error_msg = bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+        if error_msg:
+            plan_error_messages[error_msg.message_id] = {
+                'user_id': user_id,
+                'chat_id': chat_id,
+                'link': link,
+                'plan_type': None,
+                'day_or_date': None,
+                'missing': 'plan_type'
+            }
+        return
+    
+    day_or_date = None
+    
+    sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
+    for phrase in sorted_phrases:
+        if phrase in text:
+            day_or_date = phrase
+            break
+    
+    if not day_or_date:
+        date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
+        if date_match:
+            day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+        else:
+            date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+            if date_match:
+                day_num = int(date_match.group(1))
+                month_num = int(date_match.group(2))
+                if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                    month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                    day_or_date = f"{day_num} {month_names[month_num - 1]}"
+    
+    if not day_or_date:
+        error_msg = bot.reply_to(message, "Не указан день/дата. Для дома укажите день недели (пн, вт, ср, чт, пт, сб, вс или 'в сб'), для кино - день недели или дату (15 января).")
+        if error_msg:
+            plan_error_messages[error_msg.message_id] = {
+                'user_id': user_id,
+                'chat_id': chat_id,
+                'link': link,
+                'plan_type': plan_type,
+                'day_or_date': None,
+                'missing': 'day_or_date'
+            }
+        return
+    
+    message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
+    result = process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_utc)
+    if result == 'NEEDS_TIMEZONE':
+        show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+
+def handle_plan_error_reply_internal(message):
+    """Внутренняя функция для обработки реплая на сообщение с ошибкой планирования"""
+    # Используем существующую логику из handle_plan_error_reply
+    error_data = plan_error_messages.get(message.reply_to_message.message_id)
+    if not error_data:
+        return
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    link = error_data['link']
+    plan_type = error_data.get('plan_type')
+    day_or_date = error_data.get('day_or_date')
+    missing = error_data.get('missing')
+    
+    text = message.text.lower().strip()
+    
+    if missing == 'plan_type':
+        plan_type = 'home' if 'дома' in text else 'cinema' if ('в кино' in text or 'кино' in text) else None
+        if not plan_type:
+            bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+            return
+        error_data['plan_type'] = plan_type
+    
+    if missing == 'day_or_date' or not day_or_date:
+        sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
+        for phrase in sorted_phrases:
+            if phrase in text:
+                day_or_date = phrase
+                break
+        
+        if not day_or_date:
+            date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
+            if date_match:
+                day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+        
+        if not day_or_date:
+            bot.reply_to(message, "Не указан день/дата.")
+            return
+        error_data['day_or_date'] = day_or_date
+    
+    message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
+    result = process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_utc)
+    if result == 'NEEDS_TIMEZONE':
+        show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+    elif result:
+        plan_error_messages.pop(message.reply_to_message.message_id, None)
+
+def handle_rating_internal(message, rating):
+    """Внутренняя функция для обработки оценки"""
+    # Используем существующую логику из handle_rating
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    film_id = None
+    
+    if message.reply_to_message:
+        reply_msg_id = message.reply_to_message.message_id
+        film_id = rating_messages.get(reply_msg_id)
+        
+        if not film_id and message.reply_to_message.reply_to_message:
+            parent_reply_msg_id = message.reply_to_message.reply_to_message.message_id
+            film_id = rating_messages.get(parent_reply_msg_id)
+            if not film_id:
+                reply_link = bot_messages.get(parent_reply_msg_id)
+                if reply_link:
+                    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                    if match:
+                        kp_id = match.group(2)
+                        with db_lock:
+                            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                            row = cursor.fetchone()
+                            if row:
+                                film_id = row.get('id') if isinstance(row, dict) else row[0]
+        
+        if not film_id:
+            reply_link = bot_messages.get(reply_msg_id)
+            if reply_link:
+                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                if match:
+                    kp_id = match.group(2)
+                    with db_lock:
+                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        row = cursor.fetchone()
+                        if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+    
+    if film_id:
+        try:
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, film_id, user_id, rating))
+                conn.commit()
+                
+                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                avg_row = cursor.fetchone()
+                avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
+                
+                avg_str = f"{avg:.1f}" if avg else "—"
+                bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+        except Exception as e:
+            logger.error(f"Ошибка при сохранении оценки: {e}", exc_info=True)
+            bot.reply_to(message, "Произошла ошибка при сохранении оценки. Попробуйте позже.")
+        
+        if message.reply_to_message:
+            rating_messages.pop(message.reply_to_message.message_id, None)
+    else:
+        bot.reply_to(message, "❌ Оценка не привязана к фильму. Ответьте на сообщение о просмотренном фильме или на сообщение с фильмом.")
+
+def handle_cinema_vote_internal(message, vote):
+    """Внутренняя функция для обработки голосования 'в кино'"""
+    # Используем существующую логику из handle_cinema_vote
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    with db_lock:
+        cursor.execute('''
+            SELECT film_id, deadline, yes_users, no_users
+            FROM cinema_votes
+            WHERE chat_id = %s AND deadline > NOW()
+            ORDER BY deadline ASC
+            LIMIT 1
+        ''', (chat_id,))
+        vote_row = cursor.fetchone()
+        
+        if not vote_row:
+            return
+        
+        film_id = vote_row.get('film_id') if isinstance(vote_row, dict) else vote_row[0]
+        yes_users = vote_row.get('yes_users') or [] if isinstance(vote_row, dict) else (vote_row[2] or [])
+        no_users = vote_row.get('no_users') or [] if isinstance(vote_row, dict) else (vote_row[3] or [])
+        
+        if vote == 'да':
+            if user_id not in yes_users:
+                yes_users = list(set(yes_users + [user_id]))
+                if user_id in no_users:
+                    no_users = [u for u in no_users if u != user_id]
+        else:
+            if user_id not in no_users:
+                no_users = list(set(no_users + [user_id]))
+                if user_id in yes_users:
+                    yes_users = [u for u in yes_users if u != user_id]
+        
+        cursor.execute('''
+            UPDATE cinema_votes
+            SET yes_users = %s, no_users = %s
+            WHERE chat_id = %s AND film_id = %s
+        ''', (yes_users, no_users, chat_id, film_id))
+        conn.commit()
+    
+    bot.reply_to(message, f"✅ Ваш голос '{vote}' учтён!")
+
+def handle_list_reply_internal(message):
+    """Внутренняя функция для обработки реплая на список фильмов"""
+    # Используем существующую логику из handle_list_reply
+    reply_msg_id = message.reply_to_message.message_id
+    link = bot_messages.get(reply_msg_id)
+    
+    if not link:
+        return
+    
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    text = message.text.lower().strip()
+    
+    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+    if not match:
+        return
+    
+    kp_id = match.group(2)
+    
+    with db_lock:
+        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+        row = cursor.fetchone()
+        if not row:
+            return
+        
+        film_id = row.get('id') if isinstance(row, dict) else row[0]
+        
+        if 'дома' in text:
+            plan_type = 'home'
+        elif 'в кино' in text or 'кино' in text:
+            plan_type = 'cinema'
+        else:
+            return
+        
+        # Парсим день/дату
+        day_or_date = None
+        for phrase in sorted(days_full.keys(), key=len, reverse=True):
+            if phrase in text:
+                day_or_date = phrase
+                break
+        
+        if not day_or_date:
+            date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+            if date_match:
+                day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+        
+        if not day_or_date:
+            return
+        
+        message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
+        result = process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_utc)
+        if result == 'NEEDS_TIMEZONE':
+            show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+
+# ==================== ГЛАВНЫЙ ХЭНДЛЕР ДЛЯ ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ ====================
+@bot.message_handler(content_types=['text'])
+def main_text_handler(message):
+    """Единый главный хэндлер для всех текстовых сообщений"""
+    logger.info(f"[MAIN TEXT HANDLER] Получено текстовое сообщение от {message.from_user.id}: '{message.text[:100] if message.text else ''}'")
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip() if message.text else ""
+    
+    # Команды обрабатываются отдельными хэндлерами через @bot.message_handler(commands=['...'])
+    if text.startswith('/'):
+        logger.info(f"[MAIN TEXT HANDLER] Пропущена команда: {text[:50]}")
+        return
+    
+    # 1. Проверяем состояния (ticket, settings, plan, edit)
+    
+    # === user_ticket_state ===
+    if user_id in user_ticket_state:
+        state = user_ticket_state[user_id]
+        step = state.get('step')
+        
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_ticket_state, step={step}")
+        
+        if step == 'waiting_new_session':
+            # Обработка ввода нового сеанса (фильм + дата)
+            handle_new_session_input_internal(message, state)
+            return
+        
+        if step == 'upload_ticket':
+            # Если ждём билеты, но пришёл текст (например "готово")
+            if text.lower().strip() == 'готово':
+                ticket_done_internal(message, state)
+                return
+            # Иначе игнорируем текст (билеты обрабатываются отдельным хэндлером для фото/документов)
+            logger.info(f"[MAIN TEXT HANDLER] Игнорируем текст в режиме upload_ticket (ожидаются фото/документы)")
+            return
+        
+        if step == 'waiting_session_time':
+            # Обработка времени сеанса
+            handle_edit_ticket_text_internal(message, state)
+            return
+    
+    # === user_edit_state ===
+    if user_id in user_edit_state:
+        state = user_edit_state[user_id]
+        action = state.get('action')
+        
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_edit_state, action={action}")
+        
+        if action == 'edit_rating':
+            # Обработка редактирования оценки
+            handle_edit_rating_internal(message, state)
+            return
+        
+        if action == 'edit_plan_datetime':
+            # Обработка редактирования времени плана
+            handle_edit_plan_datetime_internal(message, state)
+            return
+    
+    # === user_settings_state ===
+    if user_id in user_settings_state:
+        state = user_settings_state.get(user_id)
+        
+        # Проверяем, что это ответ на правильное сообщение
+        if message.reply_to_message:
+            settings_msg_id = state.get('settings_msg_id')
+            if settings_msg_id and message.reply_to_message.message_id == settings_msg_id:
+                if state.get('adding_reactions'):
+                    # Обработка ответа с эмодзи на /settings
+                    handle_settings_emojis_internal(message, state)
+                    return
+    
+    # === user_plan_state ===
+    if user_id in user_plan_state:
+        state = user_plan_state[user_id]
+        step = state.get('step')
+        
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_plan_state, step={step}")
+        
+        if step == 1:
+            # Получение ссылки на фильм
+            get_plan_link_internal(message, state)
+            return
+        
+        if step == 3:
+            # Получение дня/даты
+            get_plan_day_or_date_internal(message, state)
+            return
+    
+    # === user_clean_state ===
+    if user_id in user_clean_state:
+        if text.upper().strip() == 'ДА, УДАЛИТЬ':
+            # Обработка подтверждения удаления
+            handle_clean_confirm_internal(message)
+            return
+    
+    # 2. Обработка реплаев
+    
+    # Реплай на сообщение бота с оценками
+    if message.reply_to_message and message.reply_to_message.from_user.id == bot.get_me().id:
+        reply_text = message.reply_to_message.text or ""
+        
+        # Реплай на список фильмов с оценками
+        if "Список просмотренных фильмов для оценки" in reply_text:
+            handle_rate_list_reply_internal(message)
+            return
+        
+        # Реплай на сообщение с фильмом из /random для планирования
+        reply_msg_id = message.reply_to_message.message_id
+        if reply_msg_id in bot_messages:
+            link = bot_messages.get(reply_msg_id)
+            if link:
+                handle_random_plan_reply_internal(message, link)
+                return
+    
+    # Реплай на сообщение с ошибкой планирования
+    if message.reply_to_message and message.reply_to_message.message_id in plan_error_messages:
+        handle_plan_error_reply_internal(message)
+        return
+    
+    # Реплай на сообщение с оценкой (для сохранения оценки)
+    if message.reply_to_message and message.text and message.text.isdigit():
+        rating = int(message.text)
+        if 1 <= rating <= 10:
+            handle_rating_internal(message, rating)
+            return
+    
+    # Реплай на голосование "в кино"
+    if message.reply_to_message and text.lower() in ['да', 'нет']:
+        handle_cinema_vote_internal(message, text.lower())
+        return
+    
+    # Реплай на список фильмов
+    if message.reply_to_message and message.reply_to_message.message_id in list_messages:
+        handle_list_reply_internal(message)
+        return
+    
+    # 3. Обычные сообщения с фильмами (если нет состояния)
+    
+    # Сообщения с ссылками на Кинопоиск
+    if 'kinopoisk.ru' in text or 'kinopoisk.com' in text:
+        link_match = re.search(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', text)
+        if link_match:
+            link = link_match.group(1)
+            # Сохраняем ссылку в bot_messages для обработки реакций
+            bot_messages[message.message_id] = link
+            logger.info(f"[MAIN TEXT HANDLER] Ссылка сохранена в bot_messages для message_id={message.message_id}: {link}")
+            
+            # Добавляем фильм в базу
+            username = message.from_user.username or f"user_{message.from_user.id}"
+            log_request(message.from_user.id, username, 'add_movie', chat_id)
+            
+            added_count = 0
+            links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', text)
+            for link_item in links:
+                if add_and_announce(link_item, chat_id):
+                    added_count += 1
+                    logger.info(f"[MAIN TEXT HANDLER] Фильм обработан: {link_item}")
+            
+            if added_count > 1:
+                bot.send_message(chat_id, f"🎉 Добавлено {added_count} новых фильмов в базу!")
+            return
+    
+    # Сообщения с entities (URL в тексте)
+    if message.entities:
+        links = []
+        for entity in message.entities:
+            if entity.type == 'url':
+                link = text[entity.offset:entity.offset + entity.length]
+                if 'kinopoisk.ru' in link or 'kinopoisk.com' in link:
+                    links.append(link)
+        
+        if links:
+            for link in links:
+                bot_messages[message.message_id] = link
+                if add_and_announce(link, chat_id):
+                    logger.info(f"[MAIN TEXT HANDLER] Фильм обработан через entities: {link}")
+            return
+    
+    # Если ничего не подошло - игнорируем
+    logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано: '{text[:50]}'")
+
+# ==================== ЕДИНЫЙ ХЭНДЛЕР ДЛЯ ФОТО/ДОКУМЕНТОВ ====================
+@bot.message_handler(content_types=['photo', 'document'])
+def main_file_handler(message):
+    """Единый хэндлер для всех фото и документов"""
+    logger.info(f"[MAIN FILE HANDLER] Получено фото/документ от {message.from_user.id}")
+    
+    user_id = message.from_user.id
+    
+    # Обработка билетов
+    if user_id in user_ticket_state:
+        state = user_ticket_state[user_id]
+        step = state.get('step')
+        
+        if step == 'upload_ticket':
+            # Обработка загрузки билетов
+            handle_ticket_upload_internal(message, state)
+            return
+        
+        if step != 'upload_ticket':
+            # Сохраняем file_id для последующей обработки
+            file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+            state['file_id'] = file_id
+            bot.reply_to(message, "✅ Файл получен. Продолжайте выбор сеанса.")
+            return
+    
+    # Если не в состоянии - игнорируем
+    logger.info(f"[MAIN FILE HANDLER] Фото/документ не обработан (пользователь не в user_ticket_state)")
+
+def handle_ticket_upload_internal(message, state):
+    """Внутренняя функция для обработки загрузки билетов"""
+    user_id = message.from_user.id
+    plan_id = state.get('plan_id')
+    
+    if not plan_id:
+        bot.reply_to(message, "❌ Ошибка: план не найден.")
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
+        return
+    
+    file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+    
+    with db_lock:
+        cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (file_id, plan_id))
+        conn.commit()
+    
+    title = state.get('film_title', 'фильм')
+    dt = state.get('plan_dt', '')
+    
+    bot.reply_to(message, f"✅ Билет прикреплён!\n\n<b>{title}</b> — {dt}\n\nМожете отправить ещё билеты или написать 'готово'.", parse_mode='HTML')
+
+# Обработчик для сохранения сообщений пользователей с ссылками на фильмы (ОСТАВЛЕН ДЛЯ ОБРАТНОЙ СОВМЕСТИМОСТИ, НО НЕ ИСПОЛЬЗУЕТСЯ)
 @bot.message_handler(func=lambda m: (
     m.text and 
     ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text) and
@@ -4988,8 +5978,9 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
 
 
 # ==================== ОБРАБОТКА ИЗОБРАЖЕНИЙ И ФАЙЛОВ ДЛЯ БИЛЕТОВ ====================
-@bot.message_handler(content_types=['photo', 'document'], func=lambda message: message.from_user.id in user_ticket_state and user_ticket_state.get(message.from_user.id, {}).get('step') != 'upload_ticket', priority=10)
-def handle_ticket_file(message):
+# ВЫКЛЮЧЕНО: Теперь обрабатывается через main_file_handler
+# @bot.message_handler(content_types=['photo', 'document'], func=lambda message: message.from_user.id in user_ticket_state and user_ticket_state.get(message.from_user.id, {}).get('step') != 'upload_ticket', priority=10)
+def handle_ticket_file_OLD(message):
     """Обработчик загрузки билетов (фото или файл)"""
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -5066,8 +6057,9 @@ def handle_ticket_file(message):
 
 
 # ==================== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ДЛЯ РЕДАКТИРОВАНИЯ И БИЛЕТОВ ====================
-@bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_edit_state or message.from_user.id in user_ticket_state, priority=15)
-def handle_edit_ticket_text(message):
+# ВЫКЛЮЧЕНО: Теперь обрабатывается через main_text_handler
+# @bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_edit_state or message.from_user.id in user_ticket_state, priority=15)
+def handle_edit_ticket_text_OLD(message):
     """Обработчик текстовых сообщений для редактирования и билетов"""
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -5418,9 +6410,9 @@ def handle_reply_to_bot(message):
             return  # Важно: возвращаемся, чтобы не обрабатывать дальше
 
 # ==================== ОБРАБОТКА СООБЩЕНИЙ С ФИЛЬМОМ + ДАТОЙ В РЕЖИМЕ ДОБАВЛЕНИЯ НОВОГО СЕАНСА ====================
-# Высокий приоритет: обработка ввода нового сеанса (фильм + дата)
-@bot.message_handler(func=lambda m: m.text and m.from_user.id in user_ticket_state, priority=20)
-def handle_new_session_input(message):
+# ВЫКЛЮЧЕНО: Теперь обрабатывается через main_text_handler
+# @bot.message_handler(func=lambda m: m.text and m.from_user.id in user_ticket_state, priority=20)
+def handle_new_session_input_OLD(message):
     # Проверяем состояние внутри обработчика
     user_id = message.from_user.id
     state = user_ticket_state.get(user_id, {})
@@ -5560,8 +6552,9 @@ def handle_new_session_input(message):
 
 
 # ==================== ЗАГРУЗКА БИЛЕТОВ ====================
-@bot.message_handler(content_types=['photo', 'document'], func=lambda m: m.from_user.id in user_ticket_state, priority=20)
-def handle_ticket_upload(message):
+# ВЫКЛЮЧЕНО: Теперь обрабатывается через main_file_handler
+# @bot.message_handler(content_types=['photo', 'document'], func=lambda m: m.from_user.id in user_ticket_state, priority=20)
+def handle_ticket_upload_OLD(message):
     # Проверяем состояние внутри обработчика
     user_id = message.from_user.id
     state = user_ticket_state.get(user_id, {})
@@ -5600,8 +6593,9 @@ def handle_ticket_upload(message):
 
 
 # ==================== ОБРАБОТКА КОМАНДЫ "ГОТОВО" ДЛЯ ЗАВЕРШЕНИЯ ЗАГРУЗКИ БИЛЕТОВ ====================
-@bot.message_handler(func=lambda m: m.text and m.text.lower().strip() == 'готово' and m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'upload_ticket', priority=20)
-def ticket_done(message):
+# ВЫКЛЮЧЕНО: Теперь обрабатывается через main_text_handler
+# @bot.message_handler(func=lambda m: m.text and m.text.lower().strip() == 'готово' and m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'upload_ticket', priority=20)
+def ticket_done_OLD(message):
     """Обработка команды 'готово' для завершения загрузки билетов"""
     user_id = message.from_user.id
     state = user_ticket_state.get(user_id, {})
@@ -5618,8 +6612,9 @@ def ticket_done(message):
 
 
 # Обработка новых ссылок (должен быть последним, чтобы не перехватывать команды)
-@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities, priority=1)
-def handle_message(message):
+# ВЫКЛЮЧЕНО: Теперь обрабатывается через main_text_handler
+# @bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities, priority=1)
+def handle_message_OLD(message):
     logger.info(f"[HANDLER] handle_message вызван для сообщения от {message.from_user.id}")
     
     # Пропускаем сообщения, если пользователь работает с билетами или планированием
