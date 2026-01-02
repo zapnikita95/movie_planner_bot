@@ -1556,55 +1556,31 @@ def handle_reaction(reaction):
                 link = plan_data.get('link')
                 logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
         
-        # Если не найдено, пытаемся получить текст сообщения через forward или другой способ
+        # Если не найдено, пытаемся найти в БД по message_id или другим способом
         if not link:
+            logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
+            # Пробуем найти фильм в БД по последним добавленным фильмам в этом чате
+            # Это не идеально, но лучше чем пересылать сообщение
             try:
-                # Пробуем получить сообщение и найти ссылку в его тексте
-                # Для этого нужно использовать forward_message или получить через API
-                # Но проще всего - если реакция на сообщение пользователя, оно может содержать ссылку
-                # Попробуем найти через поиск в базе - если в чате есть фильмы, проверим их ссылки
-                # Но это не очень надежно, поэтому просто логируем
-                logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
+                with db_lock:
+                    # Ищем последние фильмы в этом чате (за последний час)
+                    cursor.execute("""
+                        SELECT link FROM movies 
+                        WHERE chat_id = %s 
+                        ORDER BY id DESC 
+                        LIMIT 10
+                    """, (chat_id,))
+                    recent_links = cursor.fetchall()
+                    # Если в чате недавно был добавлен только один фильм, используем его
+                    if len(recent_links) == 1:
+                        link = recent_links[0].get('link') if isinstance(recent_links[0], dict) else recent_links[0][0]
+                        logger.info(f"[REACTION] Использована последняя ссылка из БД: {link}")
+                        bot_messages[message_id] = link
             except Exception as e:
-                logger.warning(f"[REACTION] Ошибка при обработке реакции: {e}")
+                logger.warning(f"[REACTION] Ошибка при поиске в БД: {e}")
     
     if not link:
-        # Пытаемся получить сообщение и найти ссылку в его тексте
-        try:
-            # Пробуем получить сообщение через forward_message (но сразу удалим пересланное)
-            forwarded = bot.forward_message(chat_id, chat_id, message_id)
-            forwarded_msg_id = None
-            if forwarded:
-                forwarded_msg_id = forwarded.message_id
-                if forwarded.text:
-                    # Ищем ссылку на Кинопоиск в тексте сообщения
-                    link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', forwarded.text)
-                    if link_match:
-                        link = link_match.group(1)
-                        logger.info(f"[REACTION] Найдена ссылка в тексте сообщения: {link}")
-                        # Сохраняем в bot_messages для будущих реакций
-                        bot_messages[message_id] = link
-                elif forwarded.caption:
-                    # Ищем ссылку в подписи к фото
-                    link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', forwarded.caption)
-                    if link_match:
-                        link = link_match.group(1)
-                        logger.info(f"[REACTION] Найдена ссылка в подписи к фото: {link}")
-                        bot_messages[message_id] = link
-                
-                # Удаляем пересланное сообщение сразу после получения данных
-                if forwarded_msg_id:
-                    try:
-                        bot.delete_message(chat_id, forwarded_msg_id)
-                        logger.info(f"[REACTION] Пересланное сообщение {forwarded_msg_id} удалено")
-                    except Exception as e_del:
-                        logger.warning(f"[REACTION] Не удалось удалить пересланное сообщение: {e_del}")
-        except Exception as e:
-            logger.warning(f"[REACTION] Ошибка при получении сообщения через forward_message: {e}")
-            logger.info(f"[REACTION] Не удалось получить сообщение для message_id={message_id}")
-    
-    if not link:
-        logger.info(f"[REACTION] Нет link для message_id={message_id}, chat_id={chat_id}. Возможно, реакция на сообщение пользователя с фильмом.")
+        logger.info(f"[REACTION] Нет link для message_id={message_id}, chat_id={chat_id}. Реакция не обработана.")
         return
     
     user_id = reaction.user.id if reaction.user else None
