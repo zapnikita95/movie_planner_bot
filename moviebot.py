@@ -1982,7 +1982,7 @@ def handle_delete_movie_internal(message, state):
         watched_deleted = cursor.rowcount
         logger.info(f"[DELETE MOVIE] Удалено отметок просмотра: {watched_deleted}")
         
-        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (chat_id, film_id))
+        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
         movie_deleted = cursor.rowcount
         logger.info(f"[DELETE MOVIE] Удалено фильмов: {movie_deleted}")
         
