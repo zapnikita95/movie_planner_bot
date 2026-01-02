@@ -132,6 +132,8 @@ commands = [
     BotCommand("clean", "Очистить базу данных (чат или данные о просмотрах)"),
     BotCommand("edit", "Редактировать расписание и оценки"),
     BotCommand("ticket", "Работа с билетами в кино"),
+    BotCommand("seasons", "Просмотр сезонов сериалов"),
+    BotCommand("premieres", "Список премьер месяца"),
     BotCommand("help", "Помощь по командам")
 ]
 bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
@@ -2281,22 +2283,102 @@ def get_plan_day_or_date_internal(message, state):
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
         plan_dt = user_tz.localize(plan_dt)
     else:
-        # Парсим дату
-        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
-        if date_match:
-            day = int(date_match.group(1))
-            month_str = date_match.group(2).lower()
-            month = months_map.get(month_str)
-            if month:
-                year = now.year
-                try:
-                    candidate = user_tz.localize(datetime(year, month, day, 9 if plan_type == 'cinema' else 19))
-                    if candidate < now:
-                        year += 1
-                        candidate = user_tz.localize(datetime(year, month, day, 9 if plan_type == 'cinema' else 19))
-                    plan_dt = candidate
-                except ValueError:
-                    pass
+        # Обработка специальных форматов: "завтра", "следующая неделя"
+        if 'завтра' in text:
+            plan_date = (now.date() + timedelta(days=1))
+            if plan_type == 'home':
+                hour = 19 if plan_date.weekday() < 5 else 10
+            else:
+                hour = 9
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+            plan_dt = user_tz.localize(plan_dt)
+        elif 'следующая неделя' in text or 'след неделя' in text or 'след. неделя' in text or 'на следующей неделе' in text:
+            if plan_type == 'home':
+                # Для дома - суббота следующей недели в 10:00
+                current_wd = now.weekday()
+                days_until_next_saturday = (5 - current_wd + 7) % 7
+                if days_until_next_saturday == 0:
+                    days_until_next_saturday = 7
+                else:
+                    days_until_next_saturday += 7
+                plan_date = now.date() + timedelta(days=days_until_next_saturday)
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=10))
+                plan_dt = user_tz.localize(plan_dt)
+            else:
+                # Для кино - четверг следующей недели
+                current_wd = now.weekday()
+                days_until_thursday = (3 - current_wd + 7) % 7
+                if days_until_thursday == 0:
+                    days_until_thursday = 7
+                else:
+                    days_until_thursday += 7
+                plan_date = now.date() + timedelta(days=days_until_thursday)
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
+                plan_dt = user_tz.localize(plan_dt)
+        else:
+            # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
+            # Сначала пробуем формат с временем: "15 января 17:00"
+            date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2})[.:](\d{2})', text)
+            if date_time_match:
+                day_num = int(date_time_match.group(1))
+                month_str = date_time_match.group(2)
+                hour = int(date_time_match.group(3))
+                minute = int(date_time_match.group(4))
+                month = months_map.get(month_str.lower())
+                if month:
+                    try:
+                        year = now.year
+                        candidate = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                        if candidate < now:
+                            year += 1
+                        plan_dt = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                    except ValueError:
+                        pass
+            else:
+                # Парсинг "15 января" или "14 апреля"
+                date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+                if date_match:
+                    day = int(date_match.group(1))
+                    month_str = date_match.group(2).lower()
+                    month = months_map.get(month_str)
+                    if month:
+                        year = now.year
+                        try:
+                            candidate = user_tz.localize(datetime(year, month, day))
+                            if candidate < now:
+                                year += 1
+                            if plan_type == 'home':
+                                hour = 19 if datetime(year, month, day).weekday() < 5 else 10
+                            else:
+                                hour = 9
+                            plan_dt = user_tz.localize(datetime(year, month, day, hour))
+                        except ValueError:
+                            pass
+                else:
+                    # Парсинг "10.01" или "06.01"
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            try:
+                                year = now.year
+                                if date_match.group(3):
+                                    year_part = int(date_match.group(3))
+                                    if year_part < 100:
+                                        year = 2000 + year_part
+                                    else:
+                                        year = year_part
+                                candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                if candidate < now:
+                                    year += 1
+                                if plan_type == 'home':
+                                    hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
+                                else:
+                                    hour = 9
+                                plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour))
+                            except ValueError:
+                                pass
     
     if not plan_dt:
         bot.reply_to(message, "Не удалось распознать день/дату. Попробуйте снова.")
@@ -4728,7 +4810,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         plan_dt = user_tz.localize(plan_dt)
     
     # Обработка "следующая неделя" (для обоих режимов)
-    elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower:
+    elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower or 'на следующей неделе' in day_lower:
         if plan_type == 'cinema':
             # Для кино - напоминание в четверг, день премьер
             current_wd = now.weekday()
@@ -4736,13 +4818,23 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
             if days_until_thursday == 0:
                 # Если сегодня четверг, берем следующий четверг
                 days_until_thursday = 7
+            else:
+                # Добавляем еще неделю, чтобы получить четверг следующей недели
+                days_until_thursday += 7
             plan_date = now.date() + timedelta(days=days_until_thursday)
             hour = 9
         else:  # home
-            # Для дома - через неделю от сегодня
-            plan_date = now.date() + timedelta(days=7)
-            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-            hour = 19 if plan_date.weekday() < 5 else 10
+            # Для дома - суббота следующей недели в 10:00
+            current_wd = now.weekday()
+            days_until_next_saturday = (5 - current_wd + 7) % 7
+            if days_until_next_saturday == 0:
+                # Если сегодня суббота, берем следующую
+                days_until_next_saturday = 7
+            else:
+                # Иначе добавляем еще неделю, чтобы получить субботу следующей недели
+                days_until_next_saturday += 7
+            plan_date = now.date() + timedelta(days=days_until_next_saturday)
+            hour = 10
         plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
         plan_dt = user_tz.localize(plan_dt)
     
@@ -5312,7 +5404,16 @@ def plan_type_choice(call):
     bot.answer_callback_query(call.id)
     bot.edit_message_text("Укажите день/дату:", call.message.chat.id, call.message.message_id)
     if plan_type == 'home':
-        bot.send_message(call.message.chat.id, "Для дома: пт, сб или вс.")
+        bot.send_message(call.message.chat.id, 
+            "📅 <b>Укажите дату, это может быть:</b>\n\n"
+            "• <b>15 января 17:00</b>\n"
+            "• <b>10.01</b>\n"
+            "• <b>14 апреля</b>\n"
+            "• <b>пятница</b>\n"
+            "• <b>сб</b>\n"
+            "• <b>завтра</b>\n"
+            "• <b>на следующей неделе</b>", 
+            parse_mode='HTML')
     else:
         bot.send_message(call.message.chat.id, "Для кино: '15 января' или 'с четверга'.")
 
@@ -5353,24 +5454,71 @@ def get_plan_day_or_date(message):
         plan_dt = user_tz.localize(plan_dt)
 
     else:
-        # Если день недели не найден — пытаемся распарсить дату (только для "в кино")
-        if plan_type == 'cinema':
-            if 'четверг' in text or any(p in text for p in ['чт', 'в четверг']):
-                target_weekday = 3
+        # Обработка специальных форматов: "завтра", "следующая неделя"
+        if 'завтра' in text:
+            plan_date = (now.date() + timedelta(days=1))
+            if plan_type == 'home':
+                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                hour = 19 if plan_date.weekday() < 5 else 10
+            else:
+                hour = 9
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+            plan_dt = user_tz.localize(plan_dt)
+        elif 'следующая неделя' in text or 'след неделя' in text or 'след. неделя' in text or 'на следующей неделе' in text:
+            if plan_type == 'home':
+                # Для дома - суббота следующей недели в 10:00
                 current_wd = now.weekday()
-                delta = (3 - current_wd + 7) % 7
-                if delta == 0:
-                    delta = 7
-                plan_date = now.date() + timedelta(days=delta)
-                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
+                days_until_next_saturday = (5 - current_wd + 7) % 7
+                if days_until_next_saturday == 0:
+                    # Если сегодня суббота, берем следующую
+                    days_until_next_saturday = 7
+                else:
+                    # Иначе добавляем еще неделю, чтобы получить субботу следующей недели
+                    days_until_next_saturday += 7
+                plan_date = now.date() + timedelta(days=days_until_next_saturday)
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=10))
                 plan_dt = user_tz.localize(plan_dt)
             else:
-                # Парсинг "15 января"
+                # Для кино - четверг следующей недели
+                current_wd = now.weekday()
+                days_until_thursday = (3 - current_wd + 7) % 7
+                if days_until_thursday == 0:
+                    days_until_thursday = 7
+                else:
+                    days_until_thursday += 7
+                plan_date = now.date() + timedelta(days=days_until_thursday)
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
+                plan_dt = user_tz.localize(plan_dt)
+        else:
+            # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
+            # Сначала пробуем формат с временем: "15 января 17:00"
+            date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2})[.:](\d{2})', text)
+            if date_time_match:
+                day_num = int(date_time_match.group(1))
+                month_str = date_time_match.group(2)
+                hour = int(date_time_match.group(3))
+                minute = int(date_time_match.group(4))
+                month = months_map.get(month_str.lower())
+                if month:
+                    try:
+                        year = now.year
+                        candidate = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                        if candidate < now:
+                            year += 1
+                        plan_dt = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                    except ValueError:
+                        bot.reply_to(message, "Некорректная дата или время. Попробуйте снова.")
+                        return
+                else:
+                    bot.reply_to(message, "Не распознал месяц.")
+                    return
+            else:
+                # Парсинг "15 января" или "14 апреля"
                 date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
                 if date_match:
                     day_num = int(date_match.group(1))
                     month_str = date_match.group(2)
-                    month = months_map.get(month_str)
+                    month = months_map.get(month_str.lower())
                     if month:
                         try:
                             year = now.year
@@ -5378,7 +5526,12 @@ def get_plan_day_or_date(message):
                             if candidate < now:
                                 year += 1
                             plan_date = datetime(year, month, day_num)
-                            plan_dt = user_tz.localize(plan_date.replace(hour=9, minute=0))
+                            if plan_type == 'home':
+                                # Будние дни — 19:00, выходные — 10:00
+                                hour = 19 if plan_date.weekday() < 5 else 10
+                            else:
+                                hour = 9
+                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                         except ValueError:
                             bot.reply_to(message, "Некорректная дата. Попробуйте снова.")
                             return
@@ -5386,11 +5539,43 @@ def get_plan_day_or_date(message):
                         bot.reply_to(message, "Не распознал месяц.")
                         return
                 else:
-                    bot.reply_to(message, "Укажите день недели или дату в формате '15 января'.")
-                    return
-        else:
-            bot.reply_to(message, "Укажите день недели (пн, вт, ср, чт, пт, сб, вс или полное название).")
-            return
+                    # Парсинг "10.01" или "06.01"
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            try:
+                                year = now.year
+                                if date_match.group(3):
+                                    year_part = int(date_match.group(3))
+                                    if year_part < 100:
+                                        year = 2000 + year_part
+                                    else:
+                                        year = year_part
+                                candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                if candidate < now:
+                                    year += 1
+                                plan_date = datetime(year, month_num, day_num)
+                                if plan_type == 'home':
+                                    # Будние дни — 19:00, выходные — 10:00
+                                    hour = 19 if plan_date.weekday() < 5 else 10
+                                else:
+                                    hour = 9
+                                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                            except ValueError:
+                                bot.reply_to(message, "Некорректная дата. Попробуйте снова.")
+                                return
+                        else:
+                            bot.reply_to(message, "Некорректная дата. Попробуйте снова.")
+                            return
+                    else:
+                        # Если ничего не распознано
+                        if plan_type == 'cinema':
+                            bot.reply_to(message, "Укажите день недели или дату в формате '15 января' или '10.01'.")
+                        else:
+                            bot.reply_to(message, "Укажите день недели, дату (15 января, 10.01) или 'завтра', 'на следующей неделе'.")
+                        return
 
     if plan_dt:
         # Получаем/создаём фильм
