@@ -2735,9 +2735,9 @@ def handle_edit_rating_internal(message, state):
             film_id = state.get('film_id')
             with db_lock:
                 cursor.execute('''
-                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = FALSE
                 ''', (chat_id, film_id, user_id, rating))
                 conn.commit()
             
@@ -3161,9 +3161,9 @@ def handle_rate_list_reply_internal(message):
                     continue
                 
                 cursor.execute('''
-                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = FALSE
                 ''', (chat_id, film_id, user_id, rating))
                 
                 results.append((kp_id, title, rating))
@@ -3346,9 +3346,9 @@ def handle_rating_internal(message, rating):
         try:
             with db_lock:
                 cursor.execute('''
-                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = FALSE
                 ''', (chat_id, film_id, user_id, rating))
                 conn.commit()
                 
@@ -5022,9 +5022,9 @@ def handle_rate_list_reply(message):
                 
                 # Сохраняем оценку
                 cursor.execute('''
-                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = FALSE
                 ''', (chat_id, film_id, user_id, rating))
                 
                 results.append((kp_id, title, rating))
