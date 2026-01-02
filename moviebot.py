@@ -6448,10 +6448,10 @@ def rate_movie(message):
         title = movie.get('title') if isinstance(movie, dict) else movie[2]
         year = (movie.get('year') if isinstance(movie, dict) else movie[3]) or '—'
         
-        # Получаем всех, кто оценил этот фильм
+        # Получаем всех, кто оценил этот фильм (только неимпортированные оценки)
         cursor.execute('''
             SELECT user_id FROM ratings
-            WHERE chat_id = %s AND film_id = %s
+            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
         ''', (chat_id, film_id))
         rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
         
