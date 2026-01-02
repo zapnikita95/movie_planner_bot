@@ -3318,12 +3318,6 @@ def handle_reaction(reaction):
         kp_row = cursor.fetchone()
         kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
     
-    # Получаем и отправляем факты о фильме ПЕРЕД сообщением об оценке
-    if kp_id:
-        facts = get_facts(kp_id)
-        if facts:
-            bot.send_message(chat_id, facts, parse_mode='HTML')
-    
     # Отправляем персональное сообщение пользователю с упоминанием
     user_name = reaction.user.first_name if reaction.user else "Вы"
     user_mention = f"@{reaction.user.username}" if reaction.user and reaction.user.username else user_name
