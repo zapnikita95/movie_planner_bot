@@ -5116,8 +5116,15 @@ def handle_edit_ticket_text(message):
             
             tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
             formatted_time = session_dt.strftime('%d.%m %H:%M')
+            logger.info(f"[TICKET TIME] Время обновлено для plan_id={plan_id}: {formatted_time} {tz_name}")
+            logger.info(f"[TICKET TIME] Обновляем план в БД: plan_id={plan_id}, session_utc={session_utc}")
             bot.reply_to(message, f"✅ <b>Время принято!</b>\n\n🕐 Сеанс: {formatted_time} {tz_name}", parse_mode='HTML')
             del user_ticket_state[user_id]
+            logger.info(f"[TICKET TIME] Состояние пользователя {user_id} очищено")
+        else:
+            logger.warning(f"[TICKET TIME] Неожиданный step: {step}, ожидался 'waiting_session_time'")
+    else:
+        logger.info(f"[TICKET TIME] Пользователь {user_id} не в user_ticket_state")
         
         elif step == 'waiting_new_session':
             # Обрабатываем создание нового сеанса с билетами
