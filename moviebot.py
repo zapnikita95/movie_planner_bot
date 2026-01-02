@@ -1721,129 +1721,73 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 
                 link = f"https://kinopoisk.ru/film/{kp_id}/"
                 
-                # Добавляем фильм в базу (если еще нет)
+                # Импортированные оценки НЕ добавляют фильмы в базу группы
+                # Они существуют только как оценки в таблице ratings с is_imported = TRUE
+                # Для импортированных оценок используем film_id = NULL или создаем виртуальный film_id
                 try:
                     with db_lock:
+                        # Проверяем, есть ли фильм в базе группы (добавлен через бота)
                         cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                         film_row = cursor.fetchone()
                         
                         if film_row:
+                            # Фильм уже есть в базе группы - можем добавить импортированную оценку
                             film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                            logger.debug(f"[IMPORT] Фильм {kp_id} уже существует в базе, film_id={film_id}")
-                        else:
-                            # Фильма нет в базе - получаем полную информацию через API v2.2
-                            logger.debug(f"[IMPORT] Получаем информацию о новом фильме {kp_id} через API")
-                            info = None
+                            logger.debug(f"[IMPORT] Фильм {kp_id} уже существует в базе группы, film_id={film_id}")
                             
-                            # Используем API v2.2 для получения полной информации
-                            headers = {'X-API-KEY': KP_TOKEN}
-                            api_url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-                            
-                            try:
-                                api_response = requests.get(api_url, headers=headers, timeout=10)
-                                if api_response.status_code == 200:
-                                    api_data = api_response.json()
-                                    
-                                    # Извлекаем информацию из API ответа
-                                    title = api_data.get('nameRu') or api_data.get('nameOriginal') or item.get('nameRu') or item.get('nameEn') or 'Без названия'
-                                    year = api_data.get('year') or item.get('year') or None
-                                    
-                                    # Жанры
-                                    genres_list = api_data.get('genres', [])
-                                    genres = ', '.join([g.get('genre', '') for g in genres_list]) if genres_list else ''
-                                    
-                                    # Описание
-                                    description = api_data.get('description') or api_data.get('shortDescription') or ''
-                                    
-                                    # Режиссёр
-                                    directors_list = api_data.get('directors', [])
-                                    director = directors_list[0].get('nameRu') or directors_list[0].get('nameEn', '') if directors_list else 'Не указан'
-                                    
-                                    # Актёры
-                                    actors_list = api_data.get('actors', [])[:10]  # Берем первых 10
-                                    actors = ', '.join([a.get('nameRu') or a.get('nameEn', '') for a in actors_list]) if actors_list else ''
-                                    
-                                    # Сериал или фильм
-                                    is_series = api_data.get('type') == 'TV_SERIES' or api_data.get('serial', False)
-                                    
-                                    info = {
-                                        'title': title,
-                                        'year': year or '—',
-                                        'genres': genres or '—',
-                                        'description': description or '—',
-                                        'director': director or 'Не указан',
-                                        'actors': actors or '—',
-                                        'is_series': is_series
-                                    }
-                                    
-                                    logger.info(f"[IMPORT] Получена информация о фильме {kp_id}: {title}")
-                                else:
-                                    logger.warning(f"[IMPORT] API v2.2 вернул {api_response.status_code} для {kp_id}")
-                            except Exception as api_error:
-                                logger.warning(f"[IMPORT] Ошибка при запросе API v2.2 для {kp_id}: {api_error}")
-                            
-                            # Если не удалось получить через API, используем базовые данные из votes
-                            if not info:
-                                title = item.get('nameRu') or item.get('nameEn') or 'Без названия'
-                                year = item.get('year') or '—'
-                                info = {
-                                    'title': title,
-                                    'year': year,
-                                    'genres': '—',
-                                    'description': '—',
-                                    'director': 'Не указан',
-                                    'actors': '—',
-                                    'is_series': False
-                                }
-                                logger.info(f"[IMPORT] Используем базовые данные из votes для {kp_id}: {title}")
-                            
-                            # Добавляем фильм в базу
-                            logger.debug(f"[IMPORT] Добавляем новый фильм {kp_id}: {info['title']}")
+                            # Проверяем, есть ли уже оценка у этого пользователя для этого фильма
                             cursor.execute('''
-                                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
-                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                                RETURNING id
-                            ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], 
-                                  info['description'], info['director'], info['actors'], 1 if info.get('is_series') else 0))
-                            film_row = cursor.fetchone()
-                            if not film_row:
-                                # Если RETURNING не вернул результат (может быть при конфликте), делаем SELECT
-                                logger.warning(f"[IMPORT] RETURNING не вернул результат для kp_id={kp_id}, делаем SELECT")
-                                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                                film_row = cursor.fetchone()
-                                if not film_row:
-                                    logger.error(f"[IMPORT] Не удалось получить film_id для kp_id={kp_id}")
-                                    continue
-                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                            logger.debug(f"[IMPORT] Фильм добавлен, film_id={film_id}")
-                        
-                        # Проверяем, есть ли уже оценка у этого пользователя для этого фильма
-                        cursor.execute('''
-                            SELECT rating FROM ratings 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                        ''', (chat_id, film_id, user_id))
-                        existing_rating = cursor.fetchone()
-                        
-                        if existing_rating:
-                            # Оценка уже есть, пропускаем
-                            # Получаем название для лога
+                                SELECT rating FROM ratings 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                            ''', (chat_id, film_id, user_id))
+                            existing_rating = cursor.fetchone()
+                            
+                            if existing_rating:
+                                # Оценка уже есть, пропускаем
+                                cursor.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
+                                title_row = cursor.fetchone()
+                                title = title_row.get('title') if isinstance(title_row, dict) else (title_row[0] if title_row else 'Неизвестно')
+                                logger.debug(f"[IMPORT] Фильм {title} уже имеет оценку, пропускаем")
+                                continue
+                            
+                            # Добавляем импортированную оценку для существующего фильма
+                            cursor.execute('''
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                                VALUES (%s, %s, %s, %s, TRUE)
+                                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE
+                            ''', (chat_id, film_id, user_id, user_rating))
+                            conn.commit()
+                            
+                            imported_count += 1
                             cursor.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
                             title_row = cursor.fetchone()
                             title = title_row.get('title') if isinstance(title_row, dict) else (title_row[0] if title_row else 'Неизвестно')
-                            logger.debug(f"[IMPORT] Фильм {title} уже имеет оценку, пропускаем")
-                            continue
-                        
-                        # Добавляем оценку с пометкой is_imported = TRUE
-                        cursor.execute('''
-                            INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
-                            VALUES (%s, %s, %s, %s, TRUE)
-                            ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE
-                        ''', (chat_id, film_id, user_id, user_rating))
-                        conn.commit()
-                        
-                        imported_count += 1
-                        logger.info(f"[IMPORT] Импортирован фильм {info['title']} с оценкой {user_rating}")
+                            logger.info(f"[IMPORT] Импортирован фильм {title} с оценкой {user_rating}")
+                        else:
+                            # Фильма нет в базе группы - создаем импортированную оценку БЕЗ добавления фильма в movies
+                            # Используем film_id = NULL и kp_id для хранения импортированных оценок
+                            title = item.get('nameRu') or item.get('nameEn') or 'Без названия'
+                            
+                            # Проверяем, есть ли уже импортированная оценка для этого kp_id и пользователя
+                            cursor.execute('''
+                                SELECT rating FROM ratings 
+                                WHERE chat_id = %s AND kp_id = %s AND user_id = %s AND film_id IS NULL
+                            ''', (chat_id, kp_id, user_id))
+                            existing_imported_rating = cursor.fetchone()
+                            
+                            if existing_imported_rating:
+                                logger.debug(f"[IMPORT] Импортированная оценка для фильма {kp_id} ({title}) уже существует, пропускаем")
+                                continue
+                            
+                            # Добавляем импортированную оценку БЕЗ film_id (film_id = NULL)
+                            cursor.execute('''
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id)
+                                VALUES (%s, NULL, %s, %s, TRUE, %s)
+                            ''', (chat_id, user_id, user_rating, kp_id))
+                            conn.commit()
+                            
+                            imported_count += 1
+                            logger.info(f"[IMPORT] Импортирован фильм {title} (kp_id={kp_id}) с оценкой {user_rating} (без добавления в базу группы)")
                 except Exception as db_error:
                     logger.error(f"[IMPORT] Ошибка при работе с БД для фильма {kp_id}: {db_error}", exc_info=True)
                     continue
@@ -5510,7 +5454,8 @@ def stats_command(message):
                 avg = row.get('avg_rating') if isinstance(row, dict) else row[2]
                 ratings_by_user[user_id] = {'count': count, 'avg': avg}
             
-            # Для каждого пользователя добавляем импортированные оценки
+            # Для каждого пользователя добавляем импортированные оценки (только для личной статистики)
+            # Импортированные оценки НЕ учитываются в общей статистике группы, но учитываются в личной статистике пользователя
             cursor.execute('''
                 SELECT 
                     r.user_id,
@@ -5524,7 +5469,7 @@ def stats_command(message):
                 user_id = row.get('user_id') if isinstance(row, dict) else row[0]
                 imported_count = row.get('imported_count') if isinstance(row, dict) else row[1]
                 if user_id in ratings_by_user:
-                    # Добавляем импортированные к существующим
+                    # Добавляем импортированные к существующим (только для отображения личной статистики)
                     ratings_by_user[user_id]['count'] += imported_count
                 else:
                     # Если у пользователя только импортированные оценки
