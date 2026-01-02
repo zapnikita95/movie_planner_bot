@@ -5385,6 +5385,236 @@ def handle_reply_to_bot(message):
                 del user_settings_state[message.from_user.id]
             return  # Важно: возвращаемся, чтобы не обрабатывать дальше
 
+# ==================== ОБРАБОТКА СООБЩЕНИЙ С ФИЛЬМОМ + ДАТОЙ В РЕЖИМЕ ДОБАВЛЕНИЯ НОВОГО СЕАНСА ====================
+@bot.message_handler(func=lambda m: m.text and m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'waiting_new_session', priority=20)
+def handle_new_session_input(message):
+    """Обработка сообщения с фильмом + датой в режиме добавления нового сеанса"""
+    logger.info(f"[TICKET NEW SESSION] Получено сообщение в состоянии waiting_new_session от {message.from_user.id}: {message.text}")
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    state = user_ticket_state.get(user_id, {})
+    file_id = state.get('file_id')
+    
+    # Парсим ссылку или kp_id
+    link = None
+    kp_id = None
+    
+    # Ищем ссылку
+    link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', text)
+    if link_match:
+        link = link_match.group(1)
+        kp_id = link_match.group(3)
+        logger.info(f"[TICKET NEW SESSION] Найдена ссылка: {link}, kp_id={kp_id}")
+    
+    # Если нет ссылки — ищем kp_id в начале
+    if not kp_id:
+        id_match = re.search(r'^(\d+)', text)
+        if id_match:
+            kp_id = id_match.group(1)
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            logger.info(f"[TICKET NEW SESSION] Найден ID: {kp_id}, создана ссылка: {link}")
+    
+    if not kp_id:
+        logger.warning(f"[TICKET NEW SESSION] Не найдена ссылка или ID фильма в тексте: '{text}'")
+        bot.reply_to(message, "⚠️ Не найдена ссылка или ID фильма. Попробуйте снова.")
+        return
+    
+    # Парсим дату и время используя существующую функцию
+    user_tz = get_user_timezone_or_default(user_id)
+    session_dt = parse_session_time(text, user_tz)
+    if not session_dt:
+        logger.warning(f"[TICKET NEW SESSION] Не удалось распарсить время из текста: '{text}'")
+        bot.reply_to(message, "⚠️ Не удалось распознать дату и время. Формат: 10.01 15:20 или 10 января 20:30")
+        return
+    
+    logger.info(f"[TICKET NEW SESSION] Время успешно распарсено: {session_dt}")
+    
+    # Получаем информацию о фильме
+    movie_info = extract_movie_info(link)
+    if not movie_info:
+        logger.error(f"[TICKET NEW SESSION] Не удалось получить информацию о фильме по ссылке {link}")
+        bot.reply_to(message, "❌ Не удалось получить информацию о фильме.")
+        return
+    
+    # Добавляем фильм в базу, если его нет
+    with db_lock:
+        cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+        row = cursor.fetchone()
+        if row:
+            if isinstance(row, dict):
+                film_id = row.get('id')
+                title = row.get('title')
+            else:
+                film_id = row[0]
+                title = row[1]
+            logger.info(f"[TICKET NEW SESSION] Фильм уже в базе: film_id={film_id}, title={title}")
+        else:
+            logger.info(f"[TICKET NEW SESSION] Добавляем новый фильм в базу: {movie_info.get('title')}")
+            cursor.execute('''
+                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                RETURNING id, title
+            ''', (chat_id, link, kp_id, movie_info.get('title'), movie_info.get('year'),
+                  movie_info.get('genres'), movie_info.get('description'),
+                  movie_info.get('director'), movie_info.get('actors')))
+            row = cursor.fetchone()
+            if isinstance(row, dict):
+                film_id = row.get('id')
+                title = row.get('title')
+            else:
+                film_id = row[0]
+                title = row[1]
+            conn.commit()
+            logger.info(f"[TICKET NEW SESSION] Фильм добавлен: film_id={film_id}, title={title}")
+        
+        # Создаём план "в кино"
+        session_utc = session_dt.astimezone(pytz.utc)
+        cursor.execute('''
+            INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
+            VALUES (%s, %s, 'cinema', %s, %s)
+            RETURNING id
+        ''', (chat_id, film_id, session_utc, user_id))
+        plan_row = cursor.fetchone()
+        if isinstance(plan_row, dict):
+            plan_id = plan_row.get('id')
+        else:
+            plan_id = plan_row[0]
+        conn.commit()
+        logger.info(f"[TICKET NEW SESSION] Создан план: plan_id={plan_id}")
+        
+        # Если был file_id, добавляем билеты сразу
+        if file_id:
+            cursor.execute('''
+                INSERT INTO tickets (plan_id, chat_id, file_id, session_datetime)
+                VALUES (%s, %s, %s, %s)
+            ''', (plan_id, chat_id, file_id, session_utc))
+            conn.commit()
+            logger.info(f"[TICKET NEW SESSION] Билеты добавлены к плану plan_id={plan_id}")
+    
+    # Планируем напоминания
+    morning_dt = session_dt.replace(hour=9, minute=0)
+    if morning_dt < datetime.now(user_tz):
+        morning_dt = morning_dt + timedelta(days=1)
+    morning_utc = morning_dt.astimezone(pytz.utc)
+    
+    scheduler.add_job(
+        send_plan_notification,
+        'date',
+        run_date=morning_utc,
+        args=[chat_id, film_id, title, link, 'cinema'],
+        id=f'plan_morning_{chat_id}_{plan_id}_{int(morning_utc.timestamp())}'
+    )
+    
+    if file_id:
+        ticket_dt = session_dt - timedelta(minutes=10)
+        if ticket_dt > datetime.now(user_tz):
+            ticket_utc = ticket_dt.astimezone(pytz.utc)
+            scheduler.add_job(
+                send_ticket_notification,
+                'date',
+                run_date=ticket_utc,
+                args=[chat_id, plan_id],
+                id=f'ticket_notify_{chat_id}_{plan_id}_{int(ticket_utc.timestamp())}'
+            )
+    
+    # Обновляем состояние для загрузки билетов (если их еще нет)
+    if file_id:
+        # Билеты уже добавлены, просто подтверждаем
+        tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+        formatted_time = session_dt.strftime('%d.%m %H:%M')
+        bot.reply_to(message, f"✅ <b>Время принято!</b>\n\n🎬 Сеанс создан: {title}\n🕐 Время: {formatted_time} {tz_name}", parse_mode='HTML')
+        del user_ticket_state[user_id]
+        logger.info(f"[TICKET NEW SESSION] Сеанс создан с билетами, состояние очищено")
+    else:
+        # Нужно загрузить билеты
+        user_ticket_state[user_id] = {
+            'step': 'upload_ticket',
+            'plan_id': plan_id,
+            'film_title': title,
+            'plan_dt': session_dt.strftime('%d.%m %H:%M'),
+            'chat_id': chat_id
+        }
+        tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+        formatted_time = session_dt.strftime('%d.%m %H:%M')
+        bot.reply_to(message, f"✅ Сеанс запланирован!\n\n<b>{title}</b> — {formatted_time} {tz_name}\n\n🎟️ Прикрепите фото билетов.", parse_mode='HTML')
+        logger.info(f"[TICKET NEW SESSION] Сеанс создан, ожидаем загрузку билетов, plan_id={plan_id}")
+
+
+# ==================== ОБРАБОТКА ЗАГРУЗКИ БИЛЕТОВ ====================
+@bot.message_handler(content_types=['photo', 'document'], func=lambda m: m.from_user.id in user_ticket_state and user_ticket_state.get(m.from_user.id, {}).get('step') == 'upload_ticket', priority=20)
+def handle_ticket_upload(message):
+    """Обработка загрузки билетов для нового сеанса"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    state = user_ticket_state.get(user_id, {})
+    plan_id = state.get('plan_id')
+    
+    logger.info(f"[TICKET UPLOAD] Получена загрузка билетов от {user_id}, plan_id={plan_id}")
+    
+    if not plan_id:
+        logger.error(f"[TICKET UPLOAD] plan_id не найден в состоянии")
+        bot.reply_to(message, "❌ Ошибка: план не найден.")
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
+        return
+    
+    # Получаем file_id
+    if message.photo:
+        file_id = message.photo[-1].file_id  # Берем самое большое фото
+        logger.info(f"[TICKET UPLOAD] Получено фото, file_id={file_id}")
+    elif message.document:
+        file_id = message.document.file_id
+        logger.info(f"[TICKET UPLOAD] Получен документ, file_id={file_id}")
+    else:
+        logger.warning(f"[TICKET UPLOAD] Не удалось получить file_id из сообщения")
+        bot.reply_to(message, "❌ Не удалось получить файл. Попробуйте еще раз.")
+        return
+    
+    # Сохраняем билеты в БД
+    with db_lock:
+        # Получаем session_datetime из плана
+        cursor.execute('SELECT plan_datetime FROM plans WHERE id = %s', (plan_id,))
+        plan_row = cursor.fetchone()
+        if plan_row:
+            session_datetime = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[0]
+        else:
+            session_datetime = None
+        
+        cursor.execute('''
+            INSERT INTO tickets (plan_id, chat_id, file_id, session_datetime)
+            VALUES (%s, %s, %s, %s)
+        ''', (plan_id, chat_id, file_id, session_datetime))
+        conn.commit()
+        logger.info(f"[TICKET UPLOAD] Билеты сохранены в БД для plan_id={plan_id}")
+    
+    title = state.get('film_title', 'Фильм')
+    dt = state.get('plan_dt', '')
+    
+    # Планируем напоминание за 10 минут до сеанса
+    if session_datetime:
+        user_tz = get_user_timezone_or_default(user_id)
+        session_dt = session_datetime.astimezone(user_tz) if isinstance(session_datetime, datetime) else datetime.fromisoformat(str(session_datetime).replace('Z', '+00:00')).astimezone(user_tz)
+        ticket_dt = session_dt - timedelta(minutes=10)
+        if ticket_dt > datetime.now(user_tz):
+            ticket_utc = ticket_dt.astimezone(pytz.utc)
+            scheduler.add_job(
+                send_ticket_notification,
+                'date',
+                run_date=ticket_utc,
+                args=[chat_id, plan_id],
+                id=f'ticket_notify_{chat_id}_{plan_id}_{int(ticket_utc.timestamp())}'
+            )
+            logger.info(f"[TICKET UPLOAD] Напоминание о билетах запланировано")
+    
+    bot.reply_to(message, f"✅ Билеты прикреплены к сеансу:\n\n<b>{title}</b> — {dt}", parse_mode='HTML')
+    logger.info(f"[TICKET UPLOAD] Билеты успешно добавлены для plan_id={plan_id}")
+    
+    del user_ticket_state[user_id]
+
+
 # Обработка новых ссылок (должен быть последним, чтобы не перехватывать команды)
 @bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities, priority=1)
 def handle_message(message):
