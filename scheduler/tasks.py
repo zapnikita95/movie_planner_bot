@@ -22,10 +22,6 @@ def hourly_stats():
 # Функции для уведомлений о планах (определяем до использования в scheduler)
 
 def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None):
-
-
-def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None):
-
     """Отправляет уведомление о запланированном просмотре"""
 
     try:
@@ -87,10 +83,6 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
 
 
 def check_and_send_plan_notifications():
-
-
-def check_and_send_plan_notifications():
-
     """Периодическая проверка планов и отправка пропущенных уведомлений"""
 
     try:
@@ -382,10 +374,6 @@ scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='
 # Очистка планов
 
 def clean_home_plans():
-
-
-def clean_home_plans():
-
     """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок"""
 
     yesterday = (datetime.now(plans_tz) - timedelta(days=1)).date()
@@ -455,10 +443,6 @@ def clean_home_plans():
 
 
 def clean_cinema_plans():
-
-
-def clean_cinema_plans():
-
     """Каждый понедельник удаляет все планы кино"""
 
     with db_lock:
@@ -478,10 +462,6 @@ def clean_cinema_plans():
 # Голосование для фильмов "в кино"
 
 def start_cinema_votes():
-
-
-def start_cinema_votes():
-
     """Каждый понедельник в 9:00 запускает голосование для фильмов в кино"""
 
     now = datetime.now(plans_tz)
@@ -573,10 +553,6 @@ def start_cinema_votes():
 
 
 def resolve_cinema_votes():
-
-
-def resolve_cinema_votes():
-
     """Во вторник в 9:00 подводит итоги голосований"""
 
     with db_lock:
@@ -662,10 +638,6 @@ scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minut
 
 
 def send_rating_reminder(chat_id, film_id, film_title, user_id):
-
-
-def send_rating_reminder(chat_id, film_id, film_title, user_id):
-
     """Отправляет напоминание пользователю об оценке фильма на следующий день после просмотра"""
 
     try:
@@ -735,9 +707,5 @@ def send_rating_reminder(chat_id, film_id, film_title, user_id):
     except Exception as e:
 
         logger.error(f"[RATING REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
-
-
-
-def send_rating_reminder(chat_id, film_id, film_title, user_id):
 
 
