@@ -1143,33 +1143,49 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                     continue
                 
                 # Добавляем фильм в базу (если еще нет)
-                with db_lock:
-                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                    film_row = cursor.fetchone()
-                    
-                    if film_row:
-                        film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                    else:
-                        # Добавляем фильм
+                try:
+                    with db_lock:
+                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        film_row = cursor.fetchone()
+                        
+                        if film_row:
+                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                            logger.debug(f"[IMPORT] Фильм {kp_id} уже существует в базе, film_id={film_id}")
+                        else:
+                            # Добавляем фильм
+                            logger.debug(f"[IMPORT] Добавляем новый фильм {kp_id}: {info['title']}")
+                            cursor.execute('''
+                                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                                RETURNING id
+                            ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], 
+                                  info['description'], info['director'], info['actors'], 1 if info.get('is_series') else 0))
+                            film_row = cursor.fetchone()
+                            if not film_row:
+                                # Если RETURNING не вернул результат (может быть при конфликте), делаем SELECT
+                                logger.warning(f"[IMPORT] RETURNING не вернул результат для kp_id={kp_id}, делаем SELECT")
+                                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                                film_row = cursor.fetchone()
+                                if not film_row:
+                                    logger.error(f"[IMPORT] Не удалось получить film_id для kp_id={kp_id}")
+                                    continue
+                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                            logger.debug(f"[IMPORT] Фильм добавлен, film_id={film_id}")
+                        
+                        # Добавляем оценку
                         cursor.execute('''
-                            INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                            RETURNING id
-                        ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], 
-                              info['description'], info['director'], info['actors'], 1 if info.get('is_series') else 0))
-                        film_id = cursor.fetchone()[0]
+                            INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                        ''', (chat_id, film_id, user_id, user_rating))
+                        conn.commit()
                     
-                    # Добавляем оценку
-                    cursor.execute('''
-                        INSERT INTO ratings (chat_id, film_id, user_id, rating)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
-                    ''', (chat_id, film_id, user_id, user_rating))
-                    conn.commit()
-                
-                imported_count += 1
-                logger.info(f"[IMPORT] Импортирован фильм {info['title']} с оценкой {user_rating}")
+                    imported_count += 1
+                    logger.info(f"[IMPORT] Импортирован фильм {info['title']} с оценкой {user_rating}")
+                except Exception as db_error:
+                    logger.error(f"[IMPORT] Ошибка при работе с БД для фильма {kp_id}: {db_error}", exc_info=True)
+                    continue
             
             # Если получили меньше 20 фильмов, значит страницы закончились
             if len(items) < 20:
