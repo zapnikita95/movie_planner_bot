@@ -1500,11 +1500,19 @@ def handle_reaction(reaction):
             if len(vote_data['voted']) >= vote_data['members_count']:
                 # Все проголосовали - удаляем базу
                 with db_lock:
-                    cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
-                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
+                    # Удаляем билеты (связаны с plans через plan_id)
+                    cursor.execute('DELETE FROM tickets WHERE chat_id = %s', (chat_id,))
+                    # Удаляем планы (расписание)
                     cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
+                    # Удаляем фильмы
+                    cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
+                    # Удаляем оценки
+                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
+                    # Удаляем настройки
                     cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
+                    # Удаляем статистику
                     cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
+                    # Удаляем голосования
                     cursor.execute('DELETE FROM cinema_votes WHERE chat_id = %s', (chat_id,))
                     conn.commit()
                 
@@ -2646,7 +2654,11 @@ def main_file_handler(message):
             # Сохраняем file_id для последующей обработки
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
             state['file_id'] = file_id
-            bot.reply_to(message, "✅ Файл получен. Продолжайте выбор сеанса.")
+            bot.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿")
+            # Очищаем состояние пользователя, завершаем цикл работы с билетами
+            if user_id in user_ticket_state:
+                del user_ticket_state[user_id]
+            logger.info(f"[TICKET FILE] Состояние пользователя {user_id} очищено после получения файла")
             return
     
     # Если не в состоянии - игнорируем
@@ -5467,13 +5479,11 @@ def clean_command(message):
         "• Все оценки всех пользователей\n"
         "• Все планы и расписание всех пользователей\n"
         "• Все билеты\n"
-        "• Все просмотренные фильмы\n"
         "• Все настройки\n\n"
         "<b>👤 Обнулить базу пользователя</b> — удаляет <b>только ваши данные в этом чате</b>:\n"
         "• Ваши оценки\n"
         "• Ваши планы и расписание\n"
         "• Ваши билеты\n"
-        "• Ваши просмотренные фильмы\n"
         "• Ваша статистика\n"
         "• Ваши настройки (включая часовой пояс)\n\n"
         "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
@@ -5608,7 +5618,8 @@ def clean_action_choice(call):
                 "Это удалит <b>ВСЕ данные чата</b>:\n"
                 "• Все фильмы\n"
                 "• Все оценки\n"
-                "• Все планы\n"
+                "• Все планы и расписание\n"
+                "• Все билеты\n"
                 "• Все настройки\n\n"
                 "Это действие необратимо!\n\n"
                 "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
@@ -5625,7 +5636,6 @@ def clean_action_choice(call):
             "• Все ваши оценки\n"
             "• Все ваши планы и расписание\n"
             "• Все ваши билеты\n"
-            "• Ваши просмотренные фильмы\n"
             "• Вашу статистику\n"
             "• Ваши настройки (включая часовой пояс)\n\n"
             "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
@@ -5781,14 +5791,12 @@ def clean_confirm_execute(message):
                 try:
                     # Удаляем билеты (связаны с plans через plan_id)
                     cursor.execute('DELETE FROM tickets WHERE chat_id = %s', (chat_id,))
-                    # Удаляем просмотренные фильмы
-                    cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s', (chat_id,))
                     # Удаляем планы (расписание)
                     cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
-                    # Удаляем оценки
-                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
                     # Удаляем фильмы
                     cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
+                    # Удаляем оценки
+                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
                     # Удаляем настройки
                     cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
                     # Удаляем статистику
@@ -5808,20 +5816,17 @@ def clean_confirm_execute(message):
             # Удаляем все данные пользователя ТОЛЬКО в этом конкретном чате
             with db_lock:
                 try:
-                    # Сначала получаем plan_id пользователя для удаления билетов
-                    cursor.execute('SELECT id FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-                    plan_ids = [row.get('id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
-                    
-                    # Удаляем билеты пользователя в этом чате (ДО удаления plans)
-                    if plan_ids:
-                        cursor.execute('DELETE FROM tickets WHERE chat_id = %s AND plan_id = ANY(%s)', (chat_id, plan_ids))
-                    
-                    # Удаляем оценки пользователя в этом чате
-                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    # Удаляем билеты пользователя в этом чате (через plans)
+                    cursor.execute('''
+                        DELETE FROM tickets 
+                        WHERE chat_id = %s AND plan_id IN (
+                            SELECT id FROM plans WHERE chat_id = %s AND user_id = %s
+                        )
+                    ''', (chat_id, chat_id, user_id))
                     # Удаляем планы пользователя в этом чате
                     cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-                    # Удаляем просмотренные фильмы пользователя в этом чате
-                    cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    # Удаляем оценки пользователя в этом чате
+                    cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
                     # Удаляем статистику пользователя в этом чате
                     cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
                     # Удаляем настройки пользователя (часовой пояс) - используется user_id как chat_id в settings
@@ -6101,8 +6106,11 @@ def handle_ticket_file_OLD(message):
         # Сохраняем file_id для последующей обработки
         logger.info(f"[TICKET FILE] Сохраняем file_id в состояние, step={step}")
         user_ticket_state[user_id]['file_id'] = file_id
-        bot.reply_to(message, "✅ Файл получен. Продолжайте выбор сеанса.")
-        logger.info(f"[TICKET FILE] file_id сохранен в состояние пользователя {user_id}")
+        bot.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿")
+        # Очищаем состояние пользователя, завершаем цикл работы с билетами
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
+        logger.info(f"[TICKET FILE] file_id сохранен, состояние пользователя {user_id} очищено")
 
 
 # ==================== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ДЛЯ РЕДАКТИРОВАНИЯ И БИЛЕТОВ ====================
