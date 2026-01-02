@@ -930,12 +930,6 @@ def check_and_send_plan_notifications():
     except Exception as e:
         logger.error(f"[PLAN CHECK] Ошибка при проверке планов: {e}", exc_info=True)
 
-# Настройка периодического вывода статистики
-scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
-
-# Периодическая проверка планов и отправка пропущенных уведомлений (каждые 5 минут)
-scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='check_plan_notifications')
-
 # Очистка планов
 def clean_home_plans():
     """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок"""
