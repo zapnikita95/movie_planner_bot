@@ -4808,7 +4808,7 @@ def edit_command(message):
 
 # ==================== КОМАНДА /TICKET ====================
 logger.info("[TICKET REGISTRATION] Регистрируем обработчик команды /ticket")
-@bot.message_handler(commands=['ticket'], priority=10)
+@bot.message_handler(commands=['ticket'])
 def ticket_command(message):
     """Команда /ticket - работа с билетами в кино"""
     logger.info(f"[TICKET COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
