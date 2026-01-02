@@ -471,8 +471,8 @@ def parse_session_time(text, user_tz):
     text = text.strip()
     now = datetime.now(user_tz)
     
-    # Формат: "15 января 10:30" или "15 января 10 30"
-    match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2})[: ](\d{2})', text)
+    # Формат: "15 января 10:30" или "15 января 10 30" или "17 января 15:30"
+    match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2})[: ](\d{1,2})', text)
     if match:
         day = int(match.group(1))
         month_str = match.group(2)
@@ -494,7 +494,7 @@ def parse_session_time(text, user_tz):
                 return None
     
     # Формат: "17.01 15:20" или "17.01.2025 15:20"
-    match = re.search(r'(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s+(\d{1,2})[: ](\d{2})', text)
+    match = re.search(r'(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s+(\d{1,2})[: ](\d{1,2})', text)
     if match:
         day = int(match.group(1))
         month = int(match.group(2))
@@ -4964,12 +4964,14 @@ def handle_ticket_file(message):
 
 
 # ==================== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ДЛЯ РЕДАКТИРОВАНИЯ И БИЛЕТОВ ====================
-@bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_edit_state or message.from_user.id in user_ticket_state)
+@bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_edit_state or message.from_user.id in user_ticket_state, priority=5)
 def handle_edit_ticket_text(message):
     """Обработчик текстовых сообщений для редактирования и билетов"""
     user_id = message.from_user.id
     chat_id = message.chat.id
-    text = message.text.strip()
+    text = message.text.strip() if message.text else ""
+    
+    logger.info(f"[EDIT/TICKET TEXT] Получено сообщение от {user_id}: '{text}'")
     
     # Обработка редактирования оценки
     if user_id in user_edit_state:
@@ -5012,12 +5014,22 @@ def handle_edit_ticket_text(message):
                 bot.reply_to(message, "❌ Не удалось распознать время. Попробуйте в формате:\n• 15 января 10:30\n• 17.01 15:20")
                 return
             
-            # Обновляем время сеанса в плане и билетах
-            session_utc = session_dt.astimezone(pytz.utc)
+            # Получаем информацию о плане и обновляем время сеанса
             with db_lock:
+                # Получаем информацию о фильме для планирования напоминаний
+                cursor.execute('''
+                    SELECT m.title, m.link, p.plan_type
+                    FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s
+                ''', (plan_id,))
+                plan_info = cursor.fetchone()
+                
+                # Обновляем время сеанса в плане и билетах
+                session_utc = session_dt.astimezone(pytz.utc)
                 # Обновляем план
                 cursor.execute('UPDATE plans SET plan_datetime = %s WHERE id = %s', (session_utc, plan_id))
-                # Обновляем время сеанса в билетах
+                # Обновляем время сеанса в билетах (если есть)
                 cursor.execute('UPDATE tickets SET session_datetime = %s WHERE plan_id = %s', (session_utc, plan_id))
                 conn.commit()
             
@@ -5211,6 +5223,11 @@ def handle_reply_to_bot(message):
     # Пропускаем команды - они обрабатываются отдельными обработчиками
     if message.text and message.text.strip().startswith('/'):
         logger.info(f"[REPLY TO BOT] Пропущена команда: {message.text[:50]}")
+        return
+    
+    # Пропускаем сообщения, которые должны обрабатываться обработчиками edit/ticket
+    if message.from_user.id in user_edit_state or message.from_user.id in user_ticket_state:
+        logger.info(f"[REPLY TO BOT] Пропущено сообщение для обработки edit/ticket: {message.text[:50] if message.text else 'None'}")
         return
     
     logger.info(f"[REPLY TO BOT] Получен реплай на сообщение бота от {message.from_user.id}, text: '{message.text}'")
@@ -6590,12 +6607,13 @@ def add_ticket_from_plan_callback(call):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
     
-    bot.edit_message_text(
-        "🎟️ <b>Пришлите билеты скриншотом или вложением</b>\n\n"
-        "Отправьте фото или файл с билетами в следующем сообщении.",
-        chat_id, call.message.chat.id, reply_markup=markup, parse_mode='HTML'
-    )
     bot.answer_callback_query(call.id)
+    bot.send_message(
+        chat_id,
+        "🎟️ <b>Загрузите билеты в чат</b>\n\n"
+        "Отправьте фото или файл с билетами в следующем сообщении.",
+        reply_markup=markup, parse_mode='HTML'
+    )
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_time:"))
