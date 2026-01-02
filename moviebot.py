@@ -7046,7 +7046,7 @@ def random_period_handler(call):
                             SELECT COUNT(DISTINCT m.id) 
                             FROM movies m
                             LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL AND {condition}
+                            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL AND m.{condition}
                         """, (chat_id,))
                         count_row = cursor.fetchone()
                         count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
@@ -7110,17 +7110,17 @@ def _show_genre_step(call, chat_id, user_id):
             period_conditions = []
             for p in periods:
                 if p == "До 1980":
-                    period_conditions.append("year < 1980")
+                    period_conditions.append("m.year < 1980")
                 elif p == "1980–1990":
-                    period_conditions.append("(year >= 1980 AND year <= 1990)")
+                    period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
                 elif p == "1990–2000":
-                    period_conditions.append("(year >= 1990 AND year <= 2000)")
+                    period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
                 elif p == "2000–2010":
-                    period_conditions.append("(year >= 2000 AND year <= 2010)")
+                    period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
                 elif p == "2010–2020":
-                    period_conditions.append("(year >= 2010 AND year <= 2020)")
+                    period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
                 elif p == "2020–сейчас":
-                    period_conditions.append("year >= 2020")
+                    period_conditions.append("m.year >= 2020")
             if period_conditions:
                 base_query += " AND (" + " OR ".join(period_conditions) + ")"
         
@@ -7313,12 +7313,12 @@ def _show_director_step(call, chat_id, user_id):
         if genres:
             genre_conditions = []
             for genre in genres:
-                genre_conditions.append("genres ILIKE %s")
+                genre_conditions.append("m.genres ILIKE %s")
                 params.append(f"%{genre}%")
             if genre_conditions:
                 base_query += " AND (" + " OR ".join(genre_conditions) + ")"
         
-        base_query += " GROUP BY director ORDER BY cnt DESC LIMIT 10"
+        base_query += " ORDER BY cnt DESC LIMIT 10"
         
         with db_lock:
             cursor.execute(base_query, params)
@@ -7329,6 +7329,12 @@ def _show_director_step(call, chat_id, user_id):
                 if director:
                     directors.append(director)
             logger.info(f"[RANDOM] Directors found: {len(directors)}")
+        
+        # Если режиссеров нет, пропускаем шаг и переходим к актерам
+        if not directors:
+            logger.info(f"[RANDOM] No directors found, skipping to actor step")
+            _show_actor_step(call, chat_id, user_id)
+            return
         
         markup = InlineKeyboardMarkup(row_width=1)
         if directors:
@@ -7447,17 +7453,17 @@ def _show_actor_step(call, chat_id, user_id):
             period_conditions = []
             for p in periods:
                 if p == "До 1980":
-                    period_conditions.append("year < 1980")
+                    period_conditions.append("m.year < 1980")
                 elif p == "1980–1990":
-                    period_conditions.append("(year >= 1980 AND year <= 1990)")
+                    period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
                 elif p == "1990–2000":
-                    period_conditions.append("(year >= 1990 AND year <= 2000)")
+                    period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
                 elif p == "2000–2010":
-                    period_conditions.append("(year >= 2000 AND year <= 2010)")
+                    period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
                 elif p == "2010–2020":
-                    period_conditions.append("(year >= 2010 AND year <= 2020)")
+                    period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
                 elif p == "2020–сейчас":
-                    period_conditions.append("year >= 2020")
+                    period_conditions.append("m.year >= 2020")
             if period_conditions:
                 base_query += " AND (" + " OR ".join(period_conditions) + ")"
         
@@ -7465,7 +7471,7 @@ def _show_actor_step(call, chat_id, user_id):
         if genres:
             genre_conditions = []
             for genre in genres:
-                genre_conditions.append("genres ILIKE %s")
+                genre_conditions.append("m.genres ILIKE %s")
                 params.append(f"%{genre}%")
             if genre_conditions:
                 base_query += " AND (" + " OR ".join(genre_conditions) + ")"
@@ -7474,7 +7480,7 @@ def _show_actor_step(call, chat_id, user_id):
         if directors:
             director_conditions = []
             for director in directors:
-                director_conditions.append("director = %s")
+                director_conditions.append("m.director = %s")
                 params.append(director)
             if director_conditions:
                 base_query += " AND (" + " OR ".join(director_conditions) + ")"
@@ -7491,6 +7497,12 @@ def _show_actor_step(call, chat_id, user_id):
                         if actor:
                             actor_counts[actor] = actor_counts.get(actor, 0) + 1
             logger.info(f"[RANDOM] Unique actors found: {len(actor_counts)}")
+        
+        # Если актеров нет, пропускаем шаг и переходим к финалу
+        if not actor_counts:
+            logger.info(f"[RANDOM] No actors found, skipping to final step")
+            _random_final(call, chat_id, user_id)
+            return
         
         markup = InlineKeyboardMarkup(row_width=1)
         if actor_counts:
