@@ -4976,25 +4976,35 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
                 WHERE m.chat_id = %s 
                   AND m.watched = 0 
                   AND r_imported.id IS NULL
-                  AND NOT EXISTS (
-                      -- Проверяем, что есть хотя бы один активный участник, который не просмотрел фильм
-                      SELECT 1 
-                      FROM (
-                          SELECT DISTINCT user_id 
+                  AND (
+                      -- Если нет активных участников, показываем все фильмы
+                      NOT EXISTS (
+                          SELECT 1 
                           FROM stats 
                           WHERE chat_id = %s 
                             AND date >= CURRENT_DATE - INTERVAL '30 days'
-                      ) active_users
-                      WHERE NOT EXISTS (
+                      )
+                      OR
+                      -- Или если есть активные участники, показываем только фильмы, которые не просмотрены хотя бы одним из них
+                      EXISTS (
                           SELECT 1 
-                          FROM watched_movies wm 
-                          WHERE wm.chat_id = %s 
-                            AND wm.film_id = m.id 
-                            AND wm.user_id = active_users.user_id
+                          FROM (
+                              SELECT DISTINCT user_id 
+                              FROM stats 
+                              WHERE chat_id = %s 
+                                AND date >= CURRENT_DATE - INTERVAL '30 days'
+                          ) active_users
+                          WHERE NOT EXISTS (
+                              SELECT 1 
+                              FROM watched_movies wm 
+                              WHERE wm.chat_id = %s 
+                                AND wm.film_id = m.id 
+                                AND wm.user_id = active_users.user_id
+                          )
                       )
                   )
                 ORDER BY m.title
-            ''', (chat_id, chat_id, chat_id))
+            ''', (chat_id, chat_id, chat_id, chat_id))
             rows = cursor.fetchall()
         
         if not rows:
