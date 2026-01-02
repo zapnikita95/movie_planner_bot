@@ -2192,54 +2192,91 @@ def add_and_announce(link, chat_id):
 def handle_web_app_data(message):
     """Обработчик данных из Web App"""
     try:
-        logger.info(f"[WEB APP] Получены данные от {message.from_user.id}: {message.web_app_data.data}")
+        logger.info(f"[WEB APP] Получены данные от {message.from_user.id}, chat_id={message.chat.id}")
+        logger.info(f"[WEB APP] web_app_data: {message.web_app_data.data if hasattr(message, 'web_app_data') and message.web_app_data else 'НЕТ ДАННЫХ'}")
+        
+        if not hasattr(message, 'web_app_data') or not message.web_app_data:
+            logger.error("[WEB APP] web_app_data отсутствует в сообщении")
+            bot.reply_to(message, "❌ Данные Web App не получены")
+            return
+        
         data = json.loads(message.web_app_data.data)
         command = data.get('command')
+        
+        logger.info(f"[WEB APP] Распарсена команда: {command}")
         
         if not command:
             bot.reply_to(message, "❌ Команда не указана")
             return
         
-        # Создаём фейковое сообщение с командой
-        fake_message = telebot.types.Message()
-        fake_message.text = f'/{command}'
-        fake_message.from_user = message.from_user
-        fake_message.chat = message.chat
-        fake_message.date = message.date
-        fake_message.message_id = message.message_id
+        # Вместо создания fake_message, просто вызываем команду напрямую через bot.process_new_messages
+        # Создаём новое сообщение с командой
+        command_message = telebot.types.Message(
+            message_id=message.message_id,
+            from_user=message.from_user,
+            date=message.date,
+            chat=message.chat,
+            content_type='text',
+            options={},
+            json_string=json.dumps({
+                'message_id': message.message_id,
+                'from': {
+                    'id': message.from_user.id,
+                    'is_bot': False,
+                    'first_name': message.from_user.first_name,
+                    'username': message.from_user.username
+                },
+                'chat': {
+                    'id': message.chat.id,
+                    'type': message.chat.type
+                },
+                'date': message.date,
+                'text': f'/{command}',
+                'entities': [{
+                    'type': 'bot_command',
+                    'offset': 0,
+                    'length': len(f'/{command}')
+                }]
+            })
+        )
         
-        # Вызываем соответствующий хэндлер
+        # Устанавливаем текст команды
+        command_message.text = f'/{command}'
+        
+        logger.info(f"[WEB APP] Вызываем обработчик для команды /{command}")
+        
+        # Вызываем соответствующий хэндлер напрямую
         if command == 'random':
-            random_start(fake_message)
+            random_start(command_message)
         elif command == 'premieres':
-            premieres_command(fake_message)
+            premieres_command(command_message)
         elif command == 'list':
-            list_movies(fake_message)
+            list_movies(command_message)
         elif command == 'schedule':
-            show_schedule(fake_message)
+            show_schedule(command_message)
         elif command == 'plan':
-            plan_handler(fake_message)
+            plan_handler(command_message)
         elif command == 'ticket':
-            ticket_command(fake_message)
+            ticket_command(command_message)
         elif command == 'seasons':
-            seasons_command(fake_message)
+            seasons_command(command_message)
         elif command == 'total':
-            total_stats(fake_message)
+            total_stats(command_message)
         elif command == 'stats':
-            stats_command(fake_message)
+            stats_command(command_message)
         elif command == 'rate':
-            rate_command(fake_message)
+            rate_command(command_message)
         elif command == 'settings':
-            settings_command(fake_message)
+            settings_command(command_message)
         elif command == 'help':
-            help_command(fake_message)
+            help_command(command_message)
         elif command == 'start':
-            send_welcome(fake_message)
+            send_welcome(command_message)
         else:
             bot.reply_to(message, f"❌ Неизвестная команда: {command}")
             
     except json.JSONDecodeError as e:
-        logger.error(f"[WEB APP] Ошибка парсинга JSON: {e}")
+        logger.error(f"[WEB APP] Ошибка парсинга JSON: {e}, данные: {message.web_app_data.data if hasattr(message, 'web_app_data') and message.web_app_data else 'НЕТ'}")
         bot.reply_to(message, "❌ Ошибка обработки данных")
     except Exception as e:
         logger.error(f"[WEB APP] Ошибка обработки: {e}", exc_info=True)
