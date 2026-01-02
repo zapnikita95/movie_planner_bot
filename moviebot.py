@@ -2833,11 +2833,6 @@ def add_and_announce(link, chat_id):
                 existing_title = existing_row.get('title') if isinstance(existing_row, dict) else existing_row[1]
                 watched = existing_row.get('watched') if isinstance(existing_row, dict) else existing_row[2]
                 
-                # Проверяем, есть ли импортированные оценки (если есть, фильм не показывается в /list)
-                cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s AND is_imported = TRUE', (chat_id, film_id))
-                imported_count_result = cursor.fetchone()
-                has_imported = imported_count_result[0] > 0 if imported_count_result else False
-                
                 # Получаем среднюю оценку, если фильм просмотрен
                 avg = None
                 if watched:
@@ -2850,8 +2845,7 @@ def add_and_announce(link, chat_id):
                     'title': existing_title,
                     'watched': watched,
                     'avg': avg,
-                    'link': link,
-                    'has_imported': has_imported
+                    'link': link
                 }
                 inserted = False
             else:
@@ -2894,11 +2888,6 @@ def add_and_announce(link, chat_id):
                 text += f"⭐ <b>Оценка не указана</b>\n"
         else:
             text += f"\n⏳ <b>Ещё не просмотрено</b>\n"
-        
-        # Если есть импортированные оценки, объясняем, почему фильм не показывается в /list
-        if duplicate_data.get('has_imported'):
-            text += f"\n⚠️ <b>Фильм имеет импортированные оценки и не отображается в /list</b>\n"
-            text += f"Используйте /edit для удаления фильма из базы, если хотите добавить его заново.\n"
         
         text += f"\n<a href='{duplicate_data['link']}'>Кинопоиск</a>"
         
@@ -3725,19 +3714,19 @@ def handle_delete_movie_internal(message, state):
         for line in lines:
     # Извлекаем kp_id из ссылки или используем как ID
             kp_id = extract_kp_id_from_text(line)
-    if not kp_id:
+            if not kp_id:
                 logger.warning(f"[DELETE MOVIE] Не удалось извлечь kp_id из текста: '{line}'")
                 not_found.append(line)
                 continue
-    
-    logger.info(f"[DELETE MOVIE] Извлечен kp_id: {kp_id}")
-    
-    # Ищем фильм в БД
-        cursor.execute("SELECT id, title FROM movies WHERE (kp_id = %s OR id = %s) AND chat_id = %s", (kp_id, kp_id, chat_id))
-        film = cursor.fetchone()
-        
-        if not film:
-            logger.warning(f"[DELETE MOVIE] Фильм с kp_id={kp_id} или id={kp_id} не найден в чате {chat_id}")
+            
+            logger.info(f"[DELETE MOVIE] Извлечен kp_id: {kp_id}")
+            
+            # Ищем фильм в БД
+            cursor.execute("SELECT id, title FROM movies WHERE (kp_id = %s OR id = %s) AND chat_id = %s", (kp_id, kp_id, chat_id))
+            film = cursor.fetchone()
+            
+            if not film:
+                logger.warning(f"[DELETE MOVIE] Фильм с kp_id={kp_id} или id={kp_id} не найден в чате {chat_id}")
                 not_found.append(kp_id)
                 continue
         
