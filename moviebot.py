@@ -5744,7 +5744,16 @@ def handle_add_film_callback(call):
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
             
             # Получаем информацию об оценках для текущего пользователя
-            from database.db_operations import get_ratings_info
+            # Функция get_ratings_info будет определена ниже или импортирована
+            try:
+                from database.db_operations import get_ratings_info
+            except ImportError:
+                # Если функция не найдена, создаем простую заглушку
+                def get_ratings_info(chat_id, film_id, user_id):
+                    with db_lock:
+                        cursor.execute("SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)", (chat_id, film_id, user_id))
+                        row = cursor.fetchone()
+                        return {'current_user_rated': row is not None, 'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)}
             ratings_info = get_ratings_info(chat_id, film_id, user_id)
             
             if ratings_info['current_user_rated']:
