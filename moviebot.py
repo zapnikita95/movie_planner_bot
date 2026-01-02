@@ -28,6 +28,7 @@ import logging
 import json
 import sys
 from flask import Flask, request, abort, jsonify
+import socket
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
@@ -7188,3 +7189,88 @@ def plan_handler(message):
             bot.reply_to(message, "Произошла ошибка при обработке команды /plan")
         except:
             pass
+
+# Flask app для webhook
+from web.web_app import create_web_app
+app = create_web_app(bot)
+
+logger.info("[DEBUG] Flask app создан")
+
+# Определяем, где запускается бот: на Render, Railway или локально
+try:
+    RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
+    RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
+    RENDER = os.getenv('RENDER')
+    RAILWAY_PUBLIC_DOMAIN = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+    PORT = os.getenv('PORT')
+    
+    IS_PRODUCTION = bool(RENDER_EXTERNAL_URL or RAILWAY_PUBLIC_DOMAIN or (RENDER and PORT))
+    logger.info(f"[DEBUG] IS_PRODUCTION={IS_PRODUCTION}")
+    logger.info(f"[DEBUG] RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}")
+    logger.info(f"[DEBUG] RAILWAY_PUBLIC_DOMAIN={RAILWAY_PUBLIC_DOMAIN}")
+    logger.info(f"[DEBUG] PORT={PORT}")
+except Exception as e:
+    logger.error(f"[DEBUG] Ошибка определения окружения: {e}")
+    IS_PRODUCTION = False
+
+if IS_PRODUCTION:
+    # Production окружение - используем webhook
+    logger.info("Production окружение - используем webhook")
+    
+    # Определяем URL для webhook
+    webhook_url = None
+    if RENDER_EXTERNAL_URL:
+        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
+        logger.info(f"Используем RENDER_EXTERNAL_URL: {webhook_url}")
+    elif RAILWAY_PUBLIC_DOMAIN:
+        webhook_url = f"https://{RAILWAY_PUBLIC_DOMAIN}/webhook"
+        logger.info(f"Используем RAILWAY_PUBLIC_DOMAIN: {webhook_url}")
+    
+    if webhook_url:
+        allowed_updates = [
+            "message",
+            "edited_message",
+            "callback_query",
+            "message_reaction",
+            "message_reaction_count",
+            "chat_member",
+            "my_chat_member"
+        ]
+        logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
+        try:
+            bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
+            logger.info(f"Webhook успешно установлен: {webhook_url}")
+            logger.info(f"allowed_updates включает: {', '.join(allowed_updates)}")
+        except Exception as e:
+            logger.error(f"ОШИБКА при set_webhook: {e}")
+    else:
+        logger.warning("Webhook URL не определён! Установите RENDER_EXTERNAL_URL или RAILWAY_PUBLIC_DOMAIN")
+
+    # КЛЮЧЕВОЕ: запускаем Flask сервер
+    port = int(os.getenv('PORT', 10000))
+    logger.info(f"Запускаем Flask сервер на 0.0.0.0:{port}")
+    
+    # Это важно — чтобы Render сразу увидел порт
+    import socket
+    logger.info(f"Текущий хост: {socket.gethostname()}")
+    
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+else:
+    # Локальный запуск - используем polling (только если IS_PRODUCTION=False)
+    logger.info("Локальное окружение - будет использован polling")
+    try:
+        bot.remove_webhook()
+        logger.info("Старые webhook очищены")
+    except Exception as e:
+        logger.warning(f"Не удалось очистить webhook: {e}")
+    
+    # Запускаем polling независимо от того, как выполняется код
+    # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
+    logger.info("Локальный запуск: используется polling")
+    try:
+        bot.infinity_polling()
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал прерывания, останавливаем бота...")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
+        raise
