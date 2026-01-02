@@ -4950,8 +4950,14 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
         
         with db_lock:
             # Получаем все непросмотренные фильмы, отсортированные по алфавиту
-            # Исключаем импортированные фильмы (is_imported = TRUE)
-            cursor.execute('SELECT id, kp_id, title, year, genres, link FROM movies WHERE chat_id = %s AND watched = 0 AND (is_imported IS NULL OR is_imported = FALSE) ORDER BY title', (chat_id,))
+            # Исключаем фильмы, у которых есть импортированные оценки (is_imported = TRUE в ratings)
+            cursor.execute('''
+                SELECT DISTINCT m.id, m.kp_id, m.title, m.year, m.genres, m.link 
+                FROM movies m
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                ORDER BY m.title
+            ''', (chat_id,))
             rows = cursor.fetchall()
         
         if not rows:
@@ -6455,7 +6461,13 @@ def random_mode_handler(call):
         
         with db_lock:
             # Формируем базовый запрос в зависимости от режима
-            base_query = "SELECT COUNT(*) FROM movies m WHERE m.chat_id = %s AND m.watched = 0 AND (m.is_imported IS NULL OR m.is_imported = FALSE)"
+            # Исключаем фильмы, у которых есть импортированные оценки
+            base_query = """
+                SELECT COUNT(DISTINCT m.id) 
+                FROM movies m
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            """
             params = [chat_id]
             
             if mode == 'my_votes':
@@ -6570,8 +6582,10 @@ def random_period_handler(call):
                             condition = "year >= 2020"
                         
                         cursor.execute(f"""
-                            SELECT COUNT(*) FROM movies 
-                            WHERE chat_id = %s AND watched = 0 AND (is_imported IS NULL OR is_imported = FALSE) AND {condition}
+                            SELECT COUNT(DISTINCT m.id) 
+                            FROM movies m
+                            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL AND {condition}
                         """, (chat_id,))
                         count_row = cursor.fetchone()
                         count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
@@ -6622,10 +6636,11 @@ def _show_genre_step(call, chat_id, user_id):
         
         # Формируем WHERE условие с учетом периодов
         base_query = """
-            SELECT DISTINCT TRIM(UNNEST(string_to_array(genres, ', '))) as genre
-            FROM movies
-            WHERE chat_id = %s AND watched = 0 AND (is_imported IS NULL OR is_imported = FALSE)
-            AND genres IS NOT NULL AND genres != '' AND genres != '—'
+            SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+            FROM movies m
+            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
         """
         params = [chat_id]
         
@@ -6805,10 +6820,11 @@ def _show_director_step(call, chat_id, user_id):
         
         # Формируем WHERE условие с учетом периодов и жанров
         base_query = """
-            SELECT director, COUNT(*) as cnt
-            FROM movies
-            WHERE chat_id = %s AND watched = 0 AND (is_imported IS NULL OR is_imported = FALSE)
-            AND director IS NOT NULL AND director != 'Не указан' AND director != ''
+            SELECT m.director, COUNT(*) as cnt
+            FROM movies m
+            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            AND m.director IS NOT NULL AND m.director != 'Не указан' AND m.director != ''
         """
         params = [chat_id]
         
@@ -6956,9 +6972,11 @@ def _show_actor_step(call, chat_id, user_id):
         
         # Формируем WHERE условие с учетом всех фильтров
         base_query = """
-            SELECT actors FROM movies
-            WHERE chat_id = %s AND watched = 0 AND (is_imported IS NULL OR is_imported = FALSE)
-            AND actors IS NOT NULL AND actors != '' AND actors != '—'
+            SELECT m.actors 
+            FROM movies m
+            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            AND m.actors IS NOT NULL AND m.actors != '' AND m.actors != '—'
         """
         params = [chat_id]
         
@@ -7257,10 +7275,11 @@ def _random_final(call, chat_id, user_id):
             return
         
         # Для остальных режимов используем поиск в базе
-        # Формируем запрос - исключаем фильмы, которые уже запланированы
+        # Формируем запрос - исключаем фильмы, которые уже запланированы и фильмы с импортированными оценками
         query = """SELECT m.id, m.title, m.year, m.genres, m.director, m.actors, m.description, m.link, m.kp_id 
-                   FROM movies m 
-                   WHERE m.chat_id = %s AND m.watched = 0 AND (m.is_imported IS NULL OR m.is_imported = FALSE)
+                   FROM movies m
+                   LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                   WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
                    AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s)"""
         params = [chat_id, chat_id]
         
