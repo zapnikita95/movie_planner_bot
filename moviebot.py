@@ -2833,6 +2833,11 @@ def add_and_announce(link, chat_id):
                 existing_title = existing_row.get('title') if isinstance(existing_row, dict) else existing_row[1]
                 watched = existing_row.get('watched') if isinstance(existing_row, dict) else existing_row[2]
                 
+                # Проверяем, есть ли импортированные оценки (если есть, фильм не показывается в /list)
+                cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s AND is_imported = TRUE', (chat_id, film_id))
+                imported_count_result = cursor.fetchone()
+                has_imported = imported_count_result[0] > 0 if imported_count_result else False
+                
                 # Получаем среднюю оценку, если фильм просмотрен
                 avg = None
                 if watched:
@@ -2845,7 +2850,8 @@ def add_and_announce(link, chat_id):
                     'title': existing_title,
                     'watched': watched,
                     'avg': avg,
-                    'link': link
+                    'link': link,
+                    'has_imported': has_imported
                 }
                 inserted = False
             else:
