@@ -6028,12 +6028,12 @@ def handle_ticket_file_OLD(message):
             bot.reply_to(message, "✅ <b>Дополнительные билеты успешно добавлены!</b>", parse_mode='HTML')
         else:
             # Если это первые билеты, предлагаем указать время
-        user_ticket_state[user_id] = {
-            'step': 'waiting_session_time',
-            'plan_id': plan_id,
-            'chat_id': chat_id
-        }
-        
+            user_ticket_state[user_id] = {
+                'step': 'waiting_session_time',
+                'plan_id': plan_id,
+                'chat_id': chat_id
+            }
+            
             # Проверяем, есть ли время у сеанса
             with db_lock:
                 cursor.execute('SELECT plan_datetime FROM plans WHERE id = %s', (plan_id,))
