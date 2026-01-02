@@ -118,9 +118,6 @@ scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='
 scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
 scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
-months_map = MONTHS_MAP
-days_map = DAYS_MAP
-days_full = DAYS_MAP
 
 # Команды
 commands = [
