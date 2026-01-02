@@ -6696,8 +6696,24 @@ def ticket_session_callback(call):
                 logger.warning(f"[TICKET SESSION] file_id в БД пустой")
                 bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
         else:
-            logger.warning(f"[TICKET SESSION] Нет билетов в БД и нет file_id для добавления. Состояние пользователя: {state}")
-            bot.answer_callback_query(call.id, "Нет файла для добавления", show_alert=True)
+            # Нет билетов и нет file_id - предлагаем загрузить билеты
+            logger.info(f"[TICKET SESSION] Нет билетов в БД и нет file_id для добавления. Предлагаем загрузить билеты")
+            user_ticket_state[user_id] = {
+                'step': 'waiting_ticket_file',
+                'plan_id': plan_id,
+                'chat_id': chat_id
+            }
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+            
+            bot.edit_message_text(
+                "🎟️ <b>Билеты не найдены</b>\n\n"
+                "Загрузите билеты для этого сеанса:\n"
+                "Отправьте фото или файл с билетами в следующем сообщении.",
+                chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+            )
+            bot.answer_callback_query(call.id, "Загрузите билеты")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
