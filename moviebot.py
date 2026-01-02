@@ -1307,9 +1307,16 @@ def add_and_announce(link, chat_id):
         text += f"<i>Кратко:</i> {info['description']}\n\n"
         text += f"<a href='{link}'>Кинопоиск</a>"
         
+        # Создаем кнопку "Запланировать просмотр"
+        markup = InlineKeyboardMarkup()
+        kp_id = info.get('kp_id')
+        if kp_id:
+            # Используем kp_id для callback_data (короче, чем полная ссылка)
+            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+        
         try:
             logger.info(f"Отправляем сообщение в чат {chat_id}")
-            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
             # Только если сообщение отправлено успешно и фильм добавлен в БД — сохраняем для реакций
             bot_messages[msg.message_id] = link
             logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}, message_id={msg.message_id}")
@@ -5024,13 +5031,63 @@ def get_plan_link(message):
     markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
     bot.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan_from_added:"))
+def plan_from_added_callback(call):
+    """Обработчик кнопки 'Запланировать просмотр' из сообщения о добавлении фильма"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        kp_id = call.data.split(":")[1]
+        
+        logger.info(f"[PLAN FROM ADDED] Пользователь {user_id} хочет запланировать фильм kp_id={kp_id}")
+        
+        # Получаем link из базы или формируем его
+        link = None
+        with db_lock:
+            cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            row = cursor.fetchone()
+            if row:
+                link = row.get('link') if isinstance(row, dict) else row[0]
+        
+        if not link:
+            link = f"https://kinopoisk.ru/film/{kp_id}/"
+        
+        # Устанавливаем состояние для планирования
+        user_plan_state[user_id] = {
+            'step': 2,
+            'link': link,
+            'chat_id': chat_id
+        }
+        
+        # Показываем кнопки выбора типа просмотра
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
+        markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
+        
+        bot.answer_callback_query(call.id, "Выберите тип просмотра")
+        bot.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
+        logger.info(f"[PLAN FROM ADDED] Состояние установлено для пользователя {user_id}, link={link}")
+    except Exception as e:
+        logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan_type:"))
 def plan_type_choice(call):
     user_id = call.from_user.id
     plan_type = call.data.split(":")[1]
+    
+    # Проверяем, что пользователь в состоянии планирования
+    if user_id not in user_plan_state:
+        bot.answer_callback_query(call.id, "❌ Состояние планирования не найдено", show_alert=True)
+        return
+    
     user_plan_state[user_id]['type'] = plan_type
     user_plan_state[user_id]['step'] = 3
 
+    bot.answer_callback_query(call.id)
     bot.edit_message_text("Укажите день/дату:", call.message.chat.id, call.message.message_id)
     if plan_type == 'home':
         bot.send_message(call.message.chat.id, "Для дома: пт, сб или вс.")
