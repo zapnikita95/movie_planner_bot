@@ -6334,6 +6334,200 @@ def handle_timezone_callback(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "plan:cancel")
+def plan_cancel_callback(call):
+    """Обработчик кнопки выхода из режима планирования"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    # Удаляем состояние планирования
+    if user_id in user_plan_state:
+        del user_plan_state[user_id]
+        logger.info(f"[PLAN] Пользователь {user_id} вышел из режима планирования")
+    
+    bot.answer_callback_query(call.id, "Режим планирования отменён")
+    bot.edit_message_text("✅ Режим планирования отменён. Можете использовать другие команды.", 
+                         chat_id, call.message.message_id)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan_detail:"))
+def handle_plan_detail_callback(call):
+    """Обработчик показа деталей плана"""
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[PLAN DETAIL] Показ деталей плана {plan_id} от пользователя {user_id}")
+        
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            row = cursor.fetchone()
+        
+        if not row:
+            bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+            return
+        
+        if isinstance(row, dict):
+            title = row.get('title')
+            kp_id = row.get('kp_id')
+            link = row.get('link')
+            plan_dt_value = row.get('plan_datetime')
+            plan_type = row.get('plan_type')
+            has_ticket = row.get('has_ticket', 0)
+        else:
+            title = row[1]
+            kp_id = row[2]
+            link = row[3]
+            plan_dt_value = row[4]
+            plan_type = row[5]
+            has_ticket = row[6] if len(row) > 6 else 0
+        
+        user_tz = get_user_timezone_or_default(user_id)
+        
+        # Преобразуем дату
+        try:
+            if isinstance(plan_dt_value, datetime):
+                if plan_dt_value.tzinfo is None:
+                    plan_dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                else:
+                    plan_dt = plan_dt_value.astimezone(user_tz)
+            elif isinstance(plan_dt_value, str):
+                plan_dt_iso = plan_dt_value
+                if plan_dt_iso.endswith('Z'):
+                    plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(user_tz)
+                elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
+                    plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(user_tz)
+                else:
+                    plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(user_tz)
+            else:
+                plan_dt = datetime.now(user_tz)
+            
+            date_str = plan_dt.strftime('%d.%m.%Y %H:%M')
+        except Exception as e:
+            logger.error(f"Ошибка обработки даты: {e}")
+            date_str = str(plan_dt_value)
+        
+        text = f"📅 <b>План просмотра</b>\n\n"
+        text += f"🎬 <b>{title}</b>\n"
+        text += f"📆 {date_str}\n"
+        text += f"📍 {'Кино' if plan_type == 'cinema' else 'Дома'}\n"
+        if has_ticket:
+            text += f"🎟️ Билет прикреплён\n"
+        text += f"\n<a href='{link}'>Кинопоиск</a>"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_plan:{plan_id}"))
+        markup.add(InlineKeyboardButton("🗑️ Удалить", callback_data=f"delete_plan:{plan_id}"))
+        
+        bot.answer_callback_query(call.id)
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[PLAN DETAIL] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_mode:"))
+def random_mode_handler(call):
+    """Обработчик выбора режима рандомайзера"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        mode = call.data.split(":")[1]
+        
+        if user_id not in user_random_state:
+            bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+            return
+        
+        user_random_state[user_id]['mode'] = mode
+        user_random_state[user_id]['step'] = 'period'
+        
+        # Пока просто отвечаем, что режим выбран
+        bot.answer_callback_query(call.id, f"Режим '{mode}' выбран")
+        bot.edit_message_text(f"🎲 Режим '{mode}' выбран. Функция в разработке.", chat_id, call.message.message_id)
+        logger.info(f"[RANDOM] Mode selected: {mode}, user_id={user_id}")
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_mode_handler: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
+def random_mode_locked_handler(call):
+    """Обработчик заблокированных режимов рандомайзера"""
+    try:
+        mode = call.data.split(":")[1]
+        bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_mode_locked_handler: {e}", exc_info=True)
+
+@bot.message_handler(commands=['seasons'])
+def seasons_command(message):
+    """Команда /seasons - просмотр сезонов сериалов"""
+    logger.info(f"[HANDLER] /seasons вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/seasons', message.chat.id)
+    
+    chat_id = message.chat.id
+    
+    with db_lock:
+        cursor.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
+        series = cursor.fetchall()
+    
+    if not series:
+        bot.reply_to(message, "📺 Нет сериалов в базе.")
+        return
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    for row in series:
+        if isinstance(row, dict):
+            title = row.get('title')
+            kp_id = row.get('kp_id')
+            film_id = row.get('id')
+        else:
+            film_id = row[0]
+            title = row[1]
+            kp_id = row[2]
+        
+        button_text = title
+        if len(button_text) > 30:
+            button_text = button_text[:27] + "..."
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+    
+    bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
+def show_seasons_callback(call):
+    """Показывает сезоны выбранного сериала"""
+    try:
+        kp_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем актуальные данные о сезонах
+        from api.kinopoisk_api import get_seasons
+        seasons_text = get_seasons(kp_id, chat_id, user_id)
+        
+        if seasons_text:
+            bot.answer_callback_query(call.id)
+            bot.send_message(chat_id, seasons_text, parse_mode='HTML')
+        else:
+            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сезонах", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SEASONS] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
 def handle_settings_callback(call):
     """Обработчик callback для кнопок настроек"""
