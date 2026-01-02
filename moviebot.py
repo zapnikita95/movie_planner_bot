@@ -3969,27 +3969,117 @@ def get_plan_day_or_date_internal(message, state):
 
 def handle_clean_confirm_internal(message):
     """Внутренняя функция для обработки подтверждения удаления"""
-    # Используем существующую логику из handle_clean_confirm
     user_id = message.from_user.id
     state = user_clean_state.get(user_id)
     if not state:
         return
     
-    film_id = state.get('film_id')
+    target = state.get('target')
     chat_id = message.chat.id
     
-    with db_lock:
-        cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        ratings_deleted = cursor.rowcount
-        cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        plans_deleted = cursor.rowcount
-        cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        watched_deleted = cursor.rowcount
-        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-        conn.commit()
+    if target == 'user':
+        # Удаление всех данных пользователя
+        with db_lock:
+            # Удаляем оценки пользователя (но не импортированные - они удаляются отдельной командой)
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, user_id))
+            ratings_deleted = cursor.rowcount
+            
+            # Удаляем планы пользователя
+            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            plans_deleted = cursor.rowcount
+            
+            # Удаляем отметки просмотра пользователя
+            cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            watched_deleted = cursor.rowcount
+            
+            # Удаляем статистику пользователя
+            cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            stats_deleted = cursor.rowcount
+            
+            # Удаляем настройки пользователя
+            cursor.execute('DELETE FROM settings WHERE chat_id = %s AND key LIKE %s', (user_id, 'user_%'))
+            settings_deleted = cursor.rowcount
+            
+            conn.commit()
+        
+        bot.reply_to(message, 
+            f"✅ Ваши данные удалены:\n"
+            f"• Оценок: {ratings_deleted}\n"
+            f"• Планов: {plans_deleted}\n"
+            f"• Отметок просмотра: {watched_deleted}\n"
+            f"• Статистики: {stats_deleted}\n"
+            f"• Настроек: {settings_deleted}")
+        del user_clean_state[user_id]
     
-    bot.reply_to(message, f"✅ Фильм удалён из базы (удалено {ratings_deleted} оценок, {plans_deleted} планов, {watched_deleted} отметок просмотра)")
-    del user_clean_state[user_id]
+    elif target == 'imported_ratings':
+        # Удаление импортированных оценок пользователя
+        with db_lock:
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s AND is_imported = TRUE', (chat_id, user_id))
+            imported_deleted = cursor.rowcount
+            conn.commit()
+        
+        bot.reply_to(message, f"✅ Удалено импортированных оценок: {imported_deleted}")
+        del user_clean_state[user_id]
+    
+    elif target == 'chat':
+        # Удаление всех данных чата (требует голосования в группах)
+        with db_lock:
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
+            ratings_deleted = cursor.rowcount
+            cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
+            plans_deleted = cursor.rowcount
+            cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s', (chat_id,))
+            watched_deleted = cursor.rowcount
+            cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
+            movies_deleted = cursor.rowcount
+            cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
+            stats_deleted = cursor.rowcount
+            cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
+            settings_deleted = cursor.rowcount
+            conn.commit()
+        
+        bot.reply_to(message, 
+            f"✅ База данных чата обнулена:\n"
+            f"• Фильмов: {movies_deleted}\n"
+            f"• Оценок: {ratings_deleted}\n"
+            f"• Планов: {plans_deleted}\n"
+            f"• Отметок просмотра: {watched_deleted}\n"
+            f"• Статистики: {stats_deleted}\n"
+            f"• Настроек: {settings_deleted}")
+        del user_clean_state[user_id]
+    
+    elif target == 'unwatched_movies':
+        # Удаление непросмотренных фильмов
+        with db_lock:
+            cursor.execute('''
+                DELETE FROM movies 
+                WHERE chat_id = %s 
+                  AND watched = 0 
+                  AND id NOT IN (SELECT DISTINCT film_id FROM plans WHERE chat_id = %s AND film_id IS NOT NULL)
+                  AND id NOT IN (SELECT DISTINCT film_id FROM ratings WHERE chat_id = %s AND film_id IS NOT NULL)
+            ''', (chat_id, chat_id, chat_id))
+            movies_deleted = cursor.rowcount
+            conn.commit()
+        
+        bot.reply_to(message, f"✅ Удалено непросмотренных фильмов: {movies_deleted}")
+        del user_clean_state[user_id]
+    
+    else:
+        # Старая логика для обратной совместимости (удаление конкретного фильма)
+        film_id = state.get('film_id')
+        if film_id:
+            with db_lock:
+                cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                ratings_deleted = cursor.rowcount
+                cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                plans_deleted = cursor.rowcount
+                cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                watched_deleted = cursor.rowcount
+                cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                conn.commit()
+            
+            bot.reply_to(message, f"✅ Фильм удалён из базы (удалено {ratings_deleted} оценок, {plans_deleted} планов, {watched_deleted} отметок просмотра)")
+        del user_clean_state[user_id]
 
 def handle_rate_list_reply_internal(message):
     """Внутренняя функция для обработки реплая на список фильмов с оценками"""
@@ -8445,6 +8535,20 @@ def clean_action_choice(call):
             user_clean_state[user_id]['confirm_needed'] = True
             user_clean_state[user_id]['target'] = 'unwatched_movies'
     
+    elif action == 'imported_ratings':
+        # Удаление импортированных оценок пользователя
+        bot.edit_message_text(
+            "⚠️ <b>Удаление импортированных оценок с Кинопоиска</b>\n\n"
+            "Это удалит <b>только ваши импортированные оценки</b>:\n"
+            "• Все оценки с пометкой is_imported = TRUE\n"
+            "• Ваши обычные оценки останутся без изменений\n"
+            "• Данные других пользователей останутся без изменений\n\n"
+            "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+            call.message.chat.id, call.message.message_id, parse_mode='HTML'
+        )
+        user_clean_state[user_id]['confirm_needed'] = True
+        user_clean_state[user_id]['target'] = 'imported_ratings'
+    
     elif action == 'cancel':
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
         if user_id in user_clean_state:
@@ -9442,6 +9546,7 @@ def clean_command(message):
     markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
     markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
     markup.add(InlineKeyboardButton("🗑️ Удалить все непросмотренные фильмы", callback_data="clean:unwatched_movies"))
+    markup.add(InlineKeyboardButton("📥 Удалить импорты с Кинопоиска", callback_data="clean:imported_ratings"))
     
     help_text = (
         "🧹 <b>Массовое удаление данных</b>\n\n"
@@ -9461,6 +9566,9 @@ def clean_command(message):
         "• Не находятся в расписании\n"
         "• У которых нет билетов\n"
         "• Которые не участвуют ни в каких активностях\n\n"
+        "<b>📥 Удалить импорты с Кинопоиска</b> — удаляет все ваши импортированные оценки из Кинопоиска.\n"
+        "• Удаляются только импортированные оценки (is_imported = TRUE)\n"
+        "• Ваши обычные оценки и данные других пользователей останутся без изменений\n\n"
         "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
         "Выберите действие:"
     )
