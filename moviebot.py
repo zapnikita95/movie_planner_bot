@@ -4802,9 +4802,11 @@ def edit_command(message):
 
 
 # ==================== КОМАНДА /TICKET ====================
+logger.info("[TICKET REGISTRATION] Регистрируем обработчик команды /ticket")
 @bot.message_handler(commands=['ticket'], priority=10)
 def ticket_command(message):
     """Команда /ticket - работа с билетами в кино"""
+    logger.info(f"[TICKET COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
     try:
         user_id = message.from_user.id
         chat_id = message.chat.id
