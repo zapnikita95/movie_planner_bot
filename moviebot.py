@@ -12,7 +12,7 @@ import random
 import re
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import time
 import threading
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -282,6 +282,18 @@ cursor.execute('''
         file_path TEXT,
         session_datetime TIMESTAMP WITH TIME ZONE,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+    
+    CREATE TABLE IF NOT EXISTS premiere_reminders (
+        id SERIAL PRIMARY KEY,
+        chat_id BIGINT NOT NULL,
+        user_id BIGINT NOT NULL,
+        kp_id TEXT NOT NULL,
+        film_title TEXT,
+        premiere_date DATE,
+        reminder_sent BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(chat_id, user_id, kp_id)
     )
 ''')
 
@@ -1173,6 +1185,18 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
                             logger.debug(f"[IMPORT] Фильм добавлен, film_id={film_id}")
                         
+                        # Проверяем, есть ли уже оценка у этого пользователя для этого фильма
+                        cursor.execute('''
+                            SELECT rating FROM ratings 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                        ''', (chat_id, film_id, user_id))
+                        existing_rating = cursor.fetchone()
+                        
+                        if existing_rating:
+                            # Оценка уже есть, пропускаем
+                            logger.debug(f"[IMPORT] Фильм {info['title']} уже имеет оценку, пропускаем")
+                            continue
+                        
                         # Добавляем оценку
                         cursor.execute('''
                             INSERT INTO ratings (chat_id, film_id, user_id, rating)
@@ -1247,28 +1271,47 @@ def handle_import_count_callback(call):
             return
         
         bot.answer_callback_query(call.id, f"⏳ Начинаю импорт {count} фильмов...")
-        bot.edit_message_text(
+        status_msg = bot.edit_message_text(
             f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
             f"ID пользователя: <code>{kp_user_id}</code>\n"
             f"Количество: {count}\n\n"
-            f"⏳ Импорт начат, это может занять некоторое время...",
+            f"⏳ Импорт начат в фоновом режиме, это может занять некоторое время...\n"
+            f"Вы получите уведомление по завершении.",
             chat_id, call.message.message_id, parse_mode='HTML'
         )
-        
-        # Запускаем импорт
-        imported = import_kp_ratings(kp_user_id, chat_id, user_id, count)
         
         # Удаляем состояние
         del user_import_state[user_id]
         
-        bot.edit_message_text(
-            f"✅ <b>Импорт завершён!</b>\n\n"
-            f"Загружено оценок: <b>{imported}</b>\n\n"
-            f"Оценки загружены в базу! 🎉",
-            chat_id, call.message.message_id, parse_mode='HTML'
-        )
+        # Запускаем импорт в фоновом потоке
+        def background_import():
+            try:
+                imported = import_kp_ratings(kp_user_id, chat_id, user_id, count)
+                
+                # Отправляем результат
+                bot.edit_message_text(
+                    f"✅ <b>Импорт завершён!</b>\n\n"
+                    f"ID пользователя: <code>{kp_user_id}</code>\n"
+                    f"Загружено новых оценок: <b>{imported}</b>\n\n"
+                    f"Оценки загружены в базу! 🎉",
+                    chat_id, status_msg.message_id, parse_mode='HTML'
+                )
+                
+                logger.info(f"[IMPORT] Импорт завершён для user_id={user_id}, kp_user_id={kp_user_id}, imported={imported}")
+            except Exception as e:
+                logger.error(f"[IMPORT] Ошибка в фоновом импорте: {e}", exc_info=True)
+                try:
+                    bot.edit_message_text(
+                        f"❌ <b>Ошибка при импорте</b>\n\n"
+                        f"Произошла ошибка: {str(e)[:200]}",
+                        chat_id, status_msg.message_id, parse_mode='HTML'
+                    )
+                except:
+                    pass
         
-        logger.info(f"[IMPORT] Импорт завершён для user_id={user_id}, kp_user_id={kp_user_id}, imported={imported}")
+        # Запускаем в отдельном потоке
+        import_thread = threading.Thread(target=background_import, daemon=True)
+        import_thread.start()
     except Exception as e:
         logger.error(f"[IMPORT] Ошибка в handle_import_count_callback: {e}", exc_info=True)
         try:
@@ -1704,53 +1747,121 @@ def get_external_sources(kp_id):
         logger.error(f"Ошибка get_external_sources: {e}", exc_info=True)
         return []
 
+def get_premieres_for_period(period_type='current_month'):
+    """Получает список премьер для указанного периода"""
+    now = datetime.now()
+    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+    
+    all_premieres = []
+    
+    if period_type == 'current_month':
+        # Текущий месяц
+        months = [(now.year, now.month)]
+    elif period_type == 'next_month':
+        # Следующий месяц
+        next_month = now.month + 1
+        next_year = now.year
+        if next_month > 12:
+            next_month = 1
+            next_year += 1
+        months = [(next_year, next_month)]
+    elif period_type == '3_months':
+        # 3 месяца
+        months = []
+        for i in range(3):
+            month = now.month + i
+            year = now.year
+            while month > 12:
+                month -= 12
+                year += 1
+            months.append((year, month))
+    elif period_type == '6_months':
+        # 6 месяцев
+        months = []
+        for i in range(6):
+            month = now.month + i
+            year = now.year
+            while month > 12:
+                month -= 12
+                year += 1
+            months.append((year, month))
+    elif period_type == 'current_year':
+        # Текущий год (до 31 декабря)
+        months = [(now.year, m) for m in range(now.month, 13)]
+    elif period_type == 'next_year':
+        # Ближайший год (следующий год полностью)
+        months = [(now.year + 1, m) for m in range(1, 13)]
+    else:
+        months = [(now.year, now.month)]
+    
+    # Получаем премьеры для каждого месяца
+    # API требует месяц в формате JANUARY, FEBRUARY и т.д. для v2.2
+    month_names = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+                   'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER']
+    
+    for year, month in months:
+        month_name = month_names[month - 1] if 1 <= month <= 12 else 'JANUARY'
+        urls_to_try = [
+            # v2.2 требует название месяца
+            f"https://kinopoiskapiunofficial.tech/api/v2.2/films/premieres?year={year}&month={month_name}",
+            # v2.1 может принимать число
+            f"https://kinopoiskapiunofficial.tech/api/v2.1/films/premieres?year={year}&month={month}",
+        ]
+        
+        for url in urls_to_try:
+            try:
+                logger.info(f"[PREMIERES] Запрос к API: {url}")
+                response = requests.get(url, headers=headers, timeout=15)
+                logger.info(f"[PREMIERES] Статус ответа: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    premieres = data.get('releases', []) or data.get('items', []) or data.get('premieres', [])
+                    if premieres:
+                        logger.info(f"[PREMIERES] Получено премьер для {year}-{month:02d}: {len(premieres)}")
+                        all_premieres.extend(premieres)
+                        break  # Успешно получили, переходим к следующему месяцу
+                elif response.status_code != 400:
+                    logger.warning(f"[PREMIERES] Ошибка {response.status_code} для {url}: {response.text[:200]}")
+                    continue
+                else:
+                    logger.warning(f"[PREMIERES] Ошибка 400 для {url}: {response.text[:200]}")
+                    continue
+            except Exception as e:
+                logger.warning(f"[PREMIERES] Ошибка при запросе {url}: {e}")
+                continue
+    
+    # Убираем дубликаты по kinopoiskId
+    seen_ids = set()
+    unique_premieres = []
+    for p in all_premieres:
+        kp_id = p.get('kinopoiskId') or p.get('filmId')
+        if kp_id and kp_id not in seen_ids:
+            seen_ids.add(kp_id)
+            unique_premieres.append(p)
+    
+    logger.info(f"[PREMIERES] Всего уникальных премьер: {len(unique_premieres)}")
+    return unique_premieres
+
 def get_premieres(year=None, month=None):
-    """Получает список премьер на указанный месяц"""
+    """Получает список премьер на указанный месяц (старая функция для обратной совместимости)"""
     if not year:
         year = datetime.now().year
     if not month:
         month = datetime.now().month
     
     headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/premieres?year={year}&month={month}"
     
-    # Пробуем разные варианты URL
-    # Возможно, API изменился и нужно использовать другой формат
-    urls_to_try = [
-        # Стандартный формат
-        f"https://kinopoiskapiunofficial.tech/api/v2.1/films/premieres?year={year}&month={month}",
-        # Альтернативный формат с префиксом
-        f"https://kinopoiskapiunofficial.tech/api/v2.1/films/premieres?year={year}&month={month:02d}",
-        # v2.2
-        f"https://kinopoiskapiunofficial.tech/api/v2.2/films/premieres?year={year}&month={month}",
-    ]
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            premieres = data.get('releases', []) or data.get('items', []) or data.get('premieres', [])
+            return premieres
+    except Exception as e:
+        logger.error(f"[PREMIERES] Ошибка: {e}")
     
-    for url in urls_to_try:
-        try:
-            logger.info(f"[PREMIERES] Запрос к API: {url}")
-            response = requests.get(url, headers=headers, timeout=15)
-            logger.info(f"[PREMIERES] Статус ответа: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                # Пробуем разные варианты ключей в ответе
-                premieres = data.get('releases', []) or data.get('items', []) or data.get('premieres', [])
-                if premieres:
-                    logger.info(f"[PREMIERES] Получено премьер: {len(premieres)}")
-                    return premieres
-            elif response.status_code != 400:
-                # Если не 400, пробуем следующий URL
-                logger.warning(f"[PREMIERES] Ошибка {response.status_code} для {url}: {response.text[:200]}")
-                continue
-            else:
-                # 400 ошибка - пробуем следующий URL
-                logger.warning(f"[PREMIERES] Ошибка 400 для {url}: {response.text[:200]}")
-                continue
-        except Exception as e:
-            logger.warning(f"[PREMIERES] Ошибка при запросе {url}: {e}")
-            continue
-    
-    # Если все варианты не сработали
-    logger.error(f"[PREMIERES] Не удалось получить премьеры ни по одному из URL")
     return []
 
 # Новая функция для поиска фильмов через API
@@ -6587,6 +6698,36 @@ def show_schedule(message):
         
         text += "Приятного просмотра! 🍿"
         bot.reply_to(message, text, parse_mode='HTML')
+        
+        # Отдельным сообщением показываем раздел "Ожидаю" (фильмы, которые выйдут через 2+ месяца)
+        now = datetime.now(user_tz).date()
+        two_months_later = now + timedelta(days=60)  # Примерно 2 месяца
+        
+        with db_lock:
+            cursor.execute('''
+                SELECT kp_id, film_title, premiere_date
+                FROM premiere_reminders
+                WHERE chat_id = %s AND user_id = %s AND reminder_sent = FALSE
+                AND premiere_date > %s
+                ORDER BY premiere_date ASC
+            ''', (chat_id, user_id, two_months_later))
+            waiting_rows = cursor.fetchall()
+        
+        if waiting_rows:
+            waiting_text = "⏳ <b>Ожидаю:</b>\n\n"
+            for row in waiting_rows:
+                kp_id = row.get('kp_id') if isinstance(row, dict) else row[0]
+                title = row.get('film_title') if isinstance(row, dict) else row[1]
+                premiere_date = row.get('premiere_date') if isinstance(row, dict) else row[2]
+                
+                if isinstance(premiere_date, date):
+                    date_str = premiere_date.strftime('%d.%m.%Y')
+                else:
+                    date_str = str(premiere_date)
+                
+                waiting_text += f"• <b>{title}</b> — {date_str}\n"
+            
+            bot.send_message(chat_id, waiting_text, parse_mode='HTML')
     except Exception as e:
         logger.error(f"❌ Ошибка в /schedule: {e}", exc_info=True)
         try:
@@ -6708,63 +6849,397 @@ def show_seasons_callback(call):
 # /premieres - команда для просмотра премьер
 @bot.message_handler(commands=['premieres'])
 def premieres_command(message):
-    """Команда /premieres - список премьер месяца"""
+    """Команда /premieres - выбор периода для просмотра премьер"""
     logger.info(f"[HANDLER] /premieres вызван от {message.from_user.id}")
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/premieres', message.chat.id)
     
-    premieres = get_premieres()
-    
-    if not premieres:
-        bot.reply_to(message, "❌ Не удалось получить список премьер.")
-        return
-    
-    text = "📅 <b>Премьеры месяца:</b>\n\n"
+    # Показываем выбор периода
     markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
+    markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
+    markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
+    markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
+    markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
+    markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
     
-    for p in premieres[:10]:
-        title = p.get('nameRu') or p.get('nameEn', 'Без названия')
-        film_id = p.get('filmId')
-        
-        if film_id:
-            text += f"• <b>{title}</b>\n"
-            button_text = title
-            if len(button_text) > 50:
-                button_text = button_text[:47] + "..."
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"premiere_info:{film_id}"))
-    
-    bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+    bot.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_info:"))
-def premiere_info_callback(call):
-    """Показывает информацию о премьере"""
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_period:"))
+def premieres_period_callback(call):
+    """Обработчик выбора периода для премьер"""
     try:
-        kp_id = call.data.split(":")[1]
+        period = call.data.split(":")[1]
         chat_id = call.message.chat.id
         
-        link = f"https://kinopoisk.ru/film/{kp_id}/"
-        info = extract_movie_info(link)
+        # Получаем премьеры для выбранного периода
+        premieres = get_premieres_for_period(period)
         
-        if info:
-            text = f"<b>{info['title']}</b> ({info['year']})\n\n"
-            text += f"<b>Режиссёр:</b> {info['director']}\n"
-            text += f"<b>Жанры:</b> {info['genres']}\n\n"
-            text += f"{info['description'][:400]}..." if len(info['description']) > 400 else info['description']
-            
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_db:{kp_id}"))
-            
-            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-        else:
-            bot.edit_message_text("❌ Не удалось получить информацию о фильме.", chat_id, call.message.message_id)
+        if not premieres:
+            bot.edit_message_text("❌ Не удалось получить список премьер для выбранного периода.", chat_id, call.message.message_id)
+            bot.answer_callback_query(call.id)
+            return
         
-        bot.answer_callback_query(call.id)
+        # Сохраняем премьеры для пагинации (можно использовать временное хранилище или передавать через callback_data)
+        # Для простоты будем показывать первую страницу
+        show_premieres_page(call, premieres, period, page=0)
+        
     except Exception as e:
-        logger.error(f"[PREMIERE INFO] Ошибка: {e}", exc_info=True)
+        logger.error(f"[PREMIERES PERIOD] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
+
+def show_premieres_page(call, premieres, period, page=0):
+    """Показывает страницу премьер с пагинацией"""
+    try:
+        chat_id = call.message.chat.id
+        items_per_page = 10
+        total_pages = (len(premieres) + items_per_page - 1) // items_per_page
+        start_idx = page * items_per_page
+        end_idx = min(start_idx + items_per_page, len(premieres))
+        
+        period_names = {
+            'current_month': 'текущего месяца',
+            'next_month': 'следующего месяца',
+            '3_months': '3 месяцев',
+            '6_months': '6 месяцев',
+            'current_year': 'текущего года',
+            'next_year': 'ближайшего года'
+        }
+        period_name = period_names.get(period, 'периода')
+        
+        text = f"📅 <b>Премьеры {period_name}:</b>\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Сортируем премьеры по дате выхода
+        def get_premiere_date(p):
+            """Извлекает дату премьеры из данных"""
+            # Пробуем разные форматы дат
+            if p.get('premiereRuDate'):
+                try:
+                    return datetime.strptime(p.get('premiereRuDate'), '%Y-%m-%d').date()
+                except:
+                    pass
+            if p.get('year') and p.get('month'):
+                try:
+                    day = p.get('day', 1)
+                    return datetime(int(p.get('year')), int(p.get('month')), int(day)).date()
+                except:
+                    pass
+            return datetime(2099, 12, 31).date()  # Для сортировки - в конец
+        
+        premieres_sorted = sorted(premieres, key=get_premiere_date)
+        
+        for p in premieres_sorted[start_idx:end_idx]:
+            kp_id = p.get('kinopoiskId') or p.get('filmId')
+            title_ru = p.get('nameRu') or p.get('nameEn') or "Без названия"
+            
+            # Получаем дату выхода
+            premiere_date = get_premiere_date(p)
+            date_str = ""
+            if premiere_date and premiere_date.year < 2099:
+                date_str = f" ({premiere_date.strftime('%d.%m.%Y')})"
+            elif p.get('year') and p.get('month'):
+                year = p.get('year')
+                month = p.get('month')
+                day = p.get('day')
+                if day:
+                    date_str = f" ({day:02d}.{month:02d}.{year})"
+                else:
+                    date_str = f" ({month:02d}.{year})"
+            
+            text += f"• <b>{title_ru}</b>{date_str}\n"
+            
+            button_text = title_ru
+            if len(button_text) > 50:
+                button_text = button_text[:47] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"premiere_detail:{kp_id}"))
+        
+        # Кнопки пагинации
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_page:{period}:{page-1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"premieres_page:{period}:{page+1}"))
+        
+        if nav_buttons:
+            markup.add(*nav_buttons)
+        
+        text += f"\nСтраница {page + 1} из {total_pages}"
+        text += "\n\nВыберите фильм для подробностей:"
+        
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_page:"))
+def premieres_page_callback(call):
+    """Обработчик пагинации премьер"""
+    try:
+        parts = call.data.split(":")
+        period = parts[1]
+        page = int(parts[2])
+        
+        # Получаем премьеры заново (можно оптимизировать, сохраняя в кэш)
+        premieres = get_premieres_for_period(period)
+        show_premieres_page(call, premieres, period, page)
+    except Exception as e:
+        logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_detail:"))
+def premiere_detail_handler(call):
+    """Показывает детали премьеры с постером и трейлером"""
+    logger.info(f"[PREMIERES] Детали премьеры: {call.data}")
+    kp_id = call.data.split(":")[1]
+    chat_id = call.message.chat.id
+    
+    # Получаем полную информацию о фильме
+    headers = {'X-API-KEY': KP_TOKEN}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            bot.answer_callback_query(call.id, "Не удалось загрузить данные фильма", show_alert=True)
+            return
+        
+        data = response.json()
+        
+        title = data.get('nameRu') or data.get('nameOriginal') or "Без названия"
+        year = data.get('year') or '—'
+        poster_url = data.get('posterUrlPreview') or data.get('posterUrl')
+        trailer_url = None
+        
+        # Ищем трейлер
+        videos = data.get('videos', {}).get('trailers', [])
+        if videos:
+            trailer_url = videos[0].get('url')  # Первый трейлер
+        
+        description = data.get('description') or data.get('shortDescription') or "Нет описания"
+        genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
+        countries = ', '.join([c['country'] for c in data.get('countries', [])]) or '—'
+        
+        # Получаем дату премьеры из данных о премьерах
+        premiere_date = None
+        premiere_date_str = ""
+        # Пробуем найти дату в данных фильма
+        # Проверяем разные поля с датами
+        for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+            date_value = data.get(date_field)
+            if date_value:
+                try:
+                    # Пробуем разные форматы
+                    for fmt in ['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%d.%m.%Y']:
+                        try:
+                            if 'T' in str(date_value):
+                                premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                            else:
+                                premiere_date = datetime.strptime(str(date_value), fmt).date()
+                            premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                            break
+                        except:
+                            continue
+                    if premiere_date:
+                        break
+                except:
+                    continue
+        
+        text = f"<b>{title}</b> ({year})\n\n"
+        if premiere_date_str:
+            text += f"📅 Премьера: {premiere_date_str}\n\n"
+        text += f"{description}\n\n"
+        text += f"🌍 {countries}\n"
+        text += f"🎭 {genres}\n"
+        
+        if trailer_url:
+            text += f"\n<a href='{trailer_url}'>📺 Смотреть трейлер</a>"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"premiere_add:{kp_id}"))
+        
+        # Кнопка напоминания о премьере (только если есть дата)
+        if premiere_date:
+            # Проверяем, не установлено ли уже напоминание
+            with db_lock:
+                cursor.execute('''
+                    SELECT id FROM premiere_reminders 
+                    WHERE chat_id = %s AND user_id = %s AND kp_id = %s
+                ''', (chat_id, call.from_user.id, kp_id))
+                existing = cursor.fetchone()
+            
+            if not existing:
+                # Используем безопасный формат даты для callback_data (без двоеточий)
+                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+                markup.add(InlineKeyboardButton("🔔 Напомнить о выходе премьеры", callback_data=f"premiere_remind:{kp_id}:{date_for_callback}"))
+        
+        # Отправляем с постером
+        if poster_url:
+            try:
+                bot.send_photo(
+                    chat_id,
+                    poster_url,
+                    caption=text,
+                    parse_mode='HTML',
+                    reply_markup=markup
+                )
+                bot.delete_message(chat_id, call.message.message_id)  # Удаляем старое сообщение
+            except Exception as e:
+                logger.error(f"[PREMIERES DETAIL] Ошибка отправки фото: {e}")
+                # Если не удалось отправить фото, отправляем текст
+                bot.edit_message_text(
+                    text,
+                    chat_id,
+                    call.message.message_id,
+                    parse_mode='HTML',
+                    reply_markup=markup,
+                    disable_web_page_preview=False
+                )
+        else:
+            bot.edit_message_text(
+                text,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=markup,
+                disable_web_page_preview=False
+            )
+        
+        bot.answer_callback_query(call.id)
+        
+    except Exception as e:
+        logger.error(f"[PREMIERES DETAIL] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "Ошибка загрузки фильма", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_add:"))
+def premiere_add_to_db(call):
+    """Добавляет премьеру в базу"""
+    try:
+        kp_id = call.data.split(":")[1]
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        chat_id = call.message.chat.id
+        
+        # Добавляем в базу через существующую функцию
+        if add_and_announce(link, chat_id):
+            bot.answer_callback_query(call.id, "✅ Фильм добавлен в базу!")
+        else:
+            bot.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+    except Exception as e:
+        logger.error(f"[PREMIERE ADD] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_remind:"))
+def premiere_remind_handler(call):
+    """Устанавливает напоминание о выходе премьеры"""
+    try:
+        parts = call.data.split(":")
+        kp_id = parts[1]
+        # Дата может содержать дефисы вместо точек, если была заменена
+        premiere_date_str = parts[2] if len(parts) > 2 else None
+        if premiere_date_str:
+            premiere_date_str = premiere_date_str.replace('-', '.')  # Возвращаем обратно точки
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем информацию о фильме
+        headers = {'X-API-KEY': KP_TOKEN}
+        url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            bot.answer_callback_query(call.id, "Не удалось получить данные фильма", show_alert=True)
+            return
+        
+        data = response.json()
+        title = data.get('nameRu') or data.get('nameOriginal') or "Без названия"
+        
+        # Парсим дату премьеры (используем те же методы, что и в premiere_detail_handler)
+        premiere_date = None
+        if premiere_date_str:
+            try:
+                premiere_date = datetime.strptime(premiere_date_str, '%d.%m.%Y').date()
+            except:
+                pass
+        
+        # Если не получилось из строки, пробуем найти в данных фильма
+        if not premiere_date:
+            for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+                date_value = data.get(date_field)
+                if date_value:
+                    try:
+                        for fmt in ['%Y-%m-%d', '%Y-%m-%dT%H:%M:%S', '%d.%m.%Y']:
+                            try:
+                                if 'T' in str(date_value):
+                                    premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                                else:
+                                    premiere_date = datetime.strptime(str(date_value), fmt).date()
+                                break
+                            except:
+                                continue
+                        if premiere_date:
+                            break
+                    except:
+                        continue
+        
+        if not premiere_date:
+            bot.answer_callback_query(call.id, "Не удалось определить дату премьеры", show_alert=True)
+            return
+        
+        # Сохраняем напоминание в базу
+        with db_lock:
+            cursor.execute('''
+                INSERT INTO premiere_reminders (chat_id, user_id, kp_id, film_title, premiere_date)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (chat_id, user_id, kp_id) DO UPDATE 
+                SET premiere_date = EXCLUDED.premiere_date, reminder_sent = FALSE
+            ''', (chat_id, user_id, kp_id, title, premiere_date))
+            conn.commit()
+        
+        # Планируем уведомление на дату премьеры
+        user_tz = get_user_timezone_or_default(user_id)
+        reminder_dt = user_tz.localize(datetime.combine(premiere_date, datetime.min.time().replace(hour=9, minute=0)))
+        reminder_utc = reminder_dt.astimezone(pytz.utc)
+        
+        scheduler.add_job(
+            send_premiere_reminder,
+            'date',
+            run_date=reminder_utc,
+            args=[chat_id, user_id, kp_id, title],
+            id=f'premiere_remind_{chat_id}_{user_id}_{kp_id}_{int(reminder_utc.timestamp())}'
+        )
+        
+        bot.answer_callback_query(call.id, f"✅ Напоминание установлено на {premiere_date_str}")
+        
+    except Exception as e:
+        logger.error(f"[PREMIERE REMIND] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка установки напоминания", show_alert=True)
+
+def send_premiere_reminder(chat_id, user_id, kp_id, title):
+    """Отправляет напоминание о выходе премьеры"""
+    try:
+        message = f"🎬 <b>{title}</b> выходит в прокат сегодня! 🎉"
+        bot.send_message(chat_id, message, parse_mode='HTML')
+        
+        # Отмечаем напоминание как отправленное
+        with db_lock:
+            cursor.execute('''
+                UPDATE premiere_reminders 
+                SET reminder_sent = TRUE 
+                WHERE chat_id = %s AND user_id = %s AND kp_id = %s
+            ''', (chat_id, user_id, kp_id))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"[PREMIERE REMINDER] Ошибка отправки: {e}", exc_info=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
 def series_track_callback(call):
