@@ -5134,22 +5134,28 @@ def handle_edit_ticket_text(message):
             del user_ticket_state[user_id]
             logger.info(f"[TICKET TIME] Состояние пользователя {user_id} очищено")
         elif step == 'waiting_new_session':
-            logger.info(f"[TICKET TIME] Обрабатываем waiting_new_session, текст='{text}'")
+            logger.info(f"[TICKET NEW SESSION] ===== НАЧАЛО ОБРАБОТКИ waiting_new_session =====")
+            logger.info(f"[TICKET NEW SESSION] Пользователь {user_id} отправил: '{text}'")
             # Обрабатываем создание нового сеанса с билетами
             file_id = state.get('file_id')
+            logger.info(f"[TICKET NEW SESSION] file_id из состояния: {file_id}")
             
             # Парсим ссылку и дату из текста
             link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', text)
+            logger.info(f"[TICKET NEW SESSION] Результат поиска ссылки: {link_match is not None}")
             if link_match:
                 link = link_match.group(1)
                 kp_id = link_match.group(3)
+                logger.info(f"[TICKET NEW SESSION] Найдена ссылка: {link}, kp_id={kp_id}")
             else:
                 # Пробуем найти просто ID
                 id_match = re.search(r'^(\d+)', text.strip())
                 if id_match:
                     kp_id = id_match.group(1)
                     link = f"https://kinopoisk.ru/film/{kp_id}/"
+                    logger.info(f"[TICKET NEW SESSION] Найден ID: {kp_id}, создана ссылка: {link}")
                 else:
+                    logger.warning(f"[TICKET NEW SESSION] Не найдена ссылка или ID в тексте: '{text}'")
                     bot.reply_to(message, "❌ Не найдена ссылка на фильм. Укажите ссылку или ID фильма.")
                     return
             
