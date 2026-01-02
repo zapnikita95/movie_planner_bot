@@ -4978,31 +4978,41 @@ def handle_ticket_file(message):
                 del user_ticket_state[user_id]
             return
         
-        # Сохраняем билет в БД
+        # Проверяем, есть ли уже билеты для этого плана
         with db_lock:
-            # Удаляем старые билеты для этого плана
-            cursor.execute('DELETE FROM tickets WHERE plan_id = %s', (plan_id,))
-            # Добавляем новые
+            cursor.execute('SELECT COUNT(*) FROM tickets WHERE plan_id = %s', (plan_id,))
+            existing_count = cursor.fetchone()[0] if cursor.rowcount > 0 else 0
+            logger.info(f"[TICKET FILE] Текущее количество билетов для plan_id={plan_id}: {existing_count}")
+            
+            # Добавляем новые билеты (не удаляем старые, если добавляем еще)
             cursor.execute('INSERT INTO tickets (plan_id, chat_id, file_id) VALUES (%s, %s, %s)',
                          (plan_id, chat_id, file_id))
             conn.commit()
         logger.info(f"[TICKET FILE] Билеты сохранены в БД для plan_id={plan_id}")
         
-        # Обновляем состояние
-        user_ticket_state[user_id] = {
-            'step': 'waiting_session_time',
-            'plan_id': plan_id,
-            'chat_id': chat_id
-        }
+        # Очищаем состояние, так как билеты добавлены
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
         
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("⏰ Указать время сеанса", callback_data=f"ticket_time:{plan_id}"))
-        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
-        
-        bot.reply_to(message, 
-                    "✅ <b>Билеты успешно добавлены!</b>\n\n"
-                    "Если нужно, укажите точное время сеанса:",
-                    reply_markup=markup, parse_mode='HTML')
+        if existing_count > 0:
+            # Если билеты уже были, просто подтверждаем добавление
+            bot.reply_to(message, "✅ <b>Дополнительные билеты успешно добавлены!</b>", parse_mode='HTML')
+        else:
+            # Если это первые билеты, предлагаем указать время
+            user_ticket_state[user_id] = {
+                'step': 'waiting_session_time',
+                'plan_id': plan_id,
+                'chat_id': chat_id
+            }
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⏰ Указать время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+            
+            bot.reply_to(message, 
+                        "✅ <b>Билеты успешно добавлены!</b>\n\n"
+                        "Если нужно, укажите точное время сеанса:",
+                        reply_markup=markup, parse_mode='HTML')
         logger.info(f"[TICKET FILE] Сообщение об успешном добавлении отправлено пользователю {user_id}")
     else:
         # Сохраняем file_id для последующей обработки
@@ -5365,15 +5375,13 @@ def handle_reply_to_bot(message):
             return  # Важно: возвращаемся, чтобы не обрабатывать дальше
 
 # Обработка новых ссылок (должен быть последним, чтобы не перехватывать команды)
-@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities, priority=1)
+@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities and m.from_user.id not in user_ticket_state and m.from_user.id not in user_plan_state, priority=1)
 def handle_message(message):
     logger.info(f"[HANDLER] handle_message вызван для сообщения от {message.from_user.id}")
     
-    # Пропускаем сообщения, если пользователь работает с билетами или планированием
-    if message.from_user.id in user_ticket_state:
-        state = user_ticket_state.get(message.from_user.id, {})
-        step = state.get('step')
-        logger.info(f"[HANDLER] Пропущено сообщение - пользователь в user_ticket_state, step={step}")
+    # Дополнительная проверка (на всякий случай)
+    if message.from_user.id in user_ticket_state or message.from_user.id in user_plan_state:
+        logger.info(f"[HANDLER] Пропущено сообщение - пользователь в user_ticket_state или user_plan_state")
         return
     
     if message.from_user.id in user_plan_state:
@@ -6663,6 +6671,11 @@ def ticket_session_callback(call):
                     logger.error(f"[TICKET SESSION] Ошибка отправки билетов: {e2}")
                     bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
                     bot.send_message(chat_id, "❌ Не удалось отправить билеты. Возможно, файл был удален.")
+            
+            # Добавляем кнопку для добавления еще билетов
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
+            bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
         else:
             logger.warning(f"[TICKET SESSION] file_id в БД пустой")
             bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
