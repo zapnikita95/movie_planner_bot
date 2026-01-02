@@ -3848,13 +3848,13 @@ def handle_rating_internal(message, rating):
                 kp_row = cursor.fetchone()
                 kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
                 
-                    avg_str = f"{avg:.1f}" if avg else "—"
-                    bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
-                    
-                    # Проверяем, все ли активные участники оценили фильм, и удаляем план если да
-                    check_and_remove_plan_if_all_rated(chat_id, film_id)
-                    
-                    # Если средняя оценка > 9, показываем похожие фильмы и продолжения
+                avg_str = f"{avg:.1f}" if avg else "—"
+                bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                
+                # Проверяем, все ли активные участники оценили фильм, и удаляем план если да
+                check_and_remove_plan_if_all_rated(chat_id, film_id)
+                
+                # Если средняя оценка > 9, показываем похожие фильмы и продолжения
                 if avg and avg > 9 and kp_id:
                     similars = get_similars(kp_id)
                     sequels_data = get_sequels(kp_id)
