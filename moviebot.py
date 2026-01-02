@@ -5071,7 +5071,8 @@ def handle_edit_ticket_text(message):
                     )
             
             tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
-            bot.reply_to(message, f"✅ Время сеанса обновлено: {session_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}")
+            formatted_time = session_dt.strftime('%d.%m %H:%M')
+            bot.reply_to(message, f"✅ <b>Время принято!</b>\n\n🕐 Сеанс: {formatted_time} {tz_name}", parse_mode='HTML')
             del user_ticket_state[user_id]
         
         elif step == 'waiting_new_session':
@@ -5171,7 +5172,8 @@ def handle_edit_ticket_text(message):
                 )
             
             tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
-            bot.reply_to(message, f"✅ Сеанс создан: {title} на {session_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}")
+            formatted_time = session_dt.strftime('%d.%m %H:%M')
+            bot.reply_to(message, f"✅ <b>Время принято!</b>\n\n🎬 Сеанс создан: {title}\n🕐 Время: {formatted_time} {tz_name}", parse_mode='HTML')
             del user_ticket_state[user_id]
 
 
@@ -6547,16 +6549,21 @@ def ticket_session_callback(call):
     if ticket_row and not file_id:
         # Показываем существующие билеты
         existing_file_id = ticket_row[0] if isinstance(ticket_row, dict) else ticket_row[0]
-        try:
-            bot.send_photo(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
-            bot.answer_callback_query(call.id, "Билеты отправлены")
-        except:
-            # Если фото не найдено, пытаемся отправить как документ
+        if existing_file_id:
             try:
-                bot.send_document(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
+                bot.send_photo(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
                 bot.answer_callback_query(call.id, "Билеты отправлены")
-            except:
-                bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
+            except Exception as e:
+                # Если фото не найдено, пытаемся отправить как документ
+                try:
+                    bot.send_document(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
+                    bot.answer_callback_query(call.id, "Билеты отправлены")
+                except Exception as e2:
+                    logger.error(f"[TICKET] Ошибка отправки билетов: {e2}")
+                    bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
+                    bot.send_message(chat_id, "❌ Не удалось отправить билеты. Возможно, файл был удален.")
+        else:
+            bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
         return
     
     if file_id:
@@ -6588,7 +6595,24 @@ def ticket_session_callback(call):
         )
         bot.answer_callback_query(call.id, "Билеты добавлены")
     else:
-        bot.answer_callback_query(call.id, "Нет файла для добавления")
+        # Если file_id не передан, но билеты есть в БД, отправляем их
+        if ticket_row:
+            existing_file_id = ticket_row[0] if isinstance(ticket_row, dict) else ticket_row[0]
+            if existing_file_id:
+                try:
+                    bot.send_photo(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
+                    bot.answer_callback_query(call.id, "Билеты отправлены")
+                except Exception as e:
+                    try:
+                        bot.send_document(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
+                        bot.answer_callback_query(call.id, "Билеты отправлены")
+                    except Exception as e2:
+                        logger.error(f"[TICKET] Ошибка отправки билетов: {e2}")
+                        bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "Нет файла для добавления")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
@@ -6607,7 +6631,7 @@ def add_ticket_from_plan_callback(call):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
     
-    bot.answer_callback_query(call.id)
+    bot.answer_callback_query(call.id, "Загрузите билеты в чат")
     bot.send_message(
         chat_id,
         "🎟️ <b>Загрузите билеты в чат</b>\n\n"
