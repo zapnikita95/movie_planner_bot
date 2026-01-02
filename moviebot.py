@@ -7075,44 +7075,86 @@ def random_start(message):
         user_id = message.from_user.id
         chat_id = message.chat.id
         
+        # Инициализируем состояние
+        user_random_state[user_id] = {
+            'step': 'mode',
+            'mode': None,  # 'my_votes', 'group_votes', или None (обычный режим)
+            'periods': [],
+            'genres': [],
+            'directors': [],
+            'actors': []
+        }
+        
+        # Шаг 0: Выбор режима
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🎲 Обычный режим", callback_data="rand_mode:normal"))
+        markup.add(InlineKeyboardButton("⭐ По моим оценкам (8+)", callback_data="rand_mode:my_votes"))
+        markup.add(InlineKeyboardButton("👥 По оценкам группы (8+)", callback_data="rand_mode:group_votes"))
+        
+        bot.send_message(chat_id, "🎲 <b>Выберите режим рандомайзера:</b>", reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[RANDOM] Step 0 sent: mode selection, user_id={user_id}")
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_start: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Ошибка при запуске рандомайзера. Попробуйте позже.")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_mode:"))
+def random_mode_handler(call):
+    """Обработчик выбора режима рандомайзера"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        mode = call.data.split(":")[1]
+        
+        if user_id not in user_random_state:
+            bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+            return
+        
+        user_random_state[user_id]['mode'] = mode
+        user_random_state[user_id]['step'] = 'period'
+        
         # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
         all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
         available_periods = []
         
         with db_lock:
+            # Формируем базовый запрос в зависимости от режима
+            base_query = "SELECT COUNT(*) FROM movies m WHERE m.chat_id = %s AND m.watched = 0"
+            params = [chat_id]
+            
+            if mode == 'my_votes':
+                # Фильмы с оценкой пользователя >= 8
+                base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND r.user_id = %s AND r.rating >= 8)"
+                params.append(user_id)
+            elif mode == 'group_votes':
+                # Фильмы со средней оценкой группы >= 8
+                base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
+            
             for period in all_periods:
                 if period == "До 1980":
-                    condition = "year < 1980"
+                    condition = "m.year < 1980"
                 elif period == "1980–1990":
-                    condition = "(year >= 1980 AND year <= 1990)"
+                    condition = "(m.year >= 1980 AND m.year <= 1990)"
                 elif period == "1990–2000":
-                    condition = "(year >= 1990 AND year <= 2000)"
+                    condition = "(m.year >= 1990 AND m.year <= 2000)"
                 elif period == "2000–2010":
-                    condition = "(year >= 2000 AND year <= 2010)"
+                    condition = "(m.year >= 2000 AND m.year <= 2010)"
                 elif period == "2010–2020":
-                    condition = "(year >= 2010 AND year <= 2020)"
+                    condition = "(m.year >= 2010 AND m.year <= 2020)"
                 elif period == "2020–сейчас":
-                    condition = "year >= 2020"
+                    condition = "m.year >= 2020"
                 
-                cursor.execute(f"""
-                    SELECT COUNT(*) FROM movies 
-                    WHERE chat_id = %s AND watched = 0 AND {condition}
-                """, (chat_id,))
+                query = f"{base_query} AND {condition}"
+                cursor.execute(query, tuple(params))
                 count_row = cursor.fetchone()
                 count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
                 
                 if count > 0:
                     available_periods.append(period)
         
-        # Инициализируем состояние с доступными периодами
-        user_random_state[user_id] = {
-            'step': 'period',
-            'periods': [],
-            'available_periods': available_periods,  # Сохраняем доступные периоды
-            'genres': [],  # Список выбранных жанров
-            'directors': [],  # Список выбранных режиссеров
-            'actors': []  # Список выбранных актёров
-        }
+        user_random_state[user_id]['available_periods'] = available_periods
         
         markup = InlineKeyboardMarkup(row_width=2)
         if available_periods:
@@ -7124,12 +7166,13 @@ def random_start(message):
                 markup.row(*row)
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
         
-        bot.send_message(chat_id, "🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)", reply_markup=markup, parse_mode='HTML')
-        logger.info(f"[RANDOM] Step 1 sent: periods, user_id={user_id}")
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text("🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[RANDOM] Mode selected: {mode}, moving to period selection, user_id={user_id}")
     except Exception as e:
-        logger.error(f"[RANDOM] ERROR in random_start: {e}", exc_info=True)
+        logger.error(f"[RANDOM] ERROR in random_mode_handler: {e}", exc_info=True)
         try:
-            bot.reply_to(message, "❌ Ошибка при запуске рандомайзера. Попробуйте позже.")
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
@@ -7726,6 +7769,16 @@ def _random_final(call, chat_id, user_id):
                    WHERE m.chat_id = %s AND m.watched = 0 
                    AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s)"""
         params = [chat_id, chat_id]
+        
+        # Фильтр по режиму (my_votes или group_votes)
+        mode = state.get('mode')
+        if mode == 'my_votes':
+            # Фильмы с оценкой пользователя >= 8
+            query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND r.user_id = %s AND r.rating >= 8)"
+            params.append(user_id)
+        elif mode == 'group_votes':
+            # Фильмы со средней оценкой группы >= 8
+            query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
         
         # Фильтр по периодам
         periods = state.get('periods', [])
