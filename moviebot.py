@@ -2837,12 +2837,25 @@ def add_and_announce(link, chat_id):
         text += f"<i>Кратко:</i> {info['description']}\n\n"
         text += f"<a href='{link}'>Кинопоиск</a>"
         
-        # Создаем кнопку "Запланировать просмотр"
-        markup = InlineKeyboardMarkup()
+        # Создаем кнопки
+        markup = InlineKeyboardMarkup(row_width=1)
         kp_id = info.get('kp_id')
         if kp_id:
             # Используем kp_id для callback_data (короче, чем полная ссылка)
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+            
+            # Получаем film_id для проверки оценок
+            with db_lock:
+                cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                film_row = cursor.fetchone()
+                if film_row:
+                    film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                    # Проверяем, есть ли уже оценка от пользователя (нужно получить user_id из контекста)
+                    # Но мы не знаем user_id здесь, поэтому просто добавляем кнопки для всех
+                    markup.row(
+                        InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                        InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+                    )
         
         try:
             logger.info(f"Отправляем сообщение в чат {chat_id}")
@@ -3033,6 +3046,7 @@ def send_welcome(message):
 
 # Реакции + сбор оценок
 rating_messages = {}  # message_id: film_id (связь сообщения о просмотренном фильме с film_id)
+rating_confirm_messages = {}  # message_id: {'chat_id': int, 'film_id': int, 'user_id': int, 'rating': int, 'title': str}
 rate_list_messages = {}  # chat_id: message_id (сообщение со списком фильмов для /rate)
 
 @bot.message_reaction_handler(func=lambda r: True)
@@ -3622,45 +3636,45 @@ def handle_delete_movie_internal(message, state):
     
     with db_lock:
         for line in lines:
-            # Извлекаем kp_id из ссылки или используем как ID
+    # Извлекаем kp_id из ссылки или используем как ID
             kp_id = extract_kp_id_from_text(line)
-            if not kp_id:
+    if not kp_id:
                 logger.warning(f"[DELETE MOVIE] Не удалось извлечь kp_id из текста: '{line}'")
                 not_found.append(line)
                 continue
-            
-            logger.info(f"[DELETE MOVIE] Извлечен kp_id: {kp_id}")
-            
-            # Ищем фильм в БД
-            cursor.execute("SELECT id, title FROM movies WHERE (kp_id = %s OR id = %s) AND chat_id = %s", (kp_id, kp_id, chat_id))
-            film = cursor.fetchone()
-            
-            if not film:
-                logger.warning(f"[DELETE MOVIE] Фильм с kp_id={kp_id} или id={kp_id} не найден в чате {chat_id}")
+    
+    logger.info(f"[DELETE MOVIE] Извлечен kp_id: {kp_id}")
+    
+    # Ищем фильм в БД
+        cursor.execute("SELECT id, title FROM movies WHERE (kp_id = %s OR id = %s) AND chat_id = %s", (kp_id, kp_id, chat_id))
+        film = cursor.fetchone()
+        
+        if not film:
+            logger.warning(f"[DELETE MOVIE] Фильм с kp_id={kp_id} или id={kp_id} не найден в чате {chat_id}")
                 not_found.append(kp_id)
                 continue
-            
-            film_id = film.get('id') if isinstance(film, dict) else film[0]
-            title = film.get('title') if isinstance(film, dict) else film[1]
-            
-            logger.info(f"[DELETE MOVIE] Найден фильм: id={film_id}, title={title}")
-            
-            # Удаляем связанные данные
-            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            ratings_deleted = cursor.rowcount
-            logger.info(f"[DELETE MOVIE] Удалено оценок: {ratings_deleted}")
-            
-            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            plans_deleted = cursor.rowcount
-            logger.info(f"[DELETE MOVIE] Удалено планов: {plans_deleted}")
-            
-            cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            watched_deleted = cursor.rowcount
-            logger.info(f"[DELETE MOVIE] Удалено отметок просмотра: {watched_deleted}")
-            
-            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            movie_deleted = cursor.rowcount
-            logger.info(f"[DELETE MOVIE] Удалено фильмов: {movie_deleted}")
+        
+        film_id = film.get('id') if isinstance(film, dict) else film[0]
+        title = film.get('title') if isinstance(film, dict) else film[1]
+        
+        logger.info(f"[DELETE MOVIE] Найден фильм: id={film_id}, title={title}")
+        
+        # Удаляем связанные данные
+        cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        ratings_deleted = cursor.rowcount
+        logger.info(f"[DELETE MOVIE] Удалено оценок: {ratings_deleted}")
+        
+        cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        plans_deleted = cursor.rowcount
+        logger.info(f"[DELETE MOVIE] Удалено планов: {plans_deleted}")
+        
+        cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        watched_deleted = cursor.rowcount
+        logger.info(f"[DELETE MOVIE] Удалено отметок просмотра: {watched_deleted}")
+        
+        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        movie_deleted = cursor.rowcount
+        logger.info(f"[DELETE MOVIE] Удалено фильмов: {movie_deleted}")
             
             if movie_deleted > 0:
                 deleted_count += 1
@@ -4933,6 +4947,45 @@ def handle_rating(message):
     if film_id:
         try:
             with db_lock:
+                # Проверяем, просмотрен ли фильм пользователем
+                cursor.execute('''
+                    SELECT watched FROM movies WHERE id = %s AND chat_id = %s
+                ''', (film_id, chat_id))
+                movie_row = cursor.fetchone()
+                if movie_row:
+                    watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[0]
+                    
+                    # Проверяем, есть ли уже оценка от этого пользователя
+                    cursor.execute('''
+                        SELECT rating FROM ratings 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                    ''', (chat_id, film_id, user_id))
+                    existing_rating = cursor.fetchone()
+                    
+                    # Если фильм не просмотрен и нет оценки, показываем подтверждение
+                    if not watched and not existing_rating:
+                        # Получаем название фильма
+                        cursor.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
+                        title_row = cursor.fetchone()
+                        title = title_row.get('title') if isinstance(title_row, dict) else (title_row[0] if title_row else "фильм")
+                        
+                        # Сохраняем информацию о запросе оценки для обработки подтверждения
+                        rating_confirm_messages[message.message_id] = {
+                            'chat_id': chat_id,
+                            'film_id': film_id,
+                            'user_id': user_id,
+                            'rating': rating,
+                            'title': title
+                        }
+                        
+                        markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton("✅ Да", callback_data=f"confirm_rating:{message.message_id}"))
+                        
+                        bot.reply_to(message, f"Вы хотите поставить оценку *{rating}* фильму *{title}* и отметить его просмотренным?", 
+                                   reply_markup=markup, parse_mode='Markdown')
+                        return
+                    
+                    # Если фильм уже просмотрен или есть оценка, сохраняем сразу
                 try:
                     # Проверяем, не в состоянии ли ошибки транзакция
                     try:
@@ -5037,7 +5090,7 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
                           SELECT 1 
                           FROM stats 
                           WHERE chat_id = %s 
-                            AND date >= CURRENT_DATE - INTERVAL '30 days'
+                            AND timestamp >= CURRENT_DATE - INTERVAL '30 days'
                       )
                       OR
                       -- Или если есть активные участники, показываем только фильмы, которые не просмотрены хотя бы одним из них
@@ -5047,7 +5100,7 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
                               SELECT DISTINCT user_id 
                               FROM stats 
                               WHERE chat_id = %s 
-                                AND date >= CURRENT_DATE - INTERVAL '30 days'
+                                AND timestamp >= CURRENT_DATE - INTERVAL '30 days'
                           ) active_users
                           WHERE NOT EXISTS (
                               SELECT 1 
@@ -6625,6 +6678,111 @@ def plan_from_added_callback(call):
         except:
             pass
 
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_rating:"))
+def handle_confirm_rating(call):
+    """Обработчик подтверждения оценки и отметки фильма как просмотренного"""
+    try:
+        bot.answer_callback_query(call.id)
+        message_id = int(call.data.split(":")[1])
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        if message_id not in rating_confirm_messages:
+            bot.reply_to(call.message, "❌ Ошибка: информация об оценке не найдена")
+            return
+        
+        rating_info = rating_confirm_messages[message_id]
+        if rating_info['user_id'] != user_id:
+            bot.answer_callback_query(call.id, "❌ Это не ваша оценка", show_alert=True)
+            return
+        
+        film_id = rating_info['film_id']
+        rating = rating_info['rating']
+        title = rating_info['title']
+        
+        with db_lock:
+            try:
+                # Проверяем, не в состоянии ли ошибки транзакция
+                try:
+                    cursor.execute('SELECT 1')
+                    cursor.fetchone()
+                except:
+                    conn.rollback()
+                
+                # Сохраняем оценку
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                ''', (chat_id, film_id, user_id, rating))
+                
+                # Отмечаем фильм как просмотренный
+                cursor.execute('''
+                    UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s
+                ''', (film_id, chat_id))
+                
+                conn.commit()
+                
+                # Получаем среднюю оценку
+                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
+                avg_row = cursor.fetchone()
+                avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
+                
+                avg_str = f"{avg:.1f}" if avg else "—"
+                bot.reply_to(call.message, f"✅ Фильм *{title}* отмечен как просмотренный!\n\nСпасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", parse_mode='Markdown')
+                
+                # Удаляем из словаря
+                del rating_confirm_messages[message_id]
+            except Exception as db_error:
+                conn.rollback()
+                logger.error(f"Ошибка при сохранении оценки и отметке просмотра: {db_error}", exc_info=True)
+                bot.reply_to(call.message, "❌ Произошла ошибка при сохранении. Попробуйте позже.")
+    except Exception as e:
+        logger.error(f"Ошибка в handle_confirm_rating: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
+def handle_rate_film_callback(call):
+    """Обработчик кнопки 'Оценить'"""
+    try:
+        bot.answer_callback_query(call.id)
+        kp_id = call.data.split(":")[1]
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Получаем film_id по kp_id
+        with db_lock:
+            cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            row = cursor.fetchone()
+            if not row:
+                bot.reply_to(call.message, "❌ Фильм не найден в базе")
+                return
+            
+            film_id = row.get('id') if isinstance(row, dict) else row[0]
+            title = row.get('title') if isinstance(row, dict) else row[1]
+            
+            # Проверяем, есть ли уже оценка
+            cursor.execute('''
+                SELECT rating FROM ratings 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+            ''', (chat_id, film_id, user_id))
+            existing_rating = cursor.fetchone()
+            
+            if existing_rating:
+                rating = existing_rating.get('rating') if isinstance(existing_rating, dict) else existing_rating[0]
+                bot.reply_to(call.message, f"✅ Вы уже оценили этот фильм: {rating}/10\n\nЧтобы изменить оценку, ответьте на сообщение с фильмом числом от 1 до 10.")
+            else:
+                bot.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.", parse_mode='Markdown')
+    except Exception as e:
+        logger.error(f"Ошибка в handle_rate_film_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:"))
 def handle_show_facts(call):
@@ -9828,9 +9986,9 @@ def handle_settings_callback(call):
                     call.message.chat.id,
                     call.message.message_id,
                     reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                return
+                parse_mode='HTML'
+            )
+            return
         
         if action == "back":
             # Возврат к главному меню settings
@@ -11007,3 +11165,4 @@ else:
     except Exception as e:
         logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
         raise
+            
