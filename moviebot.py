@@ -9504,16 +9504,10 @@ def random_genre_handler(call):
             
             # Для режимов my_votes и group_votes после выбора жанра сразу переходим к финалу
             if mode in ['my_votes', 'group_votes']:
-                # Обновляем клавиатуру и сразу переходим к финалу
-                _show_genre_step(call, chat_id, user_id)
-                # Небольшая задержка для обновления UI, затем переход к финалу
-                import threading
-                def delayed_final():
-                    import time
-                    time.sleep(0.5)  # Небольшая задержка для обновления UI
-                    user_random_state[user_id]['step'] = 'final'
-                    _random_final(call, chat_id, user_id)
-                threading.Thread(target=delayed_final, daemon=True).start()
+                # Переходим сразу к финалу (жанр уже сохранен)
+                logger.info(f"[RANDOM] Mode {mode}: genre '{data}' selected, moving to final")
+                user_random_state[user_id]['step'] = 'final'
+                _random_final(call, chat_id, user_id)
                 return
             else:
                 # Для обычного режима обновляем клавиатуру
