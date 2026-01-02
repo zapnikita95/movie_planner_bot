@@ -6825,6 +6825,7 @@ def _show_director_step(call, chat_id, user_id):
             LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
             WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
             AND m.director IS NOT NULL AND m.director != 'Не указан' AND m.director != ''
+            GROUP BY m.director
         """
         params = [chat_id]
         
