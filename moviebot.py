@@ -5354,7 +5354,7 @@ def handle_reply_to_bot(message):
             return  # Важно: возвращаемся, чтобы не обрабатывать дальше
 
 # Обработка новых ссылок (должен быть последним, чтобы не перехватывать команды)
-@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities)
+@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities, priority=1)
 def handle_message(message):
     logger.info(f"[HANDLER] handle_message вызван для сообщения от {message.from_user.id}")
     
