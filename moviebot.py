@@ -4021,6 +4021,65 @@ def handle_clean_confirm_internal(message):
         bot.reply_to(message, f"✅ Удалено импортированных оценок: {imported_deleted}")
         del user_clean_state[user_id]
     
+    elif target == 'clean_imported_movies':
+        # Удаление фильмов, которые были добавлены только из-за импорта
+        # Удаляем фильмы, у которых есть только импортированные оценки и нет обычных
+        with db_lock:
+            # Находим фильмы, которые имеют только импортированные оценки
+            cursor.execute('''
+                SELECT DISTINCT m.id, m.title
+                FROM movies m
+                WHERE m.chat_id = %s
+                  AND m.watched = 0
+                  AND m.id NOT IN (
+                      SELECT DISTINCT film_id 
+                      FROM plans 
+                      WHERE chat_id = %s AND film_id IS NOT NULL
+                  )
+                  AND EXISTS (
+                      SELECT 1 
+                      FROM ratings r 
+                      WHERE r.chat_id = %s 
+                        AND r.film_id = m.id 
+                        AND r.is_imported = TRUE
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 
+                      FROM ratings r 
+                      WHERE r.chat_id = %s 
+                        AND r.film_id = m.id 
+                        AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                  )
+            ''', (chat_id, chat_id, chat_id, chat_id))
+            movies_to_delete = cursor.fetchall()
+            
+            if not movies_to_delete:
+                bot.reply_to(message, "✅ Нет фильмов для удаления. Все фильмы либо имеют обычные оценки, либо находятся в планах.")
+                del user_clean_state[user_id]
+                return
+            
+            movie_ids = [row.get('id') if isinstance(row, dict) else row[0] for row in movies_to_delete]
+            movies_count = len(movie_ids)
+            
+            # Удаляем связанные данные
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = ANY(%s)', (chat_id, movie_ids))
+            ratings_deleted = cursor.rowcount
+            
+            cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = ANY(%s)', (chat_id, movie_ids))
+            watched_deleted = cursor.rowcount
+            
+            # Удаляем сами фильмы
+            cursor.execute('DELETE FROM movies WHERE chat_id = %s AND id = ANY(%s)', (chat_id, movie_ids))
+            movies_deleted = cursor.rowcount
+            
+            conn.commit()
+        
+        bot.reply_to(message, 
+            f"✅ Удалено фильмов, добавленных при импорте: {movies_deleted}\n"
+            f"• Удалено оценок: {ratings_deleted}\n"
+            f"• Удалено отметок просмотра: {watched_deleted}")
+        del user_clean_state[user_id]
+    
     elif target == 'chat':
         # Удаление всех данных чата (требует голосования в группах)
         with db_lock:
@@ -8549,6 +8608,22 @@ def clean_action_choice(call):
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'imported_ratings'
     
+    elif action == 'clean_imported_movies':
+        # Удаление фильмов, которые были добавлены только из-за импорта
+        bot.edit_message_text(
+            "⚠️ <b>Удаление фильмов, добавленных при импорте</b>\n\n"
+            "Это удалит фильмы, которые:\n"
+            "• Были добавлены в базу только из-за импорта оценок\n"
+            "• Имеют только импортированные оценки (is_imported = TRUE)\n"
+            "• Не имеют обычных оценок (is_imported = FALSE или NULL)\n"
+            "• Не находятся в планах\n"
+            "• Не просмотрены (watched = 0)\n\n"
+            "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+            call.message.chat.id, call.message.message_id, parse_mode='HTML'
+        )
+        user_clean_state[user_id]['confirm_needed'] = True
+        user_clean_state[user_id]['target'] = 'clean_imported_movies'
+    
     elif action == 'cancel':
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
         if user_id in user_clean_state:
@@ -9547,6 +9622,7 @@ def clean_command(message):
     markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
     markup.add(InlineKeyboardButton("🗑️ Удалить все непросмотренные фильмы", callback_data="clean:unwatched_movies"))
     markup.add(InlineKeyboardButton("📥 Удалить импорты с Кинопоиска", callback_data="clean:imported_ratings"))
+    markup.add(InlineKeyboardButton("🧹 Удалить фильмы, добавленные при импорте", callback_data="clean:clean_imported_movies"))
     
     help_text = (
         "🧹 <b>Массовое удаление данных</b>\n\n"
@@ -9569,6 +9645,9 @@ def clean_command(message):
         "<b>📥 Удалить импорты с Кинопоиска</b> — удаляет все ваши импортированные оценки из Кинопоиска.\n"
         "• Удаляются только импортированные оценки (is_imported = TRUE)\n"
         "• Ваши обычные оценки и данные других пользователей останутся без изменений\n\n"
+        "<b>🧹 Удалить фильмы, добавленные при импорте</b> — удаляет фильмы, которые были добавлены в базу только из-за импорта оценок.\n"
+        "• Удаляются фильмы с только импортированными оценками\n"
+        "• Фильмы с обычными оценками или в планах останутся\n\n"
         "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
         "Выберите действие:"
     )
