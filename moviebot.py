@@ -9135,13 +9135,13 @@ def random_start(message):
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🎲 Обычный режим", callback_data="rand_mode:normal"))
         
-        # Проверяем, есть ли у пользователя больше 100 оценок
+        # Проверяем, есть ли у пользователя больше 50 оценок (включая импортированные из КП)
         with db_lock:
             cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
             user_ratings_count = cursor.fetchone()
             user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
             
-            if user_ratings >= 100:
+            if user_ratings >= 50:
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
             else:
                 # Заблокированная кнопка
