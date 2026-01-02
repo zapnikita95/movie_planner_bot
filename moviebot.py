@@ -1668,13 +1668,23 @@ def handle_reaction(reaction):
 @bot.message_handler(func=lambda m: (
     m.text and 
     ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text) and
-    not m.text.strip().startswith('/plan') and  # Не обрабатываем команду /plan
-    m.from_user.id not in user_plan_state and  # Не обрабатываем, если пользователь в процессе планирования
-    m.from_user.id not in user_ticket_state  # Не обрабатываем, если пользователь работает с билетами
-), priority=1)
+    not m.text.strip().startswith('/plan')  # Не обрабатываем команду /plan
+))
 def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
     logger.info(f"[SAVE MOVIE] save_movie_message вызван для пользователя {message.from_user.id}, текст: '{message.text[:100]}'")
+    
+    # Пропускаем, если пользователь работает с билетами или планированием
+    if message.from_user.id in user_ticket_state:
+        state = user_ticket_state.get(message.from_user.id, {})
+        step = state.get('step')
+        logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_ticket_state, step={step}")
+        return
+    
+    if message.from_user.id in user_plan_state:
+        logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_plan_state")
+        return
+    
     try:
         # Ищем все ссылки на Кинопоиск в сообщении
         links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
