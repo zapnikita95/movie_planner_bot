@@ -17,6 +17,7 @@ user_import_state = {}  # user_id: {'step': str, 'kp_user_id': str, 'count': int
 # Состояния очистки
 user_clean_state = {}  # user_id: {'action': str, 'target': str}
 clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
+clean_unwatched_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
 
 # Состояния редактирования
 user_edit_state = {}  # user_id: {'action': str, 'plan_id': int, 'step': str, ...}
