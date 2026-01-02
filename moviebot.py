@@ -1571,9 +1571,11 @@ def handle_reaction(reaction):
     if not link:
         # Пытаемся получить сообщение и найти ссылку в его тексте
         try:
-            # Пробуем получить сообщение через forward_message
+            # Пробуем получить сообщение через forward_message (но сразу удалим пересланное)
             forwarded = bot.forward_message(chat_id, chat_id, message_id)
+            forwarded_msg_id = None
             if forwarded:
+                forwarded_msg_id = forwarded.message_id
                 if forwarded.text:
                     # Ищем ссылку на Кинопоиск в тексте сообщения
                     link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', forwarded.text)
@@ -1589,11 +1591,16 @@ def handle_reaction(reaction):
                         link = link_match.group(1)
                         logger.info(f"[REACTION] Найдена ссылка в подписи к фото: {link}")
                         bot_messages[message_id] = link
+                
+                # Удаляем пересланное сообщение сразу после получения данных
+                if forwarded_msg_id:
+                    try:
+                        bot.delete_message(chat_id, forwarded_msg_id)
+                        logger.info(f"[REACTION] Пересланное сообщение {forwarded_msg_id} удалено")
+                    except Exception as e_del:
+                        logger.warning(f"[REACTION] Не удалось удалить пересланное сообщение: {e_del}")
         except Exception as e:
             logger.warning(f"[REACTION] Ошибка при получении сообщения через forward_message: {e}")
-            # Если forward_message не работает, пробуем найти в БД по message_id
-            # Но это сложно, так как message_id не сохраняется в БД
-            # Поэтому просто логируем
             logger.info(f"[REACTION] Не удалось получить сообщение для message_id={message_id}")
     
     if not link:
