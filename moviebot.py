@@ -9186,8 +9186,8 @@ def random_mode_handler(call):
                 base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND r.user_id = %s AND r.rating >= 8)"
                 params.append(user_id)
             elif mode == 'group_votes':
-                # Фильмы со средней оценкой группы >= 8
-                base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
+                # Фильмы со средней оценкой группы >= 8 (исключаем импортированные оценки)
+                base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
             
             for period in all_periods:
                 if period == "До 1980":
@@ -9839,8 +9839,8 @@ def _random_final(call, chat_id, user_id):
             params.append(chat_id)
             params.append(user_id)
         elif mode == 'group_votes':
-            # Фильмы со средней оценкой группы >= 8
-            query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
+            # Фильмы со средней оценкой группы >= 8 (исключаем импортированные оценки)
+            query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
         
         # Фильтр по периодам
         periods = state.get('periods', [])
