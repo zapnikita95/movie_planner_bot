@@ -2447,19 +2447,14 @@ def handle_list_reply_internal(message):
             show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
 
 # ==================== ГЛАВНЫЙ ХЭНДЛЕР ДЛЯ ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ ====================
-@bot.message_handler(content_types=['text'])
+@bot.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
-    """Единый главный хэндлер для всех текстовых сообщений"""
+    """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
     logger.info(f"[MAIN TEXT HANDLER] Получено текстовое сообщение от {message.from_user.id}: '{message.text[:100] if message.text else ''}'")
     
     user_id = message.from_user.id
     chat_id = message.chat.id
     text = message.text.strip() if message.text else ""
-    
-    # Команды обрабатываются отдельными хэндлерами через @bot.message_handler(commands=['...'])
-    if text.startswith('/'):
-        logger.info(f"[MAIN TEXT HANDLER] Пропущена команда: {text[:50]}")
-        return
     
     # 1. Проверяем состояния (ticket, settings, plan, edit)
     
