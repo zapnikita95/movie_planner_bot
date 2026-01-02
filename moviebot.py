@@ -6449,10 +6449,56 @@ def random_mode_handler(call):
         user_random_state[user_id]['mode'] = mode
         user_random_state[user_id]['step'] = 'period'
         
-        # Пока просто отвечаем, что режим выбран
-        bot.answer_callback_query(call.id, f"Режим '{mode}' выбран")
-        bot.edit_message_text(f"🎲 Режим '{mode}' выбран. Функция в разработке.", chat_id, call.message.message_id)
-        logger.info(f"[RANDOM] Mode selected: {mode}, user_id={user_id}")
+        # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
+        all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+        available_periods = []
+        
+        with db_lock:
+            # Формируем базовый запрос в зависимости от режима
+            base_query = "SELECT COUNT(*) FROM movies m WHERE m.chat_id = %s AND m.watched = 0 AND (m.is_imported IS NULL OR m.is_imported = FALSE)"
+            params = [chat_id]
+            
+            if mode == 'my_votes':
+                # Фильмы с оценкой пользователя >= 8
+                base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND r.user_id = %s AND r.rating >= 8)"
+                params.append(user_id)
+            elif mode == 'group_votes':
+                # Фильмы со средней оценкой группы >= 8 (исключаем импортированные оценки)
+                base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
+            
+            for period in all_periods:
+                if period == "До 1980":
+                    condition = "m.year < 1980"
+                elif period == "1980–1990":
+                    condition = "(m.year >= 1980 AND m.year <= 1990)"
+                elif period == "1990–2000":
+                    condition = "(m.year >= 1990 AND m.year <= 2000)"
+                elif period == "2000–2010":
+                    condition = "(m.year >= 2000 AND m.year <= 2010)"
+                elif period == "2010–2020":
+                    condition = "(m.year >= 2010 AND m.year <= 2020)"
+                elif period == "2020–сейчас":
+                    condition = "m.year >= 2020"
+                
+                query = f"{base_query} AND {condition}"
+                cursor.execute(query, tuple(params))
+                count_row = cursor.fetchone()
+                count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                
+                if count > 0:
+                    available_periods.append(period)
+        
+        user_random_state[user_id]['available_periods'] = available_periods
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        if available_periods:
+            for period in available_periods:
+                markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+        
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text("🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[RANDOM] Mode selected: {mode}, moving to period selection, user_id={user_id}")
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_mode_handler: {e}", exc_info=True)
         try:
@@ -6527,6 +6573,209 @@ def show_seasons_callback(call):
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
+
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    logger.info(f"[HANDLER] /help вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/help', message.chat.id)
+    logger.info(f"Команда /help от пользователя {message.from_user.id}")
+    text = """*🎬 Помощь по командам бота:*
+
+*/list* — Показать список непросмотренных фильмов
+*/random* — Выбрать случайный непросмотренный фильм с фильтрами (год, жанр, режиссёр)
+*/search* — Поиск фильмов через Kinopoisk API
+*/total* — Статистика: фильмы, жанры, режиссёры, актёры, оценки
+*/stats* — Детальная статистика группы и участников
+*/rate* — Оценить просмотренные фильмы
+*/plan* — Запланировать просмотр фильма (дома/в кино)
+*/schedule* — Показать список запланированных просмотров
+*/settings* — Настроить эмодзи для отметки просмотренных фильмов
+*/clean* — Удалить оценку, просмотр, план или обнулить базу
+*/help* — Эта справка
+
+*Как использовать:*
+1. Отправьте ссылку на фильм с Кинопоиска — бот автоматически добавит его
+2. Поставьте реакцию ✅ (или настроенное эмодзи) на сообщение со ссылкой — фильм будет отмечен как просмотренный
+3. После отметки напишите оценку от 1 до 10
+
+*Приятного просмотра!* 🍿"""
+    
+    bot.reply_to(message, text, parse_mode='Markdown')
+
+@bot.message_handler(commands=['premieres'])
+def premieres_command(message):
+    """Команда /premieres - выбор периода для просмотра премьер"""
+    logger.info(f"[HANDLER] /premieres вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/premieres', message.chat.id)
+    
+    # Показываем выбор периода
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
+    markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
+    markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
+    markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
+    markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
+    markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+    
+    bot.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
+
+@bot.message_handler(commands=['clean'])
+def clean_command(message):
+    logger.info(f"[HANDLER] /clean вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/clean', message.chat.id)
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Показываем меню только с опциями массового удаления
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
+    markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
+    markup.add(InlineKeyboardButton("🗑️ Удалить все непросмотренные фильмы", callback_data="clean:unwatched_movies"))
+    
+    help_text = (
+        "🧹 <b>Массовое удаление данных</b>\n\n"
+        "<b>💥 Обнулить базу чата</b> — удаляет <b>ВСЕ данные чата</b>:\n"
+        "• Все фильмы\n"
+        "• Все оценки всех пользователей\n"
+        "• Все планы и расписание всех пользователей\n"
+        "• Все билеты\n"
+        "• Все настройки\n\n"
+        "<b>👤 Обнулить базу пользователя</b> — удаляет <b>только ваши данные в этом чате</b>:\n"
+        "• Ваши оценки\n"
+        "• Ваши планы и расписание\n"
+        "• Ваши билеты\n"
+        "• Ваша статистика\n"
+        "• Ваши настройки (включая часовой пояс)\n\n"
+        "<b>🗑️ Удалить все непросмотренные фильмы</b> — удаляет фильмы, которые:\n"
+        "• Не находятся в расписании\n"
+        "• У которых нет билетов\n"
+        "• Которые не участвуют ни в каких активностях\n\n"
+        "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
+        "Выберите действие:"
+    )
+    bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+
+@bot.message_handler(commands=['edit'])
+def edit_command(message):
+    """Команда /edit - редактирование расписания и оценок"""
+    logger.info(f"[EDIT COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+    logger.info(f"[EDIT COMMAND] /edit вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/edit', message.chat.id)
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("📅 Изменить фильм в расписании", callback_data="edit:plan"))
+    markup.add(InlineKeyboardButton("⭐ Изменить оценку", callback_data="edit:rating"))
+    markup.add(InlineKeyboardButton("🗑️ Удалить оценку", callback_data="edit:delete_rating"))
+    markup.add(InlineKeyboardButton("👁️ Удалить просмотр", callback_data="edit:delete_watched"))
+    markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="edit:delete_plan"))
+    markup.add(InlineKeyboardButton("🎬 Удалить фильм из базы", callback_data="edit:delete_movie"))
+    
+    help_text = (
+        "✏️ <b>Что вы хотите изменить?</b>\n\n"
+        "<b>📅 Изменить фильм в расписании</b> — изменить дату/время или переключить между 'дома' и 'в кино'\n"
+        "<b>⭐ Изменить оценку</b> — изменить вашу оценку фильма\n\n"
+        "<b>Остальные опции:</b> удаление оценок, просмотров, планов и фильмов"
+    )
+    
+    try:
+        bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[EDIT COMMAND] ❌ Ошибка отправки меню: {e}", exc_info=True)
+
+@bot.message_handler(commands=['ticket'])
+def ticket_command(message):
+    """Команда /ticket - работа с билетами в кино"""
+    logger.info(f"[TICKET COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        username = message.from_user.username or f"user_{user_id}"
+        log_request(user_id, username, '/ticket', chat_id)
+        
+        # Проверяем, есть ли файл в сообщении
+        has_photo = message.photo is not None and len(message.photo) > 0
+        has_document = message.document is not None
+        
+        if has_photo or has_document:
+            # Сохраняем file_id для последующей обработки
+            if has_photo:
+                file_id = message.photo[-1].file_id  # Берем самое большое фото
+            else:
+                file_id = message.document.file_id
+            
+            user_ticket_state[user_id] = {
+                'step': 'select_session',
+                'file_id': file_id,
+                'chat_id': chat_id
+            }
+            
+            # Показываем список сеансов в кино
+            show_cinema_sessions(chat_id, user_id, file_id)
+        else:
+            # Нет файла - показываем список сеансов для выбора
+            show_cinema_sessions(chat_id, user_id, None)
+    
+    except Exception as e:
+        logger.error(f"[TICKET COMMAND] Ошибка при обработке /ticket: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке команды /ticket")
+        except:
+            pass
+
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    logger.info(f"[HANDLER] /help вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/help', message.chat.id)
+    logger.info(f"Команда /help от пользователя {message.from_user.id}")
+    text = """*🎬 Помощь по командам бота:*
+
+*/list* — Показать список непросмотренных фильмов
+*/random* — Выбрать случайный непросмотренный фильм с фильтрами (год, жанр, режиссёр)
+*/search* — Поиск фильмов через Kinopoisk API
+*/total* — Статистика: фильмы, жанры, режиссёры, актёры, оценки
+*/stats* — Детальная статистика группы и участников
+*/rate* — Оценить просмотренные фильмы
+*/plan* — Запланировать просмотр фильма (дома/в кино)
+*/schedule* — Показать список запланированных просмотров
+*/settings* — Настроить эмодзи для отметки просмотренных фильмов
+*/clean* — Удалить оценку, просмотр, план или обнулить базу
+*/help* — Эта справка
+
+*Как использовать:*
+1. Отправьте ссылку на фильм с Кинопоиска — бот автоматически добавит его
+2. Поставьте реакцию ✅ (или настроенное эмодзи) на сообщение со ссылкой — фильм будет отмечен как просмотренный
+3. После отметки напишите оценку от 1 до 10
+
+*Приятного просмотра!* 🍿"""
+    
+    bot.reply_to(message, text, parse_mode='Markdown')
+
+@bot.message_handler(commands=['premieres'])
+def premieres_command(message):
+    """Команда /premieres - выбор периода для просмотра премьер"""
+    logger.info(f"[HANDLER] /premieres вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/premieres', message.chat.id)
+    
+    # Показываем выбор периода
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
+    markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
+    markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
+    markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
+    markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
+    markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+    
+    bot.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
 def handle_settings_callback(call):
