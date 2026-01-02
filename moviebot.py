@@ -1671,9 +1671,10 @@ def handle_reaction(reaction):
     not m.text.strip().startswith('/plan') and  # Не обрабатываем команду /plan
     m.from_user.id not in user_plan_state and  # Не обрабатываем, если пользователь в процессе планирования
     m.from_user.id not in user_ticket_state  # Не обрабатываем, если пользователь работает с билетами
-))
+), priority=1)
 def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
+    logger.info(f"[SAVE MOVIE] save_movie_message вызван для пользователя {message.from_user.id}, текст: '{message.text[:100]}'")
     try:
         # Ищем все ссылки на Кинопоиск в сообщении
         links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
