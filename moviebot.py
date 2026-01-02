@@ -2253,56 +2253,33 @@ def handle_web_app_data(message):
             return
         
         # Создаём сообщение с командой через bot.process_new_messages для правильной обработки
-        # Создаём Update объект с командой
-        import telebot.types as types
+        # Используем оригинальное сообщение, но устанавливаем текст команды
+        # Это проще и надежнее, чем создавать новое сообщение
+        original_text = message.text if hasattr(message, 'text') and message.text else None
+        message.text = f'/{command}'
         
-        # Создаём Message объект с командой
-        command_text = f'/{command}'
+        # Добавляем entities для команды, если их нет
+        if not hasattr(message, 'entities') or not message.entities:
+            import telebot.types as types
+            command_entity = types.MessageEntity(type='bot_command', offset=0, length=len(f'/{command}'))
+            message.entities = [command_entity]
         
-        # Создаём entity для команды
-        command_entity = types.MessageEntity(type='bot_command', offset=0, length=len(command_text))
-        
-        # Создаём новое сообщение
-        command_message = types.Message(
-            message_id=message.message_id,
-            from_user=message.from_user,
-            date=message.date,
-            chat=message.chat,
-            content_type='text',
-            options={},
-            json_string=json.dumps({
-                'message_id': message.message_id,
-                'from': {
-                    'id': message.from_user.id,
-                    'is_bot': False,
-                    'first_name': message.from_user.first_name or '',
-                    'username': message.from_user.username or ''
-                },
-                'chat': {
-                    'id': message.chat.id,
-                    'type': message.chat.type
-                },
-                'date': message.date,
-                'text': command_text,
-                'entities': [{
-                    'type': 'bot_command',
-                    'offset': 0,
-                    'length': len(command_text)
-                }]
-            })
-        )
-        command_message.text = command_text
-        command_message.entities = [command_entity]
-        
-        logger.info(f"[WEB APP] ✅ Создано сообщение с командой: /{command}")
+        logger.info(f"[WEB APP] ✅ Установлен текст команды: /{command}")
         logger.info(f"[WEB APP] Вызываем обработчик для команды: /{command}")
         logger.info(f"[WEB APP] User ID: {message.from_user.id}, Chat ID: {message.chat.id}")
+        logger.info(f"[WEB APP] Message.text = {message.text}")
+        logger.info(f"[WEB APP] Message.entities = {message.entities if hasattr(message, 'entities') else 'НЕТ'}")
         
         # Вызываем соответствующий хэндлер напрямую
         try:
             if command == 'random':
                 logger.info("[WEB APP] → Вызов random_start")
-                random_start(command_message)
+                try:
+                    random_start(message)
+                    logger.info("[WEB APP] ✅ random_start вызван успешно")
+                except Exception as random_error:
+                    logger.error(f"[WEB APP] ❌ Ошибка в random_start: {random_error}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при запуске рандомайзера. Попробуйте позже.")
             elif command == 'premieres':
                 logger.info("[WEB APP] → Вызов premieres_command")
                 premieres_command(command_message)
