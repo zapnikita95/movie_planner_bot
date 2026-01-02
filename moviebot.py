@@ -5151,8 +5151,7 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
         with db_lock:
             # Получаем все непросмотренные фильмы, отсортированные по алфавиту
             # Исключаем фильмы, у которых есть импортированные оценки (is_imported = TRUE в ratings)
-            # Показываем только фильмы, которые не просмотрены всеми активными членами группы
-            # (активные = те, кто использовал бота за последние 30 дней)
+            # Показываем все фильмы с watched = 0, независимо от того, просмотрены ли они активными участниками
             cursor.execute('''
                 SELECT DISTINCT m.id, m.kp_id, m.title, m.year, m.genres, m.link 
                 FROM movies m
@@ -5160,35 +5159,8 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
                 WHERE m.chat_id = %s 
                   AND m.watched = 0 
                   AND r_imported.id IS NULL
-                  AND (
-                      -- Если нет активных участников, показываем все фильмы
-                      NOT EXISTS (
-                          SELECT 1 
-                          FROM stats 
-                          WHERE chat_id = %s 
-                            AND (timestamp::TIMESTAMP)::DATE >= (CURRENT_DATE - INTERVAL '30 days')::DATE
-                      )
-                      OR
-                      -- Или если есть активные участники, показываем только фильмы, которые не просмотрены хотя бы одним из них
-                      EXISTS (
-                          SELECT 1 
-                          FROM (
-                              SELECT DISTINCT user_id 
-                              FROM stats 
-                              WHERE chat_id = %s 
-                                AND (timestamp::TIMESTAMP)::DATE >= (CURRENT_DATE - INTERVAL '30 days')::DATE
-                          ) active_users
-                          WHERE NOT EXISTS (
-                              SELECT 1 
-                              FROM watched_movies wm 
-                              WHERE wm.chat_id = %s 
-                                AND wm.film_id = m.id 
-                                AND wm.user_id = active_users.user_id
-                          )
-                      )
-                  )
                 ORDER BY m.title
-            ''', (chat_id, chat_id, chat_id, chat_id))
+            ''', (chat_id,))
             rows = cursor.fetchall()
         
         if not rows:
