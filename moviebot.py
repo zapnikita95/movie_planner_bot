@@ -1926,6 +1926,48 @@ def handle_edit_plan_datetime_internal(message, state):
     bot.reply_to(message, f"✅ <b>Время принято!</b>\n\n🕐 Сеанс: {formatted_time} {tz_name}", parse_mode='HTML')
     del user_edit_state[user_id]
 
+def handle_delete_movie_internal(message, state):
+    """Внутренняя функция для обработки удаления фильма"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    
+    # Извлекаем kp_id из ссылки или используем как ID
+    kp_id = extract_kp_id(text)
+    if not kp_id:
+        bot.reply_to(message, "❌ Не удалось распознать ссылку или ID. Введите ссылку на фильм (kinopoisk.ru/film/...) или ID фильма.")
+        return
+    
+    # Ищем фильм в БД
+    with db_lock:
+        cursor.execute("SELECT id, title FROM movies WHERE (kp_id = %s OR id = %s) AND chat_id = %s", (kp_id, kp_id, chat_id))
+        film = cursor.fetchone()
+        
+        if not film:
+            bot.reply_to(message, f"❌ Фильм с ID {kp_id} не найден в базе этого чата.")
+            if user_id in user_edit_state:
+                del user_edit_state[user_id]
+            return
+        
+        film_id = film.get('id') if isinstance(film, dict) else film[0]
+        title = film.get('title') if isinstance(film, dict) else film[1]
+        
+        # Удаляем связанные данные
+        cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        ratings_deleted = cursor.rowcount
+        cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        plans_deleted = cursor.rowcount
+        cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+        watched_deleted = cursor.rowcount
+        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (chat_id, film_id))
+        conn.commit()
+    
+    bot.reply_to(message, f"✅ Фильм <b>{title}</b> удалён из базы.\n\nТакже удалено:\n• Оценок: {ratings_deleted}\n• Планов: {plans_deleted}\n• Отметок просмотра: {watched_deleted}", parse_mode='HTML')
+    logger.info(f"[DELETE MOVIE] Фильм {title} (id={film_id}) удалён пользователем {user_id} из чата {chat_id}")
+    
+    if user_id in user_edit_state:
+        del user_edit_state[user_id]
+
 def handle_settings_emojis_internal(message, state):
     """Внутренняя функция для обработки ответа с эмодзи на /settings"""
     # Используем существующую логику из handle_settings_emojis
@@ -2507,6 +2549,11 @@ def main_text_handler(message):
         if action == 'edit_plan_datetime':
             # Обработка редактирования времени плана
             handle_edit_plan_datetime_internal(message, state)
+            return
+        
+        if action == 'delete_movie':
+            # Обработка удаления фильма
+            handle_delete_movie_internal(message, state)
             return
     
     # === user_settings_state ===
@@ -7610,13 +7657,82 @@ def _random_final(call, chat_id, user_id):
 # Callback handlers для /search
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
 def handle_add_film_callback(call):
-    """Обработчик добавления фильма из результатов поиска"""
+    """Обработчик показа описания фильма из результатов поиска"""
     try:
         kp_id = call.data.split("_")[-1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        logger.info(f"[SEARCH] Добавление фильма kp_id={kp_id} от пользователя {user_id}")
+        logger.info(f"[SEARCH] Показ описания фильма kp_id={kp_id} от пользователя {user_id}")
+        
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # Проверяем, добавлен ли уже
+        with db_lock:
+            cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            existing = cursor.fetchone()
+            if existing:
+                title = existing.get('title') if isinstance(existing, dict) else existing[1]
+                bot.answer_callback_query(call.id, f"Фильм '{title}' уже добавлен!", show_alert=False)
+                return
+        
+        # Получаем информацию о фильме
+        info = extract_movie_info(link)
+        if not info:
+            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Формируем описание фильма
+        title = info.get('title', 'Без названия')
+        year = info.get('year', '—')
+        genres = info.get('genres', '—')
+        director = info.get('director', '—')
+        actors = info.get('actors', '—')
+        description = info.get('description', 'Нет описания')
+        
+        # Ограничиваем длину описания
+        if len(description) > 500:
+            description = description[:497] + "..."
+        
+        text = f"🎬 <b>{title}</b> ({year})\n\n"
+        if genres != '—':
+            text += f"📂 <b>Жанры:</b> {genres}\n"
+        if director != '—':
+            text += f"🎥 <b>Режиссёр:</b> {director}\n"
+        if actors != '—':
+            text += f"👥 <b>Актёры:</b> {actors}\n"
+        text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
+        text += f"<a href='{link}'>Кинопоиск</a>"
+        
+        # Создаем кнопку для добавления
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
+        
+        # Отправляем описание
+        try:
+            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+            # НЕ сохраняем ссылку в bot_messages, так как фильм еще не добавлен в базу
+            bot.answer_callback_query(call.id, "Описание показано")
+            logger.info(f"[SEARCH] Описание фильма {title} показано пользователю {user_id}")
+        except Exception as e:
+            logger.error(f"[SEARCH] Ошибка отправки описания: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка отправки описания", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SEARCH] Ошибка в handle_add_film_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_add_film_"))
+def handle_confirm_add_film_callback(call):
+    """Обработчик подтверждения добавления фильма в базу"""
+    try:
+        kp_id = call.data.split("_")[-1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[SEARCH] Подтверждение добавления фильма kp_id={kp_id} от пользователя {user_id}")
         
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         
@@ -7632,10 +7748,18 @@ def handle_add_film_callback(call):
         # Добавляем фильм
         if add_and_announce(link, chat_id):
             bot.answer_callback_query(call.id, "✅ Фильм добавлен!", show_alert=False)
+            # Обновляем сообщение с описанием, убирая кнопку
+            try:
+                # Получаем текст сообщения
+                message_text = call.message.text
+                # Убираем кнопку
+                bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+            except Exception as e:
+                logger.warning(f"[SEARCH] Не удалось обновить сообщение: {e}")
         else:
             bot.answer_callback_query(call.id, "❌ Ошибка добавления фильма", show_alert=True)
     except Exception as e:
-        logger.error(f"[SEARCH] Ошибка в handle_add_film_callback: {e}", exc_info=True)
+        logger.error(f"[SEARCH] Ошибка в handle_confirm_add_film_callback: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
@@ -7826,6 +7950,21 @@ def edit_callback_handler(call):
         
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
         bot.edit_message_text("⭐ <b>Выберите фильм для изменения оценки:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
+    elif action == "delete_movie":
+        # Удаление фильма из базы - запрашиваем ссылку или id
+        user_edit_state[user_id] = {
+            'action': 'delete_movie',
+            'chat_id': chat_id
+        }
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+        bot.edit_message_text(
+            "🎬 <b>Удаление фильма из базы</b>\n\n"
+            "Введите ссылку на фильм (kinopoisk.ru/film/...) или ID фильма для удаления.",
+            chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+        )
+        bot.answer_callback_query(call.id, "Введите ссылку или ID")
     
     elif action.startswith("delete_"):
         # Перенаправляем на соответствующие обработчики clean
