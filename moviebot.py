@@ -11294,7 +11294,12 @@ def webhook():
     logger.info("[WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС =====")
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
+        logger.info(f"[WEBHOOK] Размер JSON: {len(json_string)} байт")
+        # Логируем первые 500 символов JSON для отладки
+        logger.info(f"[WEBHOOK] JSON (первые 500 символов): {json_string[:500]}")
         update = telebot.types.Update.de_json(json_string)
+        logger.info(f"[WEBHOOK] Тип update: {type(update)}")
+        logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
         
         # Логируем информацию о реплае для отладки
         if update.message:
@@ -11302,27 +11307,23 @@ def webhook():
             logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
             logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
             
-            # ПРОВЕРКА WEB_APP_DATA
+            # ПРОВЕРКА WEB_APP_DATA (приоритетная проверка!)
             logger.info(f"[WEBHOOK] Проверка web_app_data: hasattr={hasattr(update.message, 'web_app_data')}")
-            web_app_data_found = False
-            if hasattr(update.message, 'web_app_data'):
-                if update.message.web_app_data:
-                    logger.info(f"[WEBHOOK] ✅ WEB_APP_DATA НАЙДЕН! Данные: {update.message.web_app_data.data}")
-                    web_app_data_found = True
-                    # ВАЖНО: Вызываем обработчик web_app_data напрямую, так как pyTelegramBotAPI может не распознать content_type
-                    logger.info(f"[WEBHOOK] Вызываем handle_web_app_data напрямую")
-                    try:
-                        handle_web_app_data(update.message)
-                        logger.info(f"[WEBHOOK] handle_web_app_data завершен успешно")
-                        return ''  # Не обрабатываем дальше, так как уже обработали
-                    except Exception as web_app_error:
-                        logger.error(f"[WEBHOOK] Ошибка в handle_web_app_data: {web_app_error}", exc_info=True)
-                        # Продолжаем обычную обработку в случае ошибки
-                else:
-                    logger.info(f"[WEBHOOK] ⚠️ web_app_data существует, но равен None")
+            if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
+                logger.info(f"[WEBHOOK] ✅✅✅ WEB_APP_DATA НАЙДЕН! Данные: {update.message.web_app_data.data}")
+                # ВАЖНО: Вызываем обработчик web_app_data напрямую ПЕРВЫМ, до обработки обычных команд
+                logger.info(f"[WEBHOOK] Вызываем handle_web_app_data напрямую")
+                try:
+                    handle_web_app_data(update.message)
+                    logger.info(f"[WEBHOOK] handle_web_app_data завершен успешно")
+                    return ''  # Не обрабатываем дальше, так как уже обработали
+                except Exception as web_app_error:
+                    logger.error(f"[WEBHOOK] Ошибка в handle_web_app_data: {web_app_error}", exc_info=True)
+                    # Продолжаем обычную обработку в случае ошибки
+            elif hasattr(update.message, 'web_app_data'):
+                logger.info(f"[WEBHOOK] ⚠️ web_app_data существует, но равен None (это обычное сообщение)")
             else:
-                logger.info(f"[WEBHOOK] ❌ web_app_data отсутствует в update.message")
-                logger.info(f"[WEBHOOK] Доступные атрибуты update.message: {[attr for attr in dir(update.message) if not attr.startswith('_')]}")
+                logger.info(f"[WEBHOOK] web_app_data отсутствует (это обычное сообщение)")
             
             logger.info(f"[WEBHOOK] Update.message.entities={update.message.entities if update.message.entities else None}")
             if update.message.entities:
@@ -11448,14 +11449,13 @@ if IS_PRODUCTION:
     if webhook_base_url:
         webhook_url = webhook_base_url + '/webhook'
         allowed_updates = [
-            "message",
+            "message",  # web_app_data приходит внутри message
             "edited_message",
             "callback_query",
             "message_reaction",
             "message_reaction_count",
             "chat_member",
-            "my_chat_member",
-            "web_app_data"  # ОБЯЗАТЕЛЬНО для работы Web App!
+            "my_chat_member"
         ]
         logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
         try:
