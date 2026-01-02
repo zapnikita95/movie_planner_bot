@@ -6396,6 +6396,74 @@ def plan_cancel_callback(call):
     bot.edit_message_text("✅ Режим планирования отменён. Можете использовать другие команды.", 
                          chat_id, call.message.message_id)
 
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan_from_added:"))
+def plan_from_added_callback(call):
+    """Обработчик кнопки 'Запланировать просмотр' из сообщения о добавлении фильма"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        kp_id = call.data.split(":")[1]
+        
+        logger.info(f"[PLAN FROM ADDED] Пользователь {user_id} хочет запланировать фильм kp_id={kp_id}")
+        
+        # Получаем link из базы или формируем его
+        link = None
+        with db_lock:
+            cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            row = cursor.fetchone()
+            if row:
+                link = row.get('link') if isinstance(row, dict) else row[0]
+        
+        if not link:
+            link = f"https://kinopoisk.ru/film/{kp_id}/"
+        
+        # Устанавливаем состояние для планирования
+        user_plan_state[user_id] = {
+            'step': 2,
+            'link': link,
+            'chat_id': chat_id
+        }
+        
+        # Показываем кнопки выбора типа просмотра
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
+        markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
+        
+        bot.answer_callback_query(call.id, "Выберите тип просмотра")
+        bot.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
+        logger.info(f"[PLAN FROM ADDED] Состояние установлено для пользователя {user_id}, link={link}")
+    except Exception as e:
+        logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:"))
+def handle_show_facts(call):
+    """Обработчик кнопки 'Интересные факты'"""
+    try:
+        kp_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем факты
+        facts = get_facts(kp_id)
+        if facts:
+            bot.send_message(chat_id, facts, parse_mode='HTML')
+            bot.answer_callback_query(call.id, "Факты отправлены")
+        else:
+            bot.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SHOW FACTS] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan_detail:"))
 def handle_plan_detail_callback(call):
     """Обработчик показа деталей плана"""
