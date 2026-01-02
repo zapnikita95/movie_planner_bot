@@ -2894,8 +2894,32 @@ def handle_reaction(reaction):
                       (chat_id, film_id, user_id))
         already_watched = cursor.fetchone()
         
+        # Получаем kp_id для кнопок
+        cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        kp_row = cursor.fetchone()
+        kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
+        
         if already_watched:
             logger.info(f"[REACTION] Пользователь {user_id} уже отметил фильм {film_title} как просмотренный")
+            # Проверяем, есть ли оценка
+            cursor.execute("SELECT id FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s", 
+                          (chat_id, film_id, user_id))
+            has_rating = cursor.fetchone()
+            
+            user_mention = f"@{reaction.user.username}" if reaction.user and reaction.user.username else reaction.user.first_name if reaction.user else "Вы"
+            
+            if not has_rating and kp_id:
+                # Нет оценки - показываем кнопку "Оценить"
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("✅ Оценить", callback_data=f"rate_film:{kp_id}"))
+                bot.send_message(chat_id, 
+                    f"👀 {user_mention}, вы уже посмотрели фильм <b>{film_title}</b> ранее.",
+                    reply_markup=markup, parse_mode='HTML')
+            else:
+                # Есть оценка - просто сообщение
+                bot.send_message(chat_id, 
+                    f"👀 {user_mention}, вы уже посмотрели фильм <b>{film_title}</b> ранее.",
+                    parse_mode='HTML')
             return
         
         # Сохраняем просмотр для конкретного пользователя
@@ -11683,7 +11707,7 @@ def handle_rate_film(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        # Получаем film_id из базы
+        # Получаем film_id из базы и проверяем, просмотрен ли фильм
         with db_lock:
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             row = cursor.fetchone()
@@ -11693,6 +11717,31 @@ def handle_rate_film(call):
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
             film_title = row.get('title') if isinstance(row, dict) else row[1]
+            
+            # Проверяем, просмотрен ли фильм пользователем
+            cursor.execute("SELECT id FROM watched_movies WHERE chat_id = %s AND film_id = %s AND user_id = %s", 
+                          (chat_id, film_id, user_id))
+            already_watched = cursor.fetchone()
+            
+            # Если фильм не просмотрен, автоматически отмечаем как просмотренный
+            if not already_watched:
+                cursor.execute("""
+                    INSERT INTO watched_movies (chat_id, film_id, user_id, watched_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (chat_id, film_id, user_id) DO NOTHING
+                """, (chat_id, film_id, user_id))
+                
+                # Обновляем watched для фильма (если хотя бы один просмотрел)
+                cursor.execute("""
+                    UPDATE movies 
+                    SET watched = 1 
+                    WHERE id = %s AND (
+                        SELECT COUNT(*) FROM watched_movies WHERE film_id = %s AND chat_id = %s
+                    ) > 0
+                """, (film_id, film_id, chat_id))
+                
+                conn.commit()
+                logger.info(f"[RATE FILM] Фильм {film_title} автоматически отмечен как просмотренный для пользователя {user_id}")
         
         # Отправляем сообщение об оценке
         user_mention = f"@{call.from_user.username}" if call.from_user.username else call.from_user.first_name
