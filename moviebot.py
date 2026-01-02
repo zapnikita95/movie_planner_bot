@@ -2939,34 +2939,7 @@ def handle_reaction(reaction):
                 film_message_id = msg_id
                 break
     
-    # Получаем и отправляем факты о фильме ПЕРЕД сообщением об оценке
-    # Проверяем, были ли факты отправлены в течение суток
-    facts_sent_recently = False
-    if kp_id:
-        with db_lock:
-            cursor.execute('''
-                SELECT sent_at FROM facts_sent 
-                WHERE chat_id = %s AND kp_id = %s 
-                AND sent_at > NOW() - INTERVAL '1 day'
-            ''', (chat_id, kp_id))
-            recent_facts = cursor.fetchone()
-            if recent_facts:
-                facts_sent_recently = True
-                logger.info(f"[FACTS] Факты для фильма {kp_id} уже были отправлены в течение суток, пропускаем")
-        
-        if not facts_sent_recently:
-            facts = get_facts(kp_id)
-            if facts:
-                bot.send_message(chat_id, facts, parse_mode='HTML')
-                # Сохраняем информацию об отправке фактов
-                with db_lock:
-                    cursor.execute('''
-                        INSERT INTO facts_sent (chat_id, kp_id, sent_at)
-                        VALUES (%s, %s, NOW())
-                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET sent_at = NOW()
-                    ''', (chat_id, kp_id))
-                    conn.commit()
-                    logger.info(f"[FACTS] Факты отправлены для фильма {kp_id}, сохранено в БД")
+    # Факты теперь отправляются только по нажатию кнопки "Интересные факты", не автоматически
     
     # Отправляем персональное сообщение пользователю с упоминанием
     # Если есть message_id сообщения с фильмом, делаем реплай на него
