@@ -11248,14 +11248,15 @@ def handle_add_film_callback(call):
         
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         
-        # Проверяем, добавлен ли уже
+        # Проверяем, добавлен ли уже фильм в базу
+        film_in_db = False
+        film_id = None
         with db_lock:
             cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
             existing = cursor.fetchone()
             if existing:
-                title = existing.get('title') if isinstance(existing, dict) else existing[1]
-                bot.answer_callback_query(call.id, f"Фильм '{title}' уже добавлен!", show_alert=False)
-                return
+                film_in_db = True
+                film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
         
         # Получаем информацию о фильме
         info = extract_movie_info(link)
@@ -11285,16 +11286,27 @@ def handle_add_film_callback(call):
         text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
         text += f"<a href='{link}'>Кинопоиск</a>"
         
-        # Создаем кнопку для добавления
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
+        # Создаем кнопки
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        if film_in_db:
+            # Фильм уже в базе - показываем кнопки планирования, фактов и оценки
+            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+            markup.row(
+                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+            )
+        else:
+            # Фильм не в базе - показываем кнопку добавления
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
         
         # Отправляем описание
         try:
             msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-            # НЕ сохраняем ссылку в bot_messages, так как фильм еще не добавлен в базу
+            # Сохраняем ссылку в bot_messages для обработки реакций
+            bot_messages[msg.message_id] = link
             bot.answer_callback_query(call.id, "Описание показано")
-            logger.info(f"[SEARCH] Описание фильма {title} показано пользователю {user_id}")
+            logger.info(f"[SEARCH] Описание фильма {title} показано пользователю {user_id}, film_in_db={film_in_db}")
         except Exception as e:
             logger.error(f"[SEARCH] Ошибка отправки описания: {e}", exc_info=True)
             bot.answer_callback_query(call.id, "❌ Ошибка отправки описания", show_alert=True)
