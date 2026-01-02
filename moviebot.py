@@ -2252,9 +2252,47 @@ def handle_web_app_data(message):
                 pass
             return
         
-        # Создаём простое сообщение с командой, используя существующее сообщение как основу
-        command_message = message
-        command_message.text = f'/{command}'
+        # Создаём сообщение с командой через bot.process_new_messages для правильной обработки
+        # Создаём Update объект с командой
+        import telebot.types as types
+        
+        # Создаём Message объект с командой
+        command_text = f'/{command}'
+        
+        # Создаём entity для команды
+        command_entity = types.MessageEntity(type='bot_command', offset=0, length=len(command_text))
+        
+        # Создаём новое сообщение
+        command_message = types.Message(
+            message_id=message.message_id,
+            from_user=message.from_user,
+            date=message.date,
+            chat=message.chat,
+            content_type='text',
+            options={},
+            json_string=json.dumps({
+                'message_id': message.message_id,
+                'from': {
+                    'id': message.from_user.id,
+                    'is_bot': False,
+                    'first_name': message.from_user.first_name or '',
+                    'username': message.from_user.username or ''
+                },
+                'chat': {
+                    'id': message.chat.id,
+                    'type': message.chat.type
+                },
+                'date': message.date,
+                'text': command_text,
+                'entities': [{
+                    'type': 'bot_command',
+                    'offset': 0,
+                    'length': len(command_text)
+                }]
+            })
+        )
+        command_message.text = command_text
+        command_message.entities = [command_entity]
         
         logger.info(f"[WEB APP] ✅ Создано сообщение с командой: /{command}")
         logger.info(f"[WEB APP] Вызываем обработчик для команды: /{command}")
