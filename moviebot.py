@@ -1919,14 +1919,15 @@ def handle_new_session_input_internal(message, state):
             film_id = row['id'] if isinstance(row, dict) else row[0]
             title = row['title'] if isinstance(row, dict) else row[1]
         else:
+            is_series_val = 1 if movie_info.get('is_series') else 0
             cursor.execute('''
-                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
                 RETURNING id, title
             ''', (chat_id, link, kp_id, movie_info.get('title'), movie_info.get('year'), 
                   movie_info.get('genres'), movie_info.get('description'), 
-                  movie_info.get('director'), movie_info.get('actors')))
+                  movie_info.get('director'), movie_info.get('actors'), is_series_val))
             conn.commit()
             row = cursor.fetchone()
             film_id = row['id'] if isinstance(row, dict) else row[0]
@@ -5409,11 +5410,12 @@ def get_plan_day_or_date(message):
                 if not info:
                     bot.reply_to(message, "Не удалось получить информацию о фильме.")
                     return
+                is_series_val = 1 if info.get('is_series') else 0
                 cursor.execute('''
-                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors']))
+                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
+                ''', (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors'], is_series_val))
                 conn.commit()
                 cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
                 row = cursor.fetchone()
@@ -6633,13 +6635,14 @@ def handle_edit_ticket_text_OLD(message):
                     film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
                 else:
                     # Добавляем фильм
+                    is_series_val = 1 if movie_info.get('is_series') else 0
                     cursor.execute('''
-                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                         RETURNING id
                     ''', (chat_id, link, kp_id, movie_info.get('title'), movie_info.get('year'),
                           movie_info.get('genres'), movie_info.get('description'),
-                          movie_info.get('director'), movie_info.get('actors')))
+                          movie_info.get('director'), movie_info.get('actors'), is_series_val))
                     film_id = cursor.fetchone()[0]
                     conn.commit()
             
@@ -6909,11 +6912,12 @@ def handle_new_session_input_OLD(message):
             if not info:
                 bot.reply_to(message, "Не удалось получить данные о фильме.")
                 return
+            is_series_val = 1 if info.get('is_series') else 0
             cursor.execute('''
-                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-            ''', (chat_id, link, kp_id, info.get('title'), info.get('year'), info.get('genres'), info.get('description'), info.get('director'), info.get('actors')))
+                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
+            ''', (chat_id, link, kp_id, info.get('title'), info.get('year'), info.get('genres'), info.get('description'), info.get('director'), info.get('actors'), is_series_val))
             conn.commit()
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             row = cursor.fetchone()
