@@ -3202,6 +3202,10 @@ def handle_settings_reply(message):
 # Этот обработчик должен иметь высокий приоритет, чтобы сработать раньше handle_message
 def add_reactions_check(message):
     """Проверка для обработчика add_reactions"""
+    # Пропускаем команды
+    if message.text and message.text.startswith('/'):
+        logger.info(f"[SETTINGS CHECK] add_reactions_check: пропущена команда {message.text[:50]}")
+        return False
     if not message.reply_to_message:
         return False
     if message.from_user.id not in user_settings_state:
