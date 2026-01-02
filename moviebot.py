@@ -7930,20 +7930,20 @@ def ticket_session_callback(call):
         existing_file_id = ticket_row.get('file_id') if isinstance(ticket_row, dict) else ticket_row[0]
         logger.info(f"[TICKET SESSION] Отправляем существующие билеты, file_id={existing_file_id}")
         if existing_file_id:
-        try:
-            bot.send_photo(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
-            bot.answer_callback_query(call.id, "Билеты отправлены")
+            try:
+                bot.send_photo(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
+                bot.answer_callback_query(call.id, "Билеты отправлены")
                 logger.info(f"[TICKET SESSION] Билеты успешно отправлены как фото")
             except Exception as e:
                 logger.warning(f"[TICKET SESSION] Ошибка отправки фото, пробуем как документ: {e}")
-            # Если фото не найдено, пытаемся отправить как документ
-            try:
-                bot.send_document(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
-                bot.answer_callback_query(call.id, "Билеты отправлены")
+                # Если фото не найдено, пытаемся отправить как документ
+                try:
+                    bot.send_document(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
+                    bot.answer_callback_query(call.id, "Билеты отправлены")
                     logger.info(f"[TICKET SESSION] Билеты успешно отправлены как документ")
                 except Exception as e2:
                     logger.error(f"[TICKET SESSION] Ошибка отправки билетов: {e2}")
-                bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
+                    bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
                     bot.send_message(chat_id, "❌ Не удалось отправить билеты. Возможно, файл был удален.")
             
             # Создаем кнопки в зависимости от наличия времени
