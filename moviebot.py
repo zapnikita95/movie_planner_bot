@@ -2188,6 +2188,9 @@ def add_and_announce(link, chat_id):
     return False
 
 # /start — приветственное сообщение
+# Логируем регистрацию обработчика
+logger.info("[WEB APP] Регистрируем обработчик web_app_data")
+
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     """Обработчик данных из Web App"""
@@ -11363,14 +11366,29 @@ logger.info("[DEBUG] Flask app создан")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    logger.info("=" * 80)
+    logger.info("[WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС =====")
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         
         # Логируем информацию о реплае для отладки
         if update.message:
+            logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")
             logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
             logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
+            
+            # ПРОВЕРКА WEB_APP_DATA
+            logger.info(f"[WEBHOOK] Проверка web_app_data: hasattr={hasattr(update.message, 'web_app_data')}")
+            if hasattr(update.message, 'web_app_data'):
+                if update.message.web_app_data:
+                    logger.info(f"[WEBHOOK] ✅ WEB_APP_DATA НАЙДЕН! Данные: {update.message.web_app_data.data}")
+                else:
+                    logger.info(f"[WEBHOOK] ⚠️ web_app_data существует, но равен None")
+            else:
+                logger.info(f"[WEBHOOK] ❌ web_app_data отсутствует в update.message")
+                logger.info(f"[WEBHOOK] Доступные атрибуты update.message: {[attr for attr in dir(update.message) if not attr.startswith('_')]}")
+            
             logger.info(f"[WEBHOOK] Update.message.entities={update.message.entities if update.message.entities else None}")
             if update.message.entities:
                 for entity in update.message.entities:
