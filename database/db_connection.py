@@ -269,6 +269,33 @@ def init_database():
         logger.debug(f"Поле is_series уже существует или ошибка: {e}")
         conn.rollback()
     
+    # Миграция: изменение типа timestamp в stats с TEXT на TIMESTAMP WITH TIME ZONE
+    try:
+        # Сначала проверяем текущий тип поля
+        cursor.execute("""
+            SELECT data_type 
+            FROM information_schema.columns 
+            WHERE table_name = 'stats' AND column_name = 'timestamp'
+        """)
+        result = cursor.fetchone()
+        if result and result.get('data_type') == 'text':
+            # Если поле TEXT, конвертируем его в TIMESTAMP WITH TIME ZONE
+            cursor.execute("""
+                ALTER TABLE stats 
+                ALTER COLUMN timestamp TYPE TIMESTAMP WITH TIME ZONE 
+                USING timestamp::TIMESTAMP WITH TIME ZONE
+            """)
+            conn.commit()
+            logger.info("Миграция: timestamp в stats изменён на TIMESTAMP WITH TIME ZONE")
+        else:
+            logger.debug(f"Поле timestamp уже имеет тип {result.get('data_type') if result else 'неизвестен'}")
+    except Exception as e:
+        logger.warning(f"Ошибка при миграции timestamp в stats: {e}")
+        try:
+            conn.rollback()
+        except:
+            pass
+    
     # Удаление дубликатов
     try:
         cursor.execute("""
