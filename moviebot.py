@@ -5166,7 +5166,7 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
                           SELECT 1 
                           FROM stats 
                           WHERE chat_id = %s 
-                            AND timestamp >= CURRENT_DATE - INTERVAL '30 days'
+                            AND (timestamp::TIMESTAMP)::DATE >= (CURRENT_DATE - INTERVAL '30 days')::DATE
                       )
                       OR
                       -- Или если есть активные участники, показываем только фильмы, которые не просмотрены хотя бы одним из них
@@ -5176,7 +5176,7 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
                               SELECT DISTINCT user_id 
                               FROM stats 
                               WHERE chat_id = %s 
-                                AND timestamp >= CURRENT_DATE - INTERVAL '30 days'
+                                AND (timestamp::TIMESTAMP)::DATE >= (CURRENT_DATE - INTERVAL '30 days')::DATE
                           ) active_users
                           WHERE NOT EXISTS (
                               SELECT 1 
