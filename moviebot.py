@@ -249,6 +249,7 @@ cursor.execute('''
         film_id INTEGER,
         user_id BIGINT,
         rating INTEGER CHECK(rating BETWEEN 1 AND 10),
+        is_imported BOOLEAN DEFAULT FALSE,
         UNIQUE(chat_id, film_id, user_id)
     )
 ''')
@@ -331,6 +332,12 @@ try:
     logger.info("Миграция: ratings.chat_id и ratings.user_id изменены на BIGINT")
 except Exception as e:
     logger.debug(f"Миграция ratings: {e}")
+
+try:
+    cursor.execute('ALTER TABLE ratings ADD COLUMN IF NOT EXISTS is_imported BOOLEAN DEFAULT FALSE')
+    logger.info("Миграция: поле is_imported добавлено в ratings")
+except Exception as e:
+    logger.debug(f"Миграция ratings.is_imported: {e}")
 
 try:
     cursor.execute('ALTER TABLE cinema_votes ALTER COLUMN chat_id TYPE BIGINT')
@@ -1197,11 +1204,11 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             logger.debug(f"[IMPORT] Фильм {info['title']} уже имеет оценку, пропускаем")
                             continue
                         
-                        # Добавляем оценку
+                        # Добавляем оценку с пометкой is_imported = TRUE
                         cursor.execute('''
-                            INSERT INTO ratings (chat_id, film_id, user_id, rating)
-                            VALUES (%s, %s, %s, %s)
-                            ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                            INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                            VALUES (%s, %s, %s, %s, TRUE)
+                            ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE
                         ''', (chat_id, film_id, user_id, user_rating))
                         conn.commit()
                     
@@ -1942,7 +1949,7 @@ def add_and_announce(link, chat_id):
         # Если фильм просмотрен, рассчитываем среднее из ratings (внутри db_lock)
         if watched:
             with db_lock:
-                cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
                 avg_result = cursor.fetchone()
                 if avg_result:
                     avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
@@ -2000,7 +2007,7 @@ def add_and_announce(link, chat_id):
                 # Получаем среднюю оценку, если фильм просмотрен
                 avg = None
                 if watched:
-                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
                     avg_result = cursor.fetchone()
                     avg = avg_result[0] if avg_result and avg_result[0] else None
                 
@@ -3982,7 +3989,7 @@ def handle_rating(message):
                     ''', (chat_id, film_id, user_id, rating))
                     conn.commit()
                     
-                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                    cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
                     avg_row = cursor.fetchone()
                     avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
                     
@@ -4322,16 +4329,55 @@ def stats_command(message):
             # Сортируем по количеству команд и последней активности
             users_stats.sort(key=lambda x: (x['command_count'], x['last_activity'] or ''), reverse=True)
             
-            # Получаем общую статистику чата
+            # Получаем общую статистику чата (исключаем фильмы, добавленные только через импорт)
+            # Фильм считается импортированным, если у него есть только импортированные оценки
+            cursor.execute('''
+                SELECT COUNT(*) FROM movies m
+                WHERE m.chat_id = %s
+                AND NOT EXISTS (
+                    SELECT 1 FROM ratings r 
+                    WHERE r.chat_id = m.chat_id 
+                    AND r.film_id = m.id 
+                    AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                )
+                AND EXISTS (
+                    SELECT 1 FROM ratings r 
+                    WHERE r.chat_id = m.chat_id 
+                    AND r.film_id = m.id 
+                    AND r.is_imported = TRUE
+                )
+            ''', (chat_id,))
+            imported_movies_row = cursor.fetchone()
+            imported_movies_count = imported_movies_row.get('count') if isinstance(imported_movies_row, dict) else (imported_movies_row[0] if imported_movies_row else 0)
+            
             cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
             total_movies_row = cursor.fetchone()
-            total_movies = total_movies_row.get('count') if isinstance(total_movies_row, dict) else (total_movies_row[0] if total_movies_row else 0)
+            total_movies_all = total_movies_row.get('count') if isinstance(total_movies_row, dict) else (total_movies_row[0] if total_movies_row else 0)
+            total_movies = total_movies_all - imported_movies_count
             
-            cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            cursor.execute('''
+                SELECT COUNT(*) FROM movies m
+                WHERE m.chat_id = %s AND m.watched = 1
+                AND NOT (
+                    NOT EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.chat_id = m.chat_id 
+                        AND r.film_id = m.id 
+                        AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.chat_id = m.chat_id 
+                        AND r.film_id = m.id 
+                        AND r.is_imported = TRUE
+                    )
+                )
+            ''', (chat_id,))
             watched_movies_row = cursor.fetchone()
             watched_movies = watched_movies_row.get('count') if isinstance(watched_movies_row, dict) else (watched_movies_row[0] if watched_movies_row else 0)
             
-            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s', (chat_id,))
+            # Исключаем импортированные оценки
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id,))
             total_ratings_row = cursor.fetchone()
             total_ratings = total_ratings_row.get('count') if isinstance(total_ratings_row, dict) else (total_ratings_row[0] if total_ratings_row else 0)
             
@@ -4339,14 +4385,14 @@ def stats_command(message):
             total_plans_row = cursor.fetchone()
             total_plans = total_plans_row.get('count') if isinstance(total_plans_row, dict) else (total_plans_row[0] if total_plans_row else 0)
             
-            # Получаем статистику по оценкам участников
+            # Получаем статистику по оценкам участников (исключаем импортированные)
             cursor.execute('''
                 SELECT 
                     r.user_id,
                     COUNT(*) as ratings_count,
                     AVG(r.rating) as avg_rating
                 FROM ratings r
-                WHERE r.chat_id = %s
+                WHERE r.chat_id = %s AND (r.is_imported = FALSE OR r.is_imported IS NULL)
                 GROUP BY r.user_id
                 ORDER BY ratings_count DESC
             ''', (chat_id,))
@@ -4490,11 +4536,46 @@ def total_stats(message):
         logger.info(f"Команда /total от пользователя {message.from_user.id}")
         chat_id = message.chat.id
         with db_lock:
-            cursor.execute('SELECT COUNT(*) as count FROM movies WHERE chat_id = %s', (chat_id,))
+            # Исключаем фильмы, добавленные только через импорт
+            cursor.execute('''
+                SELECT COUNT(*) as count FROM movies m
+                WHERE m.chat_id = %s
+                AND NOT (
+                    NOT EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.chat_id = m.chat_id 
+                        AND r.film_id = m.id 
+                        AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.chat_id = m.chat_id 
+                        AND r.film_id = m.id 
+                        AND r.is_imported = TRUE
+                    )
+                )
+            ''', (chat_id,))
             total_row = cursor.fetchone()
             total = total_row.get('count') if isinstance(total_row, dict) else (total_row[0] if total_row and len(total_row) > 0 else 0)
             
-            cursor.execute('SELECT COUNT(*) as count FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            cursor.execute('''
+                SELECT COUNT(*) as count FROM movies m
+                WHERE m.chat_id = %s AND m.watched = 1
+                AND NOT (
+                    NOT EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.chat_id = m.chat_id 
+                        AND r.film_id = m.id 
+                        AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.chat_id = m.chat_id 
+                        AND r.film_id = m.id 
+                        AND r.is_imported = TRUE
+                    )
+                )
+            ''', (chat_id,))
             watched_row = cursor.fetchone()
             watched = watched_row.get('count') if isinstance(watched_row, dict) else (watched_row[0] if watched_row and len(watched_row) > 0 else 0)
             unwatched = total - watched
@@ -4504,8 +4585,25 @@ def total_stats(message):
                 bot.reply_to(message, "📊 Нет данных о вашей статистике.\n\nОцените первый фильм, чтобы статистика начала собираться.")
                 return
 
-            # Жанры
-            cursor.execute('SELECT genres FROM movies WHERE chat_id = %s AND watched = 1', (chat_id,))
+            # Жанры (исключаем импортированные фильмы)
+            cursor.execute('''
+                SELECT m.genres FROM movies m
+                WHERE m.chat_id = %s AND m.watched = 1
+                AND NOT (
+                    NOT EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.chat_id = m.chat_id 
+                        AND r.film_id = m.id 
+                        AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.chat_id = m.chat_id 
+                        AND r.film_id = m.id 
+                        AND r.is_imported = TRUE
+                    )
+                )
+            ''', (chat_id,))
             genre_counts = {}
             for row in cursor.fetchall():
                 genres = row.get('genres') if isinstance(row, dict) else row[0]
@@ -4515,12 +4613,27 @@ def total_stats(message):
                             genre_counts[g.strip()] = genre_counts.get(g.strip(), 0) + 1
             fav_genre = max(genre_counts, key=genre_counts.get) if genre_counts else "—"
 
-            # Режиссёры - используем оценки из таблицы ratings
+            # Режиссёры - используем оценки из таблицы ratings (исключаем импортированные)
             cursor.execute('''
                 SELECT m.director, AVG(r.rating) as avg_rating, COUNT(DISTINCT m.id) as film_count
                 FROM movies m
-                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id 
+                    AND (r.is_imported = FALSE OR r.is_imported IS NULL)
                 WHERE m.chat_id = %s AND m.watched = 1 AND m.director IS NOT NULL AND m.director != %s
+                AND NOT (
+                    NOT EXISTS (
+                        SELECT 1 FROM ratings r2 
+                        WHERE r2.chat_id = m.chat_id 
+                        AND r2.film_id = m.id 
+                        AND (r2.is_imported = FALSE OR r2.is_imported IS NULL)
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r3 
+                        WHERE r3.chat_id = m.chat_id 
+                        AND r3.film_id = m.id 
+                        AND r3.is_imported = TRUE
+                    )
+                )
                 GROUP BY m.director
             ''', (chat_id, 'Не указан'))
             director_stats = {}
@@ -4528,7 +4641,7 @@ def total_stats(message):
                 d = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
                 avg_r = row.get('avg_rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
                 film_count = row.get('film_count') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0)
-                if d:
+                if d and avg_r:  # Только если есть неимпортированные оценки
                     director_stats[d] = {
                         'count': film_count,
                         'sum_rating': (avg_r * film_count) if avg_r else 0,
@@ -4536,12 +4649,27 @@ def total_stats(message):
                     }
             top_directors = sorted(director_stats.items(), key=lambda x: (-x[1]['count'], -x[1]['avg_rating']))[:3]
 
-            # Актёры - используем оценки из таблицы ratings
+            # Актёры - используем оценки из таблицы ratings (исключаем импортированные)
             cursor.execute('''
                 SELECT m.actors, AVG(r.rating) as avg_rating, COUNT(DISTINCT m.id) as film_count
                 FROM movies m
-                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id 
+                    AND (r.is_imported = FALSE OR r.is_imported IS NULL)
                 WHERE m.chat_id = %s AND m.watched = 1
+                AND NOT (
+                    NOT EXISTS (
+                        SELECT 1 FROM ratings r2 
+                        WHERE r2.chat_id = m.chat_id 
+                        AND r2.film_id = m.id 
+                        AND (r2.is_imported = FALSE OR r2.is_imported IS NULL)
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r3 
+                        WHERE r3.chat_id = m.chat_id 
+                        AND r3.film_id = m.id 
+                        AND r3.is_imported = TRUE
+                    )
+                )
                 GROUP BY m.actors
             ''', (chat_id,))
             actor_stats = {}
@@ -4549,7 +4677,7 @@ def total_stats(message):
                 actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
                 avg_r = row.get('avg_rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
                 film_count = row.get('film_count') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0)
-                if actors_str:
+                if actors_str and avg_r:  # Только если есть неимпортированные оценки
                     for a in actors_str.split(', '):
                         a = a.strip()
                         if a and a != "—":
@@ -4571,8 +4699,8 @@ def total_stats(message):
             
             top_actors = sorted(actor_stats.items(), key=lambda x: (-x[1]['count'], -x[1].get('avg_rating', 0)))[:3]
 
-            # Рассчитываем среднее из ratings (не из movies.rating)
-            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s', (chat_id,))
+            # Рассчитываем среднее из ratings (исключаем импортированные)
+            cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id,))
             avg_row = cursor.fetchone()
             avg_rating = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
             avg_str = f"{avg_rating:.1f}/10" if avg_rating else "—"
@@ -7667,7 +7795,7 @@ def dbcheck_command(message):
                 text += f"Проверьте логи на наличие ошибок в log_request().\n"
             
             # Проверяем таблицу ratings
-            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s', (chat_id,))
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id,))
             ratings_count = cursor.fetchone()
             ratings_total = ratings_count.get('count') if isinstance(ratings_count, dict) else (ratings_count[0] if ratings_count else 0)
             
@@ -8986,30 +9114,30 @@ def random_start(message):
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
             
             # Проверяем условие для group_votes: больше 20 групповых оценок, где хотя бы 20 фильмов оценили все участники группы
-            # Сначала получаем общее количество уникальных пользователей в группе
-            cursor.execute('SELECT COUNT(DISTINCT user_id) FROM ratings WHERE chat_id = %s', (chat_id,))
+            # Сначала получаем общее количество уникальных пользователей в группе (исключаем импортированные оценки)
+            cursor.execute('SELECT COUNT(DISTINCT user_id) FROM ratings WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id,))
             total_users_row = cursor.fetchone()
             total_users = total_users_row.get('count') if isinstance(total_users_row, dict) else (total_users_row[0] if total_users_row else 0)
             
             if total_users > 0:
-                # Находим фильмы, которые оценили все участники группы
+                # Находим фильмы, которые оценили все участники группы (исключаем импортированные оценки)
                 cursor.execute('''
                     SELECT film_id, COUNT(DISTINCT user_id) as user_count
                     FROM ratings 
-                    WHERE chat_id = %s 
+                    WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
                     GROUP BY film_id 
                     HAVING COUNT(DISTINCT user_id) = %s
                 ''', (chat_id, total_users))
                 group_rated_films = cursor.fetchall()
                 group_rated_count = len(group_rated_films)
                 
-                # Также проверяем, что общее количество групповых оценок больше 20
+                # Также проверяем, что общее количество групповых оценок больше 20 (исключаем импортированные)
                 cursor.execute('''
                     SELECT COUNT(*) 
                     FROM (
                         SELECT film_id 
                         FROM ratings 
-                        WHERE chat_id = %s 
+                        WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
                         GROUP BY film_id 
                         HAVING COUNT(DISTINCT user_id) > 1
                     ) as group_rated
