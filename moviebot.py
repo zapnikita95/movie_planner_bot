@@ -4855,7 +4855,7 @@ def rate_movie(message):
                 old_rating = existing.get('rating') if isinstance(existing, dict) else existing[0]
                 # Обновляем оценку
                 cursor.execute('''
-                    UPDATE ratings SET rating = %s
+                    UPDATE ratings SET rating = %s, is_imported = FALSE
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s
                 ''', (rating, chat_id, film_id, user_id))
                 conn.commit()
