@@ -24,3 +24,12 @@ user_edit_state = {}  # user_id: {'action': str, 'plan_id': int, 'step': str, ..
 # Состояния работы с билетами
 user_ticket_state = {}  # user_id: {'step': str, 'plan_id': int, 'file_id': str, ...}
 
+# Состояния поиска
+user_search_state = {}  # user_id: {'chat_id': int, 'message_id': int}
+
+# Состояния рандома
+user_random_state = {}  # user_id: {'step': str, 'mode': str, ...}
+
+# Состояния списка
+user_list_state = {}  # user_id: {'chat_id': int, 'page': int}
+
