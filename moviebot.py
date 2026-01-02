@@ -2124,6 +2124,66 @@ def add_and_announce(link, chat_id):
     return False
 
 # /start — приветственное сообщение
+@bot.message_handler(content_types=['web_app_data'])
+def handle_web_app_data(message):
+    """Обработчик данных из Web App"""
+    try:
+        logger.info(f"[WEB APP] Получены данные от {message.from_user.id}: {message.web_app_data.data}")
+        data = json.loads(message.web_app_data.data)
+        command = data.get('command')
+        
+        if not command:
+            bot.reply_to(message, "❌ Команда не указана")
+            return
+        
+        # Создаём фейковое сообщение с командой
+        fake_message = telebot.types.Message()
+        fake_message.text = f'/{command}'
+        fake_message.from_user = message.from_user
+        fake_message.chat = message.chat
+        fake_message.date = message.date
+        fake_message.message_id = message.message_id
+        
+        # Вызываем соответствующий хэндлер
+        if command == 'random':
+            random_start(fake_message)
+        elif command == 'premieres':
+            premieres_command(fake_message)
+        elif command == 'list':
+            list_movies(fake_message)
+        elif command == 'schedule':
+            show_schedule(fake_message)
+        elif command == 'plan':
+            plan_handler(fake_message)
+        elif command == 'ticket':
+            ticket_command(fake_message)
+        elif command == 'seasons':
+            seasons_command(fake_message)
+        elif command == 'total':
+            total_stats(fake_message)
+        elif command == 'stats':
+            stats_command(fake_message)
+        elif command == 'rate':
+            rate_command(fake_message)
+        elif command == 'settings':
+            settings_command(fake_message)
+        elif command == 'help':
+            help_command(fake_message)
+        elif command == 'start':
+            send_welcome(fake_message)
+        else:
+            bot.reply_to(message, f"❌ Неизвестная команда: {command}")
+            
+    except json.JSONDecodeError as e:
+        logger.error(f"[WEB APP] Ошибка парсинга JSON: {e}")
+        bot.reply_to(message, "❌ Ошибка обработки данных")
+    except Exception as e:
+        logger.error(f"[WEB APP] Ошибка обработки: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке команды")
+        except:
+            pass
+
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     logger.info(f"[HANDLER] /start вызван от {message.from_user.id}, chat_type={message.chat.type}, text='{message.text}'")
