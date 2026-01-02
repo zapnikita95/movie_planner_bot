@@ -5013,7 +5013,7 @@ def handle_ticket_file(message):
 
 
 # ==================== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ДЛЯ РЕДАКТИРОВАНИЯ И БИЛЕТОВ ====================
-@bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_edit_state or message.from_user.id in user_ticket_state, priority=5)
+@bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_edit_state or message.from_user.id in user_ticket_state, priority=15)
 def handle_edit_ticket_text(message):
     """Обработчик текстовых сообщений для редактирования и билетов"""
     user_id = message.from_user.id
