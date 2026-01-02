@@ -88,6 +88,10 @@ clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': 
 # Состояния очистки
 user_clean_state = {}  # user_id: {'action': str, 'target': str}
 clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
+# Состояния редактирования
+user_edit_state = {}  # user_id: {'action': str, 'plan_id': int, 'step': str, ...}
+# Состояния работы с билетами
+user_ticket_state = {}  # user_id: {'step': str, 'plan_id': int, 'file_id': str, ...}
 plans_tz = pytz.timezone('Europe/Moscow')
 months_map = {
     'января': 1, 'февраля': 2, 'марта': 3, 'апреля': 4, 'мая': 5, 'июня': 6,
@@ -126,6 +130,8 @@ commands = [
     BotCommand("rate", "Оценить просмотренные фильмы"),
     BotCommand("settings", "Настроить эмодзи просмотра"),
     BotCommand("clean", "Очистить базу данных (чат или данные о просмотрах)"),
+    BotCommand("edit", "Редактировать расписание и оценки"),
+    BotCommand("ticket", "Работа с билетами в кино"),
     BotCommand("help", "Помощь по командам")
 ]
 bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
@@ -236,6 +242,17 @@ cursor.execute('''
         message_id BIGINT,
         yes_users TEXT DEFAULT '[]',
         no_users TEXT DEFAULT '[]'
+    )
+''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS tickets (
+        id SERIAL PRIMARY KEY,
+        plan_id INTEGER REFERENCES plans(id) ON DELETE CASCADE,
+        chat_id BIGINT,
+        file_id TEXT,
+        file_path TEXT,
+        session_datetime TIMESTAMP WITH TIME ZONE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
 ''')
 
@@ -442,6 +459,68 @@ def get_user_timezone(user_id):
     except Exception as e:
         logger.error(f"Ошибка получения часового пояса для user_id={user_id}: {e}", exc_info=True)
         return None
+
+def parse_session_time(text, user_tz):
+    """Парсит время сеанса из текста в форматах:
+    - 15 января 10:30
+    - 17.01 15:20
+    - 10.05.2025 21:40
+    - 17 января 12 12 (без двоеточия)
+    Возвращает datetime в user_tz или None
+    """
+    text = text.strip()
+    now = datetime.now(user_tz)
+    
+    # Формат: "15 января 10:30" или "15 января 10 30"
+    match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2})[: ](\d{2})', text)
+    if match:
+        day = int(match.group(1))
+        month_str = match.group(2)
+        hour = int(match.group(3))
+        minute = int(match.group(4))
+        
+        month = months_map.get(month_str.lower())
+        if month:
+            year = now.year
+            try:
+                dt = datetime(year, month, day, hour, minute)
+                dt = user_tz.localize(dt)
+                if dt < now:
+                    # Если дата в прошлом, берем следующий год
+                    dt = datetime(year + 1, month, day, hour, minute)
+                    dt = user_tz.localize(dt)
+                return dt
+            except ValueError:
+                return None
+    
+    # Формат: "17.01 15:20" или "17.01.2025 15:20"
+    match = re.search(r'(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s+(\d{1,2})[: ](\d{2})', text)
+    if match:
+        day = int(match.group(1))
+        month = int(match.group(2))
+        year_str = match.group(3)
+        hour = int(match.group(4))
+        minute = int(match.group(5))
+        
+        if year_str:
+            year = int(year_str)
+            if year < 100:
+                year += 2000
+        else:
+            year = now.year
+        
+        try:
+            dt = datetime(year, month, day, hour, minute)
+            dt = user_tz.localize(dt)
+            if dt < now:
+                # Если дата в прошлом, берем следующий год
+                dt = datetime(year + 1, month, day, hour, minute)
+                dt = user_tz.localize(dt)
+            return dt
+        except ValueError:
+            return None
+    
+    return None
 
 def get_user_timezone_or_default(user_id):
     """Получает часовой пояс пользователя или возвращает часовой пояс по умолчанию (Москва)"""
@@ -3538,7 +3617,22 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         plan_type_text = "в кино" if plan_type == 'cinema' else "дома"
         # Определяем название часового пояса для отображения
         tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
-        bot.send_message(chat_id, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на {plan_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}", parse_mode='HTML')
+        
+        # Для кино добавляем кнопку "Добавить билеты"
+        markup = None
+        if plan_type == 'cinema':
+            # Получаем plan_id только что созданного плана
+            with db_lock:
+                cursor.execute('SELECT id FROM plans WHERE chat_id = %s AND film_id = %s AND plan_type = %s AND plan_datetime = %s ORDER BY id DESC LIMIT 1',
+                             (chat_id, film_id, plan_type, plan_utc))
+                plan_row = cursor.fetchone()
+                if plan_row:
+                    plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+        
+        bot.send_message(chat_id, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на {plan_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}", 
+                        parse_mode='HTML', reply_markup=markup)
         
         # Планируем уведомление на время плана
         scheduler.add_job(
@@ -4932,6 +5026,439 @@ def clean_confirm_execute(message):
         del user_clean_state[user_id]
 
 
+# ==================== КОМАНДА /EDIT ====================
+@bot.message_handler(commands=['edit'])
+def edit_command(message):
+    """Команда /edit - редактирование расписания и оценок"""
+    logger.info(f"[HANDLER] /edit вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/edit', message.chat.id)
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("📅 Изменить фильм в расписании", callback_data="edit:plan"))
+    markup.add(InlineKeyboardButton("⭐ Изменить оценку", callback_data="edit:rating"))
+    markup.add(InlineKeyboardButton("🗑️ Удалить оценку", callback_data="edit:delete_rating"))
+    markup.add(InlineKeyboardButton("👁️ Удалить просмотр", callback_data="edit:delete_watched"))
+    markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="edit:delete_plan"))
+    markup.add(InlineKeyboardButton("🎬 Удалить фильм из базы", callback_data="edit:delete_movie"))
+    
+    help_text = (
+        "✏️ <b>Что вы хотите изменить?</b>\n\n"
+        "<b>📅 Изменить фильм в расписании</b> — изменить дату/время или переключить между 'дома' и 'в кино'\n"
+        "<b>⭐ Изменить оценку</b> — изменить вашу оценку фильма\n\n"
+        "<b>Остальные опции:</b> удаление оценок, просмотров, планов и фильмов"
+    )
+    
+    bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+
+
+# ==================== КОМАНДА /TICKET ====================
+@bot.message_handler(commands=['ticket'])
+def ticket_command(message):
+    """Команда /ticket - работа с билетами в кино"""
+    logger.info(f"[HANDLER] /ticket вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/ticket', message.chat.id)
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Проверяем, есть ли файл в сообщении
+    has_photo = message.photo is not None and len(message.photo) > 0
+    has_document = message.document is not None
+    
+    if has_photo or has_document:
+        # Сохраняем file_id для последующей обработки
+        if has_photo:
+            file_id = message.photo[-1].file_id  # Берем самое большое фото
+        else:
+            file_id = message.document.file_id
+        
+        user_ticket_state[user_id] = {
+            'step': 'select_session',
+            'file_id': file_id,
+            'chat_id': chat_id
+        }
+        
+        # Показываем список сеансов в кино
+        show_cinema_sessions(chat_id, user_id, file_id)
+    else:
+        # Нет файла - показываем список сеансов для выбора
+        show_cinema_sessions(chat_id, user_id, None)
+
+
+def show_cinema_sessions(chat_id, user_id, file_id=None):
+    """Показывает список запланированных сеансов в кино"""
+    with db_lock:
+        cursor.execute('''
+            SELECT p.id, m.title, p.plan_datetime, 
+                   (SELECT COUNT(*) FROM tickets WHERE plan_id = p.id) as ticket_count
+            FROM plans p
+            JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+            WHERE p.chat_id = %s AND p.plan_type = 'cinema'
+            ORDER BY p.plan_datetime
+            LIMIT 20
+        ''', (chat_id,))
+        sessions = cursor.fetchall()
+    
+    if not sessions:
+        bot.send_message(chat_id, "❌ Нет запланированных сеансов в кино.")
+        return
+    
+    user_tz = get_user_timezone_or_default(user_id)
+    markup = InlineKeyboardMarkup(row_width=1)
+    
+    for row in sessions:
+        if isinstance(row, dict):
+            plan_id = row.get('id')
+            title = row.get('title')
+            plan_dt_value = row.get('plan_datetime')
+            ticket_count = row.get('ticket_count', 0)
+        else:
+            plan_id = row[0]
+            title = row[1]
+            plan_dt_value = row[2]
+            ticket_count = row[3] if len(row) > 3 else 0
+        
+        if plan_dt_value:
+            if isinstance(plan_dt_value, datetime):
+                if plan_dt_value.tzinfo is None:
+                    dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                else:
+                    dt = plan_dt_value.astimezone(user_tz)
+            else:
+                dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+            
+            date_str = dt.strftime('%d.%m %H:%M')
+            ticket_emoji = "🎟️" if ticket_count > 0 else ""
+            button_text = f"{title} | {date_str} {ticket_emoji}"
+            
+            if len(button_text) > 60:
+                short_title = title[:50] + "..."
+                button_text = f"{short_title} | {date_str} {ticket_emoji}"
+            
+            callback_data = f"ticket_session:{plan_id}"
+            if file_id:
+                callback_data += f":{file_id}"
+            markup.add(InlineKeyboardButton(button_text, callback_data=callback_data))
+    
+    if file_id:
+        markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data=f"ticket_new:{file_id}"))
+    else:
+        markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data="ticket_new"))
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+    
+    text = "🎟️ <b>Выберите сеанс:</b>\n\n"
+    if file_id:
+        text += "📎 Файл готов к добавлению. Выберите сеанс или создайте новый."
+    else:
+        text += "Выберите сеанс для просмотра билетов или добавления новых."
+    
+    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+
+# ==================== ОБРАБОТКА ИЗОБРАЖЕНИЙ И ФАЙЛОВ ДЛЯ БИЛЕТОВ ====================
+@bot.message_handler(content_types=['photo', 'document'], func=lambda message: message.from_user.id in user_ticket_state)
+def handle_ticket_file(message):
+    """Обработчик загрузки билетов (фото или файл)"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    state = user_ticket_state.get(user_id, {})
+    step = state.get('step')
+    
+    # Получаем file_id
+    if message.photo:
+        file_id = message.photo[-1].file_id  # Берем самое большое фото
+    elif message.document:
+        file_id = message.document.file_id
+    else:
+        bot.reply_to(message, "❌ Не удалось получить файл. Попробуйте еще раз.")
+        return
+    
+    if step == 'waiting_ticket_file':
+        # Добавляем билеты к существующему плану
+        plan_id = state.get('plan_id')
+        if not plan_id:
+            bot.reply_to(message, "❌ Ошибка: план не найден.")
+            if user_id in user_ticket_state:
+                del user_ticket_state[user_id]
+            return
+        
+        # Сохраняем билет в БД
+        with db_lock:
+            # Удаляем старые билеты для этого плана
+            cursor.execute('DELETE FROM tickets WHERE plan_id = %s', (plan_id,))
+            # Добавляем новые
+            cursor.execute('INSERT INTO tickets (plan_id, chat_id, file_id) VALUES (%s, %s, %s)',
+                         (plan_id, chat_id, file_id))
+            conn.commit()
+        
+        # Обновляем состояние
+        user_ticket_state[user_id] = {
+            'step': 'waiting_session_time',
+            'plan_id': plan_id,
+            'chat_id': chat_id
+        }
+        
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("⏰ Указать время сеанса", callback_data=f"ticket_time:{plan_id}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+        
+        bot.reply_to(message, 
+                    "✅ <b>Билеты успешно добавлены!</b>\n\n"
+                    "Если нужно, укажите точное время сеанса:",
+                    reply_markup=markup, parse_mode='HTML')
+    else:
+        # Сохраняем file_id для последующей обработки
+        user_ticket_state[user_id]['file_id'] = file_id
+        bot.reply_to(message, "✅ Файл получен. Продолжайте выбор сеанса.")
+
+
+# ==================== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ДЛЯ РЕДАКТИРОВАНИЯ И БИЛЕТОВ ====================
+@bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_edit_state or message.from_user.id in user_ticket_state)
+def handle_edit_ticket_text(message):
+    """Обработчик текстовых сообщений для редактирования и билетов"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    
+    # Обработка редактирования оценки
+    if user_id in user_edit_state:
+        state = user_edit_state[user_id]
+        action = state.get('action')
+        
+        if action == 'edit_rating':
+            try:
+                rating = int(text)
+                if 1 <= rating <= 10:
+                    film_id = state.get('film_id')
+                    with db_lock:
+                        cursor.execute('''
+                            INSERT INTO ratings (chat_id, film_id, user_id, rating)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating
+                        ''', (chat_id, film_id, user_id, rating))
+                        conn.commit()
+                    
+                    bot.reply_to(message, f"✅ Оценка изменена на {rating}/10")
+                    del user_edit_state[user_id]
+                else:
+                    bot.reply_to(message, "❌ Оценка должна быть от 1 до 10")
+            except ValueError:
+                bot.reply_to(message, "❌ Введите число от 1 до 10")
+            return
+    
+    # Обработка времени сеанса для билетов
+    if user_id in user_ticket_state:
+        state = user_ticket_state[user_id]
+        step = state.get('step')
+        
+        if step == 'waiting_session_time':
+            plan_id = state.get('plan_id')
+            user_tz = get_user_timezone_or_default(user_id)
+            
+            # Парсим время сеанса
+            session_dt = parse_session_time(text, user_tz)
+            if not session_dt:
+                bot.reply_to(message, "❌ Не удалось распознать время. Попробуйте в формате:\n• 15 января 10:30\n• 17.01 15:20")
+                return
+            
+            # Обновляем время сеанса в плане и билетах
+            session_utc = session_dt.astimezone(pytz.utc)
+            with db_lock:
+                # Обновляем план
+                cursor.execute('UPDATE plans SET plan_datetime = %s WHERE id = %s', (session_utc, plan_id))
+                # Обновляем время сеанса в билетах
+                cursor.execute('UPDATE tickets SET session_datetime = %s WHERE plan_id = %s', (session_utc, plan_id))
+                conn.commit()
+            
+            if plan_info:
+                if isinstance(plan_info, dict):
+                    title = plan_info.get('title')
+                    link = plan_info.get('link')
+                    plan_type = plan_info.get('plan_type')
+                else:
+                    title = plan_info[0]
+                    link = plan_info[1]
+                    plan_type = plan_info[2]
+                
+                # Планируем напоминания
+                # 1. Утреннее напоминание (без билетов) - в 9:00 в день сеанса
+                morning_dt = session_dt.replace(hour=9, minute=0)
+                if morning_dt < datetime.now(user_tz):
+                    morning_dt = morning_dt + timedelta(days=1)
+                morning_utc = morning_dt.astimezone(pytz.utc)
+                
+                scheduler.add_job(
+                    send_plan_notification,
+                    'date',
+                    run_date=morning_utc,
+                    args=[chat_id, None, title, link, plan_type],
+                    id=f'plan_morning_{chat_id}_{plan_id}_{int(morning_utc.timestamp())}'
+                )
+                
+                # 2. Напоминание за 10 минут до сеанса (с билетами)
+                ticket_dt = session_dt - timedelta(minutes=10)
+                if ticket_dt > datetime.now(user_tz):
+                    ticket_utc = ticket_dt.astimezone(pytz.utc)
+                    scheduler.add_job(
+                        send_ticket_notification,
+                        'date',
+                        run_date=ticket_utc,
+                        args=[chat_id, plan_id],
+                        id=f'ticket_notify_{chat_id}_{plan_id}_{int(ticket_utc.timestamp())}'
+                    )
+            
+            tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+            bot.reply_to(message, f"✅ Время сеанса обновлено: {session_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}")
+            del user_ticket_state[user_id]
+        
+        elif step == 'waiting_new_session':
+            # Обрабатываем создание нового сеанса с билетами
+            file_id = state.get('file_id')
+            
+            # Парсим ссылку и дату из текста
+            link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/(\d+))', text)
+            if link_match:
+                link = link_match.group(1)
+                kp_id = link_match.group(3)
+            else:
+                # Пробуем найти просто ID
+                id_match = re.search(r'^(\d+)', text.strip())
+                if id_match:
+                    kp_id = id_match.group(1)
+                    link = f"https://kinopoisk.ru/film/{kp_id}/"
+                else:
+                    bot.reply_to(message, "❌ Не найдена ссылка на фильм. Укажите ссылку или ID фильма.")
+                    return
+            
+            # Парсим дату и время
+            user_tz = get_user_timezone_or_default(user_id)
+            session_dt = parse_session_time(text, user_tz)
+            if not session_dt:
+                bot.reply_to(message, "❌ Не удалось распознать время. Попробуйте в формате:\n• 15 января 10:30\n• 17.01 15:20")
+                return
+            
+            # Создаем план и добавляем билеты
+            # Получаем информацию о фильме
+            movie_info = extract_movie_info(link)
+            if not movie_info:
+                bot.reply_to(message, "❌ Не удалось получить информацию о фильме.")
+                return
+            
+            # Добавляем фильм в базу, если его нет
+            with db_lock:
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                movie_row = cursor.fetchone()
+                if movie_row:
+                    film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
+                else:
+                    # Добавляем фильм
+                    cursor.execute('''
+                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    ''', (chat_id, link, kp_id, movie_info.get('title'), movie_info.get('year'),
+                          movie_info.get('genres'), movie_info.get('description'),
+                          movie_info.get('director'), movie_info.get('actors')))
+                    film_id = cursor.fetchone()[0]
+                    conn.commit()
+            
+            # Создаем план
+            session_utc = session_dt.astimezone(pytz.utc)
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id
+                ''', (chat_id, film_id, 'cinema', session_utc, user_id))
+                plan_id = cursor.fetchone()[0]
+                
+                # Добавляем билеты
+                if file_id:
+                    cursor.execute('''
+                        INSERT INTO tickets (plan_id, chat_id, file_id, session_datetime)
+                        VALUES (%s, %s, %s, %s)
+                    ''', (plan_id, chat_id, file_id, session_utc))
+                
+                conn.commit()
+            
+            # Планируем напоминания (аналогично выше)
+            title = movie_info.get('title')
+            morning_dt = session_dt.replace(hour=9, minute=0)
+            if morning_dt < datetime.now(user_tz):
+                morning_dt = morning_dt + timedelta(days=1)
+            morning_utc = morning_dt.astimezone(pytz.utc)
+            
+            scheduler.add_job(
+                send_plan_notification,
+                'date',
+                run_date=morning_utc,
+                args=[chat_id, film_id, title, link, 'cinema'],
+                id=f'plan_morning_{chat_id}_{plan_id}_{int(morning_utc.timestamp())}'
+            )
+            
+            ticket_dt = session_dt - timedelta(minutes=10)
+            if ticket_dt > datetime.now(user_tz):
+                ticket_utc = ticket_dt.astimezone(pytz.utc)
+                scheduler.add_job(
+                    send_ticket_notification,
+                    'date',
+                    run_date=ticket_utc,
+                    args=[chat_id, plan_id],
+                    id=f'ticket_notify_{chat_id}_{plan_id}_{int(ticket_utc.timestamp())}'
+                )
+            
+            tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+            bot.reply_to(message, f"✅ Сеанс создан: {title} на {session_dt.strftime('%d.%m.%Y %H:%M')} {tz_name}")
+            del user_ticket_state[user_id]
+
+
+def send_ticket_notification(chat_id, plan_id):
+    """Отправляет напоминание с билетами за 10 минут до сеанса"""
+    try:
+        with db_lock:
+            cursor.execute('''
+                SELECT t.file_id, m.title, p.plan_datetime
+                FROM tickets t
+                JOIN plans p ON t.plan_id = p.id
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE t.plan_id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            ticket_row = cursor.fetchone()
+        
+        if not ticket_row:
+            logger.warning(f"[TICKET NOTIFICATION] Билеты не найдены для plan_id={plan_id}")
+            return
+        
+        if isinstance(ticket_row, dict):
+            file_id = ticket_row.get('file_id')
+            title = ticket_row.get('title')
+            plan_dt_value = ticket_row.get('plan_datetime')
+        else:
+            file_id = ticket_row[0]
+            title = ticket_row[1]
+            plan_dt_value = ticket_row[2]
+        
+        text = f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>\n\nВаши билеты:"
+        
+        try:
+            bot.send_photo(chat_id, file_id, caption=text, parse_mode='HTML')
+        except:
+            try:
+                bot.send_document(chat_id, file_id, caption=text, parse_mode='HTML')
+            except Exception as e:
+                logger.error(f"[TICKET NOTIFICATION] Ошибка отправки билетов: {e}")
+                bot.send_message(chat_id, f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>", parse_mode='HTML')
+        
+        logger.info(f"[TICKET NOTIFICATION] Напоминание с билетами отправлено для {title} в чат {chat_id}")
+    except Exception as e:
+        logger.error(f"[TICKET NOTIFICATION] Ошибка отправки напоминания: {e}")
+
+
 # Обработка реплаев на сообщения бота (для settings и других случаев)
 @bot.message_handler(content_types=['text'], func=lambda message: message.reply_to_message and message.reply_to_message.from_user.is_bot and not (message.text and message.text.strip().startswith('/')), priority=10)
 def handle_reply_to_bot(message):
@@ -6021,6 +6548,543 @@ def handle_search_pagination_callback(call):
 def handle_noop_callback(call):
     """Обработчик для плейсхолдера (кнопка с информацией о странице)"""
     bot.answer_callback_query(call.id)
+
+
+# ==================== CALLBACK ОБРАБОТЧИКИ ДЛЯ /EDIT ====================
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit:"))
+def edit_callback_handler(call):
+    """Обработчик callback для команды /edit"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    action = call.data.split(":")[1]
+    
+    if action == "plan":
+        # Показываем список планов для редактирования
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, m.title, p.plan_type, p.plan_datetime
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s
+                ORDER BY p.plan_datetime
+                LIMIT 20
+            ''', (chat_id,))
+            plans = cursor.fetchall()
+        
+        if not plans:
+            bot.edit_message_text("Нет запланированных фильмов для редактирования.", chat_id, call.message.message_id)
+            return
+        
+        user_tz = get_user_timezone_or_default(user_id)
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for row in plans:
+            if isinstance(row, dict):
+                plan_id = row.get('id')
+                title = row.get('title')
+                plan_type = row.get('plan_type')
+                plan_dt_value = row.get('plan_datetime')
+            else:
+                plan_id = row[0]
+                title = row[1]
+                plan_type = row[2]
+                plan_dt_value = row[3] if len(row) > 3 else None
+            
+            if plan_dt_value:
+                if isinstance(plan_dt_value, datetime):
+                    if plan_dt_value.tzinfo is None:
+                        dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                    else:
+                        dt = plan_dt_value.astimezone(user_tz)
+                else:
+                    dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                
+                date_str = dt.strftime('%d.%m %H:%M')
+                type_text = "🎦" if plan_type == 'cinema' else "🏠"
+                button_text = f"{title} | {date_str} {type_text}"
+                
+                if len(button_text) > 60:
+                    short_title = title[:50] + "..."
+                    button_text = f"{short_title} | {date_str} {type_text}"
+                
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_plan:{plan_id}"))
+        
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+        bot.edit_message_text("📅 <b>Выберите план для редактирования:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
+    elif action == "rating":
+        # Показываем список фильмов с оценками для изменения
+        with db_lock:
+            cursor.execute('''
+                SELECT m.id, m.title, m.year, r.rating
+                FROM movies m
+                JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                WHERE m.chat_id = %s AND r.user_id = %s
+                ORDER BY m.title
+                LIMIT 20
+            ''', (chat_id, user_id))
+            movies = cursor.fetchall()
+        
+        if not movies:
+            bot.edit_message_text("Нет фильмов с вашими оценками для изменения.", chat_id, call.message.message_id)
+            return
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for row in movies:
+            if isinstance(row, dict):
+                film_id = row.get('id')
+                title = row.get('title')
+                year = row.get('year')
+                rating = row.get('rating')
+            else:
+                film_id = row[0]
+                title = row[1]
+                year = row[2]
+                rating = row[3] if len(row) > 3 else None
+            
+            button_text = f"{title} ({year or '—'}) ⭐ {rating}/10"
+            if len(button_text) > 60:
+                short_title = title[:45] + "..."
+                button_text = f"{short_title} ({year or '—'}) ⭐ {rating}/10"
+            
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_rating:{film_id}"))
+        
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+        bot.edit_message_text("⭐ <b>Выберите фильм для изменения оценки:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
+    elif action.startswith("delete_"):
+        # Перенаправляем на соответствующие обработчики clean
+        clean_action = action.replace("delete_", "")
+        bot.answer_callback_query(call.id, "Перенаправление...")
+        # Вызываем соответствующий обработчик clean
+        call.data = f"clean:{clean_action}"
+        clean_action_choice(call)
+    
+    elif action == "cancel":
+        bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan:"))
+def edit_plan_callback(call):
+    """Обработчик выбора плана для редактирования"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    # Получаем информацию о плане
+    with db_lock:
+        cursor.execute('''
+            SELECT p.plan_type, p.plan_datetime, m.title
+            FROM plans p
+            JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+            WHERE p.id = %s AND p.chat_id = %s
+        ''', (plan_id, chat_id))
+        plan_row = cursor.fetchone()
+    
+    if not plan_row:
+        bot.answer_callback_query(call.id, "План не найден")
+        return
+    
+    if isinstance(plan_row, dict):
+        plan_type = plan_row.get('plan_type')
+        plan_dt_value = plan_row.get('plan_datetime')
+        title = plan_row.get('title')
+    else:
+        plan_type = plan_row[0]
+        plan_dt_value = plan_row[1]
+        title = plan_row[2]
+    
+    user_tz = get_user_timezone_or_default(user_id)
+    if plan_dt_value:
+        if isinstance(plan_dt_value, datetime):
+            if plan_dt_value.tzinfo is None:
+                dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+            else:
+                dt = plan_dt_value.astimezone(user_tz)
+        else:
+            dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+        date_str = dt.strftime('%d.%m.%Y %H:%M')
+    else:
+        date_str = "не указана"
+    
+    user_edit_state[user_id] = {
+        'action': 'edit_plan',
+        'plan_id': plan_id,
+        'plan_type': plan_type
+    }
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    if plan_type == 'cinema':
+        markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
+        markup.add(InlineKeyboardButton("🎟️ Загрузить билеты", callback_data=f"edit_plan_ticket:{plan_id}"))
+    else:
+        markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
+        markup.add(InlineKeyboardButton("🎦 Переключить в 'в кино'", callback_data=f"edit_plan_switch:{plan_id}"))
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+    
+    text = f"✏️ <b>Редактирование плана:</b>\n\n"
+    text += f"<b>{title}</b>\n"
+    text += f"Тип: {'🎦 в кино' if plan_type == 'cinema' else '🏠 дома'}\n"
+    text += f"Дата/время: {date_str}\n\n"
+    text += f"Что вы хотите изменить?"
+    
+    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_rating:"))
+def edit_rating_callback(call):
+    """Обработчик изменения оценки"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    film_id = int(call.data.split(":")[1])
+    
+    user_edit_state[user_id] = {
+        'action': 'edit_rating',
+        'film_id': film_id
+    }
+    
+    bot.edit_message_text(
+        "⭐ <b>Введите новую оценку (1-10):</b>\n\n"
+        "Ответьте на это сообщение числом от 1 до 10.",
+        chat_id, call.message.message_id, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id)
+
+
+# ==================== CALLBACK ОБРАБОТЧИКИ ДЛЯ /TICKET ====================
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ticket:"))
+def ticket_callback_handler(call):
+    """Обработчик callback для команды /ticket"""
+    user_id = call.from_user.id
+    action = call.data.split(":")[1]
+    
+    if action == "cancel":
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
+        bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_session:"))
+def ticket_session_callback(call):
+    """Обработчик выбора сеанса для работы с билетами"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    parts = call.data.split(":")
+    plan_id = int(parts[1])
+    file_id = parts[2] if len(parts) > 2 else None
+    
+    # Проверяем, есть ли уже билеты для этого сеанса
+    with db_lock:
+        cursor.execute('SELECT file_id, file_path FROM tickets WHERE plan_id = %s', (plan_id,))
+        ticket_row = cursor.fetchone()
+    
+    if ticket_row and not file_id:
+        # Показываем существующие билеты
+        existing_file_id = ticket_row[0] if isinstance(ticket_row, dict) else ticket_row[0]
+        try:
+            bot.send_photo(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
+            bot.answer_callback_query(call.id, "Билеты отправлены")
+        except:
+            # Если фото не найдено, пытаемся отправить как документ
+            try:
+                bot.send_document(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
+                bot.answer_callback_query(call.id, "Билеты отправлены")
+            except:
+                bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
+        return
+    
+    if file_id:
+        # Добавляем билеты к существующему сеансу
+        user_ticket_state[user_id] = {
+            'step': 'add_ticket',
+            'plan_id': plan_id,
+            'file_id': file_id,
+            'chat_id': chat_id
+        }
+        
+        # Сохраняем билет в БД
+        with db_lock:
+            # Удаляем старые билеты для этого плана
+            cursor.execute('DELETE FROM tickets WHERE plan_id = %s', (plan_id,))
+            # Добавляем новые
+            cursor.execute('INSERT INTO tickets (plan_id, chat_id, file_id) VALUES (%s, %s, %s)',
+                         (plan_id, chat_id, file_id))
+            conn.commit()
+        
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("⏰ Указать время сеанса", callback_data=f"ticket_time:{plan_id}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+        
+        bot.edit_message_text(
+            "✅ <b>Билеты успешно добавлены!</b>\n\n"
+            "Если нужно, укажите точное время сеанса:",
+            chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+        )
+        bot.answer_callback_query(call.id, "Билеты добавлены")
+    else:
+        bot.answer_callback_query(call.id, "Нет файла для добавления")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
+def add_ticket_from_plan_callback(call):
+    """Обработчик кнопки 'Добавить билеты' из подтверждения /plan"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    user_ticket_state[user_id] = {
+        'step': 'waiting_ticket_file',
+        'plan_id': plan_id,
+        'chat_id': chat_id
+    }
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+    
+    bot.edit_message_text(
+        "🎟️ <b>Пришлите билеты скриншотом или вложением</b>\n\n"
+        "Отправьте фото или файл с билетами в следующем сообщении.",
+        chat_id, call.message.chat.id, reply_markup=markup, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_time:"))
+def ticket_time_callback(call):
+    """Обработчик запроса времени сеанса"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    user_ticket_state[user_id] = {
+        'step': 'waiting_session_time',
+        'plan_id': plan_id,
+        'chat_id': chat_id
+    }
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+    
+    bot.edit_message_text(
+        "⏰ <b>Уточните дату и время сеанса:</b>\n\n"
+        "Ответьте на это сообщение в формате:\n"
+        "• 15 января 10:30\n"
+        "• 17.01 15:20\n"
+        "• 10.05.2025 21:40",
+        chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
+def ticket_new_session_callback(call):
+    """Обработчик создания нового сеанса с билетами"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    parts = call.data.split(":")
+    file_id = parts[1] if len(parts) > 1 else None
+    
+    user_ticket_state[user_id] = {
+        'step': 'waiting_new_session',
+        'file_id': file_id,
+        'chat_id': chat_id
+    }
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+    
+    bot.edit_message_text(
+        "➕ <b>Пришлите фильм и дату сеанса</b>\n\n"
+        "Формат:\n"
+        "• https://www.kinopoisk.ru/film/81682/ 17 января 20:30\n"
+        "• https://www.kinopoisk.ru/film/81682/ 17.01 15:15\n"
+        "• 81682 17 января 12 12",
+        chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id)
+
+
+# ==================== ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ ДЛЯ РЕДАКТИРОВАНИЯ ПЛАНОВ ====================
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan_datetime:"))
+def edit_plan_datetime_callback(call):
+    """Обработчик изменения даты/времени плана"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    user_edit_state[user_id] = {
+        'action': 'edit_plan_datetime',
+        'plan_id': plan_id
+    }
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+    
+    bot.edit_message_text(
+        "📅 <b>Введите новую дату и время:</b>\n\n"
+        "Формат:\n"
+        "• 15 января 10:30\n"
+        "• 17.01 15:20\n"
+        "• 10.05.2025 21:40\n"
+        "• завтра\n"
+        "• в субботу 15:00",
+        chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan_ticket:"))
+def edit_plan_ticket_callback(call):
+    """Обработчик загрузки билетов через /edit"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    user_ticket_state[user_id] = {
+        'step': 'waiting_ticket_file',
+        'plan_id': plan_id,
+        'chat_id': chat_id
+    }
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+    
+    bot.edit_message_text(
+        "🎟️ <b>Пришлите билеты скриншотом или вложением</b>\n\n"
+        "Отправьте фото или файл с билетами в следующем сообщении.",
+        chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan_switch:"))
+def edit_plan_switch_callback(call):
+    """Обработчик переключения типа плана (дома <-> в кино)"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    # Получаем текущий тип плана
+    with db_lock:
+        cursor.execute('SELECT plan_type FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+        plan_row = cursor.fetchone()
+        
+        if not plan_row:
+            bot.answer_callback_query(call.id, "План не найден", show_alert=True)
+            return
+        
+        current_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[0]
+        new_type = 'cinema' if current_type == 'home' else 'home'
+        
+        # Обновляем тип плана
+        cursor.execute('UPDATE plans SET plan_type = %s WHERE id = %s', (new_type, plan_id))
+        conn.commit()
+    
+    type_text = "в кино" if new_type == 'cinema' else "дома"
+    bot.edit_message_text(
+        f"✅ Тип плана изменен на: <b>{type_text}</b>",
+        chat_id, call.message.message_id, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id, f"Изменено на {type_text}")
+
+
+# Обработка текстовых сообщений для редактирования даты/времени плана
+@bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_edit_state and user_edit_state.get(message.from_user.id, {}).get('action') == 'edit_plan_datetime')
+def handle_edit_plan_datetime_text(message):
+    """Обработчик текстового сообщения для изменения даты/времени плана"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    state = user_edit_state.get(user_id, {})
+    plan_id = state.get('plan_id')
+    
+    if not plan_id:
+        bot.reply_to(message, "❌ Ошибка: план не найден.")
+        if user_id in user_edit_state:
+            del user_edit_state[user_id]
+        return
+    
+    user_tz = get_user_timezone_or_default(user_id)
+    
+    # Используем функцию process_plan для парсинга даты
+    # Но сначала нужно получить информацию о фильме
+    with db_lock:
+        cursor.execute('''
+            SELECT m.link, p.plan_type
+            FROM plans p
+            JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+            WHERE p.id = %s AND p.chat_id = %s
+        ''', (plan_id, chat_id))
+        plan_row = cursor.fetchone()
+    
+    if not plan_row:
+        bot.reply_to(message, "❌ План не найден.")
+        if user_id in user_edit_state:
+            del user_edit_state[user_id]
+        return
+    
+    if isinstance(plan_row, dict):
+        link = plan_row.get('link')
+        plan_type = plan_row.get('plan_type')
+    else:
+        link = plan_row[0]
+        plan_type = plan_row[1]
+    
+    # Парсим новую дату/время используя process_plan
+    # Но нам нужно только получить datetime, не создавать новый план
+    # Используем parse_session_time для простых форматов, или process_plan логику
+    from moviebot import process_plan
+    # Временно создаем новый план для парсинга, затем удалим его
+    # Лучше использовать прямую логику парсинга из process_plan
+    
+    # Используем логику парсинга из process_plan, но без создания нового плана
+    # Сначала пробуем parse_session_time для форматов с временем
+    session_dt = parse_session_time(text, user_tz)
+    
+    if not session_dt:
+        # Если parse_session_time не сработал, используем process_plan для парсинга
+        # Создаем временный план для парсинга
+        temp_result = process_plan(user_id, chat_id, link, plan_type, text)
+        if temp_result == True:
+            # Получаем новый plan_datetime из последнего созданного плана
+            with db_lock:
+                cursor.execute('SELECT plan_datetime FROM plans WHERE chat_id = %s AND user_id = %s ORDER BY id DESC LIMIT 1', (chat_id, user_id))
+                new_plan_row = cursor.fetchone()
+                if new_plan_row:
+                    session_dt = new_plan_row.get('plan_datetime') if isinstance(new_plan_row, dict) else new_plan_row[0]
+                    if isinstance(session_dt, datetime):
+                        if session_dt.tzinfo is None:
+                            session_dt = pytz.utc.localize(session_dt).astimezone(user_tz)
+                        else:
+                            session_dt = session_dt.astimezone(user_tz)
+                    # Удаляем временный план
+                    cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s ORDER BY id DESC LIMIT 1', (chat_id, user_id))
+                    conn.commit()
+    
+    if session_dt:
+        # Обновляем план
+        if isinstance(session_dt, datetime):
+            session_utc = session_dt.astimezone(pytz.utc) if session_dt.tzinfo else pytz.utc.localize(session_dt)
+        else:
+            session_utc = session_dt
+        
+        with db_lock:
+            cursor.execute('UPDATE plans SET plan_datetime = %s WHERE id = %s', (session_utc, plan_id))
+            conn.commit()
+        
+        tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+        if isinstance(session_dt, datetime):
+            date_str = session_dt.strftime('%d.%m.%Y %H:%M')
+        else:
+            date_str = str(session_dt)
+        bot.reply_to(message, f"✅ Дата и время плана обновлены: {date_str} {tz_name}")
+        if user_id in user_edit_state:
+            del user_edit_state[user_id]
+    else:
+        bot.reply_to(message, "❌ Не удалось распознать дату/время. Попробуйте еще раз.")
 
 logger.info("[DEBUG] Перед созданием Flask app")
 logger.info(f"[DEBUG] sys.argv={sys.argv}, sys.executable={sys.executable}")
