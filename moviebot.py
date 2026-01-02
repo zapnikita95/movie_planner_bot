@@ -6449,20 +6449,6 @@ def series_unsubscribe_callback(call):
         except:
             pass
 
-def get_seasons_data(kp_id):
-    """Получает данные о сезонах сериала (возвращает список сезонов)"""
-    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-    url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/{kp_id}/seasons"
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('items', [])
-        return []
-    except Exception as e:
-        logger.error(f"Ошибка get_seasons_data: {e}", exc_info=True)
-        return []
-
 # /clean
 @bot.message_handler(commands=['dbcheck'])
 def dbcheck_command(message):
