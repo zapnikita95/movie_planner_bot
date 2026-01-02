@@ -1752,10 +1752,10 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             
                             # Добавляем импортированную оценку для существующего фильма
                             cursor.execute('''
-                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
-                                VALUES (%s, %s, %s, %s, TRUE)
-                                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE
-                            ''', (chat_id, film_id, user_id, user_rating))
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id)
+                                VALUES (%s, %s, %s, %s, TRUE, %s)
+                                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE, kp_id = EXCLUDED.kp_id
+                            ''', (chat_id, film_id, user_id, user_rating, kp_id))
                             conn.commit()
                             
                             imported_count += 1
