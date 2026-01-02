@@ -7053,4 +7053,134 @@ def plan_handler(message):
             # Удаляем /plan и ссылку из текста
             remaining_text = original_text.replace('/plan', '').replace(link, '').strip().lower()
             if remaining_text:
-            
+                text = remaining_text
+                logger.info(f"[PLAN] Оставшийся текст после извлечения ссылки: {text}")
+        
+        # Ищем ID кинопоиска (например, "/plan 484791 дома в воскресенье")
+        kp_id = None
+        if not link:
+            id_match = re.search(r'^(\d+)', text.strip())
+            if id_match:
+                kp_id = id_match.group(1)
+                # Проверяем, есть ли фильм с таким ID в базе
+                with db_lock:
+                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor.fetchone()
+                    if row:
+                        link = row.get('link') if isinstance(row, dict) else row[0]
+                        logger.info(f"[PLAN] Найден фильм по ID {kp_id}: {link}")
+                    else:
+                        # Если фильма нет в базе, создаем ссылку из ID
+                        link = f"https://kinopoisk.ru/film/{kp_id}"
+                        logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
+        
+        plan_type = 'home' if 'дома' in text else 'cinema' if 'кино' in text else None
+        logger.info(f"[PLAN] plan_type={plan_type}, text={text}")
+        
+        day_or_date = None
+        
+        # Сначала ищем день недели (для обоих режимов)
+        sorted_phrases = sorted(days_full.keys(), key=len, reverse=True)
+        for phrase in sorted_phrases:
+            if phrase in text:
+                day_or_date = phrase
+                break
+        
+        # Если день недели не найден, ищем дату (для обоих режимов)
+        if not day_or_date:
+            # Сначала проверяем специальные форматы: "завтра", "следующая неделя"
+            if 'завтра' in text:
+                day_or_date = 'завтра'
+                logger.info(f"[PLAN] Найден формат 'завтра'")
+            elif 'следующая неделя' in text or 'след неделя' in text or 'след. неделя' in text:
+                day_or_date = 'следующая неделя'
+                logger.info(f"[PLAN] Найден формат 'следующая неделя'")
+            # Затем проверяем формат "в апреле", "в марте" и т.д. (без числа)
+            else:
+                month_match = re.search(r'в\s+([а-яё]+)', text)
+                if month_match:
+                    month_str = month_match.group(1)
+                    # Проверяем, что это действительно месяц
+                    months_map = {
+                        'январь': 1, 'янв': 1, 'февраль': 2, 'фев': 2, 'март': 3, 'мар': 3,
+                        'апрель': 4, 'апр': 4, 'май': 5, 'июнь': 6, 'июн': 6,
+                        'июль': 7, 'июл': 7, 'август': 8, 'авг': 8, 'сентябрь': 9, 'сент': 9, 'сен': 9,
+                        'октябрь': 10, 'окт': 10, 'ноябрь': 11, 'ноя': 11, 'декабрь': 12, 'дек': 12
+                    }
+                    if month_str.lower() in months_map:
+                        day_or_date = f"в {month_str}"
+                        logger.info(f"[PLAN] Найден месяц (формат 'в [месяц]'): {day_or_date}")
+        
+        # Если специальные форматы не найдены, пробуем другие форматы
+        if not day_or_date:
+            # Пробуем разные форматы даты: "15 января", "с 20 февраля", "15.01", "15/01", "15.01.25", "15.01.2025"
+            # Убираем предлоги "с", "на" и т.д. перед датой
+            date_match = re.search(r'(?:с|на|до)?\s*(\d{1,2})\s+([а-яё]+)', text)
+            if date_match:
+                day_or_date = f"{date_match.group(1)} {date_match.group(2)}"
+                logger.info(f"[PLAN] Найдена дата (текстовый формат): {day_or_date}")
+            else:
+                # Формат "15.01", "15/01", "15.01.25", "15.01.2025", "15/01/25", "15/01/2025"
+                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                if date_match:
+                    day_num = int(date_match.group(1))
+                    month_num = int(date_match.group(2))
+                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+        
+        logger.info(f"[PLAN] link={link}, plan_type={plan_type}, day_or_date={day_or_date}")
+        
+        if link and plan_type and day_or_date:
+            try:
+                process_plan(user_id, chat_id, link, plan_type, day_or_date)
+            except Exception as e:
+                bot.reply_to(message, f"Ошибка при планировании: {e}")
+                logger.error(f"Ошибка process_plan: {e}", exc_info=True)
+                return
+            return
+        
+        # Если нет ссылки, отправляем новое сообщение с возможностью отправки по частям
+        if not link:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Выйти", callback_data="plan:cancel"))
+            reply_msg = bot.reply_to(message, "Пришлите ссылку на фильм в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
+            # Устанавливаем состояние для получения данных по частям
+            user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id}
+            return
+        
+        if not plan_type:
+            error_msg = bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
+            # Сохраняем состояние для обработки ответа
+            plan_error_messages[error_msg.message_id] = {
+                'user_id': user_id,
+                'chat_id': chat_id,
+                'link': link,
+                'plan_type': None,
+                'day_or_date': None,
+                'missing': 'plan_type'
+            }
+            user_plan_state[user_id] = {'step': 2, 'link': link, 'chat_id': chat_id}
+            return
+        
+        if not day_or_date:
+            error_msg = bot.reply_to(message, "Не указан день или дата просмотра.")
+            # Сохраняем состояние для обработки ответа
+            plan_error_messages[error_msg.message_id] = {
+                'user_id': user_id,
+                'chat_id': chat_id,
+                'link': link,
+                'plan_type': plan_type,
+                'day_or_date': None,
+                'missing': 'day_or_date'
+            }
+            user_plan_state[user_id] = {'step': 3, 'link': link, 'type': plan_type, 'chat_id': chat_id}
+            return
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /plan: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /plan")
+        except:
+            pass
