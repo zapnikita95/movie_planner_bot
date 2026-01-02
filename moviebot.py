@@ -371,6 +371,19 @@ except Exception as e:
     except:
         pass
 
+# Добавляем поле notification_sent в таблицу plans, если его нет
+try:
+    cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS notification_sent BOOLEAN DEFAULT FALSE")
+    conn.commit()
+    logger.info("Поле notification_sent добавлено в таблицу plans (или уже существует)")
+except Exception as e:
+    logger.warning(f"Ошибка при добавлении поля notification_sent: {e}")
+    conn.rollback()
+    try:
+        conn.rollback()
+    except:
+        pass
+
 # Ключевой блок: очистка дубликатов и создание уникального индекса
 try:
     # Удаляем старые индексы и constraints, если они существуют
@@ -857,6 +870,9 @@ def hourly_stats():
 # Настройка периодического вывода статистики
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
+# Периодическая проверка планов и отправка пропущенных уведомлений (каждые 5 минут)
+scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='check_plan_notifications')
+
 # Очистка планов
 def clean_home_plans():
     """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок"""
@@ -1066,7 +1082,7 @@ def send_rating_reminder(chat_id, film_id, film_title, user_id):
     except Exception as e:
         logger.error(f"[RATING REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
 
-def send_plan_notification(chat_id, film_id, title, link, plan_type):
+def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None):
     """Отправляет уведомление о запланированном просмотре"""
     try:
         plan_type_text = "дома" if plan_type == 'home' else "в кино"
@@ -1076,8 +1092,77 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type):
         # Сохраняем message_id для обработки реакций
         plan_notification_messages[msg.message_id] = {'link': link}
         logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}")
+        
+        # Отмечаем как отправленное в базе данных, если plan_id передан
+        if plan_id:
+            try:
+                with db_lock:
+                    cursor.execute('''
+                        UPDATE plans 
+                        SET notification_sent = TRUE 
+                        WHERE id = %s
+                    ''', (plan_id,))
+                    conn.commit()
+                logger.info(f"[PLAN NOTIFICATION] План {plan_id} отмечен как уведомление отправлено")
+            except Exception as e:
+                logger.warning(f"[PLAN NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}")
     except Exception as e:
         logger.error(f"[PLAN NOTIFICATION] Ошибка отправки уведомления: {e}")
+
+def check_and_send_plan_notifications():
+    """Периодическая проверка планов и отправка пропущенных уведомлений"""
+    try:
+        now_utc = datetime.now(pytz.utc)
+        # Проверяем планы, которые должны были быть отправлены в последние 30 минут
+        # (чтобы не пропустить уведомления после перезапуска бота)
+        check_start = now_utc - timedelta(minutes=30)
+        check_end = now_utc + timedelta(minutes=5)  # Небольшой запас на будущее
+        
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
+                       m.title, m.link, p.notification_sent
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.plan_datetime >= %s 
+                  AND p.plan_datetime <= %s
+                  AND (p.notification_sent IS NULL OR p.notification_sent = FALSE)
+            ''', (check_start, check_end))
+            plans = cursor.fetchall()
+        
+        if plans:
+            logger.info(f"[PLAN CHECK] Найдено {len(plans)} планов для проверки уведомлений")
+        
+        for plan in plans:
+            if isinstance(plan, dict):
+                plan_id = plan.get('id')
+                chat_id = plan.get('chat_id')
+                film_id = plan.get('film_id')
+                plan_type = plan.get('plan_type')
+                plan_datetime = plan.get('plan_datetime')
+                user_id = plan.get('user_id')
+                title = plan.get('title')
+                link = plan.get('link')
+            else:
+                plan_id = plan[0]
+                chat_id = plan[1]
+                film_id = plan[2]
+                plan_type = plan[3]
+                plan_datetime = plan[4]
+                user_id = plan[5]
+                title = plan[6]
+                link = plan[7]
+            
+            # Проверяем, что время уже наступило (или прошло не более 30 минут назад)
+            if plan_datetime <= now_utc:
+                try:
+                    # Отправляем уведомление (plan_id передается для отметки в БД)
+                    send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                    logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
+                except Exception as e:
+                    logger.error(f"[PLAN CHECK] Ошибка отправки уведомления для плана {plan_id}: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[PLAN CHECK] Ошибка при проверке планов: {e}", exc_info=True)
 
 # Получение информации о фильме через прямой запрос к API
 def extract_kp_id_from_text(text):
@@ -6389,7 +6474,9 @@ def plan_handler(message):
         
         # Если нет ссылки, отправляем новое сообщение с возможностью отправки по частям
         if not link:
-            bot.reply_to(message, "Пришлите ссылку на фильм в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Выйти из режима", callback_data="plan:cancel"))
+            reply_msg = bot.reply_to(message, "Пришлите ссылку на фильм в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
             # Устанавливаем состояние для получения данных по частям
             user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id}
             return
@@ -6432,6 +6519,12 @@ def plan_handler(message):
 def get_plan_link(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
+    
+    # Игнорируем команды (начинающиеся с /)
+    if message.text and message.text.startswith('/'):
+        logger.info(f"[PLAN] Игнорируем команду {message.text} в режиме планирования")
+        return
+    
     link = None
     
     if message.reply_to_message:
@@ -6515,6 +6608,21 @@ def plan_from_added_callback(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "plan:cancel")
+def plan_cancel_callback(call):
+    """Обработчик кнопки выхода из режима планирования"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    # Удаляем состояние планирования
+    if user_id in user_plan_state:
+        del user_plan_state[user_id]
+        logger.info(f"[PLAN] Пользователь {user_id} вышел из режима планирования")
+    
+    bot.answer_callback_query(call.id, "Режим планирования отменён")
+    bot.edit_message_text("✅ Режим планирования отменён. Можете использовать другие команды.", 
+                         chat_id, call.message.message_id)
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan_type:"))
 def plan_type_choice(call):
     user_id = call.from_user.id
@@ -6547,6 +6655,12 @@ def plan_type_choice(call):
 @bot.message_handler(func=lambda m: user_plan_state.get(m.from_user.id, {}).get('step') == 3)
 def get_plan_day_or_date(message):
     user_id = message.from_user.id
+    
+    # Игнорируем команды (начинающиеся с /)
+    if message.text and message.text.startswith('/'):
+        logger.info(f"[PLAN] Игнорируем команду {message.text} в режиме планирования (step 3)")
+        return
+    
     text = message.text.lower().strip()
     plan_type = user_plan_state[user_id]['type']
     link = user_plan_state[user_id]['link']
@@ -6741,12 +6855,15 @@ def get_plan_day_or_date(message):
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
                 title = row.get('title') if isinstance(row, dict) else row[1]
 
-            # Сохраняем план
+            # Сохраняем план и получаем plan_id
             plan_utc = plan_dt.astimezone(pytz.utc)
             cursor.execute('''
                 INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
             VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
         ''', (chat_id, film_id, plan_type, plan_utc, user_id))
+            result = cursor.fetchone()
+            plan_id = result[0] if result else None
         conn.commit()
 
         day_name = ['понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'][plan_dt.weekday()]
@@ -6755,14 +6872,20 @@ def get_plan_day_or_date(message):
         tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
         bot.reply_to(message, f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b> на <b>{day_name} {plan_dt.strftime('%d.%m.%Y в %H:%M')}</b> {tz_name}", parse_mode='HTML')
 
-        # Планируем уведомление
-        scheduler.add_job(
-            send_plan_notification,
-            'date',
-            run_date=plan_utc,
-            args=[chat_id, film_id, title, link, plan_type],
-            id=f'plan_notify_{chat_id}_{film_id}_{int(plan_utc.timestamp())}'
-        )
+        # Планируем уведомление через scheduler
+        try:
+            scheduler.add_job(
+                send_plan_notification,
+                'date',
+                run_date=plan_utc,
+                args=[chat_id, film_id, title, link, plan_type, plan_id],
+                id=f'plan_notify_{chat_id}_{film_id}_{int(plan_utc.timestamp())}'
+            )
+            logger.info(f"[PLAN] Уведомление запланировано через scheduler на {plan_utc}, plan_id={plan_id}")
+        except Exception as e:
+            logger.warning(f"[PLAN] Не удалось запланировать уведомление через scheduler: {e}. Будет отправлено через периодическую проверку.")
+        
+        # Периодическая проверка также отправит уведомление, если scheduler не сработает
 
         del user_plan_state[user_id]
 
@@ -6877,7 +7000,9 @@ def handle_plan_error_reply(message):
 # /schedule — список запланированных просмотров
 @bot.message_handler(commands=['schedule'])
 def show_schedule(message):
-    logger.info(f"[HANDLER] /schedule вызван от {message.from_user.id}")
+    logger.info(f"[SCHEDULE COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+    logger.info(f"[SCHEDULE COMMAND] /schedule вызван от {message.from_user.id}")
+    logger.info(f"[SCHEDULE COMMAND] message.text={message.text}")
     try:
         username = message.from_user.username or f"user_{message.from_user.id}"
         log_request(message.from_user.id, username, '/schedule', message.chat.id)
@@ -8368,12 +8493,17 @@ def clean_confirm_execute(message):
 @bot.message_handler(commands=['edit'])
 def edit_command(message):
     """Команда /edit - редактирование расписания и оценок"""
-    logger.info(f"[HANDLER] /edit вызван от {message.from_user.id}")
+    logger.info(f"[EDIT COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+    logger.info(f"[EDIT COMMAND] /edit вызван от {message.from_user.id}")
+    logger.info(f"[EDIT COMMAND] message.text={message.text}")
+    logger.info(f"[EDIT COMMAND] message.chat.id={message.chat.id}")
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/edit', message.chat.id)
     
     user_id = message.from_user.id
     chat_id = message.chat.id
+    
+    logger.info(f"[EDIT COMMAND] Создаем меню редактирования для user_id={user_id}, chat_id={chat_id}")
     
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("📅 Изменить фильм в расписании", callback_data="edit:plan"))
@@ -8390,7 +8520,12 @@ def edit_command(message):
         "<b>Остальные опции:</b> удаление оценок, просмотров, планов и фильмов"
     )
     
-    bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+    logger.info(f"[EDIT COMMAND] Отправляем меню редактирования")
+    try:
+        bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[EDIT COMMAND] ✅ Меню редактирования отправлено успешно")
+    except Exception as e:
+        logger.error(f"[EDIT COMMAND] ❌ Ошибка отправки меню: {e}", exc_info=True)
 
 
 # ==================== КОМАНДА /TICKET ====================
@@ -11480,18 +11615,21 @@ if IS_PRODUCTION:
     
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 else:
-    # Локальный запуск - используем polling (только если IS_RENDER=False)
-    if IS_RENDER:
-        # Дополнительная защита: если по какой-то причине IS_RENDER=True, но мы в блоке else
-        logger.error("ОШИБКА: IS_RENDER=True, но код попал в блок else! Polling НЕ будет запущен!")
-    elif __name__ == '__main__':
-        logger.info("Локальное окружение - будет использован polling")
-        try:
-            bot.remove_webhook()
-            logger.info("Старые webhook очищены")
-        except Exception as e:
-            logger.warning(f"Не удалось очистить webhook: {e}")
-        logger.info("Локальный запуск: используется polling")
+    # Локальный запуск - используем polling (только если IS_PRODUCTION=False)
+    logger.info("Локальное окружение - будет использован polling")
+    try:
+        bot.remove_webhook()
+        logger.info("Старые webhook очищены")
+    except Exception as e:
+        logger.warning(f"Не удалось очистить webhook: {e}")
+    
+    # Запускаем polling независимо от того, как выполняется код
+    # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
+    logger.info("Локальный запуск: используется polling")
+    try:
         bot.infinity_polling()
-    else:
-        logger.warning("Код выполняется не как main, но IS_RENDER=False. Polling не будет запущен автоматически.")
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал прерывания, останавливаем бота...")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
+        raise
