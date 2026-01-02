@@ -4802,42 +4802,49 @@ def edit_command(message):
 
 
 # ==================== КОМАНДА /TICKET ====================
-@bot.message_handler(commands=['ticket'])
+@bot.message_handler(commands=['ticket'], priority=10)
 def ticket_command(message):
     """Команда /ticket - работа с билетами в кино"""
-    logger.info(f"[HANDLER] /ticket вызван от {message.from_user.id}")
-    username = message.from_user.username or f"user_{message.from_user.id}"
-    log_request(message.from_user.id, username, '/ticket', message.chat.id)
-    
     user_id = message.from_user.id
     chat_id = message.chat.id
+    username = message.from_user.username or f"user_{user_id}"
+    
+    logger.info(f"[TICKET COMMAND] Пользователь {user_id} ({username}) вызвал /ticket в чате {chat_id}")
+    log_request(user_id, username, '/ticket', chat_id)
     
     # Проверяем, есть ли файл в сообщении
     has_photo = message.photo is not None and len(message.photo) > 0
     has_document = message.document is not None
     
+    logger.info(f"[TICKET COMMAND] Проверка файла: has_photo={has_photo}, has_document={has_document}")
+    
     if has_photo or has_document:
         # Сохраняем file_id для последующей обработки
         if has_photo:
             file_id = message.photo[-1].file_id  # Берем самое большое фото
+            logger.info(f"[TICKET COMMAND] Получено фото, file_id={file_id}")
         else:
             file_id = message.document.file_id
+            logger.info(f"[TICKET COMMAND] Получен документ, file_id={file_id}")
         
         user_ticket_state[user_id] = {
             'step': 'select_session',
             'file_id': file_id,
             'chat_id': chat_id
         }
+        logger.info(f"[TICKET COMMAND] Сохранено состояние для пользователя {user_id}: step=select_session, file_id={file_id}")
         
         # Показываем список сеансов в кино
         show_cinema_sessions(chat_id, user_id, file_id)
     else:
         # Нет файла - показываем список сеансов для выбора
+        logger.info(f"[TICKET COMMAND] Файл не найден, показываем список сеансов без file_id")
         show_cinema_sessions(chat_id, user_id, None)
 
 
 def show_cinema_sessions(chat_id, user_id, file_id=None):
     """Показывает список запланированных сеансов в кино"""
+    logger.info(f"[SHOW SESSIONS] Показываем сеансы для пользователя {user_id}, chat_id={chat_id}, file_id={file_id}")
     with db_lock:
         cursor.execute('''
             SELECT p.id, m.title, p.plan_datetime, 
@@ -4850,7 +4857,10 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
         ''', (chat_id,))
         sessions = cursor.fetchall()
     
+    logger.info(f"[SHOW SESSIONS] Найдено сеансов: {len(sessions) if sessions else 0}")
+    
     if not sessions:
+        logger.info(f"[SHOW SESSIONS] Нет сеансов, отправляем сообщение пользователю {user_id}")
         bot.send_message(chat_id, "❌ Нет запланированных сеансов в кино.")
         return
     
@@ -4889,12 +4899,15 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
             callback_data = f"ticket_session:{plan_id}"
             if file_id:
                 callback_data += f":{file_id}"
+            logger.info(f"[SHOW SESSIONS] Добавляем кнопку для plan_id={plan_id}, callback_data={callback_data}, ticket_count={ticket_count}")
             markup.add(InlineKeyboardButton(button_text, callback_data=callback_data))
     
     if file_id:
         markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data=f"ticket_new:{file_id}"))
+        logger.info(f"[SHOW SESSIONS] Добавлена кнопка 'Добавить новый сеанс' с file_id={file_id}")
     else:
         markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data="ticket_new"))
+        logger.info(f"[SHOW SESSIONS] Добавлена кнопка 'Добавить новый сеанс' без file_id")
     markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
     
     text = "🎟️ <b>Выберите сеанс:</b>\n\n"
@@ -4903,6 +4916,7 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
     else:
         text += "Выберите сеанс для просмотра билетов или добавления новых."
     
+    logger.info(f"[SHOW SESSIONS] Отправляем сообщение с выбором сеансов пользователю {user_id}, file_id={file_id}")
     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 
@@ -4915,19 +4929,26 @@ def handle_ticket_file(message):
     state = user_ticket_state.get(user_id, {})
     step = state.get('step')
     
+    logger.info(f"[TICKET FILE] Пользователь {user_id} отправил файл, step={step}, state={state}")
+    
     # Получаем file_id
     if message.photo:
         file_id = message.photo[-1].file_id  # Берем самое большое фото
+        logger.info(f"[TICKET FILE] Получено фото, file_id={file_id}")
     elif message.document:
         file_id = message.document.file_id
+        logger.info(f"[TICKET FILE] Получен документ, file_id={file_id}")
     else:
+        logger.warning(f"[TICKET FILE] Не удалось получить file_id из сообщения")
         bot.reply_to(message, "❌ Не удалось получить файл. Попробуйте еще раз.")
         return
     
     if step == 'waiting_ticket_file':
         # Добавляем билеты к существующему плану
         plan_id = state.get('plan_id')
+        logger.info(f"[TICKET FILE] Добавляем билеты к плану plan_id={plan_id}")
         if not plan_id:
+            logger.error(f"[TICKET FILE] Ошибка: plan_id не найден в состоянии")
             bot.reply_to(message, "❌ Ошибка: план не найден.")
             if user_id in user_ticket_state:
                 del user_ticket_state[user_id]
@@ -4941,6 +4962,7 @@ def handle_ticket_file(message):
             cursor.execute('INSERT INTO tickets (plan_id, chat_id, file_id) VALUES (%s, %s, %s)',
                          (plan_id, chat_id, file_id))
             conn.commit()
+        logger.info(f"[TICKET FILE] Билеты сохранены в БД для plan_id={plan_id}")
         
         # Обновляем состояние
         user_ticket_state[user_id] = {
@@ -4957,10 +4979,13 @@ def handle_ticket_file(message):
                     "✅ <b>Билеты успешно добавлены!</b>\n\n"
                     "Если нужно, укажите точное время сеанса:",
                     reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[TICKET FILE] Сообщение об успешном добавлении отправлено пользователю {user_id}")
     else:
         # Сохраняем file_id для последующей обработки
+        logger.info(f"[TICKET FILE] Сохраняем file_id в состояние, step={step}")
         user_ticket_state[user_id]['file_id'] = file_id
         bot.reply_to(message, "✅ Файл получен. Продолжайте выбор сеанса.")
+        logger.info(f"[TICKET FILE] file_id сохранен в состояние пользователя {user_id}")
 
 
 # ==================== ОБРАБОТКА ТЕКСТОВЫХ СООБЩЕНИЙ ДЛЯ РЕДАКТИРОВАНИЯ И БИЛЕТОВ ====================
@@ -6539,35 +6564,54 @@ def ticket_session_callback(call):
     chat_id = call.message.chat.id
     parts = call.data.split(":")
     plan_id = int(parts[1])
-    file_id = parts[2] if len(parts) > 2 else None
+    file_id_from_callback = parts[2] if len(parts) > 2 else None
+    
+    logger.info(f"[TICKET SESSION] Пользователь {user_id} выбрал сеанс plan_id={plan_id}, file_id из callback={file_id_from_callback}")
+    
+    # Проверяем, есть ли file_id в состоянии пользователя (если был отправлен файл с /ticket)
+    state = user_ticket_state.get(user_id, {})
+    file_id_from_state = state.get('file_id')
+    
+    # Используем file_id из callback, если есть, иначе из состояния
+    file_id = file_id_from_callback or file_id_from_state
+    
+    logger.info(f"[TICKET SESSION] file_id из состояния={file_id_from_state}, итоговый file_id={file_id}")
     
     # Проверяем, есть ли уже билеты для этого сеанса
     with db_lock:
         cursor.execute('SELECT file_id, file_path FROM tickets WHERE plan_id = %s', (plan_id,))
         ticket_row = cursor.fetchone()
     
+    logger.info(f"[TICKET SESSION] Билеты в БД: {ticket_row is not None}")
+    
     if ticket_row and not file_id:
         # Показываем существующие билеты
         existing_file_id = ticket_row[0] if isinstance(ticket_row, dict) else ticket_row[0]
+        logger.info(f"[TICKET SESSION] Отправляем существующие билеты, file_id={existing_file_id}")
         if existing_file_id:
             try:
                 bot.send_photo(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
                 bot.answer_callback_query(call.id, "Билеты отправлены")
+                logger.info(f"[TICKET SESSION] Билеты успешно отправлены как фото")
             except Exception as e:
+                logger.warning(f"[TICKET SESSION] Ошибка отправки фото, пробуем как документ: {e}")
                 # Если фото не найдено, пытаемся отправить как документ
                 try:
                     bot.send_document(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
                     bot.answer_callback_query(call.id, "Билеты отправлены")
+                    logger.info(f"[TICKET SESSION] Билеты успешно отправлены как документ")
                 except Exception as e2:
-                    logger.error(f"[TICKET] Ошибка отправки билетов: {e2}")
+                    logger.error(f"[TICKET SESSION] Ошибка отправки билетов: {e2}")
                     bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
                     bot.send_message(chat_id, "❌ Не удалось отправить билеты. Возможно, файл был удален.")
         else:
+            logger.warning(f"[TICKET SESSION] file_id в БД пустой")
             bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
         return
     
     if file_id:
         # Добавляем билеты к существующему сеансу
+        logger.info(f"[TICKET SESSION] Добавляем билеты к сеансу plan_id={plan_id}, file_id={file_id}")
         user_ticket_state[user_id] = {
             'step': 'add_ticket',
             'plan_id': plan_id,
@@ -6583,6 +6627,7 @@ def ticket_session_callback(call):
             cursor.execute('INSERT INTO tickets (plan_id, chat_id, file_id) VALUES (%s, %s, %s)',
                          (plan_id, chat_id, file_id))
             conn.commit()
+        logger.info(f"[TICKET SESSION] Билеты сохранены в БД для plan_id={plan_id}")
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("⏰ Указать время сеанса", callback_data=f"ticket_time:{plan_id}"))
@@ -6594,25 +6639,33 @@ def ticket_session_callback(call):
             chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
         )
         bot.answer_callback_query(call.id, "Билеты добавлены")
+        logger.info(f"[TICKET SESSION] Сообщение об успешном добавлении отправлено пользователю {user_id}")
     else:
         # Если file_id не передан, но билеты есть в БД, отправляем их
+        logger.info(f"[TICKET SESSION] file_id не найден, проверяем билеты в БД")
         if ticket_row:
             existing_file_id = ticket_row[0] if isinstance(ticket_row, dict) else ticket_row[0]
+            logger.info(f"[TICKET SESSION] Найдены билеты в БД, file_id={existing_file_id}")
             if existing_file_id:
                 try:
                     bot.send_photo(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
                     bot.answer_callback_query(call.id, "Билеты отправлены")
+                    logger.info(f"[TICKET SESSION] Билеты успешно отправлены как фото")
                 except Exception as e:
+                    logger.warning(f"[TICKET SESSION] Ошибка отправки фото, пробуем как документ: {e}")
                     try:
                         bot.send_document(chat_id, existing_file_id, caption="🎟️ Ваши билеты на этот сеанс")
                         bot.answer_callback_query(call.id, "Билеты отправлены")
+                        logger.info(f"[TICKET SESSION] Билеты успешно отправлены как документ")
                     except Exception as e2:
-                        logger.error(f"[TICKET] Ошибка отправки билетов: {e2}")
+                        logger.error(f"[TICKET SESSION] Ошибка отправки билетов: {e2}")
                         bot.answer_callback_query(call.id, "Ошибка отправки билетов", show_alert=True)
             else:
+                logger.warning(f"[TICKET SESSION] file_id в БД пустой")
                 bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
         else:
-            bot.answer_callback_query(call.id, "Нет файла для добавления")
+            logger.warning(f"[TICKET SESSION] Нет билетов в БД и нет file_id для добавления. Состояние пользователя: {state}")
+            bot.answer_callback_query(call.id, "Нет файла для добавления", show_alert=True)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
