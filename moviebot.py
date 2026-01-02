@@ -7278,14 +7278,24 @@ def premiere_add_to_db(call):
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         chat_id = call.message.chat.id
         
+        # Проверяем, есть ли фильм уже в базе
+        with db_lock:
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            existing = cursor.fetchone()
+        
+        if existing:
+            # Фильм уже есть - просто показываем маленькое уведомление
+            bot.answer_callback_query(call.id, "ℹ️ Фильм уже есть в базе")
+            return
+        
         # Добавляем в базу через существующую функцию
         if add_and_announce(link, chat_id):
             bot.answer_callback_query(call.id, "✅ Фильм добавлен в базу!")
         else:
-            bot.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Не удалось добавить фильм")
     except Exception as e:
         logger.error(f"[PREMIERE ADD] Ошибка: {e}", exc_info=True)
-        bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка обработки")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_remind:"))
 def premiere_remind_handler(call):
@@ -9133,6 +9143,9 @@ def random_start(message):
             
             if user_ratings >= 100:
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+            else:
+                # Заблокированная кнопка
+                markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
             
             # Проверяем условие для group_votes: больше 20 групповых оценок, где хотя бы 20 фильмов оценили все участники группы
             # Сначала получаем общее количество уникальных пользователей в группе (исключаем импортированные оценки)
@@ -9140,6 +9153,7 @@ def random_start(message):
             total_users_row = cursor.fetchone()
             total_users = total_users_row.get('count') if isinstance(total_users_row, dict) else (total_users_row[0] if total_users_row else 0)
             
+            group_votes_available = False
             if total_users > 0:
                 # Находим фильмы, которые оценили все участники группы (исключаем импортированные оценки)
                 cursor.execute('''
@@ -9168,6 +9182,11 @@ def random_start(message):
                 
                 if group_rated_count >= 20 and total_group_ratings > 20:
                     markup.add(InlineKeyboardButton("👥 По оценкам группы (8+)", callback_data="rand_mode:group_votes"))
+                    group_votes_available = True
+            
+            # Если режим group_votes недоступен, добавляем заблокированную кнопку
+            if not group_votes_available:
+                markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
         
         bot.send_message(chat_id, "🎲 <b>Выберите режим рандомайзера:</b>", reply_markup=markup, parse_mode='HTML')
         logger.info(f"[RANDOM] Step 0 sent: mode selection, user_id={user_id}")
@@ -9175,6 +9194,25 @@ def random_start(message):
         logger.error(f"[RANDOM] ERROR in random_start: {e}", exc_info=True)
         try:
             bot.reply_to(message, "❌ Ошибка при запуске рандомайзера. Попробуйте позже.")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
+def random_mode_locked_handler(call):
+    """Обработчик заблокированных режимов рандомайзера"""
+    try:
+        mode = call.data.split(":")[1]
+        
+        if mode == 'my_votes':
+            bot.answer_callback_query(call.id, "🔒 Этот режим откроется при наличии 50 оценок с Кинопоиска", show_alert=False)
+        elif mode == 'group_votes':
+            bot.answer_callback_query(call.id, "🔒 Этот режим откроется при наличии 20 групповых оценок", show_alert=False)
+        else:
+            bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=False)
+    except Exception as e:
+        logger.error(f"[RANDOM LOCKED] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=False)
         except:
             pass
 
