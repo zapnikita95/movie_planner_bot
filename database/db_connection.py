@@ -309,3 +309,4 @@ def init_database():
     conn.commit()
     logger.info("База данных инициализирована")
 
+
