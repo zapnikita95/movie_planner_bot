@@ -3216,6 +3216,11 @@ def add_reactions_check(message):
 
 @bot.message_handler(func=add_reactions_check, priority=10)  # Высокий приоритет
 def add_reactions(message):
+    # Пропускаем команды - они обрабатываются отдельными обработчиками
+    if message.text and message.text.startswith('/'):
+        logger.info(f"[SETTINGS] add_reactions пропущена команда: {message.text[:50]}")
+        return
+    
     user_id = message.from_user.id
     chat_id = message.chat.id
     
