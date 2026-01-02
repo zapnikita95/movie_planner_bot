@@ -130,9 +130,19 @@ def init_database():
             user_id BIGINT,
             rating INTEGER CHECK(rating BETWEEN 1 AND 10),
             is_imported BOOLEAN DEFAULT FALSE,
+            kp_id TEXT,
             UNIQUE(chat_id, film_id, user_id)
         )
     ''')
+    
+    # Миграция: добавление поля kp_id в ratings для импортированных оценок
+    try:
+        cursor.execute('ALTER TABLE ratings ADD COLUMN IF NOT EXISTS kp_id TEXT')
+        conn.commit()
+        logger.info("Миграция: поле kp_id добавлено в ratings")
+    except Exception as e:
+        logger.debug(f"Поле kp_id уже существует или ошибка: {e}")
+        conn.rollback()
     
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS watched_movies (
