@@ -8152,18 +8152,39 @@ def random_start(message):
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
             
             # Проверяем условие для group_votes: больше 20 групповых оценок, где хотя бы 20 фильмов оценили все участники группы
-            cursor.execute('''
-                SELECT COUNT(DISTINCT film_id) 
-                FROM ratings 
-                WHERE chat_id = %s 
-                GROUP BY film_id 
-                HAVING COUNT(DISTINCT user_id) >= (SELECT COUNT(DISTINCT user_id) FROM ratings WHERE chat_id = %s)
-            ''', (chat_id, chat_id))
-            group_rated_films = cursor.fetchall()
-            group_rated_count = len(group_rated_films)
+            # Сначала получаем общее количество уникальных пользователей в группе
+            cursor.execute('SELECT COUNT(DISTINCT user_id) FROM ratings WHERE chat_id = %s', (chat_id,))
+            total_users_row = cursor.fetchone()
+            total_users = total_users_row.get('count') if isinstance(total_users_row, dict) else (total_users_row[0] if total_users_row else 0)
             
-            if group_rated_count >= 20:
-                markup.add(InlineKeyboardButton("👥 По оценкам группы (8+)", callback_data="rand_mode:group_votes"))
+            if total_users > 0:
+                # Находим фильмы, которые оценили все участники группы
+                cursor.execute('''
+                    SELECT film_id, COUNT(DISTINCT user_id) as user_count
+                    FROM ratings 
+                    WHERE chat_id = %s 
+                    GROUP BY film_id 
+                    HAVING COUNT(DISTINCT user_id) = %s
+                ''', (chat_id, total_users))
+                group_rated_films = cursor.fetchall()
+                group_rated_count = len(group_rated_films)
+                
+                # Также проверяем, что общее количество групповых оценок больше 20
+                cursor.execute('''
+                    SELECT COUNT(*) 
+                    FROM (
+                        SELECT film_id 
+                        FROM ratings 
+                        WHERE chat_id = %s 
+                        GROUP BY film_id 
+                        HAVING COUNT(DISTINCT user_id) > 1
+                    ) as group_rated
+                ''', (chat_id,))
+                total_group_ratings_row = cursor.fetchone()
+                total_group_ratings = total_group_ratings_row.get('count') if isinstance(total_group_ratings_row, dict) else (total_group_ratings_row[0] if total_group_ratings_row else 0)
+                
+                if group_rated_count >= 20 and total_group_ratings > 20:
+                    markup.add(InlineKeyboardButton("👥 По оценкам группы (8+)", callback_data="rand_mode:group_votes"))
         
         bot.send_message(chat_id, "🎲 <b>Выберите режим рандомайзера:</b>", reply_markup=markup, parse_mode='HTML')
         logger.info(f"[RANDOM] Step 0 sent: mode selection, user_id={user_id}")
