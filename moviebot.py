@@ -85,11 +85,9 @@ user_settings_state = {}  # user_id: {'waiting_emoji': bool}
 settings_messages = {}  # message_id: {'user_id': int, 'action': str, 'chat_id': int} - для отслеживания сообщений settings
 user_import_state = {}  # user_id: {'step': str, 'kp_user_id': str, 'count': int} - для импорта базы из Кинопоиска
 # Состояния очистки
-user_clean_state = {}  # user_id: {'action': str, 'target': str}
 clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
-# Состояния очистки
+clean_unwatched_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
 user_clean_state = {}  # user_id: {'action': str, 'target': str}
-clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
 # Состояния редактирования
 user_edit_state = {}  # user_id: {'action': str, 'plan_id': int, 'step': str, ...}
 # Состояния работы с билетами
@@ -2683,6 +2681,71 @@ def handle_reaction(reaction):
                         f"Проголосовало: {voted_count}/{total_count}\n\n"
                         f"Для подтверждения все участники должны поставить 👍 (лайк) на это сообщение.\n\n"
                         f"Если не все проголосуют, база не будет удалена.",
+                        chat_id, message_id, parse_mode='HTML')
+                except:
+                    pass
+        return
+    
+    # Проверяем, не это ли голосование по удалению непросмотренных фильмов
+    if message_id in clean_unwatched_votes:
+        vote_data = clean_unwatched_votes[message_id]
+        is_like = False
+        user_id = reaction.user.id if reaction.user else None
+        if reaction.new_reaction:
+            for r in reaction.new_reaction:
+                if hasattr(r, 'type'):
+                    if r.type == 'emoji' and hasattr(r, 'emoji') and r.emoji == '👍':
+                        is_like = True
+                        break
+                elif hasattr(r, 'emoji') and r.emoji == '👍':
+                    is_like = True
+                    break
+        
+        if is_like and user_id:
+            vote_data['voted'].add(user_id)
+            
+            # Проверяем, все ли проголосовали
+            if len(vote_data['voted']) >= vote_data['members_count']:
+                # Все проголосовали - удаляем непросмотренные фильмы
+                chat_id = vote_data['chat_id']
+                with db_lock:
+                    # Удаляем фильмы, которые:
+                    # - Не находятся в расписании (нет в plans)
+                    # - У которых нет билетов (нет связанных plans с ticket_file_id)
+                    # - Которые не участвуют ни в каких активностях (нет оценок, нет просмотров)
+                    cursor.execute('''
+                        DELETE FROM movies
+                        WHERE chat_id = %s
+                        AND watched = 0
+                        AND id NOT IN (SELECT DISTINCT film_id FROM plans WHERE chat_id = %s)
+                        AND id NOT IN (
+                            SELECT DISTINCT m.id
+                            FROM movies m
+                            JOIN plans p ON m.id = p.film_id AND m.chat_id = p.chat_id
+                            WHERE p.chat_id = %s AND p.ticket_file_id IS NOT NULL
+                        )
+                        AND id NOT IN (SELECT DISTINCT film_id FROM ratings WHERE chat_id = %s)
+                        AND id NOT IN (SELECT DISTINCT film_id FROM watched_movies WHERE chat_id = %s)
+                    ''', (chat_id, chat_id, chat_id, chat_id, chat_id))
+                    deleted_count = cursor.rowcount
+                    conn.commit()
+                
+                bot.send_message(chat_id, f"✅ Все участники проголосовали. Удалено непросмотренных фильмов: {deleted_count}.")
+                logger.info(f"Удалено {deleted_count} непросмотренных фильмов в чате {chat_id} после голосования всех участников")
+                
+                # Удаляем из clean_unwatched_votes
+                del clean_unwatched_votes[message_id]
+            else:
+                # Обновляем сообщение с прогрессом
+                voted_count = len(vote_data['voted'])
+                total_count = vote_data['members_count']
+                try:
+                    bot.edit_message_text(
+                        f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено удаление всех непросмотренных фильмов.\n\n"
+                        f"Участников в чате: {total_count}\n"
+                        f"Проголосовало: {voted_count}/{total_count}\n\n"
+                        f"Для подтверждения все участники должны поставить 👍 (лайк) на это сообщение.\n\n"
+                        f"Если не все проголосуют, фильмы не будут удалены.",
                         chat_id, message_id, parse_mode='HTML')
                 except:
                     pass
@@ -7428,9 +7491,10 @@ def show_schedule(message):
         
         with db_lock:
             cursor.execute('''
-                SELECT m.title, p.plan_datetime, p.plan_type
+                SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket
                 FROM plans p
-                JOIN movies m ON p.film_id = m.id AND m.chat_id = p.chat_id
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.chat_id = %s
                 ORDER BY p.plan_type DESC, p.plan_datetime ASC
             ''', (chat_id,))
@@ -7445,22 +7509,31 @@ def show_schedule(message):
         home_plans = []
         
         for row in rows:
-            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
-            title = row.get('title') if isinstance(row, dict) else row[0]
-            plan_dt_value = row.get('plan_datetime') if isinstance(row, dict) else row[1]
-            plan_type = row.get('plan_type') if isinstance(row, dict) else row[2]
+            if isinstance(row, dict):
+                plan_id = row.get('id')
+                title = row.get('title')
+                kp_id = row.get('kp_id')
+                link = row.get('link')
+                plan_dt_value = row.get('plan_datetime')
+                plan_type = row.get('plan_type')
+                has_ticket = row.get('has_ticket', 0)
+            else:
+                plan_id = row[0]
+                title = row[1]
+                kp_id = row[2]
+                link = row[3]
+                plan_dt_value = row[4]
+                plan_type = row[5]
+                has_ticket = row[6] if len(row) > 6 else 0
+            
             # Преобразуем TIMESTAMP в дату в часовом поясе пользователя
             try:
-                # psycopg2 возвращает объект datetime для TIMESTAMP WITH TIME ZONE
                 if isinstance(plan_dt_value, datetime):
-                    # Если уже объект datetime, конвертируем в нужную таймзону
                     if plan_dt_value.tzinfo is None:
-                        # Если нет таймзоны, предполагаем UTC
                         plan_dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
                     else:
                         plan_dt = plan_dt_value.astimezone(user_tz)
                 elif isinstance(plan_dt_value, str):
-                    # Fallback для старых данных (если миграция еще не применена)
                     plan_dt_iso = plan_dt_value
                     if plan_dt_iso.endswith('Z'):
                         plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(user_tz)
@@ -7469,12 +7542,11 @@ def show_schedule(message):
                     else:
                         plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(user_tz)
                 else:
-                    # Неожиданный тип
                     logger.warning(f"Неожиданный тип plan_datetime: {type(plan_dt_value)}")
                     continue
                 
-                date_str = plan_dt.strftime('%d.%m.%Y %H:%M')
-                plan_info = (title, date_str)
+                date_str = plan_dt.strftime('%d.%m %H:%M')
+                plan_info = (plan_id, title, kp_id, link, date_str, has_ticket)
                 
                 if plan_type == 'cinema':
                     cinema_plans.append(plan_info)
@@ -7482,37 +7554,55 @@ def show_schedule(message):
                     home_plans.append(plan_info)
             except Exception as e:
                 logger.error(f"Ошибка при обработке даты {plan_dt_value}: {e}")
-                # Fallback: пытаемся извлечь дату из строки или использовать текущую дату
                 if isinstance(plan_dt_value, str):
                     date_str = plan_dt_value[:10] if len(plan_dt_value) >= 10 else plan_dt_value
                 else:
-                    date_str = datetime.now(user_tz).strftime('%d.%m.%Y')
-                plan_info = (title, date_str)
+                    date_str = datetime.now(user_tz).strftime('%d.%m')
+                plan_info = (plan_id, title, kp_id, link, date_str, has_ticket)
                 
                 if plan_type == 'cinema':
                     cinema_plans.append(plan_info)
                 else:  # home
                     home_plans.append(plan_info)
         
-        # Формируем текст с секциями
-        text = "📅 Запланированные просмотры:\n\n"
+        # Формируем сообщение с кнопками
+        markup = InlineKeyboardMarkup(row_width=1)
         
         # Секция: Премьеры в кино
         if cinema_plans:
-            text += "🎦 Премьеры в кино:\n"
-            for title, date_str in cinema_plans:
-                text += f"• <b>{title}</b> — {date_str}\n"
-            text += "\n"
+            for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
+                ticket_emoji = "🎟️ " if has_ticket else ""
+                button_text = f"{ticket_emoji}{title} | {date_str}"
+                
+                if len(button_text) > 30:
+                    short_title = title[:20] + "..."
+                    button_text = f"{ticket_emoji}{short_title} | {date_str}"
+                    if len(button_text) > 30:
+                        button_text = button_text[:27] + "..."
+                
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"schedule_film:{plan_id}"))
         
         # Секция: Просмотры дома
         if home_plans:
-            text += "🏠 Просмотры дома:\n"
-            for title, date_str in home_plans:
-                text += f"• <b>{title}</b> — {date_str}\n"
-            text += "\n"
+            for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
+                button_text = f"{title} | {date_str}"
+                
+                if len(button_text) > 30:
+                    short_title = title[:20] + "..."
+                    button_text = f"{short_title} | {date_str}"
+                    if len(button_text) > 30:
+                        button_text = button_text[:27] + "..."
+                
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"schedule_film:{plan_id}"))
         
-        text += "Приятного просмотра! 🍿"
-        bot.reply_to(message, text, parse_mode='HTML')
+        text = "📅 <b>Запланированные просмотры:</b>\n\n"
+        if cinema_plans:
+            text += "🎦 Премьеры в кино:\n"
+        if home_plans:
+            text += "🏠 Просмотры дома:\n"
+        text += "\nВыберите фильм для просмотра информации"
+        
+        bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
         
         # Отдельным сообщением показываем раздел "Ожидаю" (фильмы, которые выйдут через 2+ месяца)
         now = datetime.now(user_tz).date()
@@ -8527,6 +8617,7 @@ def clean_command(message):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
     markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
+    markup.add(InlineKeyboardButton("🗑️ Удалить все непросмотренные фильмы", callback_data="clean:unwatched_movies"))
     
     help_text = (
         "🧹 <b>Массовое удаление данных</b>\n\n"
@@ -8542,6 +8633,10 @@ def clean_command(message):
         "• Ваши билеты\n"
         "• Ваша статистика\n"
         "• Ваши настройки (включая часовой пояс)\n\n"
+        "<b>🗑️ Удалить все непросмотренные фильмы</b> — удаляет фильмы, которые:\n"
+        "• Не находятся в расписании\n"
+        "• У которых нет билетов\n"
+        "• Которые не участвуют ни в каких активностях\n\n"
         "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
         "Выберите действие:"
     )
@@ -8700,6 +8795,90 @@ def clean_action_choice(call):
         )
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'user'
+    
+    elif action == 'unwatched_movies':
+        # Удаление непросмотренных фильмов - требует голосования в группах
+        if call.message.chat.type in ['group', 'supergroup']:
+            try:
+                # Получаем количество участников и активных участников (та же логика, что и для chat_db)
+                try:
+                    chat_member_count = bot.get_chat_member_count(chat_id)
+                    logger.info(f"[CLEAN UNWATCHED] Количество участников чата через API: {chat_member_count}")
+                except Exception as api_error:
+                    logger.warning(f"[CLEAN UNWATCHED] Не удалось получить количество участников через API: {api_error}")
+                    chat_member_count = None
+                
+                # Получаем список активных участников из stats (за последние 30 дней)
+                with db_lock:
+                    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+                    cursor.execute('''
+                        SELECT DISTINCT user_id
+                        FROM stats
+                        WHERE chat_id = %s AND timestamp > %s
+                    ''', (chat_id, thirty_days_ago))
+                    rows = cursor.fetchall()
+                    active_members_from_stats = set()
+                    for row in rows:
+                        user_id_val = row.get('user_id') if isinstance(row, dict) else row[0]
+                        active_members_from_stats.add(user_id_val)
+                
+                # Исключаем бота
+                if BOT_ID and BOT_ID in active_members_from_stats:
+                    active_members_from_stats.discard(BOT_ID)
+                
+                # Определяем количество участников для голосования
+                if chat_member_count:
+                    if chat_member_count > 0:
+                        chat_member_count = max(1, chat_member_count - 1)
+                    if chat_member_count > len(active_members_from_stats):
+                        active_members_count = chat_member_count
+                        active_members = active_members_from_stats
+                    else:
+                        active_members_count = max(len(active_members_from_stats), 2)
+                        active_members = active_members_from_stats
+                else:
+                    active_members_count = max(len(active_members_from_stats), 2)
+                    active_members = active_members_from_stats
+                
+                if active_members_count < 2:
+                    error_msg = (
+                        f"⚠️ Не найдено активных участников чата за последние 30 дней.\n\n"
+                        f"Используйте /dbcheck для подробной диагностики БД"
+                    )
+                    bot.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
+                    return
+                
+                msg = bot.send_message(chat_id, 
+                    f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено удаление всех непросмотренных фильмов.\n\n"
+                    f"Участников в чате: {active_members_count}\n"
+                    f"Для подтверждения все участники должны поставить 👍 (лайк) на это сообщение.\n\n"
+                    f"Если не все проголосуют, фильмы не будут удалены.",
+                    parse_mode='HTML')
+                
+                clean_unwatched_votes[msg.message_id] = {
+                    'chat_id': chat_id,
+                    'members_count': active_members_count,
+                    'voted': set(),
+                    'active_members': active_members
+                }
+                
+                bot.edit_message_text("✅ Запрос на удаление непросмотренных фильмов отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
+            except Exception as e:
+                logger.error(f"Ошибка при инициировании голосования: {e}", exc_info=True)
+                bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
+        else:
+            # В личном чате можно сразу удалить
+            bot.edit_message_text(
+                "⚠️ <b>Удаление непросмотренных фильмов</b>\n\n"
+                "Это удалит все фильмы, которые:\n"
+                "• Не находятся в расписании\n"
+                "• У которых нет билетов\n"
+                "• Которые не участвуют ни в каких активностях\n\n"
+                "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+                call.message.chat.id, call.message.message_id, parse_mode='HTML'
+            )
+            user_clean_state[user_id]['confirm_needed'] = True
+            user_clean_state[user_id]['target'] = 'unwatched_movies'
     
     elif action == 'cancel':
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
@@ -8894,6 +9073,38 @@ def clean_confirm_execute(message):
                     conn.rollback()
                     logger.error(f"Ошибка при удалении данных пользователя: {e}", exc_info=True)
                     bot.reply_to(message, "❌ Произошла ошибка при удалении данных. Попробуйте позже.")
+                    raise
+        
+        elif state.get('target') == 'unwatched_movies':
+            # Удаляем непросмотренные фильмы
+            with db_lock:
+                try:
+                    # Удаляем фильмы, которые:
+                    # - Не находятся в расписании (нет в plans)
+                    # - У которых нет билетов (нет связанных plans с ticket_file_id)
+                    # - Которые не участвуют ни в каких активностях (нет оценок, нет просмотров)
+                    cursor.execute('''
+                        DELETE FROM movies
+                        WHERE chat_id = %s
+                        AND watched = 0
+                        AND id NOT IN (SELECT DISTINCT film_id FROM plans WHERE chat_id = %s)
+                        AND id NOT IN (
+                            SELECT DISTINCT m.id
+                            FROM movies m
+                            JOIN plans p ON m.id = p.film_id AND m.chat_id = p.chat_id
+                            WHERE p.chat_id = %s AND p.ticket_file_id IS NOT NULL
+                        )
+                        AND id NOT IN (SELECT DISTINCT film_id FROM ratings WHERE chat_id = %s)
+                        AND id NOT IN (SELECT DISTINCT film_id FROM watched_movies WHERE chat_id = %s)
+                    ''', (chat_id, chat_id, chat_id, chat_id, chat_id))
+                    deleted_count = cursor.rowcount
+                    conn.commit()
+                    bot.reply_to(message, f"✅ Удалено непросмотренных фильмов: {deleted_count}.\n\nУдалены фильмы, которые не находятся в расписании, у которых нет билетов и которые не участвуют ни в каких активностях.")
+                    logger.info(f"Удалено {deleted_count} непросмотренных фильмов в чате {chat_id} пользователем {user_id}")
+                except Exception as e:
+                    conn.rollback()
+                    logger.error(f"Ошибка при удалении непросмотренных фильмов: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Произошла ошибка при удалении фильмов. Попробуйте позже.")
                     raise
     except Exception as e:
         logger.error(f"Критическая ошибка в clean_confirm_execute: {e}", exc_info=True)
@@ -11463,6 +11674,7 @@ def handle_show_facts(call):
     try:
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id
+        user_id = call.from_user.id
         
         # Получаем факты
         facts = get_facts(kp_id)
@@ -12125,6 +12337,172 @@ def edit_plan_ticket_callback(call):
     )
     bot.answer_callback_query(call.id)
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("schedule_film:"))
+def schedule_film_callback(call):
+    """Обработчик нажатия на фильм в расписании"""
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[SCHEDULE FILM] Пользователь {user_id} выбрал фильм plan_id={plan_id}")
+        
+        # Получаем информацию о фильме и плане
+        with db_lock:
+            cursor.execute('''
+                SELECT m.id, m.title, m.kp_id, m.link, m.year, m.genres, m.director, m.actors, m.description,
+                       p.plan_type, p.ticket_file_id
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            row = cursor.fetchone()
+            
+            if not row:
+                bot.answer_callback_query(call.id, "Фильм не найден", show_alert=True)
+                return
+            
+            if isinstance(row, dict):
+                film_id = row.get('id')
+                title = row.get('title')
+                kp_id = row.get('kp_id')
+                link = row.get('link')
+                year = row.get('year')
+                genres = row.get('genres')
+                director = row.get('director')
+                actors = row.get('actors')
+                description = row.get('description')
+                plan_type = row.get('plan_type')
+                ticket_file_id = row.get('ticket_file_id')
+            else:
+                film_id = row[0]
+                title = row[1]
+                kp_id = row[2]
+                link = row[3]
+                year = row[4]
+                genres = row[5]
+                director = row[6]
+                actors = row[7]
+                description = row[8]
+                plan_type = row[9]
+                ticket_file_id = row[10] if len(row) > 10 else None
+        
+        # Формируем описание фильма
+        text = f"🎬 <b>{title}</b> ({year or '—'})\n\n"
+        if genres and genres != '—':
+            text += f"📂 <b>Жанры:</b> {genres}\n"
+        if director and director != '—':
+            text += f"🎥 <b>Режиссёр:</b> {director}\n"
+        if actors and actors != '—':
+            text += f"👥 <b>Актёры:</b> {actors}\n"
+        if description:
+            if len(description) > 500:
+                description = description[:497] + "..."
+            text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
+        text += f"<a href='{link}'>Кинопоиск</a>"
+        
+        # Создаем кнопки
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Для фильмов в кино - кнопка билетов
+        if plan_type == 'cinema':
+            if ticket_file_id:
+                markup.add(InlineKeyboardButton("🎟️ Открыть билеты", callback_data=f"open_ticket:{plan_id}"))
+            else:
+                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket_to_plan:{plan_id}"))
+        
+        # Кнопки "Интересные факты" и "Оценить" (50/50)
+        if kp_id:
+            markup.row(
+                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+            )
+        
+        # Отправляем описание
+        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+        
+        # Сохраняем ссылку для обработки реакций и реплаев
+        if link:
+            bot_messages[msg.message_id] = link
+            logger.info(f"[SCHEDULE FILM] Сохранена ссылка для message_id={msg.message_id}, link={link}")
+        
+        bot.answer_callback_query(call.id, "Описание показано")
+        logger.info(f"[SCHEDULE FILM] Описание фильма {title} показано пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"[SCHEDULE FILM] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("open_ticket:"))
+def open_ticket_callback(call):
+    """Обработчик открытия билетов"""
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        
+        with db_lock:
+            cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+            row = cursor.fetchone()
+            
+            if not row:
+                bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
+                return
+            
+            ticket_file_id = row.get('ticket_file_id') if isinstance(row, dict) else row[0]
+            
+            if not ticket_file_id:
+                bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
+                return
+        
+        # Отправляем билет
+        try:
+            bot.send_photo(chat_id, ticket_file_id)
+            bot.answer_callback_query(call.id, "Билеты отправлены")
+        except:
+            try:
+                bot.send_document(chat_id, ticket_file_id)
+                bot.answer_callback_query(call.id, "Билеты отправлены")
+            except Exception as e:
+                logger.error(f"[OPEN TICKET] Ошибка отправки билета: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка отправки билета", show_alert=True)
+    except Exception as e:
+        logger.error(f"[OPEN TICKET] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket_to_plan:"))
+def add_ticket_to_plan_callback(call):
+    """Обработчик добавления билетов к плану"""
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        user_ticket_state[user_id] = {
+            'step': 'waiting_ticket_file',
+            'plan_id': plan_id,
+            'chat_id': chat_id
+        }
+        
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+        
+        bot.edit_message_text(
+            "🎟️ <b>Пришлите билеты скриншотом или вложением</b>\n\n"
+            "Отправьте фото или файл с билетами в следующем сообщении.",
+            chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+        )
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.error(f"[ADD TICKET TO PLAN] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan_switch:"))
 def edit_plan_switch_callback(call):
