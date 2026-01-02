@@ -302,6 +302,14 @@ except Exception as e:
 # Миграция: изменяем тип plan_datetime с TEXT на TIMESTAMP WITH TIME ZONE
 try:
     cursor.execute("ALTER TABLE plans ALTER COLUMN plan_datetime TYPE TIMESTAMP WITH TIME ZONE USING plan_datetime::TIMESTAMP WITH TIME ZONE")
+    logger.info("Миграция: plan_datetime в plans изменён на TIMESTAMP WITH TIME ZONE")
+    conn.commit()
+except Exception as e:
+    logger.debug(f"Миграция plan_datetime: {e}")
+    try:
+        conn.rollback()
+    except:
+        pass
 
 # Добавляем поле ticket_file_id в таблицу plans, если его нет
 try:
@@ -311,10 +319,6 @@ try:
 except Exception as e:
     logger.warning(f"Ошибка при добавлении поля ticket_file_id: {e}")
     conn.rollback()
-    logger.info("Миграция: plan_datetime в plans изменён на TIMESTAMP WITH TIME ZONE")
-    conn.commit()
-except Exception as e:
-    logger.debug(f"Миграция plan_datetime: {e}")
     try:
         conn.rollback()
     except:
