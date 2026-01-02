@@ -1716,6 +1716,17 @@ def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
     logger.info(f"[SAVE MOVIE] save_movie_message вызван для пользователя {message.from_user.id}, текст: '{message.text[:100]}'")
     
+    # Сохраняем ссылку в bot_messages для обработки реакций, даже если пропускаем обработку
+    links = []
+    try:
+        links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
+        if links:
+            # Сохраняем первую ссылку для обработки реакций
+            bot_messages[message.message_id] = links[0]
+            logger.info(f"[SAVE MOVIE] Ссылка сохранена в bot_messages для message_id={message.message_id}: {links[0]}")
+    except Exception as e:
+        logger.warning(f"[SAVE MOVIE] Ошибка при сохранении ссылки в bot_messages: {e}")
+    
     # Пропускаем, если пользователь работает с билетами или планированием
     if message.from_user.id in user_ticket_state:
         state = user_ticket_state.get(message.from_user.id, {})
@@ -1728,8 +1739,7 @@ def save_movie_message(message):
         return
     
     try:
-        # Ищем все ссылки на Кинопоиск в сообщении
-        links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
+        # Ищем все ссылки на Кинопоиск в сообщении (уже найдены выше)
         if links:
             chat_id = message.chat.id
             username = message.from_user.username or f"user_{message.from_user.id}"
@@ -1738,9 +1748,6 @@ def save_movie_message(message):
             
             added_count = 0
             for link in links:
-                # Сохраняем первую ссылку для обработки реакций (если нужно)
-                if added_count == 0:
-                    bot_messages[message.message_id] = link
                 
                 # Добавляем фильм в базу и отправляем карточку
                 if add_and_announce(link, chat_id):
