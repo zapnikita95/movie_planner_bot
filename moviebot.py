@@ -1566,7 +1566,7 @@ def handle_reaction(reaction):
         
         # Если не найдено, пытаемся найти в БД по message_id или другим способом
         if not link:
-                logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
+            logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
             # Пробуем найти фильм в БД по последним добавленным фильмам в этом чате
             # Это не идеально, но лучше чем пересылать сообщение
             try:
