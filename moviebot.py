@@ -11450,7 +11450,8 @@ if IS_PRODUCTION:
         allowed_updates = [
             "message", "edited_message", "callback_query",
             "message_reaction", "message_reaction_count",
-            "chat_member", "my_chat_member"
+            "chat_member", "my_chat_member",
+            "web_app_data"  # Ключевое для работы Web App!
         ]
         try:
             bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
