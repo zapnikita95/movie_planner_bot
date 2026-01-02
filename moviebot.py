@@ -2895,6 +2895,11 @@ def add_and_announce(link, chat_id):
         else:
             text += f"\n⏳ <b>Ещё не просмотрено</b>\n"
         
+        # Если есть импортированные оценки, объясняем, почему фильм не показывается в /list
+        if duplicate_data.get('has_imported'):
+            text += f"\n⚠️ <b>Фильм имеет импортированные оценки и не отображается в /list</b>\n"
+            text += f"Используйте /edit для удаления фильма из базы, если хотите добавить его заново.\n"
+        
         text += f"\n<a href='{duplicate_data['link']}'>Кинопоиск</a>"
         
         try:
