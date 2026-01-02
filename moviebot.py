@@ -2282,40 +2282,100 @@ def handle_web_app_data(message):
                     bot.reply_to(message, "❌ Ошибка при запуске рандомайзера. Попробуйте позже.")
             elif command == 'premieres':
                 logger.info("[WEB APP] → Вызов premieres_command")
-                premieres_command(command_message)
+                try:
+                    premieres_command(message)
+                    logger.info("[WEB APP] ✅ premieres_command вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в premieres_command: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'list':
                 logger.info("[WEB APP] → Вызов list_movies")
-                list_movies(command_message)
+                try:
+                    list_movies(message)
+                    logger.info("[WEB APP] ✅ list_movies вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в list_movies: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'schedule':
                 logger.info("[WEB APP] → Вызов show_schedule")
-                show_schedule(command_message)
+                try:
+                    show_schedule(message)
+                    logger.info("[WEB APP] ✅ show_schedule вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в show_schedule: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'plan':
                 logger.info("[WEB APP] → Вызов plan_handler")
-                plan_handler(command_message)
+                try:
+                    plan_handler(message)
+                    logger.info("[WEB APP] ✅ plan_handler вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в plan_handler: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'ticket':
                 logger.info("[WEB APP] → Вызов ticket_command")
-                ticket_command(command_message)
+                try:
+                    ticket_command(message)
+                    logger.info("[WEB APP] ✅ ticket_command вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в ticket_command: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'seasons':
                 logger.info("[WEB APP] → Вызов seasons_command")
-                seasons_command(command_message)
+                try:
+                    seasons_command(message)
+                    logger.info("[WEB APP] ✅ seasons_command вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в seasons_command: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'total':
                 logger.info("[WEB APP] → Вызов total_stats")
-                total_stats(command_message)
+                try:
+                    total_stats(message)
+                    logger.info("[WEB APP] ✅ total_stats вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в total_stats: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'stats':
                 logger.info("[WEB APP] → Вызов stats_command")
-                stats_command(command_message)
+                try:
+                    stats_command(message)
+                    logger.info("[WEB APP] ✅ stats_command вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в stats_command: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'rate':
                 logger.info("[WEB APP] → Вызов rate_command")
-                rate_command(command_message)
+                try:
+                    rate_command(message)
+                    logger.info("[WEB APP] ✅ rate_command вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в rate_command: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'settings':
                 logger.info("[WEB APP] → Вызов settings_command")
-                settings_command(command_message)
+                try:
+                    settings_command(message)
+                    logger.info("[WEB APP] ✅ settings_command вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в settings_command: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'help':
                 logger.info("[WEB APP] → Вызов help_command")
-                help_command(command_message)
+                try:
+                    help_command(message)
+                    logger.info("[WEB APP] ✅ help_command вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в help_command: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             elif command == 'start':
                 logger.info("[WEB APP] → Вызов send_welcome")
-                send_welcome(command_message)
+                try:
+                    send_welcome(message)
+                    logger.info("[WEB APP] ✅ send_welcome вызван успешно")
+                except Exception as e:
+                    logger.error(f"[WEB APP] ❌ Ошибка в send_welcome: {e}", exc_info=True)
+                    bot.reply_to(message, "❌ Ошибка при выполнении команды. Попробуйте позже.")
             else:
                 logger.warning(f"[WEB APP] ⚠️ Неизвестная команда: {command}")
                 try:
