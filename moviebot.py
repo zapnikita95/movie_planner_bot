@@ -2191,70 +2191,139 @@ def add_and_announce(link, chat_id):
 @bot.message_handler(content_types=['web_app_data'])
 def handle_web_app_data(message):
     """Обработчик данных из Web App"""
+    logger.info("=" * 80)
+    logger.info("[WEB APP] ===== НАЧАЛО ОБРАБОТКИ WEB APP DATA =====")
+    logger.info(f"[WEB APP] Тип сообщения: {type(message)}")
+    logger.info(f"[WEB APP] User ID: {message.from_user.id if message.from_user else 'НЕТ'}")
+    logger.info(f"[WEB APP] Chat ID: {message.chat.id if message.chat else 'НЕТ'}")
+    logger.info(f"[WEB APP] Message ID: {message.message_id if hasattr(message, 'message_id') else 'НЕТ'}")
+    logger.info(f"[WEB APP] Content type: {message.content_type if hasattr(message, 'content_type') else 'НЕТ'}")
+    
     try:
-        logger.info(f"[WEB APP] Получены данные от {message.from_user.id}, chat_id={message.chat.id}")
-        logger.info(f"[WEB APP] web_app_data: {message.web_app_data.data if hasattr(message, 'web_app_data') and message.web_app_data else 'НЕТ ДАННЫХ'}")
+        # Проверяем наличие web_app_data
+        logger.info(f"[WEB APP] Проверка наличия web_app_data: {hasattr(message, 'web_app_data')}")
         
-        if not hasattr(message, 'web_app_data') or not message.web_app_data:
-            logger.error("[WEB APP] web_app_data отсутствует в сообщении")
-            bot.reply_to(message, "❌ Данные Web App не получены")
+        if not hasattr(message, 'web_app_data'):
+            logger.error("[WEB APP] ❌ Атрибут web_app_data отсутствует в сообщении")
+            logger.error(f"[WEB APP] Доступные атрибуты: {dir(message)}")
+            try:
+                bot.reply_to(message, "❌ Данные Web App не получены (нет атрибута)")
+            except Exception as reply_error:
+                logger.error(f"[WEB APP] Ошибка при отправке ответа: {reply_error}")
             return
         
-        data = json.loads(message.web_app_data.data)
-        command = data.get('command')
+        if not message.web_app_data:
+            logger.error("[WEB APP] ❌ web_app_data равен None или пустой")
+            try:
+                bot.reply_to(message, "❌ Данные Web App пусты")
+            except Exception as reply_error:
+                logger.error(f"[WEB APP] Ошибка при отправке ответа: {reply_error}")
+            return
         
-        logger.info(f"[WEB APP] Распарсена команда: {command}")
+        raw_data = message.web_app_data.data
+        logger.info(f"[WEB APP] ✅ Получены данные: {raw_data}")
+        logger.info(f"[WEB APP] Тип данных: {type(raw_data)}")
+        
+        # Парсим JSON
+        try:
+            data = json.loads(raw_data)
+            logger.info(f"[WEB APP] ✅ JSON распарсен успешно: {data}")
+        except json.JSONDecodeError as json_error:
+            logger.error(f"[WEB APP] ❌ Ошибка парсинга JSON: {json_error}")
+            logger.error(f"[WEB APP] Сырые данные: {raw_data}")
+            try:
+                bot.reply_to(message, f"❌ Ошибка обработки данных: {json_error}")
+            except:
+                pass
+            return
+        
+        command = data.get('command')
+        logger.info(f"[WEB APP] ✅ Извлечена команда: '{command}'")
         
         if not command:
-            bot.reply_to(message, "❌ Команда не указана")
+            logger.warning("[WEB APP] ⚠️ Команда не указана в данных")
+            logger.warning(f"[WEB APP] Полные данные: {data}")
+            try:
+                bot.reply_to(message, "❌ Команда не указана")
+            except:
+                pass
             return
         
         # Создаём простое сообщение с командой, используя существующее сообщение как основу
-        # Копируем все необходимые атрибуты
         command_message = message
         command_message.text = f'/{command}'
         
-        logger.info(f"[WEB APP] Вызываем обработчик для команды /{command}, user_id={message.from_user.id}, chat_id={message.chat.id}")
+        logger.info(f"[WEB APP] ✅ Создано сообщение с командой: /{command}")
+        logger.info(f"[WEB APP] Вызываем обработчик для команды: /{command}")
+        logger.info(f"[WEB APP] User ID: {message.from_user.id}, Chat ID: {message.chat.id}")
         
         # Вызываем соответствующий хэндлер напрямую
-        if command == 'random':
-            random_start(command_message)
-        elif command == 'premieres':
-            premieres_command(command_message)
-        elif command == 'list':
-            list_movies(command_message)
-        elif command == 'schedule':
-            show_schedule(command_message)
-        elif command == 'plan':
-            plan_handler(command_message)
-        elif command == 'ticket':
-            ticket_command(command_message)
-        elif command == 'seasons':
-            seasons_command(command_message)
-        elif command == 'total':
-            total_stats(command_message)
-        elif command == 'stats':
-            stats_command(command_message)
-        elif command == 'rate':
-            rate_command(command_message)
-        elif command == 'settings':
-            settings_command(command_message)
-        elif command == 'help':
-            help_command(command_message)
-        elif command == 'start':
-            send_welcome(command_message)
-        else:
-            bot.reply_to(message, f"❌ Неизвестная команда: {command}")
-            
-    except json.JSONDecodeError as e:
-        logger.error(f"[WEB APP] Ошибка парсинга JSON: {e}, данные: {message.web_app_data.data if hasattr(message, 'web_app_data') and message.web_app_data else 'НЕТ'}")
-        bot.reply_to(message, "❌ Ошибка обработки данных")
-    except Exception as e:
-        logger.error(f"[WEB APP] Ошибка обработки: {e}", exc_info=True)
         try:
-            bot.reply_to(message, "❌ Произошла ошибка при обработке команды")
-        except:
-            pass
+            if command == 'random':
+                logger.info("[WEB APP] → Вызов random_start")
+                random_start(command_message)
+            elif command == 'premieres':
+                logger.info("[WEB APP] → Вызов premieres_command")
+                premieres_command(command_message)
+            elif command == 'list':
+                logger.info("[WEB APP] → Вызов list_movies")
+                list_movies(command_message)
+            elif command == 'schedule':
+                logger.info("[WEB APP] → Вызов show_schedule")
+                show_schedule(command_message)
+            elif command == 'plan':
+                logger.info("[WEB APP] → Вызов plan_handler")
+                plan_handler(command_message)
+            elif command == 'ticket':
+                logger.info("[WEB APP] → Вызов ticket_command")
+                ticket_command(command_message)
+            elif command == 'seasons':
+                logger.info("[WEB APP] → Вызов seasons_command")
+                seasons_command(command_message)
+            elif command == 'total':
+                logger.info("[WEB APP] → Вызов total_stats")
+                total_stats(command_message)
+            elif command == 'stats':
+                logger.info("[WEB APP] → Вызов stats_command")
+                stats_command(command_message)
+            elif command == 'rate':
+                logger.info("[WEB APP] → Вызов rate_command")
+                rate_command(command_message)
+            elif command == 'settings':
+                logger.info("[WEB APP] → Вызов settings_command")
+                settings_command(command_message)
+            elif command == 'help':
+                logger.info("[WEB APP] → Вызов help_command")
+                help_command(command_message)
+            elif command == 'start':
+                logger.info("[WEB APP] → Вызов send_welcome")
+                send_welcome(command_message)
+            else:
+                logger.warning(f"[WEB APP] ⚠️ Неизвестная команда: {command}")
+                try:
+                    bot.reply_to(message, f"❌ Неизвестная команда: {command}")
+                except:
+                    pass
+            
+            logger.info(f"[WEB APP] ✅ Обработчик команды /{command} вызван успешно")
+        except Exception as handler_error:
+            logger.error(f"[WEB APP] ❌ Ошибка при вызове обработчика команды /{command}: {handler_error}", exc_info=True)
+            try:
+                bot.reply_to(message, f"❌ Ошибка при выполнении команды /{command}")
+            except:
+                pass
+        
+        logger.info("[WEB APP] ===== КОНЕЦ ОБРАБОТКИ WEB APP DATA =====")
+        logger.info("=" * 80)
+            
+    except Exception as e:
+        logger.error("[WEB APP] ❌ КРИТИЧЕСКАЯ ОШИБКА в handle_web_app_data", exc_info=True)
+        logger.error(f"[WEB APP] Тип ошибки: {type(e).__name__}")
+        logger.error(f"[WEB APP] Сообщение ошибки: {str(e)}")
+        try:
+            bot.reply_to(message, "❌ Произошла критическая ошибка при обработке команды")
+        except Exception as reply_error:
+            logger.error(f"[WEB APP] Не удалось отправить сообщение об ошибке: {reply_error}")
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
