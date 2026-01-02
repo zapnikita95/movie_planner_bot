@@ -5856,35 +5856,35 @@ def ticket_command(message):
         logger.info(f"[TICKET COMMAND] message.photo={message.photo}")
         logger.info(f"[TICKET COMMAND] message.document={message.document}")
         log_request(user_id, username, '/ticket', chat_id)
-    
-    # Проверяем, есть ли файл в сообщении
-    has_photo = message.photo is not None and len(message.photo) > 0
-    has_document = message.document is not None
+        
+        # Проверяем, есть ли файл в сообщении
+        has_photo = message.photo is not None and len(message.photo) > 0
+        has_document = message.document is not None
         
         logger.info(f"[TICKET COMMAND] Проверка файла: has_photo={has_photo}, has_document={has_document}")
-    
-    if has_photo or has_document:
-        # Сохраняем file_id для последующей обработки
-        if has_photo:
-            file_id = message.photo[-1].file_id  # Берем самое большое фото
+        
+        if has_photo or has_document:
+            # Сохраняем file_id для последующей обработки
+            if has_photo:
+                file_id = message.photo[-1].file_id  # Берем самое большое фото
                 logger.info(f"[TICKET COMMAND] Получено фото, file_id={file_id}")
-        else:
-            file_id = message.document.file_id
+            else:
+                file_id = message.document.file_id
                 logger.info(f"[TICKET COMMAND] Получен документ, file_id={file_id}")
-        
-        user_ticket_state[user_id] = {
-            'step': 'select_session',
-            'file_id': file_id,
-            'chat_id': chat_id
-        }
+            
+            user_ticket_state[user_id] = {
+                'step': 'select_session',
+                'file_id': file_id,
+                'chat_id': chat_id
+            }
             logger.info(f"[TICKET COMMAND] Сохранено состояние для пользователя {user_id}: step=select_session, file_id={file_id}")
-        
-        # Показываем список сеансов в кино
-        show_cinema_sessions(chat_id, user_id, file_id)
-    else:
-        # Нет файла - показываем список сеансов для выбора
+            
+            # Показываем список сеансов в кино
+            show_cinema_sessions(chat_id, user_id, file_id)
+        else:
+            # Нет файла - показываем список сеансов для выбора
             logger.info(f"[TICKET COMMAND] Файл не найден, показываем список сеансов без file_id")
-        show_cinema_sessions(chat_id, user_id, None)
+            show_cinema_sessions(chat_id, user_id, None)
     
     except Exception as e:
         logger.error(f"[TICKET COMMAND] Ошибка при обработке /ticket: {e}", exc_info=True)
