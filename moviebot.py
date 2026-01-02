@@ -9488,7 +9488,39 @@ def random_genre_handler(call):
         
         mode = user_random_state[user_id].get('mode')
         
-        # Для режимов my_votes и group_votes после жанра сразу переходим к финалу
+        # Обрабатываем выбор жанра (toggle)
+        if data not in ["skip", "done", "back"]:
+            # Toggle жанра
+            genres = user_random_state[user_id].get('genres', [])
+            if data in genres:
+                genres.remove(data)
+                logger.info(f"[RANDOM] Genre removed: {data}")
+            else:
+                genres.append(data)
+                logger.info(f"[RANDOM] Genre added: {data}")
+            
+            user_random_state[user_id]['genres'] = genres
+            user_random_state[user_id]['step'] = 'genre'
+            
+            # Для режимов my_votes и group_votes после выбора жанра сразу переходим к финалу
+            if mode in ['my_votes', 'group_votes']:
+                # Обновляем клавиатуру и сразу переходим к финалу
+                _show_genre_step(call, chat_id, user_id)
+                # Небольшая задержка для обновления UI, затем переход к финалу
+                import threading
+                def delayed_final():
+                    import time
+                    time.sleep(0.5)  # Небольшая задержка для обновления UI
+                    user_random_state[user_id]['step'] = 'final'
+                    _random_final(call, chat_id, user_id)
+                threading.Thread(target=delayed_final, daemon=True).start()
+                return
+            else:
+                # Для обычного режима обновляем клавиатуру
+                _show_genre_step(call, chat_id, user_id)
+                return
+        
+        # Для режимов my_votes и group_votes после подтверждения жанров сразу переходим к финалу
         if mode in ['my_votes', 'group_votes']:
             if data == "skip":
                 user_random_state[user_id]['genres'] = []
@@ -9546,21 +9578,6 @@ def random_genre_handler(call):
             except Exception as e:
                 logger.error(f"[RANDOM] Error going back to period: {e}", exc_info=True)
                 bot.answer_callback_query(call.id, "Ошибка")
-        else:
-            # Toggle жанра
-            genres = user_random_state[user_id].get('genres', [])
-            if data in genres:
-                genres.remove(data)
-                logger.info(f"[RANDOM] Genre removed: {data}")
-            else:
-                genres.append(data)
-                logger.info(f"[RANDOM] Genre added: {data}")
-            
-            user_random_state[user_id]['genres'] = genres
-            user_random_state[user_id]['step'] = 'genre'
-            
-            # Обновляем клавиатуру
-            _show_genre_step(call, chat_id, user_id)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_genre_handler: {e}", exc_info=True)
         try:
