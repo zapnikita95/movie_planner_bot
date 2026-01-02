@@ -5376,13 +5376,19 @@ def handle_reply_to_bot(message):
             return  # Важно: возвращаемся, чтобы не обрабатывать дальше
 
 # Обработка новых ссылок (должен быть последним, чтобы не перехватывать команды)
-@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities and m.from_user.id not in user_ticket_state and m.from_user.id not in user_plan_state, priority=1)
+@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and m.entities, priority=1)
 def handle_message(message):
     logger.info(f"[HANDLER] handle_message вызван для сообщения от {message.from_user.id}")
     
-    # Дополнительная проверка (на всякий случай)
-    if message.from_user.id in user_ticket_state or message.from_user.id in user_plan_state:
-        logger.info(f"[HANDLER] Пропущено сообщение - пользователь в user_ticket_state или user_plan_state")
+    # Пропускаем сообщения, если пользователь работает с билетами или планированием
+    if message.from_user.id in user_ticket_state:
+        state = user_ticket_state.get(message.from_user.id, {})
+        step = state.get('step')
+        logger.info(f"[HANDLER] Пропущено сообщение - пользователь в user_ticket_state, step={step}")
+        return
+    
+    if message.from_user.id in user_plan_state:
+        logger.info(f"[HANDLER] Пропущено сообщение - пользователь в user_plan_state")
         return
     
     if message.from_user.id in user_plan_state:
