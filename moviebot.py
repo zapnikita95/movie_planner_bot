@@ -9486,6 +9486,22 @@ def random_genre_handler(call):
             logger.warning(f"[RANDOM] State not found for user {user_id}, reinitializing")
             user_random_state[user_id] = {'step': 'genre', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
         
+        mode = user_random_state[user_id].get('mode')
+        
+        # Для режимов my_votes и group_votes после жанра сразу переходим к финалу
+        if mode in ['my_votes', 'group_votes']:
+            if data == "skip":
+                user_random_state[user_id]['genres'] = []
+            elif data == "done":
+                pass  # Жанры уже сохранены
+            
+            # Переходим сразу к финалу
+            logger.info(f"[RANDOM] Mode {mode}: genres selected, moving to final")
+            user_random_state[user_id]['step'] = 'final'
+            _random_final(call, chat_id, user_id)
+            return
+        
+        # Для обычного режима переходим к режиссёру
         if data == "skip":
             user_random_state[user_id]['genres'] = []
             user_random_state[user_id]['step'] = 'director'
@@ -9880,7 +9896,7 @@ def _random_final(call, chat_id, user_id):
         logger.info(f"[RANDOM] State: {state}")
         
         # Формируем запрос - исключаем фильмы, которые уже запланированы
-        query = """SELECT m.id, m.title, m.year, m.genres, m.director, m.actors, m.description, m.link 
+        query = """SELECT m.id, m.title, m.year, m.genres, m.director, m.actors, m.description, m.link, m.kp_id 
                    FROM movies m 
                    WHERE m.chat_id = %s AND m.watched = 0 
                    AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s)"""
@@ -9889,11 +9905,11 @@ def _random_final(call, chat_id, user_id):
         # Фильтр по режиму (my_votes или group_votes)
         mode = state.get('mode')
         if mode == 'my_votes':
-            # Фильмы с оценкой пользователя 9 или 10, похожие на те, что пользователь оценил высоко
+            # Фильмы с импортированной оценкой пользователя 9 или 10 из Кинопоиска
             query += """ AND m.id IN (
                 SELECT DISTINCT r2.film_id 
                 FROM ratings r2 
-                WHERE r2.chat_id = %s AND r2.user_id = %s AND r2.rating IN (9, 10)
+                WHERE r2.chat_id = %s AND r2.user_id = %s AND r2.rating IN (9, 10) AND r2.is_imported = TRUE
             )"""
             params.append(chat_id)
             params.append(user_id)
@@ -10059,12 +10075,102 @@ def _random_final(call, chat_id, user_id):
             title = movie.get('title')
             year = movie.get('year') or '—'
             link = movie.get('link')
+            kp_id = movie.get('kp_id') if 'kp_id' in movie else None
         else:
             # Кортеж
             film_id = movie[0] if len(movie) > 0 else None
             title = movie[1] if len(movie) > 1 else None
             year = movie[2] if len(movie) > 2 else '—'
             link = movie[7] if len(movie) > 7 else None
+            kp_id = movie[8] if len(movie) > 8 else None
+        
+        # Для режимов my_votes и group_votes ищем похожие фильмы
+        if mode in ['my_votes', 'group_votes']:
+            # Получаем kp_id из базы, если не получили
+            if not kp_id and link:
+                try:
+                    kp_match = re.search(r'/film/(\d+)/', link)
+                    if kp_match:
+                        kp_id = kp_match.group(1)
+                except:
+                    pass
+            
+            if kp_id:
+                # Получаем похожие фильмы
+                similars = get_similars(kp_id)
+                logger.info(f"[RANDOM] Found {len(similars)} similar films for kp_id={kp_id}")
+                
+                if similars:
+                    # Получаем выбранные периоды и жанры для фильтрации
+                    periods = state.get('periods', [])
+                    genres = state.get('genres', [])
+                    
+                    # Функция для проверки года
+                    def check_year(film_year, periods_list):
+                        if not periods_list:
+                            return True
+                        for p in periods_list:
+                            if p == "До 1980" and film_year < 1980:
+                                return True
+                            elif p == "1980–1990" and 1980 <= film_year <= 1990:
+                                return True
+                            elif p == "1990–2000" and 1990 <= film_year <= 2000:
+                                return True
+                            elif p == "2000–2010" and 2000 <= film_year <= 2010:
+                                return True
+                            elif p == "2010–2020" and 2010 <= film_year <= 2020:
+                                return True
+                            elif p == "2020–сейчас" and film_year >= 2020:
+                                return True
+                        return False
+                    
+                    # Функция для проверки жанра
+                    def check_genre(film_genres, genres_list):
+                        if not genres_list:
+                            return True
+                        film_genres_lower = str(film_genres).lower() if film_genres else ""
+                        for g in genres_list:
+                            if g.lower() in film_genres_lower:
+                                return True
+                        return False
+                    
+                    # Получаем информацию о похожих фильмах через API и фильтруем
+                    filtered_similars = []
+                    headers = {'X-API-KEY': KP_TOKEN}
+                    
+                    for similar_kp_id, similar_title in similars:
+                        try:
+                            # Получаем информацию о фильме через API
+                            url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{similar_kp_id}"
+                            response = requests.get(url, headers=headers, timeout=10)
+                            if response.status_code == 200:
+                                data = response.json()
+                                similar_year = data.get('year')
+                                similar_genres = ', '.join([g.get('genre', '') for g in data.get('genres', [])])
+                                
+                                # Проверяем год и жанр
+                                if similar_year and check_year(similar_year, periods):
+                                    if check_genre(similar_genres, genres):
+                                        filtered_similars.append({
+                                            'kp_id': similar_kp_id,
+                                            'title': similar_title,
+                                            'year': similar_year,
+                                            'genres': similar_genres,
+                                            'link': f"https://www.kinopoisk.ru/film/{similar_kp_id}/"
+                                        })
+                        except Exception as e:
+                            logger.warning(f"[RANDOM] Error getting info for similar film {similar_kp_id}: {e}")
+                            continue
+                    
+                    if filtered_similars:
+                        # Выбираем случайный из отфильтрованных похожих
+                        selected_similar = random.choice(filtered_similars)
+                        title = selected_similar['title']
+                        year = selected_similar['year']
+                        link = selected_similar['link']
+                        logger.info(f"[RANDOM] Selected similar film: {title} ({year})")
+                    else:
+                        logger.info(f"[RANDOM] No similar films match filters, using original")
         
         text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
         
