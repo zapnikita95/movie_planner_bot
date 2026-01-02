@@ -357,4 +357,47 @@ def log_request(user_id, username, command_or_action, chat_id=None):
             pass
 
 
+def print_daily_stats():
+    """Выводит статистику за текущий день в консоль"""
+    try:
+        today = datetime.now().strftime('%Y-%m-%d')
+        with db_lock:
+            cursor.execute('''
+                SELECT COUNT(*) as total_requests,
+                       COUNT(DISTINCT user_id) as unique_users
+                FROM stats
+                WHERE DATE(timestamp) = DATE(%s)
+            ''', (today,))
+            row = cursor.fetchone()
+            if row:
+                total_requests = row.get('total_requests') if isinstance(row, dict) else (row[0] if len(row) > 0 else 0)
+                unique_users = row.get('unique_users') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0)
+            else:
+                total_requests = 0
+                unique_users = 0
+            
+            # Статистика по командам
+            cursor.execute('''
+                SELECT command_or_action, COUNT(*) as count
+                FROM stats
+                WHERE DATE(timestamp) = DATE(%s)
+                GROUP BY command_or_action
+                ORDER BY count DESC
+            ''', (today,))
+            commands_stats = cursor.fetchall()
+        
+        print("\n" + "=" * 60)
+        print(f"📊 СТАТИСТИКА БОТА ЗА {today}")
+        print("=" * 60)
+        print(f"📈 Всего запросов за день: {total_requests}")
+        print(f"👥 Уникальных пользователей: {unique_users}")
+        print("\n📋 Топ команд/действий:")
+        if commands_stats:
+            for cmd, count in commands_stats:
+                print(f"   • {cmd}: {count}")
+        else:
+            print("   (нет данных)")
+        print("=" * 60 + "\n")
+    except Exception as e:
+        logger.error(f"Ошибка вывода статистики: {e}")
 
