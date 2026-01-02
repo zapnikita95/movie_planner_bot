@@ -98,9 +98,10 @@ except Exception as e:
 scheduler = BackgroundScheduler()
 scheduler.start()
 
-# Устанавливаем экземпляр бота в модуле tasks
-from scheduler.tasks import set_bot_instance, hourly_stats, check_and_send_plan_notifications, clean_home_plans, start_cinema_votes, resolve_cinema_votes
+# Устанавливаем экземпляр бота и scheduler в модуле tasks
+from scheduler.tasks import set_bot_instance, set_scheduler_instance, hourly_stats, check_and_send_plan_notifications, clean_home_plans, start_cinema_votes, resolve_cinema_votes
 set_bot_instance(bot)
+set_scheduler_instance(scheduler)
 
 # Состояния импортируются из bot.states
 # Для обратной совместимости создаем алиасы
@@ -3609,67 +3610,82 @@ def handle_edit_plan_datetime_internal(message, state):
     del user_edit_state[user_id]
 
 def handle_delete_movie_internal(message, state):
-    """Внутренняя функция для обработки удаления фильма"""
+    """Внутренняя функция для обработки удаления фильма (поддерживает несколько ссылок/ID)"""
     user_id = message.from_user.id
     chat_id = message.chat.id
     text = message.text.strip()
     
     logger.info(f"[DELETE MOVIE] Обработка удаления фильма: text='{text}', user_id={user_id}, chat_id={chat_id}")
     
-    # Извлекаем kp_id из ссылки или используем как ID
-    kp_id = extract_kp_id_from_text(text)
-    if not kp_id:
-        logger.warning(f"[DELETE MOVIE] Не удалось извлечь kp_id из текста: '{text}'")
-        bot.reply_to(message, "❌ Не удалось распознать ссылку или ID. Введите ссылку на фильм (kinopoisk.ru/film/...) или ID фильма.")
+    # Разбиваем текст на строки и обрабатываем каждую
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
+    if not lines:
+        bot.reply_to(message, "❌ Не удалось распознать ссылки или ID. Введите ссылки на фильмы (kinopoisk.ru/film/...) или ID фильмов, по одному на строку.")
         return
     
-    logger.info(f"[DELETE MOVIE] Извлечен kp_id: {kp_id}")
+    deleted_count = 0
+    not_found = []
     
-    # Ищем фильм в БД
     with db_lock:
-        cursor.execute("SELECT id, title FROM movies WHERE (kp_id = %s OR id = %s) AND chat_id = %s", (kp_id, kp_id, chat_id))
-        film = cursor.fetchone()
-        
-        logger.info(f"[DELETE MOVIE] Результат поиска фильма: {film}")
-        
-        if not film:
-            logger.warning(f"[DELETE MOVIE] Фильм с kp_id={kp_id} или id={kp_id} не найден в чате {chat_id}")
-            bot.reply_to(message, f"❌ Фильм с ID {kp_id} не найден в базе этого чата.")
-            if user_id in user_edit_state:
-                del user_edit_state[user_id]
-            return
-        
-        film_id = film.get('id') if isinstance(film, dict) else film[0]
-        title = film.get('title') if isinstance(film, dict) else film[1]
-        
-        logger.info(f"[DELETE MOVIE] Найден фильм: id={film_id}, title={title}")
-        
-        # Удаляем связанные данные
-        cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        ratings_deleted = cursor.rowcount
-        logger.info(f"[DELETE MOVIE] Удалено оценок: {ratings_deleted}")
-        
-        cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        plans_deleted = cursor.rowcount
-        logger.info(f"[DELETE MOVIE] Удалено планов: {plans_deleted}")
-        
-        cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-        watched_deleted = cursor.rowcount
-        logger.info(f"[DELETE MOVIE] Удалено отметок просмотра: {watched_deleted}")
-        
-        cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-        movie_deleted = cursor.rowcount
-        logger.info(f"[DELETE MOVIE] Удалено фильмов: {movie_deleted}")
+        for line in lines:
+            # Извлекаем kp_id из ссылки или используем как ID
+            kp_id = extract_kp_id_from_text(line)
+            if not kp_id:
+                logger.warning(f"[DELETE MOVIE] Не удалось извлечь kp_id из текста: '{line}'")
+                not_found.append(line)
+                continue
+            
+            logger.info(f"[DELETE MOVIE] Извлечен kp_id: {kp_id}")
+            
+            # Ищем фильм в БД
+            cursor.execute("SELECT id, title FROM movies WHERE (kp_id = %s OR id = %s) AND chat_id = %s", (kp_id, kp_id, chat_id))
+            film = cursor.fetchone()
+            
+            if not film:
+                logger.warning(f"[DELETE MOVIE] Фильм с kp_id={kp_id} или id={kp_id} не найден в чате {chat_id}")
+                not_found.append(kp_id)
+                continue
+            
+            film_id = film.get('id') if isinstance(film, dict) else film[0]
+            title = film.get('title') if isinstance(film, dict) else film[1]
+            
+            logger.info(f"[DELETE MOVIE] Найден фильм: id={film_id}, title={title}")
+            
+            # Удаляем связанные данные
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            ratings_deleted = cursor.rowcount
+            logger.info(f"[DELETE MOVIE] Удалено оценок: {ratings_deleted}")
+            
+            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            plans_deleted = cursor.rowcount
+            logger.info(f"[DELETE MOVIE] Удалено планов: {plans_deleted}")
+            
+            cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            watched_deleted = cursor.rowcount
+            logger.info(f"[DELETE MOVIE] Удалено отметок просмотра: {watched_deleted}")
+            
+            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            movie_deleted = cursor.rowcount
+            logger.info(f"[DELETE MOVIE] Удалено фильмов: {movie_deleted}")
+            
+            if movie_deleted > 0:
+                deleted_count += 1
+                logger.info(f"[DELETE MOVIE] Фильм {title} (id={film_id}) удалён пользователем {user_id} из чата {chat_id}")
         
         conn.commit()
         logger.info(f"[DELETE MOVIE] Транзакция закоммичена")
         
         # Отправляем сообщение о результате
-        if movie_deleted > 0:
-            bot.reply_to(message, f"✅ Фильм <b>{title}</b> удалён из базы.\n\nТакже удалено:\n• Оценок: {ratings_deleted}\n• Планов: {plans_deleted}\n• Отметок просмотра: {watched_deleted}", parse_mode='HTML')
-            logger.info(f"[DELETE MOVIE] Фильм {title} (id={film_id}) удалён пользователем {user_id} из чата {chat_id}")
+        if deleted_count > 0:
+            result_msg = f"✅ Удалено фильмов: {deleted_count}"
+            if not_found:
+                result_msg += f"\n\n❌ Не найдено: {len(not_found)}"
+            bot.reply_to(message, result_msg, parse_mode='HTML')
         else:
-            logger.error(f"[DELETE MOVIE] Фильм не был удален! movie_deleted={movie_deleted}")
+            if not_found:
+                bot.reply_to(message, f"❌ Не найдено фильмов: {len(not_found)}", parse_mode='HTML')
+            else:
+                bot.reply_to(message, "❌ Не удалось удалить фильмы.", parse_mode='HTML')
             bot.reply_to(message, f"❌ Ошибка при удалении фильма. Попробуйте снова.")
     
     if user_id in user_edit_state:
@@ -4951,13 +4967,34 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
         with db_lock:
             # Получаем все непросмотренные фильмы, отсортированные по алфавиту
             # Исключаем фильмы, у которых есть импортированные оценки (is_imported = TRUE в ratings)
+            # Показываем только фильмы, которые не просмотрены всеми активными членами группы
+            # (активные = те, кто использовал бота за последние 30 дней)
             cursor.execute('''
                 SELECT DISTINCT m.id, m.kp_id, m.title, m.year, m.genres, m.link 
                 FROM movies m
-                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                LEFT JOIN ratings r_imported ON m.id = r_imported.film_id AND m.chat_id = r_imported.chat_id AND r_imported.is_imported = TRUE
+                WHERE m.chat_id = %s 
+                  AND m.watched = 0 
+                  AND r_imported.id IS NULL
+                  AND NOT EXISTS (
+                      -- Проверяем, что есть хотя бы один активный участник, который не просмотрел фильм
+                      SELECT 1 
+                      FROM (
+                          SELECT DISTINCT user_id 
+                          FROM stats 
+                          WHERE chat_id = %s 
+                            AND date >= CURRENT_DATE - INTERVAL '30 days'
+                      ) active_users
+                      WHERE NOT EXISTS (
+                          SELECT 1 
+                          FROM watched_movies wm 
+                          WHERE wm.chat_id = %s 
+                            AND wm.film_id = m.id 
+                            AND wm.user_id = active_users.user_id
+                      )
+                  )
                 ORDER BY m.title
-            ''', (chat_id,))
+            ''', (chat_id, chat_id, chat_id))
             rows = cursor.fetchall()
         
         if not rows:
@@ -8147,6 +8184,62 @@ def edit_callback_handler(call):
         )
         bot.answer_callback_query(call.id, "Введите ссылку или ID")
     
+    elif action == "delete_plan":
+        # Показываем список планов для удаления
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, m.title, p.plan_type, p.plan_datetime
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s
+                ORDER BY p.plan_datetime
+                LIMIT 20
+            ''', (chat_id,))
+            plans = cursor.fetchall()
+        
+        if not plans:
+            bot.edit_message_text("Нет запланированных фильмов для удаления.", chat_id, call.message.message_id)
+            return
+        
+        user_tz = get_user_timezone_or_default(user_id)
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for row in plans:
+            if isinstance(row, dict):
+                plan_id = row.get('id')
+                title = row.get('title')
+                plan_type = row.get('plan_type')
+                plan_dt_value = row.get('plan_datetime')
+            else:
+                plan_id = row[0]
+                title = row[1]
+                plan_type = row[2]
+                plan_dt_value = row[3] if len(row) > 3 else None
+            
+            if plan_dt_value:
+                if isinstance(plan_dt_value, datetime):
+                    if plan_dt_value.tzinfo is None:
+                        dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                    else:
+                        dt = plan_dt_value.astimezone(user_tz)
+                else:
+                    dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                
+                date_str = dt.strftime('%d.%m %H:%M')
+                type_text = "🎦" if plan_type == 'cinema' else "🏠"
+                button_text = f"{title} | {date_str} {type_text}"
+                
+                if len(button_text) > 30:
+                    short_title = title[:20] + "..."
+                    button_text = f"{short_title} | {date_str} {type_text}"
+                    if len(button_text) > 30:
+                        button_text = button_text[:27] + "..."
+                
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_plan_delete:{plan_id}"))
+        
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+        bot.edit_message_text("🗑️ <b>Выберите план для удаления:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    
     elif action.startswith("delete_"):
         # Перенаправляем на соответствующие обработчики clean
         clean_action = action.replace("delete_", "")
@@ -8329,6 +8422,47 @@ def edit_plan_switch_callback(call):
         chat_id, call.message.message_id, parse_mode='HTML'
     )
     bot.answer_callback_query(call.id, f"Изменено на {type_text}")
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan_delete:"))
+def edit_plan_delete_callback(call):
+    """Обработчик удаления плана"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    # Получаем информацию о плане
+    with db_lock:
+        cursor.execute('''
+            SELECT m.title, p.plan_type
+            FROM plans p
+            JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+            WHERE p.id = %s AND p.chat_id = %s
+        ''', (plan_id, chat_id))
+        plan_row = cursor.fetchone()
+    
+    if not plan_row:
+        bot.answer_callback_query(call.id, "План не найден", show_alert=True)
+        return
+    
+    if isinstance(plan_row, dict):
+        title = plan_row.get('title')
+        plan_type = plan_row.get('plan_type')
+    else:
+        title = plan_row[0]
+        plan_type = plan_row[1]
+    
+    # Удаляем план
+    with db_lock:
+        cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+        conn.commit()
+    
+    type_text = "в кино" if plan_type == 'cinema' else "дома"
+    bot.edit_message_text(
+        f"✅ План на фильм <b>{title}</b> ({type_text}) удалён.",
+        chat_id, call.message.message_id, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id, "План удалён")
 
 
 # Обработка текстовых сообщений для редактирования даты/времени плана
@@ -8573,7 +8707,7 @@ def ticket_session_callback(call):
         bot.answer_callback_query(call.id, "Билеты добавлены")
         logger.info(f"[TICKET SESSION] Сообщение об успешном добавлении отправлено пользователю {user_id}")
     else:
-        # Если file_id не передан и билетов нет в БД, предлагаем загрузить билеты
+        # Если file_id не передан и билетов нет в БД, предлагаем загрузить билеты или изменить время
         logger.info(f"[TICKET SESSION] file_id не найден, билетов нет в БД, предлагаем загрузить билеты")
         user_ticket_state[user_id] = {
             'step': 'waiting_ticket_file',
@@ -8581,16 +8715,37 @@ def ticket_session_callback(call):
             'chat_id': chat_id
         }
         
+        # Проверяем, есть ли время у сеанса
+        has_time = False
+        if plan_row:
+            plan_dt = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else (plan_row[1] if len(plan_row) > 1 else None)
+            if plan_dt:
+                has_time = True
+        
         markup = InlineKeyboardMarkup()
+        if not has_time:
+            # Если нет времени, добавляем обе кнопки
+            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+        else:
+            # Если время есть, только кнопка добавления билетов
+            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
-        bot.edit_message_text(
-            "🎟️ <b>Билеты не найдены</b>\n\n"
-            "Загрузите билеты для этого сеанса:\n"
-            "Отправьте фото или файл с билетами в следующем сообщении.",
-            chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
-        )
-        bot.answer_callback_query(call.id, "Загрузите билеты")
+        if not has_time:
+            bot.edit_message_text(
+                "🎟️ <b>Билеты не найдены</b>\n\n"
+                "Что хотите сделать?",
+                chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+            )
+        else:
+            bot.edit_message_text(
+                "🎟️ <b>Билеты не найдены</b>\n\n"
+                "Загрузите билеты для этого сеанса:\n"
+                "Отправьте фото или файл с билетами в следующем сообщении.",
+                chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+            )
+        bot.answer_callback_query(call.id, "Выберите действие")
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
