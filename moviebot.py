@@ -6842,6 +6842,32 @@ def ticket_new_session_callback(call):
     logger.info(f"[TICKET NEW CALLBACK] Сообщение отправлено пользователю {user_id}")
 
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_add_more:"))
+def ticket_add_more_callback(call):
+    """Обработчик кнопки 'Добавить еще билет'"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    logger.info(f"[TICKET ADD MORE] Пользователь {user_id} хочет добавить еще билеты к plan_id={plan_id}")
+    
+    user_ticket_state[user_id] = {
+        'step': 'waiting_ticket_file',
+        'plan_id': plan_id,
+        'chat_id': chat_id
+    }
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+    
+    bot.edit_message_text(
+        "🎟️ <b>Загрузите дополнительные билеты</b>\n\n"
+        "Отправьте фото или файл с билетами в следующем сообщении.",
+        chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+    )
+    bot.answer_callback_query(call.id, "Загрузите билеты")
+
+
 # ==================== ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ ДЛЯ РЕДАКТИРОВАНИЯ ПЛАНОВ ====================
 @bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan_datetime:"))
 def edit_plan_datetime_callback(call):
