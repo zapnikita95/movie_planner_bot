@@ -75,6 +75,7 @@ scheduler.start()
 
 # Состояния планирования
 user_plan_state = {}  # user_id: {'step': int, 'link': str, 'type': str, 'day_or_date': str}
+user_search_state = {}  # user_id: {'message_id': int, 'chat_id': int} - состояние ожидания запроса для поиска
 bot_messages = {}  # message_id: link (храним карточки бота)
 plan_notification_messages = {}  # message_id: {'link': str} (храним сообщения о планах для обработки реакций)
 list_messages = {}  # message_id: chat_id (храним сообщения /list для обработки ответов)
@@ -297,6 +298,15 @@ cursor.execute('''
         UNIQUE(chat_id, user_id, kp_id)
     )
 ''')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS facts_sent (
+        id SERIAL PRIMARY KEY,
+        chat_id BIGINT NOT NULL,
+        kp_id TEXT NOT NULL,
+        sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        UNIQUE(chat_id, kp_id)
+    )
+''')
 
 # Миграция: изменяем тип данных для существующих таблиц (если они уже созданы с INTEGER)
 # Это безопасно - если колонка уже BIGINT, команда не изменит ничего
@@ -383,6 +393,14 @@ except Exception as e:
         conn.rollback()
     except:
         pass
+
+# Создаем индекс для таблицы facts_sent для быстрого поиска
+try:
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_facts_sent_chat_kp ON facts_sent(chat_id, kp_id)")
+    conn.commit()
+    logger.info("Индекс для facts_sent создан (или уже существует)")
+except Exception as e:
+    logger.debug(f"Индекс facts_sent: {e}")
 
 # Ключевой блок: очистка дубликатов и создание уникального индекса
 try:
@@ -752,8 +770,8 @@ def show_timezone_selection(chat_id, user_id, prompt_text="Выберите ча
     serbia_time = now_utc.astimezone(serbia_tz).strftime('%H:%M')
     
     markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton(f"🇷🇺 Москва (MSK) — сейчас {moscow_time}", callback_data="timezone:Moscow"))
-    markup.add(InlineKeyboardButton(f"🇷🇸 Сербия (CET) — сейчас {serbia_time}", callback_data="timezone:Serbia"))
+    markup.add(InlineKeyboardButton(f"🇷🇺 Москва (MSK) {moscow_time}", callback_data="timezone:Moscow"))
+    markup.add(InlineKeyboardButton(f"🇷🇸 Сербия (CET) {serbia_time}", callback_data="timezone:Serbia"))
     
     bot.send_message(
         chat_id,
@@ -875,9 +893,13 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
         text += f"<b>{title}</b>\n{link}"
         msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
-        # Сохраняем message_id для обработки реакций
-        plan_notification_messages[msg.message_id] = {'link': link}
-        logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}")
+        # Сохраняем message_id для обработки реакций (сохраняем link, film_id и plan_id)
+        plan_notification_messages[msg.message_id] = {
+            'link': link,
+            'film_id': film_id,
+            'plan_id': plan_id
+        }
+        logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}, message_id={msg.message_id}, plan_id={plan_id}")
         
         # Отмечаем как отправленное в базе данных, если plan_id передан
         if plan_id:
@@ -1306,7 +1328,9 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 logger.info(f"[IMPORT] Нет больше фильмов на странице {page}")
                 break
             
-            # Обрабатываем фильмы на странице
+            # Обрабатываем фильмы на странице - собираем все kp_id для батч-запроса
+            batch_kp_ids = []
+            batch_items = []
             for item in items:
                 if imported_count >= max_count:
                     break
@@ -1323,83 +1347,67 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 if not user_rating or user_rating < 1 or user_rating > 10:
                     continue
                 
+                batch_kp_ids.append(kp_id)
+                batch_items.append((kp_id, item, user_rating))
+            
+            # Проверяем, какие фильмы уже есть в базе (один запрос для всех)
+            existing_films = {}
+            if batch_kp_ids:
+                with db_lock:
+                    placeholders = ','.join(['%s'] * len(batch_kp_ids))
+                    cursor.execute(f'SELECT id, kp_id FROM movies WHERE chat_id = %s AND kp_id IN ({placeholders})', 
+                                 [chat_id] + batch_kp_ids)
+                    existing_rows = cursor.fetchall()
+                    for row in existing_rows:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        kp_id_val = row.get('kp_id') if isinstance(row, dict) else row[1]
+                        existing_films[kp_id_val] = film_id
+            
+            # Обрабатываем каждый фильм
+            for kp_id, item, user_rating in batch_items:
+                if imported_count >= max_count:
+                    break
+                
                 link = f"https://kinopoisk.ru/film/{kp_id}/"
                 
                 # Добавляем фильм в базу (если еще нет)
                 try:
                     with db_lock:
-                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                        film_row = cursor.fetchone()
+                        # Проверяем, есть ли фильм в базе
+                        film_id = existing_films.get(kp_id)
                         
-                        if film_row:
-                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                        if film_id:
                             logger.debug(f"[IMPORT] Фильм {kp_id} уже существует в базе, film_id={film_id}")
+                            # Получаем название для лога
+                            cursor.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
+                            title_row = cursor.fetchone()
+                            info = {'title': title_row.get('title') if isinstance(title_row, dict) else (title_row[0] if title_row else 'Неизвестно')}
                         else:
-                            # Фильма нет в базе - получаем полную информацию через API v2.2
-                            logger.debug(f"[IMPORT] Получаем информацию о новом фильме {kp_id} через API")
-                            info = None
+                            # Фильма нет в базе - используем данные напрямую из ответа votes
+                            logger.debug(f"[IMPORT] Используем данные из votes для нового фильма {kp_id}")
                             
-                            # Используем API v2.2 для получения полной информации
-                            headers = {'X-API-KEY': KP_TOKEN}
-                            api_url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+                            # Извлекаем информацию напрямую из ответа votes
+                            title = item.get('nameRu') or item.get('nameEn') or 'Без названия'
+                            year = item.get('year') or '—'
                             
-                            try:
-                                api_response = requests.get(api_url, headers=headers, timeout=10)
-                                if api_response.status_code == 200:
-                                    api_data = api_response.json()
-                                    
-                                    # Извлекаем информацию из API ответа
-                                    title = api_data.get('nameRu') or api_data.get('nameOriginal') or item.get('nameRu') or item.get('nameEn') or 'Без названия'
-                                    year = api_data.get('year') or item.get('year') or None
-                                    
-                                    # Жанры
-                                    genres_list = api_data.get('genres', [])
-                                    genres = ', '.join([g.get('genre', '') for g in genres_list]) if genres_list else ''
-                                    
-                                    # Описание
-                                    description = api_data.get('description') or api_data.get('shortDescription') or ''
-                                    
-                                    # Режиссёр
-                                    directors_list = api_data.get('directors', [])
-                                    director = directors_list[0].get('nameRu') or directors_list[0].get('nameEn', '') if directors_list else 'Не указан'
-                                    
-                                    # Актёры
-                                    actors_list = api_data.get('actors', [])[:10]  # Берем первых 10
-                                    actors = ', '.join([a.get('nameRu') or a.get('nameEn', '') for a in actors_list]) if actors_list else ''
-                                    
-                                    # Сериал или фильм
-                                    is_series = api_data.get('type') == 'TV_SERIES' or api_data.get('serial', False)
-                                    
-                                    info = {
-                                        'title': title,
-                                        'year': year or '—',
-                                        'genres': genres or '—',
-                                        'description': description or '—',
-                                        'director': director or 'Не указан',
-                                        'actors': actors or '—',
-                                        'is_series': is_series
-                                    }
-                                    
-                                    logger.info(f"[IMPORT] Получена информация о фильме {kp_id}: {title}")
-                                else:
-                                    logger.warning(f"[IMPORT] API v2.2 вернул {api_response.status_code} для {kp_id}")
-                            except Exception as api_error:
-                                logger.warning(f"[IMPORT] Ошибка при запросе API v2.2 для {kp_id}: {api_error}")
+                            # Жанры из votes (если есть)
+                            genres_list = item.get('genres', [])
+                            if genres_list:
+                                genres = ', '.join([g.get('genre', '') for g in genres_list if isinstance(g, dict) and 'genre' in g])
+                            else:
+                                genres = '—'
                             
-                            # Если не удалось получить через API, используем базовые данные из votes
-                            if not info:
-                                title = item.get('nameRu') or item.get('nameEn') or 'Без названия'
-                                year = item.get('year') or '—'
-                                info = {
-                                    'title': title,
-                                    'year': year,
-                                    'genres': '—',
-                                    'description': '—',
-                                    'director': 'Не указан',
-                                    'actors': '—',
-                                    'is_series': False
-                                }
-                                logger.info(f"[IMPORT] Используем базовые данные из votes для {kp_id}: {title}")
+                            info = {
+                                'title': title,
+                                'year': year,
+                                'genres': genres or '—',
+                                'description': '—',
+                                'director': 'Не указан',
+                                'actors': '—',
+                                'is_series': item.get('type') == 'TV_SERIES' or False
+                            }
+                            
+                            logger.info(f"[IMPORT] Используем данные из votes для {kp_id}: {title}")
                             
                             # Добавляем фильм в базу
                             logger.debug(f"[IMPORT] Добавляем новый фильм {kp_id}: {info['title']}")
@@ -1444,10 +1452,11 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             VALUES (%s, %s, %s, %s, TRUE)
                             ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE
                         ''', (chat_id, film_id, user_id, user_rating))
-                        conn.commit()
-                        
-                        imported_count += 1
-                        logger.info(f"[IMPORT] Импортирован фильм {info['title']} с оценкой {user_rating}")
+                    conn.commit()
+                    
+                    imported_count += 1
+                    film_title = info.get('title', 'Неизвестно') if info else 'Неизвестно'
+                    logger.info(f"[IMPORT] Импортирован фильм {film_title} с оценкой {user_rating}")
                 except Exception as db_error:
                     logger.error(f"[IMPORT] Ошибка при работе с БД для фильма {kp_id}: {db_error}", exc_info=True)
                     continue
@@ -1954,19 +1963,39 @@ def get_similars(kp_id):
         return []
 
 def get_sequels(kp_id):
-    """Получает продолжения и приквелы"""
+    """Получает продолжения, приквелы и ремейки, разделяет по типам"""
     headers = {'X-API-KEY': KP_TOKEN}
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/sequels_and_prequels"
     try:
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             data = response.json()
-            sequels = data.get('items', [])
-            return [(s.get('filmId'), s.get('nameRu') or s.get('nameEn', 'Без названия')) for s in sequels[:5]]
-        return []
+            items = data.get('items', [])
+            
+            sequels = []  # Сиквелы и приквелы
+            remakes = []  # Ремейки
+            
+            for item in items:
+                film_id = item.get('filmId')
+                name = item.get('nameRu') or item.get('nameEn', 'Без названия')
+                relation_type = item.get('relationType', '').upper()
+                
+                if film_id and name:
+                    # Проверяем тип связи
+                    if 'REMAKE' in relation_type or 'REMADE' in relation_type:
+                        remakes.append((film_id, name))
+                    else:
+                        # Сиквелы, приквелы и другие связи
+                        sequels.append((film_id, name))
+            
+            return {
+                'sequels': sequels[:5],  # Максимум 5
+                'remakes': remakes[:5]   # Максимум 5
+            }
+        return {'sequels': [], 'remakes': []}
     except Exception as e:
         logger.error(f"Ошибка get_sequels: {e}", exc_info=True)
-        return []
+        return {'sequels': [], 'remakes': []}
 
 def get_external_sources(kp_id):
     """Получает внешние источники для просмотра фильма"""
@@ -2323,7 +2352,7 @@ def add_and_announce(link, chat_id):
         kp_id = info.get('kp_id')
         if kp_id:
             # Используем kp_id для callback_data (короче, чем полная ссылка)
-            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+            markup.add(InlineKeyboardButton("📅 Запланировать", callback_data=f"plan_from_added:{kp_id}"))
         
         try:
             logger.info(f"Отправляем сообщение в чат {chat_id}")
@@ -2340,8 +2369,8 @@ def add_and_announce(link, chat_id):
                     
                     # Предлагаем отметить сезоны/серии как просмотренные
                     markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{info['kp_id']}"))
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
+                    markup.add(InlineKeyboardButton("✅ Отметить сезоны", callback_data=f"series_track:{info['kp_id']}"))
+                    markup.add(InlineKeyboardButton("🔔 Новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                     bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
             
             return True
@@ -2715,6 +2744,7 @@ def handle_reaction(reaction):
         return
     
     link = None
+    plan_data = None
     if is_watched:
         link = bot_messages.get(message_id)
         if not link:
@@ -2722,7 +2752,7 @@ def handle_reaction(reaction):
             plan_data = plan_notification_messages.get(message_id)
             if plan_data:
                 link = plan_data.get('link')
-                logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
+                logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}, plan_id={plan_data.get('plan_id')}")
         
         # Если не найдено, пытаемся найти в БД по message_id или другим способом
         if not link:
@@ -2791,6 +2821,15 @@ def handle_reaction(reaction):
             ) > 0
         """, (film_id, film_id, chat_id))
         
+        # Если это реакция на напоминание о плане, удаляем план после просмотра
+        if plan_data and plan_data.get('plan_id'):
+            plan_id_to_delete = plan_data.get('plan_id')
+            try:
+                cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id_to_delete, chat_id))
+                logger.info(f"[REACTION] План {plan_id_to_delete} удален после просмотра фильма {film_title}")
+            except Exception as e:
+                logger.warning(f"[REACTION] Не удалось удалить план {plan_id_to_delete}: {e}")
+        
         conn.commit()
         logger.info(f"[REACTION] Фильм {film_title} отмечен просмотренным пользователем {user_id}")
         
@@ -2798,20 +2837,59 @@ def handle_reaction(reaction):
         cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
         kp_row = cursor.fetchone()
         kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
+        
+        # Получаем message_id сообщения с фильмом для реплая
+        film_message_id = None
+        # Ищем message_id сообщения с фильмом в bot_messages
+        for msg_id, msg_link in bot_messages.items():
+            if msg_link == link:
+                film_message_id = msg_id
+                break
     
     # Получаем и отправляем факты о фильме ПЕРЕД сообщением об оценке
+    # Проверяем, были ли факты отправлены в течение суток
+    facts_sent_recently = False
     if kp_id:
-        facts = get_facts(kp_id)
-        if facts:
-            bot.send_message(chat_id, facts, parse_mode='HTML')
+        with db_lock:
+            cursor.execute('''
+                SELECT sent_at FROM facts_sent 
+                WHERE chat_id = %s AND kp_id = %s 
+                AND sent_at > NOW() - INTERVAL '1 day'
+            ''', (chat_id, kp_id))
+            recent_facts = cursor.fetchone()
+            if recent_facts:
+                facts_sent_recently = True
+                logger.info(f"[FACTS] Факты для фильма {kp_id} уже были отправлены в течение суток, пропускаем")
+        
+        if not facts_sent_recently:
+            facts = get_facts(kp_id)
+            if facts:
+                bot.send_message(chat_id, facts, parse_mode='HTML')
+                # Сохраняем информацию об отправке фактов
+                with db_lock:
+                    cursor.execute('''
+                        INSERT INTO facts_sent (chat_id, kp_id, sent_at)
+                        VALUES (%s, %s, NOW())
+                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET sent_at = NOW()
+                    ''', (chat_id, kp_id))
+                    conn.commit()
+                    logger.info(f"[FACTS] Факты отправлены для фильма {kp_id}, сохранено в БД")
     
     # Отправляем персональное сообщение пользователю с упоминанием
+    # Если есть message_id сообщения с фильмом, делаем реплай на него
     user_name = reaction.user.first_name if reaction.user else "Вы"
     user_mention = f"@{reaction.user.username}" if reaction.user and reaction.user.username else user_name
-    msg = bot.send_message(chat_id, 
+    
+    rating_text = (
         f"🎬 {user_mention}, фильм <b>{film_title}</b> отмечен как просмотренный!\n\n"
-        f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.",
-        parse_mode='HTML')
+        f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку."
+    )
+    
+    if film_message_id:
+        # Делаем реплай на сообщение с фильмом
+        msg = bot.send_message(chat_id, rating_text, parse_mode='HTML', reply_to_message_id=film_message_id)
+    else:
+        msg = bot.send_message(chat_id, rating_text, parse_mode='HTML')
     
     # Сохраняем связь message_id -> film_id для обработки оценки
     rating_messages[msg.message_id] = film_id
@@ -3686,24 +3764,39 @@ def handle_rating_internal(message, rating):
                 # Если средняя оценка > 9, показываем похожие фильмы и продолжения
                 if avg and avg > 9 and kp_id:
                     similars = get_similars(kp_id)
-                    sequels = get_sequels(kp_id)
+                    sequels_data = get_sequels(kp_id)
+                    sequels = sequels_data.get('sequels', [])
+                    remakes = sequels_data.get('remakes', [])
                     
-                    if similars or sequels:
+                    # Отправляем похожие фильмы отдельным сообщением
+                    if similars:
                         markup = InlineKeyboardMarkup(row_width=1)
-                        if similars:
-                            for fid, name in similars:
-                                if len(name) > 50:
-                                    name = name[:47] + "..."
-                                markup.add(InlineKeyboardButton(f"🎬 {name}", callback_data=f"add_similar:{fid}"))
-                        
-                        if sequels:
-                            for fid, name in sequels:
-                                if len(name) > 50:
-                                    name = name[:47] + "..."
-                                markup.add(InlineKeyboardButton(f"▶️ {name}", callback_data=f"add_similar:{fid}"))
-                        
-                        if markup.keyboard:
-                            bot.send_message(chat_id, "🎥 Фильм высоко оценён! Посмотреть похожие или продолжения?", reply_markup=markup)
+                        for fid, name in similars:
+                            # Ограничиваем длину для iPhone (максимум 30 символов с эмодзи)
+                            if len(name) > 28:
+                                name = name[:25] + "..."
+                            markup.add(InlineKeyboardButton(f"🎬 {name}", callback_data=f"add_similar:{fid}"))
+                        bot.send_message(chat_id, "🎬 Похожие фильмы:", reply_markup=markup)
+                    
+                    # Отправляем продолжения/сиквелы отдельным сообщением
+                    if sequels:
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        for fid, name in sequels:
+                            # Ограничиваем длину для iPhone (максимум 30 символов с эмодзи)
+                            if len(name) > 28:
+                                name = name[:25] + "..."
+                            markup.add(InlineKeyboardButton(f"▶️ {name}", callback_data=f"add_similar:{fid}"))
+                        bot.send_message(chat_id, "▶️ Продолжения и сиквелы:", reply_markup=markup)
+                    
+                    # Отправляем ремейки отдельным сообщением
+                    if remakes:
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        for fid, name in remakes:
+                            # Ограничиваем длину для iPhone (максимум 30 символов с эмодзи)
+                            if len(name) > 28:
+                                name = name[:25] + "..."
+                            markup.add(InlineKeyboardButton(f"🔄 {name}", callback_data=f"add_similar:{fid}"))
+                        bot.send_message(chat_id, "🔄 Ремейки:", reply_markup=markup)
         except Exception as e:
             logger.error(f"Ошибка при сохранении оценки: {e}", exc_info=True)
             bot.reply_to(message, "Произошла ошибка при сохранении оценки. Попробуйте позже.")
@@ -3846,6 +3939,73 @@ def main_text_handler(message):
         if step == 'waiting_session_time':
             # Обработка времени сеанса
             handle_edit_ticket_text_internal(message, state)
+            return
+    
+    # === user_search_state ===
+    if user_id in user_search_state and message.reply_to_message:
+        search_state = user_search_state[user_id]
+        # Проверяем, что реплай на правильное сообщение
+        if message.reply_to_message.message_id == search_state.get('message_id'):
+            # Игнорируем команды (начинающиеся с /)
+            if text.startswith('/'):
+                logger.info(f"[SEARCH] Игнорируем команду {text} в режиме поиска")
+                if user_id in user_search_state:
+                    del user_search_state[user_id]
+                return
+            
+            # Обрабатываем запрос поиска
+            query = text.strip()
+            if query:
+                logger.info(f"[SEARCH] Получен запрос через реплай: {query}")
+                # Удаляем состояние
+                if user_id in user_search_state:
+                    del user_search_state[user_id]
+                
+                # Выполняем поиск
+                try:
+                    films, total_pages = search_films(query, page=1)
+                    if not films:
+                        bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+                        return
+                    
+                    # Формируем сообщение с результатами
+                    results_text = f"🔍 Результаты поиска '{query}':\n\n"
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    
+                    for film in films[:10]:  # Показываем максимум 10 результатов на странице
+                        title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                        year = film.get('year') or film.get('releaseYear') or 'N/A'
+                        rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                        kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                        
+                        if kp_id:
+                            # Ограничиваем длину текста кнопки для iPhone (максимум 30 символов)
+                            button_text = f"{title} ({year})"
+                            if len(button_text) > 30:
+                                title_short = title[:25] if len(title) > 25 else title
+                                button_text = f"{title_short} ({year})"
+                                if len(button_text) > 30:
+                                    button_text = button_text[:27] + "..."
+                            results_text += f"• <b>{title}</b> ({year})"
+                            if rating != 'N/A':
+                                results_text += f" ⭐ {rating}"
+                            results_text += "\n"
+                            markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}"))
+                    
+                    # Добавляем пагинацию, если нужно
+                    if total_pages > 1:
+                        pagination_row = []
+                        query_encoded = query.replace(' ', '_')
+                        pagination_row.append(InlineKeyboardButton(f"📄 1/{total_pages}", callback_data="noop"))
+                        if total_pages > 1:
+                            pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                        markup.row(*pagination_row)
+                    
+                    bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов")
+                except Exception as e:
+                    logger.error(f"❌ Ошибка в /search через реплай: {e}", exc_info=True)
+                    bot.reply_to(message, "Произошла ошибка при обработке запроса поиска")
             return
     
     # === user_import_state ===
@@ -5058,7 +5218,11 @@ def handle_search(message):
         
         query = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
         if not query:
-            bot.reply_to(message, "❌ Укажите запрос, например: /search джон уик")
+            # Если запрос не указан, показываем сообщение с кнопкой отмены
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="search:cancel"))
+            msg = bot.reply_to(message, "Введите поисковый запрос", reply_markup=markup)
+            user_search_state[message.from_user.id] = {'message_id': msg.message_id, 'chat_id': message.chat.id}
             return
         
         logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
@@ -5083,10 +5247,14 @@ def handle_search(message):
             logger.info(f"[SEARCH] Фильм: title={title}, year={year}, kp_id={kp_id}")
             
             if kp_id:
-                # Ограничиваем длину текста кнопки
+                # Ограничиваем длину текста кнопки для iPhone (максимум 30 символов)
                 button_text = f"{title} ({year})"
-                if len(button_text) > 50:
-                    button_text = button_text[:47] + "..."
+                if len(button_text) > 30:
+                    # Сокращаем название, оставляя год
+                    title_short = title[:25] if len(title) > 25 else title
+                    button_text = f"{title_short} ({year})"
+                    if len(button_text) > 30:
+                        button_text = button_text[:27] + "..."
                 results_text += f"• <b>{title}</b> ({year})"
                 if rating != 'N/A':
                     results_text += f" ⭐ {rating}"
@@ -5100,7 +5268,7 @@ def handle_search(message):
             pagination_row = []
             # Кодируем запрос для callback_data (заменяем пробелы на подчеркивания)
             query_encoded = query.replace(' ', '_')
-            pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+            pagination_row.append(InlineKeyboardButton(f"📄 1/{total_pages}", callback_data="noop"))
             if total_pages > 1:
                 pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
             markup.row(*pagination_row)
@@ -5398,7 +5566,7 @@ def settings_command(message):
         
         # Сначала показываем меню выбора действия
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
+        markup.add(InlineKeyboardButton("😀 Эмодзи просмотра", callback_data="settings:emoji"))
         markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
         markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
         
@@ -5514,7 +5682,7 @@ def handle_settings_callback(call):
         if action == "back":
             # Возврат к главному меню settings
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
+            markup.add(InlineKeyboardButton("😀 Эмодзи просмотра", callback_data="settings:emoji"))
             markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
             markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
             
@@ -6610,7 +6778,7 @@ def plan_handler(message):
         # Если нет ссылки, отправляем новое сообщение с возможностью отправки по частям
         if not link:
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("❌ Выйти из режима", callback_data="plan:cancel"))
+            markup.add(InlineKeyboardButton("❌ Выйти", callback_data="plan:cancel"))
             reply_msg = bot.reply_to(message, "Пришлите ссылку на фильм в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
             # Устанавливаем состояние для получения данных по частям
             user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id}
@@ -7332,8 +7500,8 @@ def seasons_command(message):
             kp_id = row[2]
         
         button_text = title
-        if len(button_text) > 50:
-            button_text = button_text[:47] + "..."
+        if len(button_text) > 30:
+            button_text = button_text[:27] + "..."
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
     
     bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
@@ -7357,7 +7525,7 @@ def show_seasons_callback(call):
                 film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
             
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+            markup.add(InlineKeyboardButton("✅ Отметить сезоны", callback_data=f"series_track:{kp_id}"))
             
             # Проверяем, подписан ли пользователь
             if film_id:
@@ -7366,9 +7534,9 @@ def show_seasons_callback(call):
                 is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
                 
                 if is_subscribed:
-                    markup.add(InlineKeyboardButton("🔕 Отписаться от уведомлений", callback_data=f"series_unsubscribe:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔕 Отписаться", callback_data=f"series_unsubscribe:{kp_id}"))
                 else:
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔔 Новые серии", callback_data=f"series_subscribe:{kp_id}"))
             
             # Обновляем сообщение с актуальными данными о сезонах
             bot.edit_message_text(seasons_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -7416,7 +7584,7 @@ def premieres_period_callback(call):
             bot.edit_message_text("❌ Не удалось получить список премьер для выбранного периода.", chat_id, call.message.message_id)
             bot.answer_callback_query(call.id)
             return
-        
+    
         # Сохраняем премьеры для пагинации (можно использовать временное хранилище или передавать через callback_data)
         # Для простоты будем показывать первую страницу
         show_premieres_page(call, premieres, period, page=0)
@@ -7449,7 +7617,7 @@ def show_premieres_page(call, premieres, period, page=0):
         
         text = f"📅 <b>Премьеры {period_name}:</b>\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
-        
+    
         # Сортируем премьеры по дате выхода
         def get_premiere_date(p):
             """Извлекает дату премьеры из данных"""
@@ -7490,8 +7658,8 @@ def show_premieres_page(call, premieres, period, page=0):
             text += f"• <b>{title_ru}</b>{date_str}\n"
             
             button_text = title_ru
-            if len(button_text) > 50:
-                button_text = button_text[:47] + "..."
+            if len(button_text) > 30:
+                button_text = button_text[:27] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"premiere_detail:{kp_id}"))
         
         # Кнопки пагинации
@@ -7540,7 +7708,7 @@ def premiere_detail_handler(call):
     logger.info(f"[PREMIERES] Детали премьеры: {call.data}")
     kp_id = call.data.split(":")[1]
     chat_id = call.message.chat.id
-    
+        
     # Получаем полную информацию о фильме
     headers = {'X-API-KEY': KP_TOKEN}
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
@@ -7935,7 +8103,7 @@ def series_season_callback(call):
         if not all_watched:
             markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
         
-        markup.add(InlineKeyboardButton("◀️ Назад к сезонам", callback_data=f"series_track:{kp_id}"))
+        markup.add(InlineKeyboardButton("◀️ К сезонам", callback_data=f"series_track:{kp_id}"))
         
         bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         bot.answer_callback_query(call.id)
@@ -8768,9 +8936,11 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
             ticket_emoji = "🎟️ " if ticket_count > 0 else ""
             button_text = f"{ticket_emoji}{title} | {date_str}"
             
-            if len(button_text) > 60:
-                short_title = title[:50] + "..."
+            if len(button_text) > 30:
+                short_title = title[:20] + "..."
                 button_text = f"{ticket_emoji}{short_title} | {date_str}"
+                if len(button_text) > 30:
+                    button_text = button_text[:27] + "..."
             
             callback_data = f"ticket_session:{plan_id}"
             if file_id:
@@ -9531,7 +9701,8 @@ def random_start(message):
         
         # Шаг 0: Выбор режима
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("🎲 Обычный режим", callback_data="rand_mode:normal"))
+        markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+        markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
         
         # Проверяем, есть ли у пользователя больше 50 оценок (включая импортированные из КП)
         with db_lock:
@@ -9670,14 +9841,10 @@ def random_mode_handler(call):
         
         user_random_state[user_id]['available_periods'] = available_periods
         
-        markup = InlineKeyboardMarkup(row_width=2)
+        markup = InlineKeyboardMarkup(row_width=1)
         if available_periods:
-            for i in range(0, len(available_periods), 2):
-                row = []
-                row.append(InlineKeyboardButton(available_periods[i], callback_data=f"rand_period:{available_periods[i]}"))
-                if i+1 < len(available_periods):
-                    row.append(InlineKeyboardButton(available_periods[i+1], callback_data=f"rand_period:{available_periods[i+1]}"))
-                markup.row(*row)
+            for period in available_periods:
+                markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
         
         bot.answer_callback_query(call.id)
@@ -9755,17 +9922,12 @@ def random_period_handler(call):
                             available_periods.append(period)
                 user_random_state[user_id]['available_periods'] = available_periods
             
-            # Обновляем кнопки - используем только доступные периоды
-            markup = InlineKeyboardMarkup(row_width=2)
+            # Обновляем кнопки - используем только доступные периоды (в одну колонку для правильной ширины)
+            markup = InlineKeyboardMarkup(row_width=1)
             if available_periods:
-                for i in range(0, len(available_periods), 2):
-                    row = []
-                    for j in range(2):
-                        if i + j < len(available_periods):
-                            p = available_periods[i + j]
-                            label = f"✓ {p}" if p in periods else p
-                            row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
-                    markup.row(*row)
+                for p in available_periods:
+                    label = f"✓ {p}" if p in periods else p
+                    markup.add(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
             
             # Кнопка "Продолжить" появляется только если выбран хотя бы один период
             # "Пропустить" убирается, если выбран хотя бы один период
@@ -9838,7 +10000,7 @@ def _show_genre_step(call, chat_id, user_id):
                     genres.append(genre.strip())
             logger.info(f"[RANDOM] Genres found: {len(genres)}")
         
-        markup = InlineKeyboardMarkup(row_width=2)
+        markup = InlineKeyboardMarkup(row_width=1)
         if genres:
             for genre in sorted(set(genres))[:20]:  # Ограничиваем до 20 жанров
                 label = f"✓ {genre}" if genre in selected_genres else genre
@@ -9946,16 +10108,11 @@ def random_genre_handler(call):
             if not available_periods:
                 available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
             
-            markup = InlineKeyboardMarkup(row_width=2)
+            markup = InlineKeyboardMarkup(row_width=1)
             if available_periods:
-                for i in range(0, len(available_periods), 2):
-                    row = []
-                    for j in range(2):
-                        if i + j < len(available_periods):
-                            p = available_periods[i + j]
-                            label = f"✓ {p}" if p in periods else p
-                            row.append(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
-                    markup.row(*row)
+                for period in available_periods:
+                    label = f"✓ {period}" if period in periods else period
+                    markup.add(InlineKeyboardButton(label, callback_data=f"rand_period:{period}"))
             
             if periods:
                 markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_period:done"))
@@ -10037,7 +10194,7 @@ def _show_director_step(call, chat_id, user_id):
                     directors.append(director)
             logger.info(f"[RANDOM] Directors found: {len(directors)}")
         
-        markup = InlineKeyboardMarkup(row_width=2)
+        markup = InlineKeyboardMarkup(row_width=1)
         if directors:
             for d in directors:
                 label = f"✓ {d}" if d in selected_directors else d
@@ -10197,7 +10354,7 @@ def _show_actor_step(call, chat_id, user_id):
                             actor_counts[actor] = actor_counts.get(actor, 0) + 1
             logger.info(f"[RANDOM] Unique actors found: {len(actor_counts)}")
         
-        markup = InlineKeyboardMarkup(row_width=2)
+        markup = InlineKeyboardMarkup(row_width=1)
         if actor_counts:
             top_actors = sorted(actor_counts.items(), key=lambda x: x[1], reverse=True)[:10]
             for actor, _ in top_actors:
@@ -10304,6 +10461,143 @@ def _random_final(call, chat_id, user_id):
         state = user_random_state.get(user_id, {})
         logger.info(f"[RANDOM] State: {state}")
         
+        mode = state.get('mode')
+        
+        # Для режима "kinopoisk" используем поиск по кинопоиску
+        if mode == 'kinopoisk':
+            # Получаем фильтры из состояния
+            periods = state.get('periods', [])
+            genres = state.get('genres', [])
+            
+            # Формируем параметры поиска
+            search_params = {}
+            if periods:
+                # Определяем диапазон годов
+                min_year = None
+                max_year = None
+                for p in periods:
+                    if p == "До 1980":
+                        max_year = 1979
+                    elif p == "1980–1990":
+                        min_year = 1980 if min_year is None else min(min_year, 1980)
+                        max_year = 1990 if max_year is None else max(max_year, 1990)
+                    elif p == "1990–2000":
+                        min_year = 1990 if min_year is None else min(min_year, 1990)
+                        max_year = 2000 if max_year is None else max(max_year, 2000)
+                    elif p == "2000–2010":
+                        min_year = 2000 if min_year is None else min(min_year, 2000)
+                        max_year = 2010 if max_year is None else max(max_year, 2010)
+                    elif p == "2010–2020":
+                        min_year = 2010 if min_year is None else min(min_year, 2010)
+                        max_year = 2020 if max_year is None else max(max_year, 2020)
+                    elif p == "2020–сейчас":
+                        min_year = 2020 if min_year is None else min(min_year, 2020)
+                        max_year = datetime.now().year
+                
+                if min_year:
+                    search_params['yearFrom'] = min_year
+                if max_year:
+                    search_params['yearTo'] = max_year
+            
+            if genres:
+                # Берем первый жанр для поиска (API не поддерживает несколько жанров одновременно)
+                genre_map = {
+                    'драма': 1, 'комедия': 2, 'боевик': 3, 'триллер': 4, 'ужасы': 5,
+                    'фантастика': 6, 'детектив': 7, 'мелодрама': 8, 'приключения': 9,
+                    'фэнтези': 10, 'криминал': 11, 'военный': 12, 'семейный': 13
+                }
+                first_genre = genres[0].lower()
+                if first_genre in genre_map:
+                    search_params['genres'] = genre_map[first_genre]
+            
+            # Исключаем фильмы, которые уже в базе или просмотрены
+            exclude_kp_ids = []
+            with db_lock:
+                cursor.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND (watched = 1 OR kp_id IS NOT NULL)', (chat_id,))
+                existing_movies = cursor.fetchall()
+                for movie in existing_movies:
+                    kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
+                    if kp_id_val:
+                        exclude_kp_ids.append(str(kp_id_val))
+            
+            # Выполняем поиск по кинопоиску через топ фильмов
+            try:
+                # Используем API для получения топ фильмов с фильтрами
+                headers = {'X-API-KEY': KP_TOKEN}
+                url = "https://kinopoiskapiunofficial.tech/api/v2.2/films/top"
+                api_params = {'type': 'TOP_250_BEST_FILMS', 'page': 1}
+                
+                if search_params.get('yearFrom'):
+                    api_params['yearFrom'] = search_params['yearFrom']
+                if search_params.get('yearTo'):
+                    api_params['yearTo'] = search_params['yearTo']
+                
+                response = requests.get(url, params=api_params, headers=headers, timeout=15)
+                if response.status_code == 200:
+                    data = response.json()
+                    films = data.get('films', [])
+                    
+                    # Фильтруем по исключенным kp_id и жанрам
+                    filtered_films = []
+                    for film in films:
+                        kp_id_film = str(film.get('filmId') or film.get('kinopoiskId', ''))
+                        if kp_id_film and kp_id_film not in exclude_kp_ids:
+                            # Проверяем жанры, если указаны
+                            if genres:
+                                film_genres = [g.get('genre', '').lower() for g in film.get('genres', [])]
+                                if any(g.lower() in film_genres for g in genres):
+                                    filtered_films.append(film)
+                            else:
+                                filtered_films.append(film)
+                    
+                    if filtered_films:
+                        # Выбираем случайный фильм
+                        selected_film = random.choice(filtered_films)
+                        kp_id_result = str(selected_film.get('filmId') or selected_film.get('kinopoiskId', ''))
+                        
+                        if kp_id_result:
+                            # Получаем полную информацию о фильме
+                            link = f"https://www.kinopoisk.ru/film/{kp_id_result}/"
+                            movie_info = extract_movie_info(link)
+                            
+                            if movie_info:
+                                # Формируем текст карточки
+                                title = movie_info.get('title', 'Без названия')
+                                year = movie_info.get('year', '—')
+                                genres_str = movie_info.get('genres', '—')
+                                description = movie_info.get('description', '—')
+                                director = movie_info.get('director', 'Не указан')
+                                actors = movie_info.get('actors', '—')
+                                
+                                text = f"🎬 <b>{title}</b> ({year})\n\n"
+                                if description and description != '—':
+                                    text += f"{description[:300]}...\n\n"
+                                text += f"🎭 <b>Жанры:</b> {genres_str}\n"
+                                text += f"🎬 <b>Режиссёр:</b> {director}\n"
+                                if actors and actors != '—':
+                                    text += f"👥 <b>Актёры:</b> {actors[:100]}...\n"
+                                text += f"\n<a href='{link}'>Кинопоиск</a>"
+                                
+                                markup = InlineKeyboardMarkup()
+                                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_movie:{kp_id_result}"))
+                                
+                                try:
+                                    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                                except:
+                                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                                bot.answer_callback_query(call.id)
+                                del user_random_state[user_id]
+                                return
+            except Exception as e:
+                logger.error(f"[RANDOM KINOPOISK] Ошибка поиска: {e}", exc_info=True)
+            
+            # Если не удалось найти фильм
+            bot.edit_message_text("😔 Не удалось найти фильм по заданным критериям на Кинопоиске.", chat_id, call.message.message_id)
+            bot.answer_callback_query(call.id)
+            del user_random_state[user_id]
+            return
+        
+        # Для остальных режимов используем поиск в базе
         # Формируем запрос - исключаем фильмы, которые уже запланированы
         query = """SELECT m.id, m.title, m.year, m.genres, m.director, m.actors, m.description, m.link, m.kp_id 
                    FROM movies m 
@@ -10311,20 +10605,42 @@ def _random_final(call, chat_id, user_id):
                    AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s)"""
         params = [chat_id, chat_id]
         
-        # Фильтр по режиму (my_votes или group_votes)
+        # Фильтр по режиму
         mode = state.get('mode')
         if mode == 'my_votes':
             # Фильмы с импортированной оценкой пользователя 9 или 10 из Кинопоиска
+            # Исключаем просмотренные фильмы и фильмы, которым уже поставлена оценка
             query += """ AND m.id IN (
                 SELECT DISTINCT r2.film_id 
                 FROM ratings r2 
                 WHERE r2.chat_id = %s AND r2.user_id = %s AND r2.rating IN (9, 10) AND r2.is_imported = TRUE
-            )"""
+            )
+            AND m.id NOT IN (SELECT film_id FROM watched_movies WHERE chat_id = %s AND user_id = %s)
+            AND m.id NOT IN (SELECT film_id FROM ratings WHERE chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL))"""
+            params.append(chat_id)
+            params.append(user_id)
+            params.append(chat_id)
+            params.append(user_id)
             params.append(chat_id)
             params.append(user_id)
         elif mode == 'group_votes':
             # Фильмы со средней оценкой группы >= 8 (исключаем импортированные оценки)
-            query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
+            # Исключаем просмотренные группой фильмы
+            query += """ AND EXISTS (
+                SELECT 1 FROM ratings r 
+                WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                GROUP BY r.film_id, r.chat_id 
+                HAVING AVG(r.rating) >= 8
+            )
+            AND m.id NOT IN (SELECT DISTINCT film_id FROM watched_movies WHERE chat_id = %s)"""
+            params.append(chat_id)
+        elif mode == 'database':
+            # Режим "Рандом по своей базе" - только фильмы из базы
+            # Никаких дополнительных фильтров, только базовые (watched = 0, не в планах)
+            pass
+        elif mode == 'kinopoisk':
+            # Режим "Рандом по кинопоиску" - будет обрабатываться отдельно
+            pass
         
         # Фильтр по периодам
         periods = state.get('periods', [])
@@ -10827,10 +11143,14 @@ def handle_search_pagination_callback(call):
             kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
             
             if kp_id:
-                # Ограничиваем длину текста кнопки
+                # Ограничиваем длину текста кнопки для iPhone (максимум 30 символов)
                 button_text = f"{title} ({year})"
-                if len(button_text) > 50:
-                    button_text = button_text[:47] + "..."
+                if len(button_text) > 30:
+                    # Сокращаем название, оставляя год
+                    title_short = title[:25] if len(title) > 25 else title
+                    button_text = f"{title_short} ({year})"
+                    if len(button_text) > 30:
+                        button_text = button_text[:27] + "..."
                 results_text += f"• <b>{title}</b> ({year})"
                 if rating != 'N/A':
                     results_text += f" ⭐ {rating}"
@@ -10844,7 +11164,7 @@ def handle_search_pagination_callback(call):
             pagination_row = []
             if page > 1:
                 pagination_row.append(InlineKeyboardButton("◀️ Назад", callback_data=f"search_{query_encoded}_{page-1}"))
-            pagination_row.append(InlineKeyboardButton(f"Страница {page}/{total_pages}", callback_data="noop"))
+            pagination_row.append(InlineKeyboardButton(f"📄 {page}/{total_pages}", callback_data="noop"))
             if page < total_pages:
                 pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_{page+1}"))
             markup.row(*pagination_row)
@@ -10866,6 +11186,17 @@ def handle_search_pagination_callback(call):
 def handle_noop_callback(call):
     """Обработчик для плейсхолдера (кнопка с информацией о странице)"""
     bot.answer_callback_query(call.id)
+
+@bot.callback_query_handler(func=lambda call: call.data == "search:cancel")
+def handle_search_cancel(call):
+    """Обработчик кнопки отмены поиска"""
+    user_id = call.from_user.id
+    if user_id in user_search_state:
+        del user_search_state[user_id]
+        bot.edit_message_text("❌ Поиск отменён", call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id, "Поиск отменён")
+    else:
+        bot.answer_callback_query(call.id, "Нет активного поиска")
 
 
 # ==================== CALLBACK ОБРАБОТЧИКИ ДЛЯ /EDIT ====================
@@ -10921,9 +11252,11 @@ def edit_callback_handler(call):
                 type_text = "🎦" if plan_type == 'cinema' else "🏠"
                 button_text = f"{title} | {date_str} {type_text}"
                 
-                if len(button_text) > 60:
-                    short_title = title[:50] + "..."
+                if len(button_text) > 30:
+                    short_title = title[:20] + "..."
                     button_text = f"{short_title} | {date_str} {type_text}"
+                    if len(button_text) > 30:
+                        button_text = button_text[:27] + "..."
                 
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_plan:{plan_id}"))
         
@@ -10961,9 +11294,11 @@ def edit_callback_handler(call):
                 rating = row[3] if len(row) > 3 else None
             
             button_text = f"{title} ({year or '—'}) ⭐ {rating}/10"
-            if len(button_text) > 60:
-                short_title = title[:45] + "..."
+            if len(button_text) > 30:
+                short_title = title[:20] + "..."
                 button_text = f"{short_title} ({year or '—'}) ⭐ {rating}/10"
+                if len(button_text) > 30:
+                    button_text = button_text[:27] + "..."
             
             markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_rating:{film_id}"))
         
