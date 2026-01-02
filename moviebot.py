@@ -455,7 +455,9 @@ logger.info("[DEBUG] Все таблицы созданы, миграции вы
 # ОБРАБОТЧИКИ КОМАНД И СОБЫТИЙ БОТА
 # ============================================================================
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("import_count:"))
+def get_watched_emojis(chat_id):
+    """Возвращает эмодзи для отметки просмотренных для конкретного чата как список"""
+    with db_lock:
         cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
         row = cursor.fetchone()
         if row:
@@ -1049,10 +1051,519 @@ def resolve_cinema_votes():
     
     logger.info(f"Подведены итоги для {len(rows)} голосований")
 
+# Функции для случайных событий
+def get_random_events_enabled(chat_id):
+    """Проверяет, включены ли случайные события для чата"""
+    with db_lock:
+        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+        row = cursor.fetchone()
+        if row:
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            return value == 'true'
+    return True  # По умолчанию включено
+
+# Состояния для игры в кубик
+dice_game_state = {}  # chat_id: {'participants': {user_id: dice_value}, 'message_id': int, 'start_time': datetime}
+
+def check_weekend_schedule():
+    """Проверяет расписание на выходные (пт-сб-вс) и предлагает рандомный фильм, если нет планов"""
+    try:
+        now = datetime.now(plans_tz)
+        current_weekday = now.weekday()
+        
+        # Проверяем только в пятницу, субботу и воскресенье
+        if current_weekday not in [4, 5, 6]:  # 4=пятница, 5=суббота, 6=воскресенье
+            return
+        
+        # Получаем все чаты
+        with db_lock:
+            cursor.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor.fetchall()
+        
+        for row in chat_rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, включены ли случайные события
+            if not get_random_events_enabled(chat_id):
+                continue
+            
+            # Проверяем, есть ли планы на выходные (пт-сб-вс)
+            friday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            if current_weekday == 4:  # Пятница
+                friday = friday
+            elif current_weekday == 5:  # Суббота
+                friday = friday - timedelta(days=1)
+            else:  # Воскресенье
+                friday = friday - timedelta(days=2)
+            
+            sunday = friday + timedelta(days=2)
+            sunday = sunday.replace(hour=23, minute=59, second=59)
+            
+            # Проверяем планы на выходные
+            cursor.execute('''
+                SELECT COUNT(*) FROM plans
+                WHERE chat_id = %s 
+                AND plan_datetime >= %s 
+                AND plan_datetime <= %s
+            ''', (chat_id, friday, sunday))
+            plans_count = cursor.fetchone()
+            count = plans_count.get('count') if isinstance(plans_count, dict) else plans_count[0] if plans_count else 0
+            
+            if count == 0:
+                # Нет планов на выходные - предлагаем рандомный фильм
+                try:
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                    bot.send_message(
+                        chat_id,
+                        "🎬 На выходных нет запланированных фильмов!\n\nХотите выбрать рандомный фильм?",
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    logger.info(f"[RANDOM EVENTS] Предложен рандомный фильм для чата {chat_id}")
+                except Exception as e:
+                    logger.error(f"[RANDOM EVENTS] Ошибка при отправке предложения рандомного фильма: {e}")
+    except Exception as e:
+        logger.error(f"[RANDOM EVENTS] Ошибка в check_weekend_schedule: {e}", exc_info=True)
+
+def choose_random_participant():
+    """Раз в две недели выбирает случайного участника для выбора фильма"""
+    try:
+        now = datetime.now(plans_tz)
+        
+        # Получаем все чаты
+        with db_lock:
+            cursor.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor.fetchall()
+        
+        for row in chat_rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, включены ли случайные события
+            if not get_random_events_enabled(chat_id):
+                continue
+            
+            # Проверяем, когда последний раз выбирали участника
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_random_participant_date'", (chat_id,))
+            last_date_row = cursor.fetchone()
+            
+            if last_date_row:
+                last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
+                try:
+                    last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+                    days_passed = (now.date() - last_date).days
+                    if days_passed < 14:
+                        continue
+                except:
+                    pass
+            
+            # Получаем список активных участников из stats
+            cursor.execute('''
+                SELECT DISTINCT user_id, username 
+                FROM stats 
+                WHERE chat_id = %s 
+                AND timestamp >= %s
+            ''', (chat_id, (now - timedelta(days=30)).isoformat()))
+            participants = cursor.fetchall()
+            
+            if not participants:
+                continue
+            
+            # Выбираем случайного участника
+            participant = random.choice(participants)
+            user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+            username = participant.get('username') if isinstance(participant, dict) else participant[1]
+            
+            # Отправляем сообщение
+            try:
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                mention = f"@{username}" if username else f"<a href='tg://user?id={user_id}'>участник</a>"
+                bot.send_message(
+                    chat_id,
+                    f"🎬 <b>{mention}</b> выбери фильм на выходные!",
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                
+                # Сохраняем дату последнего выбора
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, 'last_random_participant_date', %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (chat_id, now.date().isoformat()))
+                conn.commit()
+                
+                logger.info(f"[RANDOM EVENTS] Выбран случайный участник {user_id} для чата {chat_id}")
+            except Exception as e:
+                logger.error(f"[RANDOM EVENTS] Ошибка при отправке сообщения участнику: {e}")
+    except Exception as e:
+        logger.error(f"[RANDOM EVENTS] Ошибка в choose_random_participant: {e}", exc_info=True)
+
+def start_dice_game():
+    """Раз в две недели запускает игру в кубик для выбора фильма"""
+    try:
+        now = datetime.now(plans_tz)
+        
+        # Получаем все чаты
+        with db_lock:
+            cursor.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor.fetchall()
+        
+        for row in chat_rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, включены ли случайные события
+            if not get_random_events_enabled(chat_id):
+                continue
+            
+            # Проверяем, когда последний раз запускали игру
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_dice_game_date'", (chat_id,))
+            last_date_row = cursor.fetchone()
+            
+            if last_date_row:
+                last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
+                try:
+                    last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+                    days_passed = (now.date() - last_date).days
+                    if days_passed < 14:
+                        continue
+                except:
+                    pass
+            
+            # Получаем список активных участников
+            cursor.execute('''
+                SELECT DISTINCT user_id, username 
+                FROM stats 
+                WHERE chat_id = %s 
+                AND timestamp >= %s
+            ''', (chat_id, (now - timedelta(days=30)).isoformat()))
+            participants = cursor.fetchall()
+            
+            if len(participants) < 2:
+                continue
+            
+            # Формируем список упоминаний
+            mentions = []
+            for p in participants:
+                user_id = p.get('user_id') if isinstance(p, dict) else p[0]
+                username = p.get('username') if isinstance(p, dict) else p[1]
+                if username:
+                    mentions.append(f"@{username}")
+                else:
+                    mentions.append(f"<a href='tg://user?id={user_id}'>участник</a>")
+            
+            mentions_text = ", ".join(mentions)
+            
+            # Отправляем сообщение с кнопкой
+            try:
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
+                msg = bot.send_message(
+                    chat_id,
+                    f"🎲 Испытай удачу! {mentions_text} Кто выберет фильм на выходные?",
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                
+                # Сохраняем состояние игры
+                dice_game_state[chat_id] = {
+                    'participants': {},
+                    'message_id': msg.message_id,
+                    'start_time': now
+                }
+                
+                # Сохраняем дату последнего запуска
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, 'last_dice_game_date', %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (chat_id, now.date().isoformat()))
+                conn.commit()
+                
+                logger.info(f"[RANDOM EVENTS] Запущена игра в кубик для чата {chat_id}")
+            except Exception as e:
+                logger.error(f"[RANDOM EVENTS] Ошибка при запуске игры в кубик: {e}")
+    except Exception as e:
+        logger.error(f"[RANDOM EVENTS] Ошибка в start_dice_game: {e}", exc_info=True)
+
+def check_cinema_reminder():
+    """Проверяет, не добавляли ли фильмы в кино 14 дней, и отправляет напоминание о премьерах"""
+    try:
+        now = datetime.now(plans_tz)
+        days_ago = now - timedelta(days=14)
+        
+        # Получаем все чаты
+        with db_lock:
+            cursor.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor.fetchall()
+        
+        for row in chat_rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, включены ли случайные события
+            if not get_random_events_enabled(chat_id):
+                continue
+            
+            # Проверяем, когда последний раз добавляли фильм в кино (plan_type='cinema')
+            cursor.execute('''
+                SELECT MAX(plan_datetime) FROM plans
+                WHERE chat_id = %s AND plan_type = 'cinema'
+            ''', (chat_id,))
+            last_cinema_row = cursor.fetchone()
+            
+            if last_cinema_row:
+                last_cinema = last_cinema_row.get('max') if isinstance(last_cinema_row, dict) else last_cinema_row[0]
+                if last_cinema:
+                    if isinstance(last_cinema, str):
+                        last_cinema = datetime.fromisoformat(last_cinema.replace('Z', '+00:00'))
+                    if last_cinema.tzinfo is None:
+                        last_cinema = pytz.utc.localize(last_cinema)
+                    last_cinema = last_cinema.astimezone(plans_tz)
+                    
+                    if (now - last_cinema).days < 14:
+                        continue
+            
+            # Проверяем, когда последний раз отправляли напоминание
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_cinema_reminder_date'", (chat_id,))
+            last_reminder_row = cursor.fetchone()
+            
+            if last_reminder_row:
+                last_reminder_str = last_reminder_row.get('value') if isinstance(last_reminder_row, dict) else last_reminder_row[0]
+                try:
+                    last_reminder = datetime.strptime(last_reminder_str, '%Y-%m-%d').date()
+                    if (now.date() - last_reminder).days < 14:
+                        continue
+                except:
+                    pass
+            
+            # Отправляем напоминание с премьерами
+            try:
+                # Получаем премьеры текущего месяца
+                premieres = get_premieres_for_period('current_month')
+                
+                if premieres:
+                    text = "Вы давно ничего не добавляли к просмотру в кинотеатре! Посмотрите, что сейчас идет в кино:\n\n"
+                    
+                    # Формируем список премьер (первые 10)
+                    for i, p in enumerate(premieres[:10], 1):
+                        title = p.get('nameRu') or p.get('nameOriginal') or 'Без названия'
+                        year = p.get('year') or ''
+                        kp_id = str(p.get('kinopoiskId', ''))
+                        text += f"{i}. {title}"
+                        if year:
+                            text += f" ({year})"
+                        text += "\n"
+                    
+                    if len(premieres) > 10:
+                        text += f"\n... и еще {len(premieres) - 10} премьер"
+                    
+                    text += "\n\nИспользуйте /premieres для просмотра всех премьер"
+                    
+                    bot.send_message(chat_id, text, parse_mode='HTML')
+                    
+                    # Сохраняем дату последнего напоминания
+                    cursor.execute('''
+                        INSERT INTO settings (chat_id, key, value)
+                        VALUES (%s, 'last_cinema_reminder_date', %s)
+                        ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                    ''', (chat_id, now.date().isoformat()))
+                    conn.commit()
+                    
+                    logger.info(f"[RANDOM EVENTS] Отправлено напоминание о премьерах для чата {chat_id}")
+            except Exception as e:
+                logger.error(f"[RANDOM EVENTS] Ошибка при отправке напоминания о премьерах: {e}")
+    except Exception as e:
+        logger.error(f"[RANDOM EVENTS] Ошибка в check_cinema_reminder: {e}", exc_info=True)
+
+# Обработчик для игры в кубик
+@bot.callback_query_handler(func=lambda call: call.data.startswith("dice_game:"))
+def dice_game_handler(call):
+    """Обработчик игры в кубик"""
+    try:
+        bot.answer_callback_query(call.id)
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        if chat_id not in dice_game_state:
+            bot.answer_callback_query(call.id, "Игра уже завершена", show_alert=True)
+            return
+        
+        game_state = dice_game_state[chat_id]
+        
+        # Проверяем, не истекло ли время игры (24 часа)
+        if (datetime.now(plans_tz) - game_state['start_time']).total_seconds() > 86400:
+            del dice_game_state[chat_id]
+            bot.answer_callback_query(call.id, "Время игры истекло", show_alert=True)
+            return
+        
+        # Отправляем стикер игральной кости
+        try:
+            # Используем send_dice для отправки игральной кости
+            dice_msg = bot.send_dice(chat_id)
+            # Сохраняем message_id для получения значения позже
+            game_state['dice_messages'] = game_state.get('dice_messages', {})
+            game_state['dice_messages'][dice_msg.message_id] = user_id
+            
+            # Сохраняем информацию об участнике
+            if user_id not in game_state['participants']:
+                game_state['participants'][user_id] = {
+                    'username': call.from_user.username or call.from_user.first_name,
+                    'dice_message_id': dice_msg.message_id
+                }
+                
+                # Проверяем, все ли участники бросили кубик
+                # Получаем список участников из stats
+                with db_lock:
+                    cursor.execute('''
+                        SELECT DISTINCT user_id 
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND timestamp >= %s
+                    ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat()))
+                    all_participants = [row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+                
+                # Ждем, пока все участники бросят кубик, или через 5 минут определяем победителя
+                if len(game_state['participants']) >= len(all_participants) or (datetime.now(plans_tz) - game_state['start_time']).total_seconds() > 300:
+                    # Определяем победителя
+                    max_value = max(p['value'] for p in game_state['participants'].values())
+                    winners = [uid for uid, p in game_state['participants'].items() if p['value'] == max_value]
+                    
+                    if len(winners) == 1:
+                        # Есть победитель
+                        winner_id = winners[0]
+                        winner_info = game_state['participants'][winner_id]
+                        winner_name = winner_info.get('username', 'участник')
+                        
+                        # Отправляем сообщение победителю
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                        mention = f"@{winner_name}" if winner_name.startswith('@') else f"<a href='tg://user?id={winner_id}'>@{winner_name}</a>"
+                        bot.send_message(
+                            chat_id,
+                            f"🎉 Победитель: <b>{mention}</b>! Выбери фильм на выходные!",
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                        
+                        # Удаляем состояние игры
+                        del dice_game_state[chat_id]
+                    else:
+                        # Ничья - перекидываем
+                        bot.send_message(
+                            chat_id,
+                            f"🤝 Ничья! У {len(winners)} участников выпало {max_value}. Перекидываем кубик!",
+                            parse_mode='HTML'
+                        )
+                        # Сбрасываем результаты для перекидывания
+                        game_state['participants'] = {}
+                        game_state['start_time'] = datetime.now(plans_tz)
+        except Exception as e:
+            logger.error(f"[RANDOM EVENTS] Ошибка при отправке кубика: {e}")
+            bot.answer_callback_query(call.id, "Ошибка при отправке кубика", show_alert=True)
+    except Exception as e:
+        logger.error(f"[RANDOM EVENTS] Ошибка в dice_game_handler: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
+
+# Обработчик для получения значения кубика из update
+@bot.message_handler(content_types=['dice'])
+def handle_dice_result(message):
+    """Обработчик получения значения кубика"""
+    try:
+        if not message.dice or message.dice.emoji != '🎲':
+            return
+        
+        chat_id = message.chat.id
+        if chat_id not in dice_game_state:
+            return
+        
+        game_state = dice_game_state[chat_id]
+        dice_message_id = message.message_id
+        dice_value = message.dice.value
+        
+        # Находим пользователя по message_id кубика
+        user_id = game_state.get('dice_messages', {}).get(dice_message_id)
+        if not user_id:
+            # Пробуем найти по участникам
+            for uid, p in game_state.get('participants', {}).items():
+                if p.get('dice_message_id') == dice_message_id:
+                    user_id = uid
+                    break
+        
+        if not user_id:
+            return
+        
+        # Сохраняем значение кубика
+        if user_id in game_state['participants']:
+            game_state['participants'][user_id]['value'] = dice_value
+            
+            # Проверяем, все ли участники бросили кубик
+            with db_lock:
+                cursor.execute('''
+                    SELECT DISTINCT user_id 
+                    FROM stats 
+                    WHERE chat_id = %s 
+                    AND timestamp >= %s
+                ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat()))
+                all_participants = [row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
+            
+            # Проверяем, есть ли значения у всех участников
+            participants_with_values = [uid for uid, p in game_state['participants'].items() if 'value' in p]
+            
+            # Ждем 30 секунд после последнего броска или если все участники бросили
+            if len(participants_with_values) >= len(all_participants) or (datetime.now(plans_tz) - game_state['start_time']).total_seconds() > 300:
+                # Определяем победителя
+                participants_with_values_dict = {uid: p['value'] for uid, p in game_state['participants'].items() if 'value' in p}
+                if participants_with_values_dict:
+                    max_value = max(participants_with_values_dict.values())
+                    winners = [uid for uid, val in participants_with_values_dict.items() if val == max_value]
+                    
+                    if len(winners) == 1:
+                        # Есть победитель
+                        winner_id = winners[0]
+                        winner_info = game_state['participants'][winner_id]
+                        winner_name = winner_info.get('username', 'участник')
+                        
+                        # Отправляем сообщение победителю
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                        mention = f"@{winner_name}" if winner_name and not winner_name.startswith('@') else (winner_name if winner_name else f"<a href='tg://user?id={winner_id}'>участник</a>")
+                        bot.send_message(
+                            chat_id,
+                            f"🎉 Победитель: <b>{mention}</b>! Выбери фильм на выходные!",
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                        
+                        # Удаляем состояние игры
+                        del dice_game_state[chat_id]
+                    elif len(winners) > 1:
+                        # Ничья - перекидываем
+                        bot.send_message(
+                            chat_id,
+                            f"🤝 Ничья! У {len(winners)} участников выпало {max_value}. Перекидываем кубик!",
+                            parse_mode='HTML'
+                        )
+                        # Сбрасываем результаты для перекидывания
+                        game_state['participants'] = {}
+                        game_state['start_time'] = datetime.now(plans_tz)
+                        game_state['dice_messages'] = {}
+    except Exception as e:
+        logger.error(f"[RANDOM EVENTS] Ошибка в handle_dice_result: {e}", exc_info=True)
+
 # Добавляем задачи очистки и голосования в scheduler
 scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
 scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
+
+# Добавляем задачи для случайных событий
+scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri-sun', hour=10, minute=0, timezone=plans_tz, id='check_weekend_schedule')  # каждый день выходных в 10:00
+scheduler.add_job(choose_random_participant, 'cron', day_of_week='mon-sun', hour=12, minute=0, timezone=plans_tz, id='choose_random_participant')  # каждый день в 12:00 (будет проверять 14 дней)
+scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minute=0, timezone=plans_tz, id='start_dice_game')  # каждый день в 14:00 (будет проверять 14 дней)
+scheduler.add_job(check_cinema_reminder, 'cron', day_of_week='mon-sun', hour=11, minute=0, timezone=plans_tz, id='check_cinema_reminder')  # каждый день в 11:00 (будет проверять 14 дней)
 
 def send_rating_reminder(chat_id, film_id, film_title, user_id):
     """Отправляет напоминание пользователю об оценке фильма на следующий день после просмотра"""
@@ -1983,6 +2494,129 @@ def get_premieres(year=None, month=None):
         logger.error(f"[PREMIERES] Ошибка: {e}")
     
         return []
+
+# Обработчик для показа деталей премьеры с постером и трейлером
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_detail:"))
+def premiere_detail_handler(call):
+    """Показывает детали премьеры с постером и трейлером"""
+    try:
+        bot.answer_callback_query(call.id)
+        kp_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        
+        # Получаем полную информацию о фильме
+        headers = {'X-API-KEY': KP_TOKEN}
+        url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+        
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            bot.answer_callback_query(call.id, "Не удалось загрузить данные фильма", show_alert=True)
+            return
+        
+        data = response.json()
+        
+        title = data.get('nameRu') or data.get('nameOriginal') or "Без названия"
+        year = data.get('year') or '—'
+        poster_url = data.get('posterUrlPreview') or data.get('posterUrl')
+        trailer_url = None
+        
+        # Ищем трейлер
+        videos = data.get('videos', {}).get('trailers', [])
+        if videos:
+            trailer_url = videos[0].get('url')  # Первый трейлер
+        
+        description = data.get('description') or data.get('shortDescription') or "Нет описания"
+        genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
+        countries = ', '.join([c['country'] for c in data.get('countries', [])]) or '—'
+        
+        # Получаем дату премьеры
+        premiere_date = None
+        premiere_date_str = ""
+        for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+            date_value = data.get(date_field)
+            if date_value:
+                try:
+                    if 'T' in str(date_value):
+                        premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                    else:
+                        premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                    break
+                except:
+                    continue
+        
+        text = f"<b>{title}</b> ({year})\n\n"
+        if premiere_date_str:
+            text += f"📅 Премьера: {premiere_date_str}\n\n"
+        text += f"{description}\n\n"
+        text += f"🌍 {countries}\n"
+        text += f"🎭 {genres}\n"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"premiere_add:{kp_id}"))
+        
+        if premiere_date:
+            with db_lock:
+                cursor.execute('''
+                    SELECT id FROM premiere_reminders 
+                    WHERE chat_id = %s AND user_id = %s AND kp_id = %s
+                ''', (chat_id, call.from_user.id, kp_id))
+                existing = cursor.fetchone()
+            
+            if not existing:
+                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+                markup.add(InlineKeyboardButton("🔔 Напомнить о выходе премьеры", callback_data=f"premiere_remind:{kp_id}:{date_for_callback}"))
+        
+        # Отправляем с постером
+        if poster_url:
+            try:
+                bot.send_photo(
+                    chat_id,
+                    poster_url,
+                    caption=text,
+                    parse_mode='HTML',
+                    reply_markup=markup
+                )
+                bot.delete_message(chat_id, call.message.message_id)
+            except Exception as e:
+                logger.error(f"[PREMIERES DETAIL] Ошибка отправки фото: {e}")
+                bot.edit_message_text(
+                    text,
+                    chat_id,
+                    call.message.message_id,
+                    parse_mode='HTML',
+                    reply_markup=markup,
+                    disable_web_page_preview=False
+                )
+        else:
+            bot.edit_message_text(
+                text,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML',
+                reply_markup=markup,
+                disable_web_page_preview=False
+            )
+        
+        # Отправляем трейлер, если есть
+        if trailer_url:
+            try:
+                # Пытаемся отправить как видео
+                bot.send_video(chat_id, trailer_url, caption=f"📺 Трейлер: <b>{title}</b>", parse_mode='HTML')
+            except Exception as e:
+                logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как видео: {e}")
+                try:
+                    # Если не получилось как видео, отправляем как ссылку
+                    bot.send_message(chat_id, f"📺 <a href='{trailer_url}'>Смотреть трейлер: {title}</a>", parse_mode='HTML')
+                except Exception as e2:
+                    logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как ссылки: {e2}")
+        
+    except Exception as e:
+        logger.error(f"[PREMIERES DETAIL] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка загрузки фильма", show_alert=True)
+        except:
+            pass
 
 # Новая функция для поиска фильмов через API
 def search_films(query, page=1):
@@ -5280,6 +5914,7 @@ def settings_command(message):
         markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
         markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
         markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+        markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
         
         sent = bot.send_message(chat_id,
             f"⚙️ <b>Настройки</b>\n\n"
@@ -5390,12 +6025,82 @@ def handle_settings_callback(call):
             )
             return
         
+        if action == "random_events":
+            # Показываем настройку случайных событий
+            with db_lock:
+                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+                row = cursor.fetchone()
+                is_enabled = row and row.get('value') == 'true' if isinstance(row, dict) else (row and row[0] == 'true' if row else False)
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            if is_enabled:
+                markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
+            else:
+                markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+            
+            status_text = "включены" if is_enabled else "выключены"
+            bot.edit_message_text(
+                f"🎲 <b>Случайные события</b>\n\n"
+                f"Текущий статус: <b>{status_text}</b>\n\n"
+                f"Случайные события включают:\n"
+                f"• Предложение рандомного фильма, если на выходных нет планов\n"
+                f"• Выбор случайного участника для выбора фильма (раз в 2 недели)\n"
+                f"• Игра в кубик для выбора фильма (раз в 2 недели)\n"
+                f"• Напоминание о премьерах, если давно не добавляли фильмы в кино",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        
+        if action.startswith("random_events:"):
+            # Включение/выключение случайных событий
+            sub_action = action.split(":", 1)[1]
+            new_value = 'true' if sub_action == 'enable' else 'false'
+            
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, 'random_events_enabled', %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (chat_id, new_value))
+                conn.commit()
+            
+            status_text = "включены" if new_value == 'true' else "выключены"
+            bot.answer_callback_query(call.id, f"Случайные события {status_text}")
+            
+            # Обновляем сообщение
+            markup = InlineKeyboardMarkup(row_width=1)
+            if new_value == 'true':
+                markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
+            else:
+                markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+            
+            bot.edit_message_text(
+                f"🎲 <b>Случайные события</b>\n\n"
+                f"Текущий статус: <b>{status_text}</b>\n\n"
+                f"Случайные события включают:\n"
+                f"• Предложение рандомного фильма, если на выходных нет планов\n"
+                f"• Выбор случайного участника для выбора фильма (раз в 2 недели)\n"
+                f"• Игра в кубик для выбора фильма (раз в 2 недели)\n"
+                f"• Напоминание о премьерах, если давно не добавляли фильмы в кино",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        
         if action == "back":
             # Возврат к главному меню settings
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
             markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
             markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+            markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
             
             bot.edit_message_text(
                 f"⚙️ <b>Настройки</b>\n\n"
