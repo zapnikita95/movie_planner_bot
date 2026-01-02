@@ -5118,6 +5118,15 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
         if not rows:
             text = "⏳ Нет непросмотренных фильмов!"
             markup = None
+            if message_id:
+                try:
+                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
+                except:
+                    bot.send_message(chat_id, text, reply_markup=markup)
+            else:
+                bot.send_message(chat_id, text, reply_markup=markup)
+            logger.info(f"✅ Ответ на /list отправлен пользователю {user_id}: нет фильмов")
+            return
         else:
             total_movies = len(rows)
             total_pages = (total_movies + MOVIES_PER_PAGE - 1) // MOVIES_PER_PAGE  # Округление вверх
