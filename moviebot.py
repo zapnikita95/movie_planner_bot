@@ -1157,14 +1157,14 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 
                 # Добавляем фильм в базу (если еще нет)
                 try:
-                with db_lock:
-                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                    film_row = cursor.fetchone()
-                    
-                    if film_row:
-                        film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                    with db_lock:
+                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        film_row = cursor.fetchone()
+                        
+                        if film_row:
+                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
                             logger.debug(f"[IMPORT] Фильм {kp_id} уже существует в базе, film_id={film_id}")
-                    else:
+                        else:
                             # Фильма нет в базе - получаем полную информацию через API v2.2
                             logger.debug(f"[IMPORT] Получаем информацию о новом фильме {kp_id} через API")
                             info = None
@@ -1233,13 +1233,13 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             
                             # Добавляем фильм в базу
                             logger.debug(f"[IMPORT] Добавляем новый фильм {kp_id}: {info['title']}")
-                        cursor.execute('''
-                            INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                            RETURNING id
-                        ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], 
-                              info['description'], info['director'], info['actors'], 1 if info.get('is_series') else 0))
+                            cursor.execute('''
+                                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                                RETURNING id
+                            ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], 
+                                  info['description'], info['director'], info['actors'], 1 if info.get('is_series') else 0))
                             film_row = cursor.fetchone()
                             if not film_row:
                                 # Если RETURNING не вернул результат (может быть при конфликте), делаем SELECT
@@ -1253,7 +1253,7 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             logger.debug(f"[IMPORT] Фильм добавлен, film_id={film_id}")
                         
                         # Проверяем, есть ли уже оценка у этого пользователя для этого фильма
-                    cursor.execute('''
+                        cursor.execute('''
                             SELECT rating FROM ratings 
                             WHERE chat_id = %s AND film_id = %s AND user_id = %s
                         ''', (chat_id, film_id, user_id))
@@ -1273,11 +1273,11 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
                             VALUES (%s, %s, %s, %s, TRUE)
                             ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE
-                    ''', (chat_id, film_id, user_id, user_rating))
-                    conn.commit()
-                
-                imported_count += 1
-                logger.info(f"[IMPORT] Импортирован фильм {info['title']} с оценкой {user_rating}")
+                        ''', (chat_id, film_id, user_id, user_rating))
+                        conn.commit()
+                        
+                        imported_count += 1
+                        logger.info(f"[IMPORT] Импортирован фильм {info['title']} с оценкой {user_rating}")
                 except Exception as db_error:
                     logger.error(f"[IMPORT] Ошибка при работе с БД для фильма {kp_id}: {db_error}", exc_info=True)
                     continue
@@ -1360,15 +1360,15 @@ def handle_import_count_callback(call):
                 imported = import_kp_ratings(kp_user_id, chat_id, user_id, count)
                 
                 # Отправляем результат
-        bot.edit_message_text(
-            f"✅ <b>Импорт завершён!</b>\n\n"
+                bot.edit_message_text(
+                    f"✅ <b>Импорт завершён!</b>\n\n"
                     f"ID пользователя: <code>{kp_user_id}</code>\n"
                     f"Загружено новых оценок: <b>{imported}</b>\n\n"
-            f"Оценки загружены в базу! 🎉",
+                    f"Оценки загружены в базу! 🎉",
                     chat_id, status_msg.message_id, parse_mode='HTML'
-        )
-        
-        logger.info(f"[IMPORT] Импорт завершён для user_id={user_id}, kp_user_id={kp_user_id}, imported={imported}")
+                )
+                
+                logger.info(f"[IMPORT] Импорт завершён для user_id={user_id}, kp_user_id={kp_user_id}, imported={imported}")
             except Exception as e:
                 logger.error(f"[IMPORT] Ошибка в фоновом импорте: {e}", exc_info=True)
                 try:
@@ -7302,12 +7302,12 @@ def premieres_period_callback(call):
         
         # Получаем премьеры для выбранного периода
         premieres = get_premieres_for_period(period)
-    
-    if not premieres:
+        
+        if not premieres:
             bot.edit_message_text("❌ Не удалось получить список премьер для выбранного периода.", chat_id, call.message.message_id)
             bot.answer_callback_query(call.id)
-        return
-    
+            return
+        
         # Сохраняем премьеры для пагинации (можно использовать временное хранилище или передавать через callback_data)
         # Для простоты будем показывать первую страницу
         show_premieres_page(call, premieres, period, page=0)
@@ -7339,8 +7339,8 @@ def show_premieres_page(call, premieres, period, page=0):
         period_name = period_names.get(period, 'периода')
         
         text = f"📅 <b>Премьеры {period_name}:</b>\n\n"
-    markup = InlineKeyboardMarkup(row_width=1)
-    
+        markup = InlineKeyboardMarkup(row_width=1)
+        
         # Сортируем премьеры по дате выхода
         def get_premiere_date(p):
             """Извлекает дату премьеры из данных"""
@@ -7429,9 +7429,9 @@ def premieres_page_callback(call):
 def premiere_detail_handler(call):
     """Показывает детали премьеры с постером и трейлером"""
     logger.info(f"[PREMIERES] Детали премьеры: {call.data}")
-        kp_id = call.data.split(":")[1]
-        chat_id = call.message.chat.id
-        
+    kp_id = call.data.split(":")[1]
+    chat_id = call.message.chat.id
+    
     # Получаем полную информацию о фильме
     headers = {'X-API-KEY': KP_TOKEN}
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
@@ -7472,7 +7472,7 @@ def premiere_detail_handler(call):
                         try:
                             if 'T' in str(date_value):
                                 premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-        else:
+                            else:
                                 premiere_date = datetime.strptime(str(date_value), fmt).date()
                             premiere_date_str = premiere_date.strftime('%d.%m.%Y')
                             break
@@ -7606,8 +7606,8 @@ def premiere_remind_handler(call):
         if premiere_date_str:
             try:
                 premiere_date = datetime.strptime(premiere_date_str, '%d.%m.%Y').date()
-        except:
-            pass
+            except:
+                pass
         
         # Если не получилось из строки, пробуем найти в данных фильма
         if not premiere_date:
@@ -11501,7 +11501,7 @@ def webhook():
         
         logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates")
         try:
-        bot.process_new_updates([update])
+            bot.process_new_updates([update])
             logger.info(f"[WEBHOOK] bot.process_new_updates завершен успешно")
         except Exception as e:
             logger.error(f"[WEBHOOK] Ошибка в bot.process_new_updates: {e}", exc_info=True)
