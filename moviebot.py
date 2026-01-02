@@ -6798,11 +6798,16 @@ def ticket_new_session_callback(call):
     parts = call.data.split(":")
     file_id = parts[1] if len(parts) > 1 else None
     
+    logger.info(f"[TICKET NEW CALLBACK] Пользователь {user_id} нажал 'Добавить новый сеанс', file_id={file_id}")
+    
     user_ticket_state[user_id] = {
         'step': 'waiting_new_session',
         'file_id': file_id,
         'chat_id': chat_id
     }
+    
+    logger.info(f"[TICKET NEW CALLBACK] Установлено состояние: step=waiting_new_session, file_id={file_id}, chat_id={chat_id}")
+    logger.info(f"[TICKET NEW CALLBACK] Текущее состояние пользователя {user_id}: {user_ticket_state.get(user_id)}")
     
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
@@ -6816,6 +6821,7 @@ def ticket_new_session_callback(call):
         chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
     )
     bot.answer_callback_query(call.id)
+    logger.info(f"[TICKET NEW CALLBACK] Сообщение отправлено пользователю {user_id}")
 
 
 # ==================== ДОПОЛНИТЕЛЬНЫЕ ОБРАБОТЧИКИ ДЛЯ РЕДАКТИРОВАНИЯ ПЛАНОВ ====================
