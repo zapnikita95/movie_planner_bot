@@ -6974,8 +6974,17 @@ def webhook():
                 logger.info(f"[WEBHOOK] Update содержит reply_to_message: message_id={update.message.reply_to_message.message_id}")
             else:
                 logger.info(f"[WEBHOOK] Update.message есть, но reply_to_message отсутствует")
+            
+            # Проверяем, является ли это командой
+            if update.message.text and update.message.text.startswith('/'):
+                logger.info(f"[WEBHOOK] Обнаружена команда: {update.message.text}")
+                # Проверяем, есть ли обработчик для этой команды
+                command = update.message.text.split()[0] if update.message.text else None
+                logger.info(f"[WEBHOOK] Команда для обработки: {command}")
         
+        logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates")
         bot.process_new_updates([update])
+        logger.info(f"[WEBHOOK] bot.process_new_updates завершен")
         return ''
     else:
         abort(403)
