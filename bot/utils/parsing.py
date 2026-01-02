@@ -45,10 +45,6 @@ def extract_kp_id_from_text(text):
 
 
 def extract_kp_user_id(text):
-
-
-def extract_kp_user_id(text):
-
     """Извлекает ID пользователя Кинопоиска из текста (ID или ссылка)"""
 
     import re
@@ -71,9 +67,6 @@ def extract_kp_user_id(text):
 
     return None
 
-
-
-def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
 
 
 def parse_session_time(text, user_tz):
@@ -200,9 +193,6 @@ def parse_session_time(text, user_tz):
 
 
 
-def get_user_timezone_or_default(user_id):
-
-
 def detect_timezone_from_message(message_date_utc):
 
     """Пытается определить часовой пояс по времени сообщения (UTC).
@@ -268,10 +258,6 @@ def detect_timezone_from_message(message_date_utc):
 
 
 def check_timezone_change(user_id, message_date_utc):
-
-
-def check_timezone_change(user_id, message_date_utc):
-
     """Проверяет, изменился ли часовой пояс пользователя.
 
     Возвращает True если нужно уточнить часовой пояс, False если все ок"""
@@ -359,10 +345,6 @@ def check_timezone_change(user_id, message_date_utc):
 
 
 def show_timezone_selection(chat_id, user_id, prompt_text="Выберите часовой пояс:"):
-
-
-def show_timezone_selection(chat_id, user_id, prompt_text="Выберите часовой пояс:"):
-
     """Показывает выбор часового пояса пользователю"""
 
     current_tz = get_user_timezone(user_id)
@@ -410,9 +392,3 @@ def show_timezone_selection(chat_id, user_id, prompt_text="Выберите ча
         parse_mode='HTML'
 
     )
-
-
-
-def get_watched_reactions(chat_id):
-
-
