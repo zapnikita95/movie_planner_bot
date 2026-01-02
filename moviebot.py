@@ -7562,11 +7562,11 @@ def show_schedule(message):
                 else:  # home
                     home_plans.append(plan_info)
         
-        # Формируем сообщение с кнопками
-        markup = InlineKeyboardMarkup(row_width=1)
+        # Отправляем два отдельных сообщения: одно для кино, другое для дома
         
-        # Секция: Премьеры в кино
+        # Сообщение 1: Премьеры в кино
         if cinema_plans:
+            cinema_markup = InlineKeyboardMarkup(row_width=1)
             for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
                 ticket_emoji = "🎟️ " if has_ticket else ""
                 button_text = f"{ticket_emoji}{title} | {date_str}"
@@ -7577,10 +7577,14 @@ def show_schedule(message):
                     if len(button_text) > 30:
                         button_text = button_text[:27] + "..."
                 
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"schedule_film:{plan_id}"))
+                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"schedule_film:{plan_id}"))
+            
+            cinema_text = "🎦 <b>Премьеры в кино:</b>\n\nВыберите фильм для просмотра информации"
+            bot.reply_to(message, cinema_text, reply_markup=cinema_markup, parse_mode='HTML')
         
-        # Секция: Просмотры дома
+        # Сообщение 2: Просмотры дома
         if home_plans:
+            home_markup = InlineKeyboardMarkup(row_width=1)
             for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
                 button_text = f"{title} | {date_str}"
                 
@@ -7590,16 +7594,18 @@ def show_schedule(message):
                     if len(button_text) > 30:
                         button_text = button_text[:27] + "..."
                 
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"schedule_film:{plan_id}"))
+                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"schedule_film:{plan_id}"))
+            
+            home_text = "🏠 <b>Просмотры дома:</b>\n\nВыберите фильм для просмотра информации"
+            # Если есть кино, отправляем как новое сообщение, иначе как reply
+            if cinema_plans:
+                bot.send_message(chat_id, home_text, reply_markup=home_markup, parse_mode='HTML')
+            else:
+                bot.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
         
-        text = "📅 <b>Запланированные просмотры:</b>\n\n"
-        if cinema_plans:
-            text += "🎦 Премьеры в кино:\n"
-        if home_plans:
-            text += "🏠 Просмотры дома:\n"
-        text += "\nВыберите фильм для просмотра информации"
-        
-        bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        # Если нет ни кино, ни дома (не должно произойти, но на всякий случай)
+        if not cinema_plans and not home_plans:
+            bot.reply_to(message, "📅 Нет запланированных просмотров.")
         
         # Отдельным сообщением показываем раздел "Ожидаю" (фильмы, которые выйдут через 2+ месяца)
         now = datetime.now(user_tz).date()
