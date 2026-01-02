@@ -7251,7 +7251,6 @@ if IS_PRODUCTION:
     logger.info(f"Запускаем Flask сервер на 0.0.0.0:{port}")
     
     # Это важно — чтобы Render сразу увидел порт
-    import socket
     logger.info(f"Текущий хост: {socket.gethostname()}")
     
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
