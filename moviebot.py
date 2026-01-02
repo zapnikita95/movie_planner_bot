@@ -1177,13 +1177,34 @@ def get_facts(kp_id):
             data = response.json()
             facts = data.get('items', [])
             if facts:
-                text = "🤔 <b>Интересные факты о фильме:</b>\n\n"
-                for fact in facts[:5]:  # Топ-5 фактов
+                # Разделяем факты на FACTS и BLOOPERS
+                facts_list = []
+                bloopers_list = []
+                
+                for fact in facts:
                     fact_text = fact.get('text', '').strip()
                     fact_type = fact.get('type', '')
                     if fact_text:
+                        # Исправляем HTML-сущности
+                        fact_text = fact_text.replace('&laquo;', '«').replace('&raquo;', '»').replace('&quot;', '"').replace('&amp;', '&')
+                        if fact_type == 'FACT':
+                            facts_list.append((fact_type, fact_text))
+                        elif fact_type == 'BLOOPER':
+                            bloopers_list.append((fact_type, fact_text))
+                
+                text = "🤔 <b>Интересные факты о фильме:</b>\n\n"
+                
+                # Сначала FACTS
+                if facts_list:
+                    for fact_type, fact_text in facts_list[:3]:  # Максимум 3 факта
                         text += f"• <b>{fact_type}:</b> {fact_text}\n\n"
-                return text
+                
+                # Потом BLOOPERS
+                if bloopers_list:
+                    for fact_type, fact_text in bloopers_list[:3]:  # Максимум 3 блупера
+                        text += f"• <b>{fact_type}:</b> {fact_text}\n\n"
+                
+                return text if (facts_list or bloopers_list) else None
             else:
                 return None
         else:
@@ -1196,7 +1217,8 @@ def get_facts(kp_id):
 def get_seasons(kp_id, chat_id=None, user_id=None):
     """Получает информацию о сезонах сериала с отметками просмотренных"""
     headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-    url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/{kp_id}/seasons"
+    # Пробуем сначала v2.2, если не работает - v2.1
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/seasons"
     try:
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
@@ -1239,8 +1261,56 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                 return text
             else:
                 return None
+        elif response.status_code == 400:
+            # Пробуем v2.1 если v2.2 не работает
+            logger.warning(f"Ошибка 400 для v2.2, пробуем v2.1 для kp_id={kp_id}")
+            url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/{kp_id}/seasons"
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                seasons = data.get('items', [])
+                if seasons:
+                    # Получаем информацию о просмотренных сериях
+                    watched_episodes = set()
+                    if chat_id and user_id:
+                        with db_lock:
+                            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                            row = cursor.fetchone()
+                            if row:
+                                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                                cursor.execute('''
+                                    SELECT season_number, episode_number 
+                                    FROM series_tracking 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                ''', (chat_id, film_id, user_id))
+                                watched_rows = cursor.fetchall()
+                                for w_row in watched_rows:
+                                    if isinstance(w_row, dict):
+                                        watched_episodes.add((w_row.get('season_number'), w_row.get('episode_number')))
+                                    else:
+                                        watched_episodes.add((w_row[0], w_row[1]))
+                    
+                    text = "📺 <b>Сезоны сериала:</b>\n\n"
+                    for season in seasons:
+                        number = season.get('number', '')
+                        episodes = season.get('episodes', [])
+                        text += f"<b>Сезон {number}:</b>\n"
+                        for ep in episodes[:10]:  # Первые 10 эпизодов каждого сезона
+                            ep_num = ep.get('episodeNumber', '')
+                            release = ep.get('releaseDate', '—')
+                            watched_mark = "✅" if (number, ep_num) in watched_episodes else ""
+                            text += f"{watched_mark} Эпизод {ep_num} — {release}\n"
+                        if len(episodes) > 10:
+                            text += f"... и ещё {len(episodes) - 10} эпизодов\n"
+                        text += "\n"
+                    return text
+                else:
+                    return None
+            else:
+                logger.error(f"Ошибка get_seasons (v2.1): {response.status_code}, response: {response.text[:200]}")
+                return None
         else:
-            logger.error(f"Ошибка get_seasons: {response.status_code}")
+            logger.error(f"Ошибка get_seasons: {response.status_code}, response: {response.text[:200]}")
             return None
     except Exception as e:
         logger.error(f"Ошибка get_seasons: {e}", exc_info=True)
@@ -1249,13 +1319,26 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
 def get_seasons_data(kp_id):
     """Получает данные о сезонах сериала (возвращает список сезонов)"""
     headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-    url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/{kp_id}/seasons"
+    # Пробуем сначала v2.2, если не работает - v2.1
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/seasons"
     try:
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200:
             data = response.json()
             return data.get('items', [])
-        return []
+        elif response.status_code == 400:
+            # Пробуем v2.1 если v2.2 не работает
+            url = f"https://kinopoiskapiunofficial.tech/api/v2.1/films/{kp_id}/seasons"
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                return data.get('items', [])
+            else:
+                logger.error(f"Ошибка get_seasons_data (v2.1): {response.status_code}, response: {response.text[:200]}")
+                return []
+        else:
+            logger.error(f"Ошибка get_seasons_data: {response.status_code}, response: {response.text[:200]}")
+            return []
     except Exception as e:
         logger.error(f"Ошибка get_seasons_data: {e}", exc_info=True)
         return []
@@ -1811,16 +1894,28 @@ def handle_reaction(reaction):
     
     logger.info(f"[REACTION] Количество новых реакций: {len(reaction.new_reaction)}")
     
+    # Нормализуем эмодзи для сравнения (убираем variation selector)
+    def normalize_emoji(emoji_str):
+        """Убирает variation selector (FE0F) из эмодзи для нормализации"""
+        if not emoji_str:
+            return emoji_str
+        # Убираем variation selector (U+FE0F)
+        return emoji_str.replace('\ufe0f', '')
+    
+    # Нормализуем список watched эмодзи
+    normalized_watched = [normalize_emoji(e) for e in ordinary_emojis]
+    
     for r in reaction.new_reaction:
         logger.info(f"[REACTION DEBUG] Реакция: type={getattr(r, 'type', 'unknown')}, emoji={getattr(r, 'emoji', None)}, custom_emoji_id={getattr(r, 'custom_emoji_id', None)}")
         
         if hasattr(r, 'type') and r.type == 'emoji' and hasattr(r, 'emoji'):
-            if r.emoji in ordinary_emojis:
-                logger.info(f"[REACTION DEBUG] ✅ Найден watched эмодзи: {r.emoji}")
+            normalized_reaction = normalize_emoji(r.emoji)
+            if normalized_reaction in normalized_watched:
+                logger.info(f"[REACTION DEBUG] ✅ Найден watched эмодзи: {r.emoji} (нормализован: {normalized_reaction})")
                 is_watched = True
                 break
             else:
-                logger.info(f"[REACTION DEBUG] ❌ Эмодзи {r.emoji} не в списке watched: {ordinary_emojis}")
+                logger.info(f"[REACTION DEBUG] ❌ Эмодзи {r.emoji} (нормализован: {normalized_reaction}) не в списке watched: {normalized_watched}")
         elif hasattr(r, 'type') and r.type == 'custom_emoji' and hasattr(r, 'custom_emoji_id'):
             if str(r.custom_emoji_id) in custom_emoji_ids:
                 logger.info(f"[REACTION DEBUG] ✅ Найден watched кастомный эмодзи ID: {r.custom_emoji_id}")
@@ -1927,6 +2022,12 @@ def handle_reaction(reaction):
         kp_row = cursor.fetchone()
         kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
     
+    # Получаем и отправляем факты о фильме ПЕРЕД сообщением об оценке
+    if kp_id:
+        facts = get_facts(kp_id)
+        if facts:
+            bot.send_message(chat_id, facts, parse_mode='HTML')
+    
     # Отправляем персональное сообщение пользователю с упоминанием
     user_name = reaction.user.first_name if reaction.user else "Вы"
     user_mention = f"@{reaction.user.username}" if reaction.user and reaction.user.username else user_name
@@ -1934,12 +2035,6 @@ def handle_reaction(reaction):
         f"🎬 {user_mention}, фильм <b>{film_title}</b> отмечен как просмотренный!\n\n"
         f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.",
         parse_mode='HTML')
-    
-    # Получаем и отправляем факты о фильме
-    if kp_id:
-        facts = get_facts(kp_id)
-        if facts:
-            bot.send_message(chat_id, facts, parse_mode='HTML')
     
     # Сохраняем связь message_id -> film_id для обработки оценки
     rating_messages[msg.message_id] = film_id
@@ -8819,9 +8914,12 @@ def handle_add_similar_callback(call):
         info = extract_movie_info(link)
         if info:
             text = f"<b>{info['title']}</b> ({info['year']})\n"
-            text += f"Режиссёр: {info['director']}\n"
-            text += f"Жанры: {info['genres']}\n\n"
-            text += f"{info['description'][:300]}..." if len(info['description']) > 300 else info['description']
+            text += f"<b>Режиссёр:</b> {info['director']}\n"
+            text += f"<b>Жанры:</b> {info['genres']}\n"
+            if info.get('actors'):
+                text += f"<b>В ролях:</b> {info['actors']}\n"
+            text += f"\n{info['description'][:300]}..." if len(info['description']) > 300 else f"\n{info['description']}"
+            text += f"\n\n<a href='{link}'>Кинопоиск</a>"
             
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_db:{kp_id}"))
