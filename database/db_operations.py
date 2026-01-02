@@ -401,3 +401,85 @@ def print_daily_stats():
     except Exception as e:
         logger.error(f"Ошибка вывода статистики: {e}")
 
+
+def get_ratings_info(chat_id, film_id, user_id):
+    """Получает информацию об оценках для фильма и пользователя"""
+    with db_lock:
+        cursor.execute("""
+            SELECT rating 
+            FROM ratings 
+            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+        """, (chat_id, film_id, user_id))
+        row = cursor.fetchone()
+        return {
+            'current_user_rated': row is not None,
+            'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)
+        }
+
+
+def get_notification_settings(chat_id):
+    """Получает настройки времени напоминаний для чата"""
+    defaults = {
+        'separate_weekdays': 'true',  # По умолчанию разделяем будни и выходные
+        'home_weekday_hour': 19,  # Будни: 19:00
+        'home_weekday_minute': 0,
+        'home_weekend_hour': 9,  # Выходные: 9:00
+        'home_weekend_minute': 0,
+        'cinema_weekday_hour': 9,  # Кино будни: 9:00
+        'cinema_weekday_minute': 0,
+        'cinema_weekend_hour': 9,  # Кино выходные: 9:00
+        'cinema_weekend_minute': 0,
+        'ticket_before_minutes': 10  # За 10 минут по умолчанию
+    }
+    
+    with db_lock:
+        cursor.execute("""
+            SELECT key, value FROM settings 
+            WHERE chat_id = %s AND key IN (
+                'notify_separate_weekdays', 'notify_home_weekday_hour', 'notify_home_weekday_minute',
+                'notify_home_weekend_hour', 'notify_home_weekend_minute',
+                'notify_cinema_weekday_hour', 'notify_cinema_weekday_minute',
+                'notify_cinema_weekend_hour', 'notify_cinema_weekend_minute',
+                'ticket_before_minutes'
+            )
+        """, (chat_id,))
+        rows = cursor.fetchall()
+        
+        for row in rows:
+            key = row.get('key') if isinstance(row, dict) else row[0]
+            value = row.get('value') if isinstance(row, dict) else row[1]
+            
+            if key == 'notify_separate_weekdays':
+                defaults['separate_weekdays'] = value
+            elif key == 'notify_home_weekday_hour':
+                defaults['home_weekday_hour'] = int(value) if value else defaults['home_weekday_hour']
+            elif key == 'notify_home_weekday_minute':
+                defaults['home_weekday_minute'] = int(value) if value else defaults['home_weekday_minute']
+            elif key == 'notify_home_weekend_hour':
+                defaults['home_weekend_hour'] = int(value) if value else defaults['home_weekend_hour']
+            elif key == 'notify_home_weekend_minute':
+                defaults['home_weekend_minute'] = int(value) if value else defaults['home_weekend_minute']
+            elif key == 'notify_cinema_weekday_hour':
+                defaults['cinema_weekday_hour'] = int(value) if value else defaults['cinema_weekday_hour']
+            elif key == 'notify_cinema_weekday_minute':
+                defaults['cinema_weekday_minute'] = int(value) if value else defaults['cinema_weekday_minute']
+            elif key == 'notify_cinema_weekend_hour':
+                defaults['cinema_weekend_hour'] = int(value) if value else defaults['cinema_weekend_hour']
+            elif key == 'notify_cinema_weekend_minute':
+                defaults['cinema_weekend_minute'] = int(value) if value else defaults['cinema_weekend_minute']
+            elif key == 'ticket_before_minutes':
+                defaults['ticket_before_minutes'] = int(value) if value else defaults['ticket_before_minutes']
+    
+    return defaults
+
+
+def set_notification_setting(chat_id, key, value):
+    """Сохраняет настройку времени напоминаний для чата"""
+    with db_lock:
+        cursor.execute("""
+            INSERT INTO settings (chat_id, key, value)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+        """, (chat_id, key, str(value)))
+        conn.commit()
+
