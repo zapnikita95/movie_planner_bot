@@ -899,25 +899,25 @@ def check_and_send_plan_notifications():
     """Периодическая проверка планов и отправка пропущенных уведомлений"""
     try:
         now_utc = datetime.now(pytz.utc)
-        # Проверяем планы, которые должны были быть отправлены в последние 30 минут
-        # (чтобы не пропустить уведомления после перезапуска бота)
+        # Проверяем планы на ближайшие сутки и пропущенные за последние 30 минут
         check_start = now_utc - timedelta(minutes=30)
-        check_end = now_utc + timedelta(minutes=5)  # Небольшой запас на будущее
+        check_end = now_utc + timedelta(days=1)
         
         with db_lock:
             cursor.execute('''
                 SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
-                       m.title, m.link, p.notification_sent
+                       m.title, m.link
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.plan_datetime >= %s 
                   AND p.plan_datetime <= %s
-                  AND (p.notification_sent IS NULL OR p.notification_sent = FALSE)
             ''', (check_start, check_end))
             plans = cursor.fetchall()
         
-        if plans:
-            logger.info(f"[PLAN CHECK] Найдено {len(plans)} планов для проверки уведомлений")
+        if not plans:
+            return
+        
+        logger.info(f"[PLAN CHECK] Проверяем {len(plans)} планов на уведомления")
         
         for plan in plans:
             if isinstance(plan, dict):
@@ -939,14 +939,98 @@ def check_and_send_plan_notifications():
                 title = plan[6]
                 link = plan[7]
             
-            # Проверяем, что время уже наступило (или прошло не более 30 минут назад)
-            if plan_datetime <= now_utc:
-                try:
-                    # Отправляем уведомление (plan_id передается для отметки в БД)
-                    send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
-                    logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
-                except Exception as e:
-                    logger.error(f"[PLAN CHECK] Ошибка отправки уведомления для плана {plan_id}: {e}", exc_info=True)
+            # Получаем часовой пояс пользователя
+            user_tz = get_user_timezone_or_default(user_id)
+            
+            # Преобразуем plan_datetime в локальное время пользователя
+            if isinstance(plan_datetime, datetime):
+                if plan_datetime.tzinfo is None:
+                    plan_dt_local = pytz.utc.localize(plan_datetime).astimezone(user_tz)
+                else:
+                    plan_dt_local = plan_datetime.astimezone(user_tz)
+            else:
+                plan_dt_local = datetime.fromisoformat(str(plan_datetime).replace('Z', '+00:00')).astimezone(user_tz)
+            
+            now_local = datetime.now(user_tz)
+            
+            if plan_type == 'cinema':
+                # Для планов в кино проверяем два типа уведомлений:
+                # 1. Утреннее напоминание в 9:00 в день сеанса
+                morning_dt = plan_dt_local.replace(hour=9, minute=0)
+                morning_utc = morning_dt.astimezone(pytz.utc)
+                
+                # Планируем утреннее напоминание, если оно еще не запланировано и время еще не прошло
+                if morning_utc > now_utc:
+                    try:
+                        job_id = f'plan_morning_{chat_id}_{plan_id}_{int(morning_utc.timestamp())}'
+                        existing_job = scheduler.get_job(job_id)
+                        if not existing_job:
+                            scheduler.add_job(
+                                send_plan_notification,
+                                'date',
+                                run_date=morning_utc,
+                                args=[chat_id, film_id, title, link, plan_type],
+                                id=job_id
+                            )
+                            logger.info(f"[PLAN CHECK] Запланировано утреннее уведомление для плана {plan_id} (фильм {title}) на {morning_utc}")
+                    except Exception as e:
+                        logger.warning(f"[PLAN CHECK] Не удалось запланировать утреннее уведомление для плана {plan_id}: {e}")
+                elif morning_utc <= now_utc and morning_utc >= now_utc - timedelta(minutes=30):
+                    # Время утреннего напоминания уже прошло, но не более 30 минут назад - отправляем сразу
+                    try:
+                        send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                        logger.info(f"[PLAN CHECK] Утреннее уведомление отправлено сразу для плана {plan_id} (фильм {title})")
+                    except Exception as e:
+                        logger.error(f"[PLAN CHECK] Ошибка отправки утреннего уведомления для плана {plan_id}: {e}", exc_info=True)
+                
+                # 2. Напоминание за 10 минут до сеанса с билетами
+                ticket_dt = plan_dt_local - timedelta(minutes=10)
+                ticket_utc = ticket_dt.astimezone(pytz.utc)
+                
+                # Проверяем наличие билетов
+                with db_lock:
+                    cursor.execute('SELECT COUNT(*) FROM tickets WHERE plan_id = %s', (plan_id,))
+                    ticket_count_row = cursor.fetchone()
+                    ticket_count = ticket_count_row[0] if ticket_count_row else 0
+                
+                if ticket_count > 0:
+                    # Планируем напоминание с билетами, если оно еще не запланировано и время еще не прошло
+                    if ticket_utc > now_utc:
+                        try:
+                            job_id = f'ticket_notify_{chat_id}_{plan_id}_{int(ticket_utc.timestamp())}'
+                            existing_job = scheduler.get_job(job_id)
+                            if not existing_job:
+                                scheduler.add_job(
+                                    send_ticket_notification,
+                                    'date',
+                                    run_date=ticket_utc,
+                                    args=[chat_id, plan_id],
+                                    id=job_id
+                                )
+                                logger.info(f"[PLAN CHECK] Запланировано уведомление с билетами для плана {plan_id} (фильм {title}) на {ticket_utc}")
+                        except Exception as e:
+                            logger.warning(f"[PLAN CHECK] Не удалось запланировать уведомление с билетами для плана {plan_id}: {e}")
+                    elif ticket_utc <= now_utc and ticket_utc >= now_utc - timedelta(minutes=30):
+                        # Время напоминания с билетами уже прошло, но не более 30 минут назад - отправляем сразу
+                        try:
+                            send_ticket_notification(chat_id, plan_id)
+                            logger.info(f"[PLAN CHECK] Уведомление с билетами отправлено сразу для плана {plan_id} (фильм {title})")
+                        except Exception as e:
+                            logger.error(f"[PLAN CHECK] Ошибка отправки уведомления с билетами для плана {plan_id}: {e}", exc_info=True)
+            else:
+                # Для планов дома проверяем, нужно ли отправить уведомление на время плана
+                # (время уже наступило или прошло не более 30 минут назад)
+                if plan_datetime <= now_utc and plan_datetime >= now_utc - timedelta(minutes=30):
+                    try:
+                        # Проверяем, не было ли уже запланировано это уведомление
+                        job_id = f'plan_notify_{chat_id}_{film_id}_{int(plan_datetime.timestamp())}'
+                        existing_job = scheduler.get_job(job_id)
+                        if not existing_job:
+                            # Отправляем уведомление сразу, так как время уже наступило
+                            send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                            logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
+                    except Exception as e:
+                        logger.error(f"[PLAN CHECK] Ошибка отправки уведомления для плана {plan_id}: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[PLAN CHECK] Ошибка при проверке планов: {e}", exc_info=True)
 
@@ -6271,16 +6355,66 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     sources_markup.add(InlineKeyboardButton(platform, url=url))
                 bot.send_message(chat_id, f"📺 Где посмотреть <b>{title}</b>?", reply_markup=sources_markup, parse_mode='HTML')
         
-        # Планируем уведомление на время плана
-        scheduler.add_job(
-            send_plan_notification,
-            'date',
-            run_date=plan_utc,  # plan_utc — это уже в UTC
-            args=[chat_id, film_id, title, link, plan_type],
-            id=f'plan_notify_{chat_id}_{film_id}_{int(plan_utc.timestamp())}'  # уникальный ID
-        )
+        # Планируем уведомления в зависимости от типа плана
+        if plan_type == 'cinema':
+            # Для планов в кино планируем два уведомления:
+            # 1. Утреннее напоминание в 9:00 в день сеанса
+            morning_dt = plan_dt.replace(hour=9, minute=0)
+            if morning_dt < datetime.now(user_tz):
+                # Если уже прошло 9:00 сегодня, планируем на следующий день
+                morning_dt = morning_dt + timedelta(days=1)
+            morning_utc = morning_dt.astimezone(pytz.utc)
+            
+            try:
+                scheduler.add_job(
+                    send_plan_notification,
+                    'date',
+                    run_date=morning_utc,
+                    args=[chat_id, film_id, title, link, plan_type],
+                    id=f'plan_morning_{chat_id}_{plan_id if 'plan_id' in locals() else film_id}_{int(morning_utc.timestamp())}'
+                )
+                logger.info(f"[PROCESS_PLAN] Утреннее уведомление запланировано на {morning_utc} для плана в кино")
+            except Exception as e:
+                logger.warning(f"[PROCESS_PLAN] Не удалось запланировать утреннее уведомление: {e}")
+            
+            # 2. Напоминание за 10 минут до сеанса с билетами (если билеты есть)
+            ticket_dt = plan_dt - timedelta(minutes=10)
+            if ticket_dt > datetime.now(user_tz):
+                ticket_utc = ticket_dt.astimezone(pytz.utc)
+                # Проверяем наличие билетов в базе (plan_id уже получен выше для кино)
+                if 'plan_id' in locals():
+                    with db_lock:
+                        cursor.execute('SELECT COUNT(*) FROM tickets WHERE plan_id = %s', (plan_id,))
+                        ticket_count_row = cursor.fetchone()
+                        ticket_count = ticket_count_row[0] if ticket_count_row else 0
+                    
+                    if ticket_count > 0:
+                        try:
+                            scheduler.add_job(
+                                send_ticket_notification,
+                                'date',
+                                run_date=ticket_utc,
+                                args=[chat_id, plan_id],
+                                id=f'ticket_notify_{chat_id}_{plan_id}_{int(ticket_utc.timestamp())}'
+                            )
+                            logger.info(f"[PROCESS_PLAN] Уведомление с билетами запланировано на {ticket_utc} за 10 минут до сеанса")
+                        except Exception as e:
+                            logger.warning(f"[PROCESS_PLAN] Не удалось запланировать уведомление с билетами: {e}")
+        else:
+            # Для планов дома планируем одно уведомление на время плана
+            try:
+                scheduler.add_job(
+                    send_plan_notification,
+                    'date',
+                    run_date=plan_utc,  # plan_utc — это уже в UTC
+                    args=[chat_id, film_id, title, link, plan_type],
+                    id=f'plan_notify_{chat_id}_{film_id}_{int(plan_utc.timestamp())}'  # уникальный ID
+                )
+                logger.info(f"[PROCESS_PLAN] Уведомление запланировано на {plan_utc} для плана дома")
+            except Exception as e:
+                logger.warning(f"[PROCESS_PLAN] Не удалось запланировать уведомление: {e}. Будет отправлено через периодическую проверку.")
         
-        logger.info(f"[PLAN] Уведомление запланировано на {plan_dt} МСК для фильма {title}")
+        logger.info(f"[PLAN] Уведомления запланированы для фильма {title}, тип: {plan_type}")
         return True
 
 @bot.message_handler(commands=['plan'])
