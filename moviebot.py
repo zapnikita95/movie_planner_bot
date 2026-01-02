@@ -1939,18 +1939,26 @@ def handle_delete_movie_internal(message, state):
     chat_id = message.chat.id
     text = message.text.strip()
     
+    logger.info(f"[DELETE MOVIE] Обработка удаления фильма: text='{text}', user_id={user_id}, chat_id={chat_id}")
+    
     # Извлекаем kp_id из ссылки или используем как ID
-    kp_id = extract_kp_id(text)
+    kp_id = extract_kp_id_from_text(text)
     if not kp_id:
+        logger.warning(f"[DELETE MOVIE] Не удалось извлечь kp_id из текста: '{text}'")
         bot.reply_to(message, "❌ Не удалось распознать ссылку или ID. Введите ссылку на фильм (kinopoisk.ru/film/...) или ID фильма.")
         return
+    
+    logger.info(f"[DELETE MOVIE] Извлечен kp_id: {kp_id}")
     
     # Ищем фильм в БД
     with db_lock:
         cursor.execute("SELECT id, title FROM movies WHERE (kp_id = %s OR id = %s) AND chat_id = %s", (kp_id, kp_id, chat_id))
         film = cursor.fetchone()
         
+        logger.info(f"[DELETE MOVIE] Результат поиска фильма: {film}")
+        
         if not film:
+            logger.warning(f"[DELETE MOVIE] Фильм с kp_id={kp_id} или id={kp_id} не найден в чате {chat_id}")
             bot.reply_to(message, f"❌ Фильм с ID {kp_id} не найден в базе этого чата.")
             if user_id in user_edit_state:
                 del user_edit_state[user_id]
@@ -1959,18 +1967,35 @@ def handle_delete_movie_internal(message, state):
         film_id = film.get('id') if isinstance(film, dict) else film[0]
         title = film.get('title') if isinstance(film, dict) else film[1]
         
+        logger.info(f"[DELETE MOVIE] Найден фильм: id={film_id}, title={title}")
+        
         # Удаляем связанные данные
         cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
         ratings_deleted = cursor.rowcount
+        logger.info(f"[DELETE MOVIE] Удалено оценок: {ratings_deleted}")
+        
         cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
         plans_deleted = cursor.rowcount
+        logger.info(f"[DELETE MOVIE] Удалено планов: {plans_deleted}")
+        
         cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
         watched_deleted = cursor.rowcount
+        logger.info(f"[DELETE MOVIE] Удалено отметок просмотра: {watched_deleted}")
+        
         cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (chat_id, film_id))
+        movie_deleted = cursor.rowcount
+        logger.info(f"[DELETE MOVIE] Удалено фильмов: {movie_deleted}")
+        
         conn.commit()
-    
-    bot.reply_to(message, f"✅ Фильм <b>{title}</b> удалён из базы.\n\nТакже удалено:\n• Оценок: {ratings_deleted}\n• Планов: {plans_deleted}\n• Отметок просмотра: {watched_deleted}", parse_mode='HTML')
-    logger.info(f"[DELETE MOVIE] Фильм {title} (id={film_id}) удалён пользователем {user_id} из чата {chat_id}")
+        logger.info(f"[DELETE MOVIE] Транзакция закоммичена")
+        
+        # Отправляем сообщение о результате
+        if movie_deleted > 0:
+            bot.reply_to(message, f"✅ Фильм <b>{title}</b> удалён из базы.\n\nТакже удалено:\n• Оценок: {ratings_deleted}\n• Планов: {plans_deleted}\n• Отметок просмотра: {watched_deleted}", parse_mode='HTML')
+            logger.info(f"[DELETE MOVIE] Фильм {title} (id={film_id}) удалён пользователем {user_id} из чата {chat_id}")
+        else:
+            logger.error(f"[DELETE MOVIE] Фильм не был удален! movie_deleted={movie_deleted}")
+            bot.reply_to(message, f"❌ Ошибка при удалении фильма. Попробуйте снова.")
     
     if user_id in user_edit_state:
         del user_edit_state[user_id]
