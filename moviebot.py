@@ -1669,7 +1669,8 @@ def handle_reaction(reaction):
     m.text and 
     ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text) and
     not m.text.strip().startswith('/plan') and  # Не обрабатываем команду /plan
-    m.from_user.id not in user_plan_state  # Не обрабатываем, если пользователь в процессе планирования
+    m.from_user.id not in user_plan_state and  # Не обрабатываем, если пользователь в процессе планирования
+    m.from_user.id not in user_ticket_state  # Не обрабатываем, если пользователь работает с билетами
 ))
 def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
