@@ -6644,6 +6644,7 @@ def show_seasons_callback(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
+        # Получаем актуальные данные о сезонах (с обновленными статусами просмотра)
         seasons_text = get_seasons(kp_id, chat_id, user_id)
         
         if seasons_text:
@@ -6667,7 +6668,9 @@ def show_seasons_callback(call):
                 else:
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
             
+            # Обновляем сообщение с актуальными данными о сезонах
             bot.edit_message_text(seasons_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            logger.debug(f"[SEASONS] Обновлен список сезонов для kp_id={kp_id}, user_id={user_id}")
         else:
             bot.edit_message_text("❌ Не удалось получить информацию о сезонах.", chat_id, call.message.message_id)
         bot.answer_callback_query(call.id)
