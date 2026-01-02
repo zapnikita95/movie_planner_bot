@@ -82,6 +82,7 @@ plan_error_messages = {}  # message_id: {'user_id': int, 'chat_id': int, 'link':
 # Состояния настроек
 user_settings_state = {}  # user_id: {'waiting_emoji': bool}
 settings_messages = {}  # message_id: {'user_id': int, 'action': str, 'chat_id': int} - для отслеживания сообщений settings
+user_import_state = {}  # user_id: {'step': str, 'kp_user_id': str, 'count': int} - для импорта базы из Кинопоиска
 # Состояния очистки
 user_clean_state = {}  # user_id: {'action': str, 'target': str}
 clean_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set}
@@ -3076,6 +3077,20 @@ def main_text_handler(message):
             handle_edit_ticket_text_internal(message, state)
             return
     
+    # === user_import_state ===
+    if user_id in user_import_state:
+        state = user_import_state[user_id]
+        step = state.get('step')
+        
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_import_state, step={step}")
+        
+        if step == 'waiting_user_id':
+            # Обработка ввода user_id или ссылки
+            handle_import_user_id_internal(message, state)
+            return
+        
+        return
+    
     # === user_edit_state ===
     if user_id in user_edit_state:
         state = user_edit_state[user_id]
@@ -4586,11 +4601,18 @@ def handle_settings_callback(call):
             return
         
         if action == "import":
-            # Импорт базы из Кинопоиска (пока заглушка)
+            # Импорт базы из Кинопоиска
+            user_import_state[user_id] = {
+                'step': 'waiting_user_id',
+                'kp_user_id': None,
+                'count': None
+            }
             bot.edit_message_text(
                 f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
-                f"Эта функция будет доступна в будущих обновлениях.\n\n"
-                f"Пока вы можете добавлять фильмы, отправляя ссылки на Кинопоиск.",
+                f"Отправьте ID пользователя Кинопоиска или ссылку на профиль.\n\n"
+                f"Примеры:\n"
+                f"• <code>1931396</code>\n"
+                f"• <code>https://www.kinopoisk.ru/user/1931396</code>",
                 call.message.chat.id,
                 call.message.message_id,
                 parse_mode='HTML'
@@ -7937,8 +7959,29 @@ def random_start(message):
         # Шаг 0: Выбор режима
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🎲 Обычный режим", callback_data="rand_mode:normal"))
-        markup.add(InlineKeyboardButton("⭐ По моим оценкам (8+)", callback_data="rand_mode:my_votes"))
-        markup.add(InlineKeyboardButton("👥 По оценкам группы (8+)", callback_data="rand_mode:group_votes"))
+        
+        # Проверяем, есть ли у пользователя больше 100 оценок
+        with db_lock:
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            user_ratings_count = cursor.fetchone()
+            user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+            
+            if user_ratings >= 100:
+                markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+            
+            # Проверяем условие для group_votes: больше 20 групповых оценок, где хотя бы 20 фильмов оценили все участники группы
+            cursor.execute('''
+                SELECT COUNT(DISTINCT film_id) 
+                FROM ratings 
+                WHERE chat_id = %s 
+                GROUP BY film_id 
+                HAVING COUNT(DISTINCT user_id) >= (SELECT COUNT(DISTINCT user_id) FROM ratings WHERE chat_id = %s)
+            ''', (chat_id, chat_id))
+            group_rated_films = cursor.fetchall()
+            group_rated_count = len(group_rated_films)
+            
+            if group_rated_count >= 20:
+                markup.add(InlineKeyboardButton("👥 По оценкам группы (8+)", callback_data="rand_mode:group_votes"))
         
         bot.send_message(chat_id, "🎲 <b>Выберите режим рандомайзера:</b>", reply_markup=markup, parse_mode='HTML')
         logger.info(f"[RANDOM] Step 0 sent: mode selection, user_id={user_id}")
@@ -8622,8 +8665,13 @@ def _random_final(call, chat_id, user_id):
         # Фильтр по режиму (my_votes или group_votes)
         mode = state.get('mode')
         if mode == 'my_votes':
-            # Фильмы с оценкой пользователя >= 8
-            query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND r.user_id = %s AND r.rating >= 8)"
+            # Фильмы с оценкой пользователя 9 или 10, похожие на те, что пользователь оценил высоко
+            query += """ AND m.id IN (
+                SELECT DISTINCT r2.film_id 
+                FROM ratings r2 
+                WHERE r2.chat_id = %s AND r2.user_id = %s AND r2.rating IN (9, 10)
+            )"""
+            params.append(chat_id)
             params.append(user_id)
         elif mode == 'group_votes':
             # Фильмы со средней оценкой группы >= 8
