@@ -890,8 +890,12 @@ def get_user_groups(user_id, bot_instance=None):
         """, (user_id,))
         
         for row in cursor.fetchall():
-            chat_id = row[0] if isinstance(row, dict) else row[0]
-            username = row[1] if isinstance(row, dict) else row[1]
+            if isinstance(row, dict):
+                chat_id = row.get('chat_id')
+                username = row.get('username')
+            else:
+                chat_id = row[0] if len(row) > 0 else None
+                username = row[1] if len(row) > 1 else None
             
             if chat_id and chat_id < 0:  # Только группы (отрицательные ID)
                 # Проверяем, что бот состоит в группе
