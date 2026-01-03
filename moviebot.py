@@ -2,7 +2,14 @@ from dotenv import load_dotenv
 load_dotenv()  # загружает .env (для локальной разработки)
 
 # Импорты модулей проекта
-from config.settings import TOKEN, KP_TOKEN, DATABASE_URL, PLANS_TZ, MONTHS_MAP, DAYS_MAP, DEFAULT_WATCHED_EMOJIS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+from config.settings import TOKEN, KP_TOKEN, DATABASE_URL, PLANS_TZ, MONTHS_MAP, DAYS_MAP, DEFAULT_WATCHED_EMOJIS
+try:
+    from config.settings import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+except ImportError:
+    # Если переменные не определены, используем значения из окружения напрямую
+    import os
+    YOOKASSA_SHOP_ID = os.getenv('YOOKASSA_SHOP_ID')
+    YOOKASSA_SECRET_KEY = os.getenv('YOOKASSA_SECRET_KEY')
 from database.db_connection import get_db_connection, get_db_cursor, db_lock, init_database
 from database import db_operations
 from api import kinopoisk_api
@@ -5341,6 +5348,18 @@ def main_text_handler(message):
             # Обработка подтверждения удаления
             handle_clean_confirm_internal(message)
             return
+    
+    # === user_payment_state ===
+    # Проверяем состояние оплаты - если пользователь вводит username для подписки,
+    # передаем управление специализированному обработчику
+    if user_id in user_payment_state:
+        state = user_payment_state[user_id]
+        step = state.get('step')
+        if step in ['check_personal_username', 'enter_personal_username', 'check_group_username', 'enter_group_username']:
+            # Передаем управление обработчику оплаты
+            # Он будет вызван автоматически благодаря декоратору
+            logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_payment_state, step={step}, передаем управление обработчику оплаты")
+            return  # Возвращаемся, чтобы не логировать "не обработано"
     
     # 2. Обработка реплаев
     
@@ -12984,10 +13003,13 @@ def handle_payment_callback(call):
                     else:
                         text += f"⏰ Действует: <b>Навсегда</b>\n"
                     
-                    subscription_id = sub.get('id', 0)
+                    subscription_id = sub.get('id')
+                    # Обрабатываем случай когда id может быть None
+                    if subscription_id is None:
+                        subscription_id = 0
                     markup = InlineKeyboardMarkup(row_width=1)
                     # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
-                    if subscription_id > 0:
+                    if subscription_id and subscription_id > 0:
                         markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     try:
@@ -13382,6 +13404,188 @@ def handle_payment_callback(call):
                 markup.add(InlineKeyboardButton(f"✅ Подтвердить выбор ({len(selected_members)}/{group_size})", callback_data="payment:confirm_member_selection"))
             
             markup.add(InlineKeyboardButton("◀️ Отмена", callback_data="payment:back"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
+        
+        if action.startswith("select_members:"):
+            # Выбор участников для существующей подписки (после оплаты)
+            subscription_id = int(action.split(":")[1])
+            
+            from database.db_operations import get_active_group_users, get_subscription_members, get_subscription_by_id
+            
+            # Получаем информацию о подписке
+            sub = get_subscription_by_id(subscription_id)
+            if not sub:
+                bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                return
+            
+            group_chat_id = sub.get('chat_id')
+            group_size = sub.get('group_size')
+            
+            if not group_chat_id:
+                bot.answer_callback_query(call.id, "Не удалось определить группу", show_alert=True)
+                return
+            
+            # Получаем активных пользователей и текущих участников подписки
+            active_users = get_active_group_users(group_chat_id)
+            existing_members_dict = get_subscription_members(subscription_id)
+            # get_subscription_members возвращает dict {user_id: username}
+            existing_member_ids = set(existing_members_dict.keys()) if existing_members_dict else set()
+            
+            active_count = len(active_users) if active_users else 0
+            
+            if not active_users or active_count == 0:
+                bot.answer_callback_query(call.id, "В группе нет активных участников", show_alert=True)
+                return
+            
+            # Сохраняем состояние для выбора участников
+            user_payment_state[user_id] = {
+                'step': 'select_members_existing',
+                'subscription_id': subscription_id,
+                'chat_id': group_chat_id,
+                'group_size': group_size,
+                'selected_members': existing_member_ids.copy()
+            }
+            
+            text = f"👥 <b>Выбор участников для подписки</b>\n\n"
+            text += f"Подписка рассчитана на <b>{group_size}</b> участников\n"
+            text += f"В группе <b>{active_count}</b> активных участников\n"
+            text += f"Уже выбрано: <b>{len(existing_member_ids)}</b>\n\n"
+            text += "Выберите участников:"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            for user_id_member, username_member in list(active_users.items())[:20]:
+                is_selected = user_id_member in existing_member_ids
+                prefix = "✅" if is_selected else "⬜"
+                markup.add(InlineKeyboardButton(
+                    f"{prefix} @{username_member}",
+                    callback_data=f"payment:toggle_member_existing:{user_id_member}:{subscription_id}"
+                ))
+            
+            remaining_slots = (group_size or active_count) - len(existing_member_ids)
+            if remaining_slots > 0:
+                markup.add(InlineKeyboardButton(f"✅ Сохранить выбор ({len(existing_member_ids)}/{group_size or active_count})", callback_data=f"payment:confirm_members_existing:{subscription_id}"))
+            else:
+                markup.add(InlineKeyboardButton("✅ Сохранить выбор", callback_data=f"payment:confirm_members_existing:{subscription_id}"))
+            
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
+        
+        if action.startswith("toggle_member_existing:"):
+            # Переключение выбора участника для существующей подписки
+            parts = action.split(":")
+            member_user_id = int(parts[1])
+            subscription_id = int(parts[2])
+            
+            from database.db_operations import get_active_group_users, get_subscription_members, add_subscription_member, remove_subscription_member, get_subscription_by_id
+            
+            state = user_payment_state.get(user_id, {})
+            if state.get('subscription_id') != subscription_id:
+                bot.answer_callback_query(call.id, "Ошибка состояния", show_alert=True)
+                return
+            
+            sub = get_subscription_by_id(subscription_id)
+            if not sub:
+                bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                return
+            
+            group_chat_id = sub.get('chat_id')
+            group_size = sub.get('group_size')
+            
+            active_users = get_active_group_users(group_chat_id)
+            existing_members_dict = get_subscription_members(subscription_id)
+            # get_subscription_members возвращает dict {user_id: username}
+            existing_member_ids = set(existing_members_dict.keys()) if existing_members_dict else set()
+            
+            selected_members = state.get('selected_members', existing_member_ids.copy())
+            
+            if member_user_id in selected_members:
+                # Удаляем участника
+                selected_members.remove(member_user_id)
+                if member_user_id in existing_member_ids:
+                    remove_subscription_member(subscription_id, member_user_id)
+                bot.answer_callback_query(call.id, "Участник удален")
+            else:
+                # Проверяем лимит
+                if group_size and len(selected_members) >= group_size:
+                    bot.answer_callback_query(call.id, f"Можно выбрать только {group_size} участников", show_alert=True)
+                    return
+                # Добавляем участника
+                selected_members.add(member_user_id)
+                username = active_users.get(member_user_id, f"user_{member_user_id}")
+                if member_user_id not in existing_member_ids:
+                    add_subscription_member(subscription_id, member_user_id, username)
+                bot.answer_callback_query(call.id, "Участник добавлен")
+            
+            state['selected_members'] = selected_members
+            
+            # Обновляем сообщение
+            text = f"👥 <b>Выбор участников для подписки</b>\n\n"
+            text += f"Подписка рассчитана на <b>{group_size}</b> участников\n"
+            text += f"В группе <b>{len(active_users)}</b> активных участников\n"
+            text += f"Выбрано: <b>{len(selected_members)}</b>\n\n"
+            text += "Выберите участников:"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            for user_id_member, username_member in list(active_users.items())[:20]:
+                is_selected = user_id_member in selected_members
+                prefix = "✅" if is_selected else "⬜"
+                markup.add(InlineKeyboardButton(
+                    f"{prefix} @{username_member}",
+                    callback_data=f"payment:toggle_member_existing:{user_id_member}:{subscription_id}"
+                ))
+            
+            remaining_slots = (group_size or len(active_users)) - len(selected_members)
+            if remaining_slots > 0:
+                markup.add(InlineKeyboardButton(f"✅ Сохранить выбор ({len(selected_members)}/{group_size or len(active_users)})", callback_data=f"payment:confirm_members_existing:{subscription_id}"))
+            else:
+                markup.add(InlineKeyboardButton("✅ Сохранить выбор", callback_data=f"payment:confirm_members_existing:{subscription_id}"))
+            
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
+        
+        if action.startswith("confirm_members_existing:"):
+            # Подтверждение выбора участников для существующей подписки
+            subscription_id = int(action.split(":")[1])
+            
+            from database.db_operations import get_subscription_members, get_subscription_by_id
+            
+            sub = get_subscription_by_id(subscription_id)
+            if not sub:
+                bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                return
+            
+            members = get_subscription_members(subscription_id)
+            members_count = len(members) if members else 0
+            
+            text = f"✅ <b>Участники сохранены</b>\n\n"
+            text += f"Участников в подписке: <b>{members_count}</b>\n"
+            if sub.get('group_size'):
+                text += f"Лимит: <b>{sub.get('group_size')}</b> участников\n"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("👥 Список участников", callback_data=f"payment:group_members:{subscription_id}"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+            
+            if user_id in user_payment_state:
+                del user_payment_state[user_id]
             
             try:
                 bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -14123,7 +14327,7 @@ def handle_payment_callback(call):
         except:
             pass
 
-@bot.message_handler(func=lambda m: m.from_user.id in user_payment_state and user_payment_state[m.from_user.id].get('step') in ['check_personal_username', 'enter_personal_username', 'check_group_username', 'enter_group_username'])
+@bot.message_handler(func=lambda m: m.from_user.id in user_payment_state and user_payment_state[m.from_user.id].get('step') in ['check_personal_username', 'enter_personal_username', 'check_group_username', 'enter_group_username'], priority=1)
 def handle_payment_username(message):
     """Обработчик ввода username для проверки/оформления подписки"""
     try:
