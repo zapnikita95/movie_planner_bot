@@ -1162,3 +1162,82 @@ def send_rating_reminder(chat_id, film_id, film_title, user_id):
         logger.error(f"[RATING REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
 
 
+def check_subscription_payments():
+    """Проверяет подписки и отправляет уведомления за день до списания"""
+    if not bot:
+        return
+    
+    try:
+        from datetime import datetime, timedelta
+        import pytz
+        from database.db_operations import get_active_subscription
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        now = datetime.now(pytz.UTC)
+        tomorrow = now + timedelta(days=1)
+        
+        # Находим подписки, у которых next_payment_date завтра
+        with db_lock:
+            cursor.execute("""
+                SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, next_payment_date
+                FROM subscriptions
+                WHERE is_active = TRUE
+                AND next_payment_date IS NOT NULL
+                AND DATE(next_payment_date AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
+            """, (tomorrow,))
+            subscriptions = cursor.fetchall()
+        
+        for sub in subscriptions:
+            try:
+                subscription_id = sub.get('id') if isinstance(sub, dict) else sub[0]
+                chat_id = sub.get('chat_id') if isinstance(sub, dict) else sub[1]
+                user_id = sub.get('user_id') if isinstance(sub, dict) else sub[2]
+                subscription_type = sub.get('subscription_type') if isinstance(sub, dict) else sub[3]
+                plan_type = sub.get('plan_type') if isinstance(sub, dict) else sub[4]
+                period_type = sub.get('period_type') if isinstance(sub, dict) else sub[5]
+                price = sub.get('price') if isinstance(sub, dict) else sub[6]
+                next_payment = sub.get('next_payment_date') if isinstance(sub, dict) else sub[7]
+                
+                plan_names = {
+                    'notifications': '🔔 Уведомления о сериалах',
+                    'recommendations': '🎯 Персональные рекомендации',
+                    'tickets': '🎫 Билеты на мероприятия',
+                    'all': '📦 Все режимы'
+                }
+                
+                period_names = {
+                    'month': 'месяц',
+                    '3months': '3 месяца',
+                    'year': 'год',
+                    'lifetime': 'навсегда'
+                }
+                
+                plan_name = plan_names.get(plan_type, plan_type)
+                period_name = period_names.get(period_type, period_type)
+                
+                text = "🔔 <b>Напоминание о списании</b>\n\n"
+                text += f"Завтра ({next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}) будет списана оплата за подписку:\n\n"
+                if subscription_type == 'personal':
+                    text += f"👤 Личная подписка\n"
+                else:
+                    text += f"👥 Групповая подписка\n"
+                text += f"{plan_name}\n"
+                text += f"⏰ Период: {period_name}\n"
+                text += f"💰 Сумма: <b>{price}₽</b>\n\n"
+                text += "💡 Вы можете изменить или отменить подписку до списания."
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
+                markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
+                markup.add(InlineKeyboardButton("💰 Управление подпиской", callback_data="payment:active"))
+                
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"[SUBSCRIPTION PAYMENT] Отправлено уведомление о списании для подписки {subscription_id}, user_id={user_id}")
+                
+            except Exception as e:
+                logger.error(f"[SUBSCRIPTION PAYMENT] Ошибка отправки уведомления для подписки: {e}", exc_info=True)
+    
+    except Exception as e:
+        logger.error(f"[SUBSCRIPTION PAYMENT] Ошибка проверки подписок: {e}", exc_info=True)
+
+

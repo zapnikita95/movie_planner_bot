@@ -123,18 +123,52 @@ def create_web_app(bot_instance):
                         telegram_username = metadata.get('telegram_username')
                         group_username = metadata.get('group_username')
                         
-                        # Создаем подписку
-                        subscription_id = create_subscription(
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            subscription_type=subscription_type,
-                            plan_type=plan_type,
-                            period_type=period_type,
-                            price=amount,
-                            telegram_username=telegram_username,
-                            group_username=group_username,
-                            group_size=group_size
-                        )
+                        # Проверяем, есть ли уже активная подписка с такими же параметрами
+                        from database.db_operations import get_active_subscription, renew_subscription
+                        existing_sub = get_active_subscription(chat_id, user_id, subscription_type)
+                        
+                        if existing_sub and existing_sub.get('id') and existing_sub.get('id') > 0:
+                            # Проверяем, совпадают ли параметры подписки
+                            existing_plan = existing_sub.get('plan_type')
+                            existing_period = existing_sub.get('period_type')
+                            existing_group_size = existing_sub.get('group_size')
+                            
+                            # Если параметры совпадают, продлеваем подписку
+                            if (existing_plan == plan_type and 
+                                existing_period == period_type and 
+                                (subscription_type != 'group' or existing_group_size == group_size)):
+                                subscription_id = existing_sub.get('id')
+                                # Продлеваем подписку
+                                renew_subscription(subscription_id, period_type)
+                                logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
+                            else:
+                                # Параметры не совпадают - создаем новую подписку
+                                subscription_id = create_subscription(
+                                    chat_id=chat_id,
+                                    user_id=user_id,
+                                    subscription_type=subscription_type,
+                                    plan_type=plan_type,
+                                    period_type=period_type,
+                                    price=amount,
+                                    telegram_username=telegram_username,
+                                    group_username=group_username,
+                                    group_size=group_size
+                                )
+                                logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                        else:
+                            # Нет активной подписки - создаем новую
+                            subscription_id = create_subscription(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                subscription_type=subscription_type,
+                                plan_type=plan_type,
+                                period_type=period_type,
+                                price=amount,
+                                telegram_username=telegram_username,
+                                group_username=group_username,
+                                group_size=group_size
+                            )
+                            logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
                         
                         # Обновляем платеж с subscription_id
                         update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)
@@ -265,6 +299,22 @@ def create_web_app(bot_instance):
     def health():
         logger.info("[HEALTH] Health check запрос получен")
         return jsonify({'status': 'ok', 'bot': 'running'}), 200
+    
+    @app.route('/yookassa/webhook', methods=['POST'])
+    def yookassa_webhook():
+        """Обработчик webhook от ЮKassa"""
+        try:
+            logger.info("[YOOKASSA WEBHOOK] Получен запрос от ЮKassa")
+            event_json = request.json
+            if not event_json:
+                logger.warning("[YOOKASSA WEBHOOK] Пустой JSON")
+                return jsonify({'error': 'Empty JSON'}), 400
+            
+            logger.info(f"[YOOKASSA WEBHOOK] Событие: {event_json.get('event')}")
+            return process_yookassa_notification(event_json, is_test=False)
+        except Exception as e:
+            logger.error(f"[YOOKASSA WEBHOOK] Ошибка: {e}", exc_info=True)
+            return jsonify({'error': str(e)}), 500
     
     @app.route('/yookassa/test-webhook', methods=['POST', 'GET'])
     def test_yookassa_webhook():

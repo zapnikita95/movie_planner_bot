@@ -122,7 +122,7 @@ scheduler = BackgroundScheduler()
 scheduler.start()
 
 # Устанавливаем экземпляр бота и scheduler в модуле tasks
-from scheduler.tasks import set_bot_instance, set_scheduler_instance, hourly_stats, check_and_send_plan_notifications, clean_home_plans, start_cinema_votes, resolve_cinema_votes
+from scheduler.tasks import set_bot_instance, set_scheduler_instance, hourly_stats, check_and_send_plan_notifications, clean_home_plans, start_cinema_votes, resolve_cinema_votes, check_subscription_payments
 set_bot_instance(bot)
 set_scheduler_instance(scheduler)
 
@@ -138,6 +138,9 @@ scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
 # Периодическая проверка планов и отправка пропущенных уведомлений (каждые 5 минут)
 scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='check_plan_notifications')
+
+# Проверка подписок и отправка уведомлений за день до списания (каждый день в 9:00 МСК)
+scheduler.add_job(check_subscription_payments, 'cron', hour=9, minute=0, timezone=plans_tz, id='check_subscription_payments')
 
 # Добавляем задачи очистки и голосования в scheduler
 scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
@@ -13021,9 +13024,10 @@ def handle_payment_callback(call):
                     if subscription_id is None:
                         subscription_id = 0
                     markup = InlineKeyboardMarkup(row_width=1)
-                    # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
+                    # Показываем кнопки только для реальных подписок (id > 0)
                     if subscription_id and subscription_id > 0:
-                        markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                        markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
+                        markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     try:
                         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -14137,20 +14141,120 @@ def handle_payment_callback(call):
                         'group_username': group_username
                     }
             
-            # Создаем кнопку "Оплатить" с указанием суммы и периодичности
-            markup = InlineKeyboardMarkup(row_width=1)
-            button_text = f"💳 Оплатить {final_price}₽{period_suffix}"
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"payment:pay:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}"))
+            # Сразу создаем платеж, без промежуточного шага
+            # Инициализируем ЮKassa
+            Configuration.account_id = YOOKASSA_SHOP_ID
+            Configuration.secret_key = YOOKASSA_SECRET_KEY
             
-            if group_size:
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
+            # Формируем описание платежа
+            period_names = {
+                'month': 'месяц',
+                '3months': '3 месяца',
+                'year': 'год',
+                'lifetime': 'навсегда'
+            }
+            period_name = period_names.get(period_type, period_type)
+            
+            plan_names = {
+                'notifications': 'Уведомления о сериалах',
+                'recommendations': 'Персональные рекомендации',
+                'tickets': 'Билеты на мероприятия',
+                'all': 'Все режимы'
+            }
+            plan_name = plan_names.get(plan_type, plan_type)
+            
+            subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+            description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+            
+            # Создаем уникальный ID платежа
+            payment_id = str(uuid.uuid4())
+            
+            # Определяем URL для возврата
+            return_url = os.getenv('YOOKASSA_RETURN_URL', 'https://t.me/movie_planner_bot')
+            
+            # Подготавливаем metadata для платежа
+            metadata = {
+                "user_id": str(user_id),
+                "chat_id": str(chat_id),
+                "subscription_type": sub_type,
+                "plan_type": plan_type,
+                "period_type": period_type,
+                "payment_id": payment_id
+            }
+            
+            # Добавляем group_size, telegram_username или group_username в зависимости от типа подписки
+            if sub_type == 'group':
+                metadata["group_size"] = str(group_size) if group_size else ""
+                if not is_private:
+                    # В группе - сохраняем username группы
+                    group_username = call.message.chat.username
+                    if group_username:
+                        metadata["group_username"] = group_username
             else:
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
+                # Для личной подписки
+                if is_private:
+                    # В личке - сохраняем username пользователя
+                    telegram_username = call.from_user.username
+                    if telegram_username:
+                        metadata["telegram_username"] = telegram_username
+            
+            # Создаем платеж
             try:
-                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                payment = Payment.create({
+                    "amount": {
+                        "value": f"{final_price:.2f}",
+                        "currency": "RUB"
+                    },
+                    "confirmation": {
+                        "type": "redirect",
+                        "return_url": return_url
+                    },
+                    "capture": True,
+                    "description": description,
+                    "metadata": metadata
+                })
+                
+                # Сохраняем информацию о платеже в БД
+                from database.db_operations import save_payment
+                save_payment(
+                    payment_id=payment_id,
+                    yookassa_payment_id=payment.id,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    subscription_type=sub_type,
+                    plan_type=plan_type,
+                    period_type=period_type,
+                    group_size=group_size,
+                    amount=final_price,
+                    status='pending'
+                )
+                
+                # Получаем URL для оплаты
+                confirmation_url = payment.confirmation.confirmation_url
+                
+                # Обновляем сообщение с кнопкой для оплаты
+                text += f"\n\n💳 <b>Оплата</b>\n"
+                text += f"💰 Сумма: <b>{final_price}₽{period_suffix}</b>\n\n"
+                text += "Нажмите кнопку ниже для перехода к оплате:"
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+                
+                if group_size:
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
+                else:
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
+                
+                try:
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                logger.error(f"[PAYMENT] Ошибка создания платежа в ЮKassa: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
             return
         
         if action.startswith("pay:"):
@@ -14330,6 +14434,73 @@ def handle_payment_callback(call):
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
+        
+        if action.startswith("modify:"):
+            # Изменение подписки - показываем информацию о текущей подписке и варианты изменения
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+            
+            subscription_id = int(action.split(":")[1])
+            
+            # Получаем информацию о подписке
+            with db_lock:
+                cursor.execute("""
+                    SELECT * FROM subscriptions 
+                    WHERE id = %s AND user_id = %s AND is_active = TRUE
+                """, (subscription_id, user_id))
+                sub = cursor.fetchone()
+            
+            if not sub:
+                bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                return
+            
+            from datetime import datetime
+            plan_type = sub.get('plan_type', 'all')
+            period_type = sub.get('period_type', 'lifetime')
+            price = sub.get('price', 0)
+            next_payment = sub.get('next_payment_date')
+            subscription_type = sub.get('subscription_type')
+            
+            plan_names = {
+                'notifications': '🔔 Уведомления о сериалах',
+                'recommendations': '🎯 Персональные рекомендации',
+                'tickets': '🎫 Билеты на мероприятия',
+                'all': '📦 Все режимы'
+            }
+            
+            period_names = {
+                'month': 'месяц',
+                '3months': '3 месяца',
+                'year': 'год',
+                'lifetime': 'навсегда'
+            }
+            
+            text = f"✏️ <b>Изменение подписки</b>\n\n"
+            text += f"📋 <b>Текущая подписка:</b>\n"
+            if subscription_type == 'personal':
+                text += f"👤 Личная подписка\n"
+            else:
+                text += f"👥 Групповая подписка\n"
+            text += f"{plan_names.get(plan_type, plan_type)}\n"
+            text += f"⏰ Период: {period_names.get(period_type, period_type)}\n"
+            text += f"💰 Сумма: <b>{price}₽</b>\n"
+            if next_payment:
+                text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+            text += "\nВыберите действие:"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("💰 Изменить тариф", callback_data=f"payment:tariffs:{subscription_type}"))
+            markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:{subscription_type}" if subscription_type == 'personal' else "payment:active:group:current"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e:
                 if "message is not modified" not in str(e):
                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -14602,13 +14773,10 @@ def handle_payment_username(message):
                     
                     markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
                 
-                # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
+                # Показываем кнопки только для реальных подписок (id > 0)
                 if subscription_id and subscription_id > 0:
-                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
-                
-                # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
-                if subscription_id and subscription_id > 0:
-                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                 logger.info(f"[PAYMENT] Отправка информации о подписке для группы @{username}")

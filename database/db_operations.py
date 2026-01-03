@@ -681,10 +681,46 @@ def get_user_group_subscriptions(user_id):
         return cursor.fetchall()
 
 
+def renew_subscription(subscription_id, period_type):
+    """Продлевает существующую подписку на указанный период"""
+    from datetime import datetime
+    from dateutil.relativedelta import relativedelta
+    import pytz
+    
+    now = datetime.now(pytz.UTC)
+    
+    # Вычисляем новую дату следующего платежа и окончания
+    expires_at = None
+    next_payment_date = None
+    
+    if period_type == 'month':
+        next_payment_date = now + relativedelta(months=1)
+        expires_at = now + relativedelta(months=1)
+    elif period_type == '3months':
+        next_payment_date = now + relativedelta(months=3)
+        expires_at = now + relativedelta(months=3)
+    elif period_type == 'year':
+        next_payment_date = now + relativedelta(years=1)
+        expires_at = now + relativedelta(years=1)
+    elif period_type == 'lifetime':
+        expires_at = None
+        next_payment_date = None
+    
+    with db_lock:
+        cursor.execute("""
+            UPDATE subscriptions 
+            SET next_payment_date = %s, expires_at = %s, activated_at = %s
+            WHERE id = %s
+        """, (next_payment_date, expires_at, now, subscription_id))
+        conn.commit()
+        return True
+
+
 def create_subscription(chat_id, user_id, subscription_type, plan_type, period_type, price, 
                        telegram_username=None, group_username=None, group_size=None):
     """Создает новую подписку"""
     from datetime import datetime, timedelta
+    from dateutil.relativedelta import relativedelta
     import pytz
     
     now = datetime.now(pytz.UTC)
@@ -694,14 +730,17 @@ def create_subscription(chat_id, user_id, subscription_type, plan_type, period_t
     next_payment_date = None
     
     if period_type == 'month':
-        expires_at = now + timedelta(days=30)
-        next_payment_date = now + timedelta(days=30)
+        # Ежемесячная подписка - списание каждый месяц
+        expires_at = now + relativedelta(months=1)
+        next_payment_date = now + relativedelta(months=1)
     elif period_type == '3months':
-        expires_at = now + timedelta(days=90)
-        next_payment_date = now + timedelta(days=90)
+        # Ежеквартальная подписка - списание каждые 3 месяца
+        expires_at = now + relativedelta(months=3)
+        next_payment_date = now + relativedelta(months=3)
     elif period_type == 'year':
-        expires_at = now + timedelta(days=365)
-        next_payment_date = now + timedelta(days=365)
+        # Годовая подписка - списание раз в год
+        expires_at = now + relativedelta(years=1)
+        next_payment_date = now + relativedelta(years=1)
     elif period_type == 'lifetime':
         expires_at = None
         next_payment_date = None
