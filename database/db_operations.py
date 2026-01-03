@@ -514,6 +514,7 @@ def get_active_subscription(chat_id, user_id, subscription_type=None):
         return virtual_sub
     
     with db_lock:
+        # Сначала проверяем, есть ли реальная подписка в БД
         query = """
             SELECT * FROM subscriptions 
             WHERE chat_id = %s AND user_id = %s AND is_active = TRUE 
@@ -526,7 +527,47 @@ def get_active_subscription(chat_id, user_id, subscription_type=None):
         query += " ORDER BY activated_at DESC LIMIT 1"
         cursor.execute(query, params)
         row = cursor.fetchone()
-        return row
+        
+        # Если есть реальная подписка, возвращаем её
+        if row:
+            return row
+        
+        # Если подписки нет, проверяем, есть ли активность в группе (бот присутствует)
+        # Проверяем наличие записей в stats для этого чата
+        cursor.execute("""
+            SELECT COUNT(*) FROM stats 
+            WHERE chat_id = %s
+            LIMIT 1
+        """, (chat_id,))
+        stats_count = cursor.fetchone()
+        has_activity = stats_count and (stats_count[0] if isinstance(stats_count, tuple) else stats_count.get('count', 0) if isinstance(stats_count, dict) else 0) > 0
+        
+        # Если есть активность в группе, возвращаем виртуальную полную подписку навсегда
+        if has_activity:
+            from datetime import datetime
+            import pytz
+            now = datetime.now(pytz.UTC)
+            virtual_sub = {
+                'id': -1,  # Виртуальная подписка
+                'chat_id': chat_id,
+                'user_id': user_id,
+                'subscription_type': subscription_type or 'group',
+                'plan_type': 'all',
+                'period_type': 'lifetime',
+                'price': 0,
+                'activated_at': now,
+                'next_payment_date': None,
+                'expires_at': None,
+                'is_active': True,
+                'cancelled_at': None,
+                'telegram_username': None,
+                'group_username': None,
+                'group_size': None,
+                'created_at': now
+            }
+            return virtual_sub
+        
+        return None
 
 
 def get_active_subscription_by_username(telegram_username, subscription_type='personal'):
@@ -570,13 +611,23 @@ def get_active_subscription_by_username(telegram_username, subscription_type='pe
 def get_active_group_subscription(group_username):
     """Получает активную групповую подписку по username группы"""
     with db_lock:
+        # Сначала проверяем реальную подписку
         cursor.execute("""
             SELECT * FROM subscriptions 
             WHERE group_username = %s AND subscription_type = 'group' 
             AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
             ORDER BY activated_at DESC LIMIT 1
         """, (group_username,))
-        return cursor.fetchone()
+        row = cursor.fetchone()
+        
+        # Если есть реальная подписка, возвращаем её
+        if row:
+            return row
+        
+        # Если подписки нет, проверяем наличие активности (бот присутствует в группе)
+        # Для этого нужно найти chat_id по username, но это сложно без bot объекта
+        # Поэтому возвращаем None - проверка будет в обработчике через bot.get_chat
+        return None
 
 
 def get_user_personal_subscriptions(user_id):
@@ -631,7 +682,7 @@ def get_user_group_subscriptions(user_id):
 
 
 def create_subscription(chat_id, user_id, subscription_type, plan_type, period_type, price, 
-                       telegram_username=None, group_username=None):
+                       telegram_username=None, group_username=None, group_size=None):
     """Создает новую подписку"""
     from datetime import datetime, timedelta
     import pytz
@@ -659,11 +710,11 @@ def create_subscription(chat_id, user_id, subscription_type, plan_type, period_t
         cursor.execute("""
             INSERT INTO subscriptions 
             (chat_id, user_id, subscription_type, plan_type, period_type, price, 
-             activated_at, next_payment_date, expires_at, telegram_username, group_username)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             activated_at, next_payment_date, expires_at, telegram_username, group_username, group_size)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (chat_id, user_id, subscription_type, plan_type, period_type, price,
-              now, next_payment_date, expires_at, telegram_username, group_username))
+              now, next_payment_date, expires_at, telegram_username, group_username, group_size))
         subscription_id = cursor.fetchone()[0] if cursor.rowcount > 0 else None
         
         # Добавляем features в зависимости от plan_type
@@ -723,14 +774,31 @@ def has_subscription_feature(chat_id, user_id, feature_type):
             return True
         
         # Проверяем групповую подписку
+        # Сначала проверяем, есть ли ограничение по участникам (group_size)
         cursor.execute("""
-            SELECT s.id FROM subscriptions s
+            SELECT s.id, s.group_size FROM subscriptions s
             JOIN subscription_features sf ON s.id = sf.subscription_id
             WHERE s.chat_id = %s AND s.subscription_type = 'group' 
             AND s.is_active = TRUE AND (s.expires_at IS NULL OR s.expires_at > NOW())
             AND sf.feature_type = %s
         """, (chat_id, feature_type))
-        return cursor.fetchone() is not None
+        sub_row = cursor.fetchone()
+        if sub_row:
+            subscription_id = sub_row[0] if isinstance(sub_row, dict) else sub_row[0]
+            group_size = sub_row[1] if isinstance(sub_row, dict) else sub_row[1]
+            
+            # Если есть ограничение по участникам, проверяем, входит ли пользователь в список
+            if group_size is not None:
+                cursor.execute("""
+                    SELECT id FROM subscription_members
+                    WHERE subscription_id = %s AND user_id = %s
+                """, (subscription_id, user_id))
+                if not cursor.fetchone():
+                    return False  # Пользователь не в списке участников подписки
+            
+            return True
+        
+        return False
 
 
 def check_user_in_group(bot, user_id, group_username):
@@ -749,4 +817,148 @@ def check_user_in_group(bot, user_id, group_username):
             return False
     except:
         return False
+
+
+def get_active_group_users(chat_id):
+    """Получает список активных пользователей группы (кто отправлял запросы или присоединился)"""
+    with db_lock:
+        # Получаем пользователей из stats (кто отправлял запросы)
+        cursor.execute("""
+            SELECT DISTINCT user_id, username 
+            FROM stats 
+            WHERE chat_id = %s AND user_id IS NOT NULL
+        """, (chat_id,))
+        users = {}
+        for row in cursor.fetchall():
+            user_id = row[0] if isinstance(row, dict) else row[0]
+            username = row[1] if isinstance(row, dict) else row[1]
+            if user_id:
+                users[user_id] = username or f"user_{user_id}"
+        
+        return users
+
+
+def get_subscription_by_id(subscription_id):
+    """Получает подписку по ID"""
+    with db_lock:
+        cursor.execute("""
+            SELECT * FROM subscriptions 
+            WHERE id = %s
+        """, (subscription_id,))
+        return cursor.fetchone()
+
+
+def get_subscription_members(subscription_id):
+    """Получает список участников подписки"""
+    with db_lock:
+        cursor.execute("""
+            SELECT user_id, username FROM subscription_members
+            WHERE subscription_id = %s
+        """, (subscription_id,))
+        members = {}
+        for row in cursor.fetchall():
+            user_id = row[0] if isinstance(row, dict) else row[0]
+            username = row[1] if isinstance(row, dict) else row[1]
+            members[user_id] = username or f"user_{user_id}"
+        return members
+
+
+def add_subscription_member(subscription_id, user_id, username=None):
+    """Добавляет участника в подписку"""
+    with db_lock:
+        cursor.execute("""
+            INSERT INTO subscription_members (subscription_id, user_id, username)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (subscription_id, user_id) DO NOTHING
+        """, (subscription_id, user_id, username))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def update_subscription_group_size(subscription_id, new_group_size, additional_price):
+    """Обновляет размер группы подписки и добавляет доплату"""
+    with db_lock:
+        cursor.execute("""
+            UPDATE subscriptions 
+            SET group_size = %s, price = price + %s
+            WHERE id = %s
+        """, (new_group_size, additional_price, subscription_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def remove_subscription_member(subscription_id, user_id):
+    """Удаляет участника из подписки"""
+    with db_lock:
+        cursor.execute("""
+            DELETE FROM subscription_members
+            WHERE subscription_id = %s AND user_id = %s
+        """, (subscription_id, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def save_payment(payment_id, yookassa_payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status='pending'):
+    """Сохраняет информацию о платеже"""
+    with db_lock:
+        cursor.execute("""
+            INSERT INTO payments (payment_id, yookassa_payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (payment_id) DO UPDATE SET
+                yookassa_payment_id = EXCLUDED.yookassa_payment_id,
+                status = EXCLUDED.status,
+                updated_at = NOW()
+        """, (payment_id, yookassa_payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def update_payment_status(payment_id, status, subscription_id=None):
+    """Обновляет статус платежа"""
+    with db_lock:
+        if subscription_id:
+            cursor.execute("""
+                UPDATE payments 
+                SET status = %s, subscription_id = %s, updated_at = NOW()
+                WHERE payment_id = %s
+            """, (status, subscription_id, payment_id))
+        else:
+            cursor.execute("""
+                UPDATE payments 
+                SET status = %s, updated_at = NOW()
+                WHERE payment_id = %s
+            """, (status, payment_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def get_payment_by_yookassa_id(yookassa_payment_id):
+    """Получает платеж по ID из ЮKassa"""
+    with db_lock:
+        cursor.execute("""
+            SELECT * FROM payments 
+            WHERE yookassa_payment_id = %s
+        """, (yookassa_payment_id,))
+        row = cursor.fetchone()
+        if row:
+            if isinstance(row, dict):
+                return dict(row)
+            else:
+                return {
+                    'id': row[0],
+                    'payment_id': row[1],
+                    'yookassa_payment_id': row[2],
+                    'user_id': row[3],
+                    'chat_id': row[4],
+                    'subscription_type': row[5],
+                    'plan_type': row[6],
+                    'period_type': row[7],
+                    'group_size': row[8],
+                    'amount': row[9],
+                    'status': row[10],
+                    'subscription_id': row[11],
+                    'created_at': row[12],
+                    'updated_at': row[13]
+                }
+        return None
 
