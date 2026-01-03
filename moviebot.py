@@ -392,6 +392,15 @@ try:
     cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS ticket_notification_sent BOOLEAN DEFAULT FALSE")
     conn.commit()
     logger.info("Поле ticket_notification_sent добавлено в таблицу plans (или уже существует)")
+    
+    # Добавляем поле streaming_service для хранения выбранного онлайн-кинотеатра
+    try:
+        cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS streaming_service TEXT")
+        cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS streaming_url TEXT")
+        conn.commit()
+        logger.info("Поля streaming_service и streaming_url добавлены в таблицу plans (или уже существуют)")
+    except Exception as e:
+        logger.warning(f"Ошибка при добавлении полей streaming_service/streaming_url: {e}")
 except Exception as e:
     logger.warning(f"Ошибка при добавлении поля notification_sent: {e}")
     conn.rollback()
@@ -3241,8 +3250,8 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                         InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                     )
                     
-                    # Если это сериал, добавляем кнопки для сериалов
-                    if is_series:
+                    # Если это сериал, добавляем кнопки для сериалов (только если есть доступ)
+                    if is_series and user_id and has_notifications_access(chat_id, user_id):
                         markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                         markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
@@ -3252,8 +3261,8 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
             # Только если сообщение отправлено успешно и фильм добавлен в БД — сохраняем для реакций
             bot_messages[msg.message_id] = link
             
-            # Если добавлен сериал, отправляем дополнительное сообщение о планировании серий
-            if is_series:
+            # Если добавлен сериал, отправляем дополнительное сообщение о планировании серий (только если есть доступ)
+            if is_series and user_id and has_notifications_access(chat_id, user_id):
                 try:
                     series_text = f"📺 <b>Сериал добавлен в базу!</b>\n\n"
                     series_text += f"Вы можете:\n"
@@ -3286,18 +3295,31 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
             
             logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}, message_id={msg.message_id}")
             
-            # Если это сериал, показываем сезоны и предлагаем отметить просмотренные
-            if info.get('is_series'):
-                seasons_text = get_seasons(info['kp_id'], chat_id, None)
+            # Если это сериал, показываем сезоны и предлагаем отметить просмотренные (только если есть доступ)
+            if info.get('is_series') and user_id and has_notifications_access(chat_id, user_id):
+                seasons_text = get_seasons(info['kp_id'], chat_id, user_id)
                 if seasons_text:
                     bot.send_message(chat_id, seasons_text, parse_mode='HTML')
                     
                     # Предлагаем отметить сезоны/серии как просмотренные
                     markup = InlineKeyboardMarkup()
                     markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{info['kp_id']}"))
-                    # Проверяем, подписан ли уже пользователь (нужно получить user_id из контекста)
-                    # Пока просто добавляем кнопку, user_id будет получен в обработчике
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
+                    # Проверяем, подписан ли уже пользователь
+                    with db_lock:
+                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, info['kp_id']))
+                        film_row = cursor.fetchone()
+                        if film_row:
+                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                            sub_row = cursor.fetchone()
+                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                            
+                            if is_subscribed:
+                                markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{info['kp_id']}"))
+                            else:
+                                markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
+                        else:
+                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                     bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
             
             return True
@@ -7281,8 +7303,8 @@ def handle_add_film_callback(call):
                     InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                 )
             
-            # Если это сериал, добавляем кнопки для сериалов
-            if is_series_final:
+            # Если это сериал, добавляем кнопки для сериалов (только если есть доступ)
+            if is_series_final and has_notifications_access(chat_id, user_id):
                 markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                 
                 # Проверяем, подписан ли уже пользователь
@@ -7296,8 +7318,8 @@ def handle_add_film_callback(call):
                 else:
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         else:
-            # Если фильм не в базе, но это сериал - показываем кнопки для сериалов
-            if is_series_final:
+            # Если фильм не в базе, но это сериал - показываем кнопки для сериалов (только если есть доступ)
+            if is_series_final and has_notifications_access(chat_id, user_id):
                 markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                 markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
@@ -7533,8 +7555,8 @@ def handle_confirm_add_film_callback(call):
                         InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                     )
             
-            # Если это сериал, добавляем кнопки для сериалов
-            if info.get('is_series'):
+            # Если это сериал, добавляем кнопки для сериалов (только если есть доступ)
+            if info.get('is_series') and has_notifications_access(chat_id, user_id):
                 # Добавляем кнопку для отметки сезонов/серий
                 markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                 
