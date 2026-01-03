@@ -949,6 +949,9 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                                     markup = InlineKeyboardMarkup(row_width=2)
                                     for platform, url in sources_dict.items():
                                         markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id}:{platform}"))
+                                    # Кнопка "Завершить" только если кинотеатр не выбран
+                                    if not streaming_service:
+                                        markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
                                     text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
                             except json.JSONDecodeError:
                                 pass
@@ -976,6 +979,9 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                                         markup = InlineKeyboardMarkup(row_width=2)
                                         for platform, url in sources[:6]:
                                             markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id}:{platform}"))
+                                        # Кнопка "Завершить" только если кинотеатр не выбран
+                                        if not streaming_service:
+                                            markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
                                         text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
         
         msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
@@ -3613,16 +3619,10 @@ def send_welcome(message):
 
 Этот бот помогает собирать фильмы, отмечать просмотренные, планировать просмотр и выбирать, что посмотреть следующим.
 
-<b>Как это работает:</b>
-• Отправляйте ссылки на фильмы/сериалы с Кинопоиска
-• Бот сразу добавит фильм в базу и покажет карточку с информацией
-
-• Когда посмотрели — поставьте на сообщение со ссылкой эмодзи {emoji}  
-  Бот поздравит и попросит оценку от 1 до 10
-
 <b>Основные команды:</b>
 /list — список непросмотренных фильмов
 /random — рандомный непросмотренный фильм с фильтрами
+/search — поиск фильмов и сериалов через Кинопоиск
 /plan — запланировать просмотр дома или в кино
 /schedule — список запланированных просмотров
 /total — статистика: фильмы, жанры, режиссёры, актёры и оценки
@@ -3640,18 +3640,12 @@ def send_welcome(message):
 <b>Билеты в кино:</b>
 /ticket — прикрепить билет к запланированному просмотру в кино
 
+<b>Управление данными:</b>
+/edit — редактирование расписания и оценок
+/clean — удаление данных (оценки, просмотры, планы, база)
+
 <b>💎 Платные функции:</b>
 /payment — управление подписками
-
-🔔 <b>Уведомления о сериалах</b> — уведомления о новых сериях, настройка времени уведомлений
-
-🎯 <b>Персональные рекомендации</b> — режимы рандомайзера "по моим оценкам", "по групповым оценкам", "рандом по кинопоиск", импорт базы из Кинопоиска
-
-🎫 <b>Билеты в кино</b> — добавление билетов на сеансы, уведомления с билетами перед сеансом
-
-📦 <b>Пакетные подписки</b> — все режимы сразу с выгодной скидкой
-
-Подробнее о тарифах и подписках: /payment
 
 Просто отправляйте ссылки и пользуйтесь командами! 🍿
 
@@ -3663,16 +3657,10 @@ def send_welcome(message):
 
 Этот бот помогает друзьям собирать фильмы, отмечать просмотренные, планировать просмотр и выбирать, что посмотреть следующим.
 
-<b>Как это работает:</b>
-• Кидайте в чат ссылки на фильмы/сериалы с Кинопоиска
-• Бот сразу добавит фильм в базу и покажет красивую карточку с названием, годом, жанрами, режиссёром, актёрами и описанием
-
-• Когда посмотрели — поставьте на сообщение со ссылкой эмодзи {emoji}  
-  Бот поздравит и попросит оценку от 1 до 10
-
 <b>Основные команды:</b>
 /list — список непросмотренных фильмов
 /random — рандомный непросмотренный фильм с фильтрами (год, жанр, режиссёр — можно пропустить)
+/search — поиск фильмов и сериалов через Кинопоиск
 /plan — запланировать просмотр дома или в кино (с напоминанием)
 /schedule — список запланированных просмотров
 /total — статистика группы: сколько посмотрели, любимые жанры, режиссёры, актёры и оценки
@@ -3689,18 +3677,12 @@ def send_welcome(message):
 <b>Билеты в кино:</b>
 /ticket — прикрепить билет к запланированному просмотру в кино
 
+<b>Управление данными:</b>
+/edit — редактирование расписания и оценок
+/clean — удаление данных (оценки, просмотры, планы, база)
+
 <b>💎 Платные функции:</b>
 /payment — управление подписками
-
-🔔 <b>Уведомления о сериалах</b> — уведомления о новых сериях, настройка времени уведомлений
-
-🎯 <b>Персональные рекомендации</b> — режимы рандомайзера "по моим оценкам", "по групповым оценкам", "рандом по кинопоиск", импорт базы из Кинопоиска
-
-🎫 <b>Билеты в кино</b> — добавление билетов на сеансы, уведомления с билетами перед сеансом
-
-📦 <b>Пакетные подписки</b> — все режимы сразу с выгодной скидкой (для групп и лично)
-
-Подробнее о тарифах и подписках: /payment
 
 Просто кидайте ссылки и пользуйтесь командами — бот всё запомнит и сделает кино-вечера идеальными! 🍿
 
@@ -4629,131 +4611,161 @@ def get_plan_day_or_date_internal(message, state):
         logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
     
     if not plan_dt:
+        # Пробуем найти время отдельно (например, "завтра 10:00", "в субботу 15:00")
+        time_match = re.search(r'(\d{1,2})[: ](\d{2})', text)
+        extracted_time = None
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                extracted_time = (hour, minute)
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Найдено время в тексте: {hour}:{minute:02d}")
+        
         target_weekday = None
         for phrase, wd in days_full.items():
             if phrase in text:
                 target_weekday = wd
                 logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
                 break
-    
-    if target_weekday is not None:
-        current_wd = now.weekday()
-        delta = (target_weekday - current_wd + 7) % 7
-        if delta == 0:
-            delta = 7
-        plan_date = now.date() + timedelta(days=delta)
         
-        if plan_type == 'home':
-            hour = 19 if target_weekday < 5 else 10
-        else:
-            hour = 9
-        
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
-        logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата по дню недели: {plan_dt}")
-    else:
-        # Обработка специальных форматов: "завтра", "следующая неделя"
-        if 'завтра' in text:
-            plan_date = (now.date() + timedelta(days=1))
-            if plan_type == 'home':
-                hour = 19 if plan_date.weekday() < 5 else 10
+        if target_weekday is not None:
+            current_wd = now.weekday()
+            delta = (target_weekday - current_wd + 7) % 7
+            if delta == 0:
+                delta = 7
+            plan_date = now.date() + timedelta(days=delta)
+            
+            # Используем извлеченное время, если есть, иначе стандартное
+            if extracted_time:
+                hour, minute = extracted_time
+            elif plan_type == 'home':
+                hour = 19 if target_weekday < 5 else 10
+                minute = 0
             else:
                 hour = 9
-            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+                minute = 0
+            
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
             plan_dt = user_tz.localize(plan_dt)
-            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'завтра': {plan_dt}")
-        elif 'следующая неделя' in text or 'след неделя' in text or 'след. неделя' in text or 'на следующей неделе' in text:
-            if plan_type == 'home':
-                # Для дома - суббота следующей недели в 10:00
-                current_wd = now.weekday()
-                days_until_next_saturday = (5 - current_wd + 7) % 7
-                if days_until_next_saturday == 0:
-                    days_until_next_saturday = 7
-                else:
-                    days_until_next_saturday += 7
-                plan_date = now.date() + timedelta(days=days_until_next_saturday)
-                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=10))
-                plan_dt = user_tz.localize(plan_dt)
-                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (дом): {plan_dt}")
-            else:
-                # Для кино - четверг следующей недели
-                current_wd = now.weekday()
-                days_until_thursday = (3 - current_wd + 7) % 7
-                if days_until_thursday == 0:
-                    days_until_thursday = 7
-                else:
-                    days_until_thursday += 7
-                plan_date = now.date() + timedelta(days=days_until_thursday)
-                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
-                plan_dt = user_tz.localize(plan_dt)
-                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (кино): {plan_dt}")
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата по дню недели: {plan_dt}")
         else:
-            # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
-            # Сначала пробуем формат с временем: "15 января 17:00"
-            date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2})[.:](\d{2})', text)
-            if date_time_match:
-                day_num = int(date_time_match.group(1))
-                month_str = date_time_match.group(2)
-                hour = int(date_time_match.group(3))
-                minute = int(date_time_match.group(4))
-                month = months_map.get(month_str.lower())
-                if month:
-                    try:
-                        year = now.year
-                        candidate = user_tz.localize(datetime(year, month, day_num, hour, minute))
-                        if candidate < now:
-                            year += 1
-                        plan_dt = user_tz.localize(datetime(year, month, day_num, hour, minute))
-                        logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата с временем: {plan_dt}")
-                    except ValueError as e:
-                        logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга даты с временем: {e}")
+            # Обработка специальных форматов: "завтра", "следующая неделя"
+            if 'завтра' in text:
+                plan_date = (now.date() + timedelta(days=1))
+                # Используем извлеченное время, если есть, иначе стандартное
+                if extracted_time:
+                    hour, minute = extracted_time
+                elif plan_type == 'home':
+                    hour = 19 if plan_date.weekday() < 5 else 10
+                    minute = 0
+                else:
+                    hour = 9
+                    minute = 0
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                plan_dt = user_tz.localize(plan_dt)
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'завтра': {plan_dt}")
+            elif 'следующая неделя' in text or 'след неделя' in text or 'след. неделя' in text or 'на следующей неделе' in text:
+                if plan_type == 'home':
+                    # Для дома - суббота следующей недели в 10:00
+                    current_wd = now.weekday()
+                    days_until_next_saturday = (5 - current_wd + 7) % 7
+                    if days_until_next_saturday == 0:
+                        days_until_next_saturday = 7
+                    else:
+                        days_until_next_saturday += 7
+                    plan_date = now.date() + timedelta(days=days_until_next_saturday)
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=10))
+                    plan_dt = user_tz.localize(plan_dt)
+                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (дом): {plan_dt}")
+                else:
+                    # Для кино - четверг следующей недели
+                    current_wd = now.weekday()
+                    days_until_thursday = (3 - current_wd + 7) % 7
+                    if days_until_thursday == 0:
+                        days_until_thursday = 7
+                    else:
+                        days_until_thursday += 7
+                    plan_date = now.date() + timedelta(days=days_until_thursday)
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
+                    plan_dt = user_tz.localize(plan_dt)
+                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (кино): {plan_dt}")
             else:
-                # Парсинг "15 января" или "14 апреля"
-                date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
-                if date_match:
-                    day = int(date_match.group(1))
-                    month_str = date_match.group(2).lower()
-                    month = months_map.get(month_str)
+                # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
+                # Сначала пробуем формат с временем: "15 января 17:00"
+                date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2})[.:](\d{2})', text)
+                if date_time_match:
+                    day_num = int(date_time_match.group(1))
+                    month_str = date_time_match.group(2)
+                    hour = int(date_time_match.group(3))
+                    minute = int(date_time_match.group(4))
+                    month = months_map.get(month_str.lower())
                     if month:
-                        year = now.year
                         try:
-                            candidate = user_tz.localize(datetime(year, month, day))
+                            year = now.year
+                            candidate = user_tz.localize(datetime(year, month, day_num, hour, minute))
                             if candidate < now:
                                 year += 1
-                            if plan_type == 'home':
-                                hour = 19 if datetime(year, month, day).weekday() < 5 else 10
-                            else:
-                                hour = 9
-                            plan_dt = user_tz.localize(datetime(year, month, day, hour))
-                            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата текстовым форматом: {plan_dt}")
+                            plan_dt = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата с временем: {plan_dt}")
                         except ValueError as e:
-                            logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга текстовой даты: {e}")
+                            logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга даты с временем: {e}")
                 else:
-                    # Парсинг "10.01" или "06.01"
-                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    # Парсинг "15 января" или "14 апреля"
+                    date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
                     if date_match:
-                        day_num = int(date_match.group(1))
-                        month_num = int(date_match.group(2))
-                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        day = int(date_match.group(1))
+                        month_str = date_match.group(2).lower()
+                        month = months_map.get(month_str)
+                        if month:
+                            year = now.year
                             try:
-                                year = now.year
-                                if date_match.group(3):
-                                    year_part = int(date_match.group(3))
-                                    if year_part < 100:
-                                        year = 2000 + year_part
-                                    else:
-                                        year = year_part
-                                candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                candidate = user_tz.localize(datetime(year, month, day))
                                 if candidate < now:
                                     year += 1
-                                if plan_type == 'home':
-                                    hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
+                                # Используем извлеченное время, если есть, иначе стандартное
+                                if extracted_time:
+                                    hour, minute = extracted_time
+                                elif plan_type == 'home':
+                                    hour = 19 if datetime(year, month, day).weekday() < 5 else 10
+                                    minute = 0
                                 else:
                                     hour = 9
-                                plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour))
-                                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
+                                    minute = 0
+                                plan_dt = user_tz.localize(datetime(year, month, day, hour, minute))
+                                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата текстовым форматом: {plan_dt}")
                             except ValueError as e:
-                                logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
+                                logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга текстовой даты: {e}")
+                    else:
+                        # Парсинг "10.01" или "06.01"
+                        date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                        if date_match:
+                            day_num = int(date_match.group(1))
+                            month_num = int(date_match.group(2))
+                            if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                                try:
+                                    year = now.year
+                                    if date_match.group(3):
+                                        year_part = int(date_match.group(3))
+                                        if year_part < 100:
+                                            year = 2000 + year_part
+                                        else:
+                                            year = year_part
+                                    candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                    if candidate < now:
+                                        year += 1
+                                    # Используем извлеченное время, если есть, иначе стандартное
+                                    if extracted_time:
+                                        hour, minute = extracted_time
+                                    elif plan_type == 'home':
+                                        hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
+                                        minute = 0
+                                    else:
+                                        hour = 9
+                                        minute = 0
+                                    plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
+                                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
+                                except ValueError as e:
+                                    logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
     
     if not plan_dt:
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать дату из текста: '{text}'")
@@ -12216,6 +12228,9 @@ def edit_callback_handler(call):
         clean_action_choice(call)
     
     elif action == "cancel":
+        # Очищаем состояние редактирования
+        if user_id in user_edit_state:
+            del user_edit_state[user_id]
         bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
         bot.answer_callback_query(call.id)
 
@@ -12226,6 +12241,14 @@ def edit_plan_callback(call):
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     plan_id = int(call.data.split(":")[1])
+    
+    # Очищаем состояние редактирования при возврате к меню
+    if user_id in user_edit_state and user_edit_state[user_id].get('action') == 'edit_plan_datetime':
+        # Оставляем только базовую информацию для меню редактирования
+        user_edit_state[user_id] = {
+            'action': 'edit_plan',
+            'plan_id': plan_id
+        }
     
     # Получаем информацию о плане
     with db_lock:
@@ -12275,6 +12298,7 @@ def edit_plan_callback(call):
         markup.add(InlineKeyboardButton("🎟️ Загрузить билеты", callback_data=f"edit_plan_ticket:{plan_id}"))
     else:
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
+        markup.add(InlineKeyboardButton("📺 Изменить онлайн-кинотеатр", callback_data=f"edit_plan_streaming:{plan_id}"))
         markup.add(InlineKeyboardButton("🎦 Переключить в 'в кино'", callback_data=f"edit_plan_switch:{plan_id}"))
     markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
     
@@ -12321,7 +12345,7 @@ def edit_plan_datetime_callback(call):
     }
     
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"edit_plan:{plan_id}"))
     
     bot.edit_message_text(
         "📅 <b>Введите новую дату и время:</b>\n\n"
@@ -12335,6 +12359,73 @@ def edit_plan_datetime_callback(call):
     )
     bot.answer_callback_query(call.id)
 
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan_streaming:"))
+def edit_plan_streaming_callback(call):
+    """Обработчик изменения онлайн-кинотеатра для домашнего плана"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    plan_id = int(call.data.split(":")[1])
+    
+    # Получаем информацию о плане и фильме
+    with db_lock:
+        cursor.execute('''
+            SELECT p.ticket_file_id, m.kp_id, p.streaming_service
+            FROM plans p
+            JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+            WHERE p.id = %s AND p.chat_id = %s
+        ''', (plan_id, chat_id))
+        plan_row = cursor.fetchone()
+    
+    if not plan_row:
+        bot.answer_callback_query(call.id, "План не найден", show_alert=True)
+        return
+    
+    sources_json = plan_row.get('ticket_file_id') if isinstance(plan_row, dict) else plan_row[0]
+    kp_id = plan_row.get('kp_id') if isinstance(plan_row, dict) else plan_row[1]
+    current_service = plan_row.get('streaming_service') if isinstance(plan_row, dict) else plan_row[2]
+    
+    sources_dict = {}
+    if sources_json:
+        import json
+        try:
+            sources_dict = json.loads(sources_json)
+        except:
+            pass
+    
+    # Если источников нет, получаем из API
+    if not sources_dict and kp_id:
+        from api.kinopoisk_api import get_external_sources
+        sources = get_external_sources(kp_id)
+        if sources:
+            sources_dict = {platform: url for platform, url in sources[:6]}
+            # Сохраняем в базу
+            sources_json = json.dumps(sources_dict, ensure_ascii=False)
+            cursor.execute('UPDATE plans SET ticket_file_id = %s WHERE id = %s', (sources_json, plan_id))
+            conn.commit()
+    
+    if not sources_dict:
+        bot.answer_callback_query(call.id, "❌ Онлайн-кинотеатры не найдены", show_alert=True)
+        return
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    for platform, url in sources_dict.items():
+        # Отмечаем текущий кинотеатр
+        button_text = f"✅ {platform}" if platform == current_service else platform
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"streaming_select:{plan_id}:{platform}"))
+    
+    # Кнопка "Завершить" только если кинотеатр не выбран
+    if not current_service:
+        markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
+    
+    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"edit_plan:{plan_id}"))
+    
+    text = "📺 <b>Выберите онлайн-кинотеатр:</b>"
+    if current_service:
+        text += f"\n\n✅ Текущий: <b>{current_service}</b>"
+    
+    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("edit_plan_ticket:"))
 def edit_plan_ticket_callback(call):
@@ -12441,6 +12532,14 @@ def handle_edit_plan_datetime_text(message):
     text = message.text.strip()
     state = user_edit_state.get(user_id, {})
     plan_id = state.get('plan_id')
+    
+    # Если это ссылка на фильм, очищаем состояние и обрабатываем как обычное добавление
+    if re.search(r'kinopoisk\.ru/(film|series)/\d+', text):
+        if user_id in user_edit_state:
+            del user_edit_state[user_id]
+        # Обрабатываем ссылку как обычное добавление фильма
+        add_and_announce(text, chat_id, user_id, source='link')
+        return
     
     if not plan_id:
         bot.reply_to(message, "❌ Ошибка: план не найден.")
@@ -12765,27 +12864,103 @@ def streaming_select_callback(call):
                     url = sources_dict.get(platform, '')
                     
                     if url:
+                        # Получаем текущий streaming_url (может содержать message_id)
+                        cursor.execute('SELECT streaming_url FROM plans WHERE id = %s', (plan_id,))
+                        url_row = cursor.fetchone()
+                        current_streaming_url = url_row.get('streaming_url') if url_row and isinstance(url_row, dict) else (url_row[0] if url_row else None)
+                        
                         # Сохраняем выбор кинотеатра в базу
-                        cursor.execute('''
-                            UPDATE plans 
-                            SET streaming_service = %s, streaming_url = %s 
-                            WHERE id = %s AND chat_id = %s AND user_id = %s
-                        ''', (platform, url, plan_id, chat_id, user_id))
-                        conn.commit()
+                        # Если streaming_url содержит message_id, сохраняем его отдельно
+                        final_streaming_url = url
+                        if current_streaming_url and current_streaming_url.startswith('confirm_msg:'):
+                            # Сохраняем message_id отдельно, чтобы не потерять его
+                            confirm_msg_id = current_streaming_url.split(':')[1]
+                            # Обновляем streaming_url на реальный URL, но message_id сохраним в отдельном запросе
+                            cursor.execute('''
+                                UPDATE plans 
+                                SET streaming_service = %s, streaming_url = %s 
+                                WHERE id = %s AND chat_id = %s AND user_id = %s
+                            ''', (platform, url, plan_id, chat_id, user_id))
+                            conn.commit()
+                        else:
+                            # Обычное обновление
+                            cursor.execute('''
+                                UPDATE plans 
+                                SET streaming_service = %s, streaming_url = %s 
+                                WHERE id = %s AND chat_id = %s AND user_id = %s
+                            ''', (platform, url, plan_id, chat_id, user_id))
+                            conn.commit()
                         
                         bot.answer_callback_query(call.id, f"✅ Выбран {platform}")
                         
-                        # Обновляем сообщение, отмечая выбранный кинотеатр
-                        sources_markup = InlineKeyboardMarkup(row_width=2)
-                        for plat, plat_url in sources_dict.items():
-                            # Отмечаем выбранный кинотеатр
-                            button_text = f"✅ {plat}" if plat == platform else plat
-                            sources_markup.add(InlineKeyboardButton(button_text, callback_data=f"streaming_select:{plan_id}:{plat}"))
-                        sources_markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
-                        bot.edit_message_text(
-                            f"📺 Где посмотреть фильм?\n\nВыберите онлайн-кинотеатр:\n\n✅ Выбрано: <b>{platform}</b>",
-                            chat_id, call.message.message_id, reply_markup=sources_markup, parse_mode='HTML'
-                        )
+                        # Получаем информацию о плане для обновления подтверждающего сообщения
+                        cursor.execute('''
+                            SELECT m.title, p.plan_datetime, p.streaming_service, p.streaming_url
+                            FROM plans p
+                            JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                            WHERE p.id = %s AND p.chat_id = %s
+                        ''', (plan_id, chat_id))
+                        plan_info = cursor.fetchone()
+                        
+                        # Удаляем сообщение с выбором кинотеатра
+                        try:
+                            bot.delete_message(chat_id, call.message.message_id)
+                        except:
+                            pass
+                        
+                        # Обновляем подтверждающее сообщение, если оно есть
+                        if plan_info:
+                            title = plan_info.get('title') if isinstance(plan_info, dict) else plan_info[0]
+                            plan_dt = plan_info.get('plan_datetime') if isinstance(plan_info, dict) else plan_info[1]
+                            streaming_url_field = plan_info.get('streaming_url') if isinstance(plan_info, dict) else plan_info[3]
+                            
+                            # Извлекаем message_id из streaming_url, если он там сохранен
+                            confirm_message_id = None
+                            if streaming_url_field and streaming_url_field.startswith('confirm_msg:'):
+                                try:
+                                    confirm_message_id = int(streaming_url_field.split(':')[1])
+                                except:
+                                    pass
+                            
+                            # Форматируем дату
+                            user_tz = get_user_timezone_or_default(user_id)
+                            if plan_dt:
+                                if isinstance(plan_dt, datetime):
+                                    if plan_dt.tzinfo is None:
+                                        dt = pytz.utc.localize(plan_dt).astimezone(user_tz)
+                                    else:
+                                        dt = plan_dt.astimezone(user_tz)
+                                else:
+                                    dt = datetime.fromisoformat(str(plan_dt).replace('Z', '+00:00')).astimezone(user_tz)
+                                date_str = dt.strftime('%d.%m.%Y %H:%M')
+                                tz_name = str(user_tz).split('/')[-1] if '/' in str(user_tz) else 'MSK'
+                                date_display = f"{date_str} {tz_name}"
+                            else:
+                                date_display = "не указана"
+                            
+                            # Формируем текст с названием кинотеатра
+                            confirm_text = f"✅ Запланирован фильм дома: <b>{title}</b> на {date_display}\n\n"
+                            confirm_text += f"📺 Онлайн-кинотеатр: <b>{platform}</b>"
+                            
+                            # Обновляем подтверждающее сообщение, если знаем его message_id
+                            try:
+                                markup_confirm = InlineKeyboardMarkup()
+                                markup_confirm.add(InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan:{plan_id}"))
+                                if confirm_message_id:
+                                    # Обновляем существующее сообщение
+                                    bot.edit_message_text(confirm_text, chat_id, confirm_message_id, parse_mode='HTML', reply_markup=markup_confirm)
+                                else:
+                                    # Если message_id не найден, отправляем новое сообщение
+                                    bot.send_message(chat_id, confirm_text, parse_mode='HTML', reply_markup=markup_confirm)
+                            except Exception as e:
+                                logger.warning(f"[STREAMING SELECT] Не удалось обновить подтверждающее сообщение: {e}")
+                                # Если не удалось обновить, отправляем новое
+                                try:
+                                    markup_confirm = InlineKeyboardMarkup()
+                                    markup_confirm.add(InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan:{plan_id}"))
+                                    bot.send_message(chat_id, confirm_text, parse_mode='HTML', reply_markup=markup_confirm)
+                                except:
+                                    pass
                     else:
                         bot.answer_callback_query(call.id, "❌ Кинотеатр не найден", show_alert=True)
                 except json.JSONDecodeError:
@@ -18443,13 +18618,33 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         # Обработка "завтра" (для обоих режимов)
         elif 'завтра' in day_lower:
             plan_date = (now.date() + timedelta(days=1))
-            if plan_type == 'cinema':
-                hour = 9
-            else:  # home
-                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                hour = 19 if plan_date.weekday() < 5 else 10
-            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-            plan_dt = user_tz.localize(plan_dt)
+            # Пробуем найти время в строке
+            time_match = re.search(r'(\d{1,2})[: ](\d{2})', day_or_date)
+            if time_match:
+                hour = int(time_match.group(1))
+                minute = int(time_match.group(2))
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                    plan_dt = user_tz.localize(plan_dt)
+                else:
+                    # Некорректное время, используем стандартное
+                    if plan_type == 'cinema':
+                        hour = 9
+                        minute = 0
+                    else:  # home
+                        hour = 19 if plan_date.weekday() < 5 else 10
+                        minute = 0
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                    plan_dt = user_tz.localize(plan_dt)
+            else:
+                # Время не указано, используем стандартное
+                if plan_type == 'cinema':
+                    hour = 9
+                else:  # home
+                    # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                    hour = 19 if plan_date.weekday() < 5 else 10
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+                plan_dt = user_tz.localize(plan_dt)
         
         # Обработка "следующая неделя" (для обоих режимов)
         elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower or 'на следующей неделе' in day_lower:
@@ -18529,14 +18724,33 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
             else:
                 plan_date = now.date() + timedelta(days=delta)
             
-            if plan_type == 'home':
-                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                hour = 19 if target_weekday < 5 else 10
-            else:  # cinema
-                hour = 9
-            
-            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-            plan_dt = user_tz.localize(plan_dt)
+            # Пробуем найти время в строке
+            time_match = re.search(r'(\d{1,2})[: ](\d{2})', day_or_date)
+            if time_match:
+                hour = int(time_match.group(1))
+                minute = int(time_match.group(2))
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                    plan_dt = user_tz.localize(plan_dt)
+                else:
+                    # Некорректное время, используем стандартное
+                    if plan_type == 'home':
+                        hour = 19 if target_weekday < 5 else 10
+                        minute = 0
+                    else:  # cinema
+                        hour = 9
+                        minute = 0
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                    plan_dt = user_tz.localize(plan_dt)
+            else:
+                # Время не указано, используем стандартное
+                if plan_type == 'home':
+                    # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                    hour = 19 if target_weekday < 5 else 10
+                else:  # cinema
+                    hour = 9
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+                plan_dt = user_tz.localize(plan_dt)
         
         else:
             # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
@@ -18825,7 +19039,27 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         if kp_id:
             markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
         
-        bot.send_message(chat_id, plan_message, parse_mode='HTML', reply_markup=markup)
+        # Отправляем подтверждающее сообщение
+        confirm_msg = bot.send_message(chat_id, plan_message, parse_mode='HTML', reply_markup=markup)
+        confirm_message_id = confirm_msg.message_id if confirm_msg else None
+        
+        # Если планируем дома, получаем plan_id для сохранения message_id
+        plan_id_for_confirm = None
+        if plan_type == 'home' and confirm_message_id:
+            with db_lock:
+                cursor.execute('SELECT id FROM plans WHERE chat_id = %s AND film_id = %s AND plan_type = %s AND plan_datetime = %s ORDER BY id DESC LIMIT 1',
+                             (chat_id, film_id, plan_type, plan_utc))
+                plan_row = cursor.fetchone()
+                if plan_row:
+                    plan_id_for_confirm = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                    # Сохраняем message_id в streaming_url (временно, пока не добавим отдельное поле)
+                    # Только если streaming_url еще не установлен (кинотеатр не выбран)
+                    cursor.execute('''
+                        UPDATE plans 
+                        SET streaming_url = %s 
+                        WHERE id = %s AND (streaming_url IS NULL OR streaming_url = '' OR streaming_url LIKE 'confirm_msg:%')
+                    ''', (f"confirm_msg:{confirm_message_id}", plan_id_for_confirm))
+                    conn.commit()
         
         # Если планируем дома, показываем где посмотреть
         if plan_type == 'home' and kp_id:
@@ -18858,7 +19092,13 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                 for platform, url in sources[:6]:  # Максимум 6 кнопок
                     # Используем только plan_id и platform в callback_data
                     sources_markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id_for_streaming}:{platform}"))
-                sources_markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id_for_streaming}"))
+                # Кнопка "Завершить" только если кинотеатр не выбран
+                # Проверяем, есть ли уже выбранный кинотеатр
+                cursor.execute('SELECT streaming_service FROM plans WHERE id = %s', (plan_id_for_streaming,))
+                stream_check = cursor.fetchone()
+                current_service = stream_check.get('streaming_service') if stream_check and isinstance(stream_check, dict) else (stream_check[0] if stream_check else None)
+                if not current_service:
+                    sources_markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id_for_streaming}"))
                 streaming_msg = bot.send_message(chat_id, f"📺 Где посмотреть <b>{title}</b>?\n\nВыберите онлайн-кинотеатр:", reply_markup=sources_markup, parse_mode='HTML')
         
         # Планируем уведомление на время плана
