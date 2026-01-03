@@ -47,12 +47,18 @@ def create_web_app(bot_instance):
     def process_yookassa_notification(event_json, is_test=False):
         """Обрабатывает уведомление от ЮKassa (можно вызывать из webhook или теста)"""
         try:
-            logger.info(f"[YOOKASSA] Обработка события: {event_json.get('event')} (тест: {is_test})")
+            logger.info("=" * 80)
+            logger.info(f"[YOOKASSA] ===== ОБРАБОТКА СОБЫТИЯ =====")
+            logger.info(f"[YOOKASSA] Событие: {event_json.get('event')} (тест: {is_test})")
+            logger.info(f"[YOOKASSA] Полный JSON: {event_json}")
             
             if event_json.get('event') == 'payment.succeeded':
                 payment_id = event_json.get('object', {}).get('id')
                 if payment_id:
                     logger.info(f"[YOOKASSA] Платеж успешен: {payment_id}")
+                else:
+                    logger.warning(f"[YOOKASSA] Платеж успешен, но payment_id отсутствует в объекте")
+                    logger.warning(f"[YOOKASSA] Объект: {event_json.get('object')}")
                     
                     # Импортируем функции для обработки платежа
                     from database.db_operations import get_payment_by_yookassa_id, update_payment_status, create_subscription
@@ -71,24 +77,29 @@ def create_web_app(bot_instance):
                         logger.warning(f"[YOOKASSA] Это может быть нормально, если платеж был создан в другом экземпляре бота")
                         return jsonify({'status': 'ok', 'message': 'Payment not found in DB'}), 200
                     
-                    logger.info(f"[YOOKASSA] Платеж найден в БД: {payment_data}")
+                    logger.info(f"[YOOKASSA] Платеж найден в БД: payment_id={payment_data.get('payment_id')}, user_id={payment_data.get('user_id')}, chat_id={payment_data.get('chat_id')}, status={payment_data.get('status')}")
                     
                     # Получаем информацию о платеже из ЮKassa (только если не тестовый режим)
                     payment = None
                     payment_status = None
                     if not is_test:
                         try:
+                            logger.info(f"[YOOKASSA] Получение информации о платеже из ЮKassa API...")
                             payment = Payment.find_one(payment_id)
                             payment_status = payment.status if payment else None
+                            logger.info(f"[YOOKASSA] Статус платежа из ЮKassa: {payment_status}")
                         except Exception as e:
-                            logger.error(f"[YOOKASSA] Ошибка получения платежа из ЮKassa: {e}")
+                            logger.error(f"[YOOKASSA] Ошибка получения платежа из ЮKassa: {e}", exc_info=True)
                             # В тестовом режиме или при ошибке используем данные из БД
                             payment_status = 'succeeded' if event_json.get('event') == 'payment.succeeded' else 'canceled'
                     else:
                         # В тестовом режиме используем статус из события
                         payment_status = 'succeeded' if event_json.get('event') == 'payment.succeeded' else 'canceled'
                     
+                    logger.info(f"[YOOKASSA] Текущий статус в БД: {payment_data.get('status')}, статус из ЮKassa: {payment_status}")
+                    
                     if payment_status == 'succeeded' and payment_data.get('status') != 'succeeded':
+                        logger.info(f"[YOOKASSA] Платеж успешен, обновляем статус и создаем/продлеваем подписку")
                         # Обновляем статус платежа
                         update_payment_status(payment_data['payment_id'], 'succeeded')
                         
