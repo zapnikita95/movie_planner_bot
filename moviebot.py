@@ -7499,17 +7499,24 @@ def handle_confirm_add_film_callback(call):
                         InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                     )
             
-            # Если это сериал, добавляем кнопку подписки
+            # Если это сериал, добавляем кнопки для сериалов
             if info.get('is_series'):
-                # Проверяем, подписан ли уже пользователь
-                with db_lock:
-                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                    sub_row = cursor.fetchone()
-                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                # Добавляем кнопку для отметки сезонов/серий
+                markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                 
-                if is_subscribed:
-                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                # Проверяем, подписан ли уже пользователь (только если film_id определен)
+                if film_row:
+                    with db_lock:
+                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                        sub_row = cursor.fetchone()
+                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                    
+                    if is_subscribed:
+                        markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
+                    # Если film_id еще не определен, просто добавляем кнопку подписки
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
             
             # Отправляем новое сообщение
@@ -13990,6 +13997,9 @@ def handle_payment_callback(call):
                             markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:group"))
                         
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                        
+                        # Добавляем сообщение о других группах
+                        text += "\n\n💬 <i>Если хотите посмотреть остальные группы, в которых вы состоите, напишите в личку боту.</i>"
                     else:
                         text = f"👥 <b>Групповая подписка</b>\n\n"
                         text += f"Группа: <b>{group_title}</b>\n"
