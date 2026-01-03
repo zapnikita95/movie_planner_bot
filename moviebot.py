@@ -2722,7 +2722,7 @@ def premiere_detail_handler(call):
             if russia_release:
                 text += f"📅 Премьера в России: {premiere_date_str}\n"
             else:
-            text += f"📅 Премьера: {premiere_date_str}\n"
+                text += f"📅 Премьера: {premiere_date_str}\n"
         if director_str != '—':
             text += f"🎥 Режиссёр: {director_str}\n"
         if countries != '—':
