@@ -15347,12 +15347,14 @@ def handle_payment_callback(call):
         
         if action.startswith("cancel:"):
             # Подтверждение отмены
+            logger.info(f"[PAYMENT CANCEL] Начало обработки отмены: action={action}, user_id={user_id}, chat_id={chat_id}")
             parts = action.split(":")
             second_param = parts[1]
             
             # Проверяем, является ли второй параметр числом (subscription_id) или строкой (personal/group)
             try:
                 subscription_id = int(second_param)
+                logger.info(f"[PAYMENT CANCEL] Параметр является числом (subscription_id={subscription_id})")
                 # Это subscription_id - проверяем тип подписки
                 from database.db_operations import get_subscription_by_id
                 sub = get_subscription_by_id(subscription_id)
@@ -15403,6 +15405,7 @@ def handle_payment_callback(call):
                     bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
             except ValueError:
                 # Это строка (personal/group) - используем старую логику
+                logger.info(f"[PAYMENT CANCEL] Параметр является строкой (sub_type={second_param})")
                 sub_type = second_param
                 sub = get_active_subscription(chat_id, user_id, sub_type)
                 
@@ -15411,12 +15414,44 @@ def handle_payment_callback(call):
                     return
                 
                 sub_id = sub.get('id')
+                logger.info(f"[PAYMENT CANCEL] Обработка отмены подписки: sub_type={sub_type}, sub_id={sub_id}, user_id={user_id}, chat_id={chat_id}")
+                
+                # Для виртуальных подписок (id <= 0) просто деактивируем их в БД, если они есть
                 if not sub_id or sub_id <= 0:
-                    bot.answer_callback_query(call.id, "Нельзя отменить виртуальную подписку", show_alert=True)
+                    logger.info(f"[PAYMENT CANCEL] Виртуальная подписка (id={sub_id}), деактивируем через UPDATE по chat_id и user_id")
+                    # Для виртуальных подписок деактивируем все активные подписки этого типа для пользователя
+                    # Используем глобальные cursor и conn, которые уже определены в начале файла
+                    with db_lock:
+                        cursor.execute("""
+                            UPDATE subscriptions 
+                            SET is_active = FALSE, cancelled_at = NOW()
+                            WHERE chat_id = %s AND user_id = %s AND subscription_type = %s AND is_active = TRUE
+                        """, (chat_id, user_id, sub_type))
+                        conn.commit()
+                        rows_updated = cursor.rowcount
+                    
+                    if rows_updated > 0:
+                        logger.info(f"[PAYMENT CANCEL] Деактивировано {rows_updated} виртуальных подписок")
+                        bot.answer_callback_query(call.id, "Подписка отменена")
+                        try:
+                            bot.edit_message_text(
+                                f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
+                                call.message.chat.id,
+                                call.message.message_id,
+                                parse_mode='HTML'
+                            )
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    else:
+                        logger.info(f"[PAYMENT CANCEL] Виртуальная подписка не найдена в БД для деактивации")
+                        bot.answer_callback_query(call.id, "Виртуальная подписка уже отменена", show_alert=True)
                     return
                 
+                # Для реальных подписок (id > 0)
                 # Для групповых подписок требуем подтверждение через текст
                 if sub_type == 'group':
+                    logger.info(f"[PAYMENT CANCEL] Групповая подписка, запрашиваем подтверждение")
                     bot.answer_callback_query(call.id)
                     try:
                         bot.edit_message_text(
@@ -15436,11 +15471,14 @@ def handle_payment_callback(call):
                         }
                         logger.info(f"[PAYMENT CANCEL] Сохранено состояние отмены для пользователя {user_id}, subscription_id={sub_id}, chat_id={chat_id}")
                     except Exception as e:
+                        logger.error(f"[PAYMENT CANCEL] Ошибка при запросе подтверждения: {e}", exc_info=True)
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 else:
                     # Для личных подписок отменяем сразу
+                    logger.info(f"[PAYMENT CANCEL] Личная подписка, отменяем сразу")
                     if cancel_subscription(sub_id, user_id):
+                        logger.info(f"[PAYMENT CANCEL] Личная подписка {sub_id} успешно отменена")
                         bot.answer_callback_query(call.id, "Подписка отменена")
                         try:
                             bot.edit_message_text(
@@ -15453,6 +15491,7 @@ def handle_payment_callback(call):
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                     else:
+                        logger.error(f"[PAYMENT CANCEL] Ошибка отмены личной подписки {sub_id}")
                         bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
             return
         
