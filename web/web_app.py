@@ -38,7 +38,16 @@ def create_web_app(bot_instance):
                 logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
                 logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
             
-            bot_instance.process_new_updates([update])
+            # Обрабатываем обновление с обработкой ошибок
+            try:
+                logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
+                bot_instance.process_new_updates([update])
+                logger.info(f"[WEBHOOK] bot.process_new_updates завершен успешно")
+            except Exception as e:
+                logger.error(f"[WEBHOOK] Ошибка в bot.process_new_updates: {e}", exc_info=True)
+                # Возвращаем 200, чтобы Telegram не повторял запрос
+                return '', 200
+            
             return '', 200
         else:
             logger.warning("[WEBHOOK] Неверный content-type")
