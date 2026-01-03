@@ -13842,7 +13842,7 @@ def handle_payment_callback(call):
                         'subscription_type': sub_type,
                         'plan_type': plan_type,
                         'period_type': period_type,
-                        'price': price,
+                        'price': final_price,
                         'group_size': group_size,
                         'chat_id': chat_id,
                         'group_username': group_username
@@ -13859,6 +13859,59 @@ def handle_payment_callback(call):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
             try:
                 bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
+        
+        if action.startswith("pay:"):
+            # Обработка нажатия на кнопку "Оплатить"
+            parts = action.split(":")
+            sub_type = parts[1]  # personal или group
+            group_size_str = parts[2] if len(parts) > 5 else ''  # 2, 5, 10 для групп или пусто
+            group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+            plan_type = parts[3] if group_size else parts[2]  # notifications, recommendations, tickets, all
+            period_type = parts[4] if group_size else parts[3]  # month, 3months, year, lifetime
+            
+            # Вычисляем финальную цену с учетом скидок
+            if sub_type == 'personal':
+                final_price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period_type, 0)
+            else:  # group
+                final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
+            
+            # Показываем сообщение о необходимости связаться с администратором
+            period_names = {
+                'month': 'месяц',
+                '3months': '3 месяца',
+                'year': 'год',
+                'lifetime': 'навсегда'
+            }
+            period_name = period_names.get(period_type, period_type)
+            
+            text = f"💳 <b>Оплата подписки</b>\n\n"
+            text += f"📋 <b>Выбранный тариф:</b>\n"
+            if sub_type == 'personal':
+                text += f"👤 Личная подписка\n"
+            else:
+                text += f"👥 Групповая подписка (на {group_size} участников)\n"
+            
+            plan_names = {
+                'notifications': '🔔 Уведомления о сериалах',
+                'recommendations': '🎯 Персональные рекомендации',
+                'tickets': '🎫 Билеты на мероприятия',
+                'all': '📦 Все режимы'
+            }
+            text += f"{plan_names.get(plan_type, plan_type)}\n"
+            text += f"⏰ Период: {period_name}\n"
+            text += f"💰 Сумма: <b>{final_price}₽</b>\n\n"
+            text += "Для завершения оплаты свяжитесь с администратором."
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.answer_callback_query(call.id, "Для оплаты свяжитесь с администратором")
             except Exception as e:
                 if "message is not modified" not in str(e):
                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
