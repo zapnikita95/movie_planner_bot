@@ -7159,7 +7159,7 @@ def handle_confirm_add_film_callback(call):
             # Если не получилось и тип был неопределен, пробуем другой вариант
             if not film_type_from_callback:
                 if link.endswith('/film/'):
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
                 else:
                     link = f"https://www.kinopoisk.ru/film/{kp_id}/"
             info = extract_movie_info(link)
