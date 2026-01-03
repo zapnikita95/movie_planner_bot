@@ -3979,105 +3979,92 @@ def handle_reaction(reaction):
                 else:
                     logger.info(f"[REACTION DEBUG] ❌ Эмодзи {r.emoji} не в списке watched (старый формат): {ordinary_emojis}")
     
-    # Если эмодзи не в списке watched, предлагаем добавить его
-    if not is_watched:
-        logger.info("[REACTION] Не watched эмодзи — проверяем, нужно ли предложить добавить")
-        
-        # Проверяем, что это реакция на сообщение с фильмом
-        link = bot_messages.get(message_id)
-        if not link:
-            plan_data = plan_notification_messages.get(message_id)
-            if plan_data:
-                link = plan_data.get('link')
-        
-        if link:
-            # Проверяем, что пользователь активный (из stats за последние 30 дней)
-            user_id = reaction.user.id if reaction.user else None
-            if user_id:
-                try:
-                    with db_lock:
-                        thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
-                        cursor.execute('''
-                            SELECT DISTINCT user_id
-                            FROM stats
-                            WHERE chat_id = %s AND user_id = %s AND timestamp > %s
-                        ''', (chat_id, user_id, thirty_days_ago))
-                        is_active = cursor.fetchone() is not None
-                    
-                    if is_active:
-                        # Получаем первое новое эмодзи
-                        new_emoji = None
-                        for r in reaction.new_reaction:
-                            if hasattr(r, 'type') and r.type == 'emoji' and hasattr(r, 'emoji'):
-                                new_emoji = r.emoji
-                                break
-                            elif hasattr(r, 'emoji'):
-                                new_emoji = r.emoji
-                                break
-                        
-                        if new_emoji:
-                            # Проверяем, не предлагали ли уже это эмодзи (чтобы не спамить)
-                            # Используем ключ: chat_id + emoji + message_id (чтобы можно было предложить для разных сообщений)
-                            emoji_suggestion_key = f"{chat_id}:{new_emoji}:{message_id}"
-                            if not hasattr(handle_reaction, '_emoji_suggestions'):
-                                handle_reaction._emoji_suggestions = set()
-                            
-                            if emoji_suggestion_key not in handle_reaction._emoji_suggestions:
-                                handle_reaction._emoji_suggestions.add(emoji_suggestion_key)
-                                
-                                # Предлагаем добавить эмодзи
-                                markup = InlineKeyboardMarkup()
-                                markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_emoji:{new_emoji}"))
-                                
-                                bot.send_message(
-                                    chat_id,
-                                    f"💡 Хотите добавить эмодзи {new_emoji} в список разрешённых для отметки о просмотре?",
-                                    reply_to_message_id=message_id,
-                                    reply_markup=markup
-                                )
-                                logger.info(f"[REACTION] Предложено добавить эмодзи {new_emoji} для чата {chat_id} на сообщение {message_id}")
-                except Exception as e:
-                    logger.error(f"[REACTION] Ошибка при предложении добавить эмодзи: {e}", exc_info=True)
-        
-        logger.info("[REACTION] Не watched эмодзи — игнорируем")
-        return
+    # Получаем ссылку на фильм (нужно для отметки как просмотренного и предложения добавить эмодзи)
+    link = bot_messages.get(message_id)
+    if not link:
+        plan_data = plan_notification_messages.get(message_id)
+        if plan_data:
+            link = plan_data.get('link')
     
-    link = None
-    if is_watched:
-        link = bot_messages.get(message_id)
-        if not link:
-            # Проверяем также plan_notification_messages
-            plan_data = plan_notification_messages.get(message_id)
-            if plan_data:
-                link = plan_data.get('link')
-                logger.info(f"[REACTION] Найдена ссылка в plan_notification_messages: {link}")
+    # Если не найдено, пытаемся найти в БД по message_id или другим способом
+    if not link:
+        logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
+        # Пробуем найти фильм в БД по последним добавленным фильмам в этом чате
+        try:
+            with db_lock:
+                # Ищем последние фильмы в этом чате (за последний час)
+                cursor.execute("""
+                    SELECT link FROM movies 
+                    WHERE chat_id = %s 
+                    ORDER BY id DESC 
+                    LIMIT 10
+                """, (chat_id,))
+                recent_links = cursor.fetchall()
+                # Если в чате недавно был добавлен только один фильм, используем его
+                if len(recent_links) == 1:
+                    link = recent_links[0].get('link') if isinstance(recent_links[0], dict) else recent_links[0][0]
+                    logger.info(f"[REACTION] Использована последняя ссылка из БД: {link}")
+                    bot_messages[message_id] = link
+        except Exception as e:
+            logger.warning(f"[REACTION] Ошибка при поиске в БД: {e}")
+    
+    # Если эмодзи не в списке watched, предлагаем добавить его, но все равно отмечаем фильм как просмотренный
+    if not is_watched and link:
+        logger.info("[REACTION] Не watched эмодзи — предлагаем добавить и отмечаем фильм как просмотренный")
         
-        # Если не найдено, пытаемся найти в БД по message_id или другим способом
-        if not link:
-            logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
-            # Пробуем найти фильм в БД по последним добавленным фильмам в этом чате
-            # Это не идеально, но лучше чем пересылать сообщение
+        user_id = reaction.user.id if reaction.user else None
+        if user_id:
             try:
-                with db_lock:
-                    # Ищем последние фильмы в этом чате (за последний час)
-                    cursor.execute("""
-                        SELECT link FROM movies 
-                        WHERE chat_id = %s 
-                        ORDER BY id DESC 
-                        LIMIT 10
-                    """, (chat_id,))
-                    recent_links = cursor.fetchall()
-                    # Если в чате недавно был добавлен только один фильм, используем его
-                    if len(recent_links) == 1:
-                        link = recent_links[0].get('link') if isinstance(recent_links[0], dict) else recent_links[0][0]
-                        logger.info(f"[REACTION] Использована последняя ссылка из БД: {link}")
-                        bot_messages[message_id] = link
+                # Получаем первое новое эмодзи (обычное или кастомное)
+                new_emoji = None
+                new_custom_emoji_id = None
+                for r in reaction.new_reaction:
+                    if hasattr(r, 'type') and r.type == 'emoji' and hasattr(r, 'emoji'):
+                        new_emoji = r.emoji
+                        break
+                    elif hasattr(r, 'type') and r.type == 'custom_emoji' and hasattr(r, 'custom_emoji_id'):
+                        new_custom_emoji_id = str(r.custom_emoji_id)
+                        break
+                    elif hasattr(r, 'emoji'):
+                        new_emoji = r.emoji
+                        break
+                
+                # Предлагаем добавить эмодзи (только если еще не предлагали)
+                if new_emoji or new_custom_emoji_id:
+                    emoji_for_key = new_emoji if new_emoji else f"custom:{new_custom_emoji_id}"
+                    emoji_suggestion_key = f"{chat_id}:{emoji_for_key}:{message_id}"
+                    if not hasattr(handle_reaction, '_emoji_suggestions'):
+                        handle_reaction._emoji_suggestions = set()
+                    
+                    if emoji_suggestion_key not in handle_reaction._emoji_suggestions:
+                        handle_reaction._emoji_suggestions.add(emoji_suggestion_key)
+                        
+                        # Предлагаем добавить эмодзи
+                        markup = InlineKeyboardMarkup()
+                        if new_emoji:
+                            markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_emoji:{new_emoji}"))
+                            emoji_display = new_emoji
+                        else:
+                            markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_custom_emoji:{new_custom_emoji_id}"))
+                            emoji_display = f"кастомное эмодзи (ID: {new_custom_emoji_id})"
+                        
+                        bot.send_message(
+                            chat_id,
+                            f"💡 Хотите добавить {emoji_display} в список разрешённых для отметки о просмотре?",
+                            reply_to_message_id=message_id,
+                            reply_markup=markup
+                        )
+                        logger.info(f"[REACTION] Предложено добавить {emoji_display} для чата {chat_id} на сообщение {message_id}")
             except Exception as e:
-                logger.warning(f"[REACTION] Ошибка при поиске в БД: {e}")
+                logger.error(f"[REACTION] Ошибка при предложении добавить эмодзи: {e}", exc_info=True)
     
+    # Если нет ссылки на фильм, не можем обработать
     if not link:
         logger.info(f"[REACTION] Нет link для message_id={message_id}, chat_id={chat_id}. Реакция не обработана.")
         return
+    
+    # Отмечаем фильм как просмотренный (даже если эмодзи не в списке watched)
+    # Это позволяет пользователю отмечать фильмы любым эмодзи, а не только из списка watched
     
     user_id = reaction.user.id if reaction.user else None
     if not user_id:
