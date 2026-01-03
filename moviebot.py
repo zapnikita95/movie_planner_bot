@@ -4284,8 +4284,8 @@ def get_plan_link_internal(message, state):
                         link = f"https://kinopoisk.ru/film/{kp_id}"
                         logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
-    if not link:
-        bot.reply_to(message, "Не нашёл ссылку или ID фильма. Попробуйте снова.")
+        if not link:
+            bot.reply_to(message, "Не нашёл ссылку или ID фильма. Попробуйте снова.")
         return
     
     user_plan_state[user_id]['link'] = link
