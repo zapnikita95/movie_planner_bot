@@ -13213,6 +13213,41 @@ def handle_payment_callback(call):
                 if subscription_id and subscription_id > 0:
                     markup.add(InlineKeyboardButton("👥 Список участников", callback_data=f"payment:group_members:{subscription_id}"))
                 
+                # Предложение других функций, если подписка не включает все режимы
+                if subscription_id and subscription_id > 0 and plan_type != 'all':
+                    # Вычисляем цены для добавления других функций
+                    group_size_str = str(group_size) if group_size else '2'
+                    # Для отдельных функций доступна только месячная подписка
+                    current_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get('month', 0) if period_type == 'month' else SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get(period_type, 0)
+                    all_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get(period_type, 0)
+                    
+                    # Определяем, какие функции отсутствуют
+                    missing_functions = []
+                    if plan_type != 'notifications':
+                        missing_functions.append(('notifications', '🔔 Уведомления', SUBSCRIPTION_PRICES['group'][group_size_str]['notifications'].get('month', 0)))
+                    if plan_type != 'recommendations':
+                        missing_functions.append(('recommendations', '🎯 Рекомендации', SUBSCRIPTION_PRICES['group'][group_size_str]['recommendations'].get('month', 0)))
+                    if plan_type != 'tickets':
+                        missing_functions.append(('tickets', '🎫 Билеты', SUBSCRIPTION_PRICES['group'][group_size_str]['tickets'].get('month', 0)))
+                    
+                    # Предлагаем добавить недостающие функции или обновить до "Все режимы"
+                    if missing_functions:
+                        # Предлагаем обновить до "Все режимы" (обычно выгоднее)
+                        # Для расчета используем месячную цену, так как отдельные функции доступны только по месячной подписке
+                        current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get('month', 0)
+                        all_month_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get('month', 0)
+                        upgrade_price = all_month_price - current_month_price
+                        if upgrade_price > 0:
+                            markup.add(InlineKeyboardButton(f"📦 Все режимы (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
+                        
+                        # Предлагаем добавить отдельные функции (если их 1-2)
+                        if len(missing_functions) <= 2:
+                            for func_type, func_name, func_price in missing_functions:
+                                # Для отдельных функций всегда месячная подписка
+                                add_price = func_price - current_month_price if func_price > current_month_price else func_price
+                                if add_price > 0:
+                                    markup.add(InlineKeyboardButton(f"{func_name} (+{add_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
+                
                 # Кнопки расширения подписки (только для реальных подписок с ограничением по участникам)
                 if subscription_id and subscription_id > 0 and (group_size is None or group_size == 2):
                     # Можно расширить до 5 или 10
@@ -15316,6 +15351,236 @@ def handle_payment_callback(call):
             except Exception as e:
                 if "message is not modified" not in str(e):
                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
+        
+        if action.startswith("upgrade_plan:"):
+            # Обновление подписки до другого типа (например, с "notifications" до "all")
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+            
+            # Парсим callback_data: payment:upgrade_plan:{subscription_id}:{new_plan_type}
+            parts = action.split(":")
+            if len(parts) < 3:
+                bot.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                return
+            
+            subscription_id = int(parts[1])
+            new_plan_type = parts[2]
+            
+            # Получаем информацию о текущей подписке
+            from database.db_operations import get_subscription_by_id
+            sub = get_subscription_by_id(subscription_id)
+            
+            if not sub or sub.get('user_id') != user_id:
+                bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                return
+            
+            current_plan_type = sub.get('plan_type')
+            period_type = sub.get('period_type', 'month')
+            group_size = sub.get('group_size')
+            subscription_type = sub.get('subscription_type')
+            
+            if subscription_type != 'group':
+                bot.answer_callback_query(call.id, "Эта функция доступна только для групповых подписок", show_alert=True)
+                return
+            
+            if current_plan_type == new_plan_type:
+                bot.answer_callback_query(call.id, "У вас уже есть эта подписка", show_alert=True)
+                return
+            
+            # Вычисляем цену для новой подписки
+            group_size_str = str(group_size) if group_size else '2'
+            
+            # Для отдельных функций (notifications, recommendations, tickets) доступна только месячная подписка
+            # Для "all" используем текущий период подписки
+            if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                # Отдельные функции - только месячная подписка
+                new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
+                upgrade_price = new_price - current_month_price
+            else:
+                # Для "all" используем текущий период
+                new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
+                current_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type, 0)
+                upgrade_price = new_price - current_price
+            
+            if upgrade_price <= 0:
+                bot.answer_callback_query(call.id, "Ошибка расчета цены", show_alert=True)
+                return
+            
+            # Формируем описание
+            plan_names = {
+                'notifications': '🔔 Уведомления о сериалах',
+                'recommendations': '🎯 Персональные рекомендации',
+                'tickets': '🎫 Билеты в кино',
+                'all': '📦 Все режимы'
+            }
+            
+            text = f"📦 <b>Обновление подписки</b>\n\n"
+            text += f"📋 <b>Текущая подписка:</b> {plan_names.get(current_plan_type, current_plan_type)}\n"
+            text += f"📋 <b>Новая подписка:</b> {plan_names.get(new_plan_type, new_plan_type)}\n\n"
+            text += f"💰 <b>Доплата:</b> {upgrade_price}₽\n\n"
+            text += f"После оплаты ваша подписка будет обновлена."
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("💳 Оплатить", callback_data=f"payment:pay_upgrade:{subscription_id}:{new_plan_type}"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
+        
+        if action.startswith("pay_upgrade:"):
+            # Создание платежа для обновления подписки
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+            
+            # Парсим callback_data: payment:pay_upgrade:{subscription_id}:{new_plan_type}
+            parts = action.split(":")
+            if len(parts) < 3:
+                bot.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                return
+            
+            subscription_id = int(parts[1])
+            new_plan_type = parts[2]
+            
+            # Получаем информацию о текущей подписке
+            from database.db_operations import get_subscription_by_id
+            sub = get_subscription_by_id(subscription_id)
+            
+            if not sub or sub.get('user_id') != user_id:
+                bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                return
+            
+            current_plan_type = sub.get('plan_type')
+            period_type = sub.get('period_type', 'month')
+            group_size = sub.get('group_size')
+            chat_id = sub.get('chat_id')
+            
+            # Вычисляем цену для новой подписки
+            group_size_str = str(group_size) if group_size else '2'
+            
+            # Для отдельных функций (notifications, recommendations, tickets) доступна только месячная подписка
+            # Для "all" используем текущий период подписки
+            if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                # Отдельные функции - только месячная подписка
+                new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
+                upgrade_price = new_price - current_month_price
+                upgrade_period_type = 'month'
+            else:
+                # Для "all" используем текущий период
+                new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
+                current_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type, 0)
+                upgrade_price = new_price - current_price
+                upgrade_period_type = period_type
+            
+            if upgrade_price <= 0:
+                bot.answer_callback_query(call.id, "Ошибка расчета цены", show_alert=True)
+                return
+            
+            # Создаем платеж для обновления подписки
+            # Используем существующую логику создания платежа, но с флагом upgrade
+            import uuid
+            payment_id = str(uuid.uuid4())
+            
+            return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
+            
+            metadata = {
+                "user_id": str(user_id),
+                "chat_id": str(chat_id),
+                "subscription_type": "group",
+                "plan_type": new_plan_type,
+                "period_type": upgrade_period_type,
+                "payment_id": payment_id,
+                "group_size": str(group_size) if group_size else "",
+                "upgrade_subscription_id": str(subscription_id),  # Флаг для обновления существующей подписки
+                "upgrade_from_plan": current_plan_type  # Старый тип подписки
+            }
+            
+            # Получаем username группы
+            try:
+                chat = bot.get_chat(chat_id)
+                if chat.username:
+                    metadata["group_username"] = chat.username
+            except:
+                pass
+            
+            # Создаем платеж через YooKassa
+            if not YOOKASSA_AVAILABLE:
+                bot.answer_callback_query(call.id, "Платежная система временно недоступна", show_alert=True)
+                return
+            
+            try:
+                from yookassa import Configuration, Payment
+                import uuid as uuid_module
+                
+                Configuration.account_id = YOOKASSA_SHOP_ID
+                Configuration.secret_key = YOOKASSA_SECRET_KEY
+                
+                plan_names = {
+                    'notifications': 'Уведомления о сериалах',
+                    'recommendations': 'Персональные рекомендации',
+                    'tickets': 'Билеты в кино',
+                    'all': 'Все режимы'
+                }
+                
+                description = f"Обновление групповой подписки (на {group_size} участников): {plan_names.get(new_plan_type, new_plan_type)}, период: {period_type}"
+                
+                payment = Payment.create({
+                    "amount": {
+                        "value": f"{upgrade_price:.2f}",
+                        "currency": "RUB"
+                    },
+                    "confirmation": {
+                        "type": "redirect",
+                        "return_url": return_url
+                    },
+                    "capture": True,
+                    "description": description,
+                    "metadata": metadata
+                }, str(uuid_module.uuid4()))
+                
+                # Сохраняем платеж в БД
+                from database.db_operations import save_payment
+                save_payment(
+                    payment_id=payment_id,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    subscription_type='group',
+                    plan_type=new_plan_type,
+                    period_type=period_type,
+                    amount=upgrade_price,
+                    yookassa_payment_id=payment.id,
+                    status='pending',
+                    group_size=group_size,
+                    upgrade_subscription_id=subscription_id
+                )
+                
+                # Отправляем ссылку на оплату
+                if payment.confirmation and payment.confirmation.confirmation_url:
+                    text = f"💳 <b>Оплата обновления подписки</b>\n\n"
+                    text += f"💰 Сумма: <b>{upgrade_price}₽</b>\n\n"
+                    text += f"Нажмите на кнопку ниже для оплаты:"
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("💳 Оплатить", url=payment.confirmation.confirmation_url))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                    
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                else:
+                    bot.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
+                    
+            except Exception as e:
+                logger.error(f"[PAYMENT] Ошибка создания платежа для обновления подписки: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
             return
         
         if action.startswith("cancel:"):
