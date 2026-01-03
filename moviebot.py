@@ -5367,39 +5367,55 @@ def main_text_handler(message):
     
     # === user_cancel_subscription_state ===
     # Проверяем состояние отмены подписки (для групповых подписок требуется подтверждение)
-    # Проверяем, что сообщение является реплаем на сообщение бота
+    # Проверяем состояние отмены подписки
     if user_id in user_cancel_subscription_state:
         logger.info(f"[PAYMENT CANCEL] Пользователь {user_id} в состоянии отмены подписки")
-        if (message.reply_to_message and 
-            message.reply_to_message.from_user and 
-            message.reply_to_message.from_user.id == BOT_ID):
-            logger.info(f"[PAYMENT CANCEL] Сообщение является реплаем на сообщение бота")
+        state = user_cancel_subscription_state.get(user_id)
+        if state:
+            # Проверяем, что сообщение в том же чате, где была запрошена отмена
+            state_chat_id = state.get('chat_id')
+            if state_chat_id and message.chat.id != state_chat_id:
+                logger.info(f"[PAYMENT CANCEL] Сообщение в другом чате: {message.chat.id} != {state_chat_id}")
+                return
+            
+            # Проверяем реплай на сообщение бота (предпочтительно, но не обязательно)
+            is_reply = (message.reply_to_message and 
+                       message.reply_to_message.from_user and 
+                       message.reply_to_message.from_user.id == BOT_ID)
+            
             if text.upper().strip() == 'ДА, ОТМЕНИТЬ':
-                logger.info(f"[PAYMENT CANCEL] Получено подтверждение отмены от пользователя {user_id}")
+                logger.info(f"[PAYMENT CANCEL] Получено подтверждение отмены от пользователя {user_id} (is_reply={is_reply}, chat_id={message.chat.id})")
                 # Обработка подтверждения отмены подписки
-                state = user_cancel_subscription_state.get(user_id)
-                if state:
-                    subscription_id = state.get('subscription_id')
-                    subscription_type = state.get('subscription_type')
-                    chat_id = state.get('chat_id', message.chat.id)
-                    
-                    logger.info(f"[PAYMENT CANCEL] Отменяем подписку {subscription_id}, тип: {subscription_type}, chat_id: {chat_id}")
-                    if subscription_id:
-                        from database.db_operations import cancel_subscription
-                        if cancel_subscription(subscription_id, user_id):
+                subscription_id = state.get('subscription_id')
+                subscription_type = state.get('subscription_type')
+                chat_id = state.get('chat_id', message.chat.id)
+                
+                logger.info(f"[PAYMENT CANCEL] Отменяем подписку {subscription_id}, тип: {subscription_type}, chat_id: {chat_id}")
+                if subscription_id:
+                    from database.db_operations import cancel_subscription
+                    if cancel_subscription(subscription_id, user_id):
+                        if subscription_type == 'group':
                             bot.reply_to(message, "✅ <b>Групповая подписка отменена</b>\n\nВаша групповая подписка была успешно отменена.", parse_mode='HTML')
-                            # Удаляем состояние
-                            del user_cancel_subscription_state[user_id]
-                            logger.info(f"[PAYMENT] Групповая подписка {subscription_id} отменена пользователем {user_id}")
                         else:
-                            bot.reply_to(message, "❌ Ошибка отмены подписки. Попробуйте позже.", parse_mode='HTML')
-                            del user_cancel_subscription_state[user_id]
-                            logger.error(f"[PAYMENT] Ошибка отмены подписки {subscription_id} пользователем {user_id}")
+                            bot.reply_to(message, "✅ <b>Личная подписка отменена</b>\n\nВаша личная подписка была успешно отменена.", parse_mode='HTML')
+                        # Удаляем состояние
+                        del user_cancel_subscription_state[user_id]
+                        logger.info(f"[PAYMENT] {subscription_type} подписка {subscription_id} отменена пользователем {user_id}")
+                    else:
+                        bot.reply_to(message, "❌ Ошибка отмены подписки. Попробуйте позже.", parse_mode='HTML')
+                        del user_cancel_subscription_state[user_id]
+                        logger.error(f"[PAYMENT] Ошибка отмены подписки {subscription_id} пользователем {user_id}")
+                else:
+                    logger.error(f"[PAYMENT CANCEL] subscription_id равен None для пользователя {user_id}")
+                    bot.reply_to(message, "❌ Ошибка: не найден ID подписки. Попробуйте отменить подписку заново.", parse_mode='HTML')
+                    del user_cancel_subscription_state[user_id]
                 return
             else:
                 logger.info(f"[PAYMENT CANCEL] Текст не совпадает: '{text.upper().strip()}' != 'ДА, ОТМЕНИТЬ'")
-        else:
-            logger.info(f"[PAYMENT CANCEL] Сообщение не является реплаем на сообщение бота. reply_to_message: {message.reply_to_message is not None}, from_user: {message.reply_to_message.from_user.id if message.reply_to_message and message.reply_to_message.from_user else None}, BOT_ID: {BOT_ID}")
+                if not is_reply:
+                    # Если не реплай, напоминаем пользователю
+                    bot.reply_to(message, "❌ Отмена не подтверждена. Напишите 'ДА, ОТМЕНИТЬ' для подтверждения или проигнорируйте это сообщение.", parse_mode='HTML')
+                return
     
     # === user_payment_state ===
     # Проверяем состояние оплаты - если пользователь вводит username для подписки,
@@ -13056,14 +13072,19 @@ def handle_payment_callback(call):
                     # Обрабатываем случай когда id может быть None
                     if subscription_id is None:
                         subscription_id = 0
+                    
+                    logger.info(f"[PAYMENT] Личная подписка для пользователя {user_id}: subscription_id={subscription_id}, sub={sub}")
+                    
                     markup = InlineKeyboardMarkup(row_width=1)
                     # Показываем кнопки для всех активных подписок
                     # Для подписок с id=0 используем специальный callback
                     if subscription_id and subscription_id > 0:
+                        logger.info(f"[PAYMENT] Добавляем кнопки для реальной подписки {subscription_id}")
                         markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
                         markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
-                    elif subscription_id == 0 or subscription_id is None:
+                    else:
                         # Для виртуальных подписок или подписок без id предлагаем тарифы
+                        logger.info(f"[PAYMENT] Добавляем кнопки для виртуальной подписки (subscription_id={subscription_id})")
                         markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:personal"))
                         markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:personal"))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
@@ -13113,13 +13134,18 @@ def handle_payment_callback(call):
                     subscription_id = sub.get('id')
                     if subscription_id is None:
                         subscription_id = 0
+                    
+                    logger.info(f"[PAYMENT] Личная подписка для пользователя {user_id} (в группе): subscription_id={subscription_id}, sub={sub}")
+                    
                     markup = InlineKeyboardMarkup(row_width=1)
                     # Показываем кнопки для всех активных подписок
                     if subscription_id and subscription_id > 0:
+                        logger.info(f"[PAYMENT] Добавляем кнопки для реальной подписки {subscription_id} (в группе)")
                         markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
                         markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
-                    elif subscription_id == 0 or subscription_id is None:
+                    else:
                         # Для виртуальных подписок или подписок без id предлагаем тарифы
+                        logger.info(f"[PAYMENT] Добавляем кнопки для виртуальной подписки (subscription_id={subscription_id}) (в группе)")
                         markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:personal"))
                         markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:personal"))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
@@ -15353,6 +15379,7 @@ def handle_payment_callback(call):
                                 'subscription_type': 'group',
                                 'chat_id': chat_id
                             }
+                            logger.info(f"[PAYMENT CANCEL] Сохранено состояние отмены для пользователя {user_id}, subscription_id={subscription_id}, chat_id={chat_id}")
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -15379,8 +15406,17 @@ def handle_payment_callback(call):
                 sub_type = second_param
                 sub = get_active_subscription(chat_id, user_id, sub_type)
                 
+                if not sub:
+                    bot.answer_callback_query(call.id, "Активная подписка не найдена", show_alert=True)
+                    return
+                
+                sub_id = sub.get('id')
+                if not sub_id or sub_id <= 0:
+                    bot.answer_callback_query(call.id, "Нельзя отменить виртуальную подписку", show_alert=True)
+                    return
+                
                 # Для групповых подписок требуем подтверждение через текст
-                if sub_type == 'group' and sub:
+                if sub_type == 'group':
                     bot.answer_callback_query(call.id)
                     try:
                         bot.edit_message_text(
@@ -15394,28 +15430,30 @@ def handle_payment_callback(call):
                         )
                         # Сохраняем состояние для подтверждения
                         user_cancel_subscription_state[user_id] = {
-                            'subscription_id': sub.get('id'),
+                            'subscription_id': sub_id,
                             'subscription_type': 'group',
                             'chat_id': chat_id
                         }
-                    except Exception as e:
-                        if "message is not modified" not in str(e):
-                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                elif sub and cancel_subscription(sub.get('id'), user_id):
-                    # Для личных подписок отменяем сразу
-                    bot.answer_callback_query(call.id, "Подписка отменена")
-                    try:
-                        bot.edit_message_text(
-                            f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
-                            call.message.chat.id,
-                            call.message.message_id,
-                            parse_mode='HTML'
-                        )
+                        logger.info(f"[PAYMENT CANCEL] Сохранено состояние отмены для пользователя {user_id}, subscription_id={sub_id}, chat_id={chat_id}")
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 else:
-                    bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
+                    # Для личных подписок отменяем сразу
+                    if cancel_subscription(sub_id, user_id):
+                        bot.answer_callback_query(call.id, "Подписка отменена")
+                        try:
+                            bot.edit_message_text(
+                                f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
+                                call.message.chat.id,
+                                call.message.message_id,
+                                parse_mode='HTML'
+                            )
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    else:
+                        bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
             return
         
         if action == "back":
