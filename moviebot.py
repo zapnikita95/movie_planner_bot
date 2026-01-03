@@ -14405,32 +14405,32 @@ def handle_payment_callback(call):
                         expansion_text = "📦 Все режимы уже включены в вашу подписку."
                     
                     if need_expansion:
-                    text = "✅ <b>Ваша подписка оформлена, но вы можете ее расширить:</b>\n\n"
-                    text += expansion_text + "\n\n"
-                    text += "💡 <b>Доступные варианты расширения:</b>\n\n"
-                    
-                    # Предлагаем варианты расширения
-                    expansion_options = []
-                    if not has_notifications:
-                        expansion_options.append(("🔔 Уведомления о сериалах", "payment:subscribe:personal:notifications:month"))
-                    if not has_recommendations:
-                        expansion_options.append(("🎯 Персональные рекомендации", "payment:subscribe:personal:recommendations:month"))
-                    if not has_tickets:
-                        expansion_options.append(("🎫 Билеты в кино", "payment:subscribe:personal:tickets:month"))
-                    if not (has_notifications and has_recommendations and has_tickets):
-                        expansion_options.append(("📦 Все режимы", "payment:subscribe:personal:all:month"))
-                    
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    for option_text, callback_data in expansion_options:
-                        markup.add(InlineKeyboardButton(option_text, callback_data=callback_data))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                    
-                    try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                    except Exception as e:
-                        if "message is not modified" not in str(e):
-                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                    return
+                        text = "✅ <b>Ваша подписка оформлена, но вы можете ее расширить:</b>\n\n"
+                        text += expansion_text + "\n\n"
+                        text += "💡 <b>Доступные варианты расширения:</b>\n\n"
+                        
+                        # Предлагаем варианты расширения
+                        expansion_options = []
+                        if not has_notifications:
+                            expansion_options.append(("🔔 Уведомления о сериалах", "payment:subscribe:personal:notifications:month"))
+                        if not has_recommendations:
+                            expansion_options.append(("🎯 Персональные рекомендации", "payment:subscribe:personal:recommendations:month"))
+                        if not has_tickets:
+                            expansion_options.append(("🎫 Билеты в кино", "payment:subscribe:personal:tickets:month"))
+                        if not (has_notifications and has_recommendations and has_tickets):
+                            expansion_options.append(("📦 Все режимы", "payment:subscribe:personal:all:month"))
+                        
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        for option_text, callback_data in expansion_options:
+                            markup.add(InlineKeyboardButton(option_text, callback_data=callback_data))
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                        
+                        try:
+                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                        return
             
             # Показываем подробное описание тарифа
             if sub_type == 'personal':
