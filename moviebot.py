@@ -10448,13 +10448,13 @@ def show_premieres_page(call, premieres, period, page=0):
         if call.message.message_id:
             try:
                 bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception as e:
+            except Exception as e:
                 error_str = str(e)
                 # Игнорируем ошибку "message is not modified" и "there is no text in the message to edit"
                 if "message is not modified" not in error_str and "there is no text in the message to edit" not in error_str:
-            logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
-            # Если не получилось отредактировать, отправляем новое
-                    try:
+                    logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
+                # Если не получилось отредактировать, отправляем новое
+                try:
                         bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                     except:
                         pass
