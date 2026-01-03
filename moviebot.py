@@ -13554,13 +13554,20 @@ def has_notifications_access(chat_id, user_id):
     
     # Проверяем групповую подписку (для групповых чатов)
     if chat_id < 0:  # Групповой чат
-        # Для групповых подписок нужно использовать get_active_group_subscription
-        # Она ищет подписку по chat_id группы
-        group_sub = get_active_group_subscription(chat_id)
-        if group_sub:
-            plan_type = group_sub.get('plan_type')
-            if plan_type in ['notifications', 'all']:
-                return True
+        # Для групповых подписок нужно искать подписку по chat_id группы
+        # Ищем любую активную групповую подписку для этого chat_id (независимо от user_id плательщика)
+        with db_lock:
+            cursor.execute("""
+                SELECT * FROM subscriptions 
+                WHERE chat_id = %s AND subscription_type = 'group' AND is_active = TRUE 
+                AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY activated_at DESC LIMIT 1
+            """, (chat_id,))
+            row = cursor.fetchone()
+            if row:
+                plan_type = row.get('plan_type') if isinstance(row, dict) else row.get('plan_type', '')
+                if plan_type in ['notifications', 'all']:
+                    return True
     
     return False
 
