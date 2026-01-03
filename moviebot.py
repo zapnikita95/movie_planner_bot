@@ -10463,7 +10463,7 @@ def show_premieres_page(call, premieres, period, page=0):
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
         if call.id:
-        bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
