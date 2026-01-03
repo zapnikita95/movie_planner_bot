@@ -8420,50 +8420,121 @@ def random_mode_handler(call):
         user_random_state[user_id]['mode'] = mode
         user_random_state[user_id]['step'] = 'period'
         
+        # Добавляем справку о режиме
+        mode_descriptions = {
+            'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
+            'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nИщем случайный фильм на Кинопоиске по заданным фильтрам.',
+            'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nВыбираем фильм среди похожих на ваши любимые (с оценкой 9-10, импортированные с Кинопоиска).',
+            'group_votes': '👥 <b>По групповым оценкам (9-10)</b>\n\nВыбираем фильм среди похожих на любимые группы (со средней оценкой 9-10, исключая импортированные оценки).'
+        }
+        mode_description = mode_descriptions.get(mode, '')
+        
         # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
         all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
         available_periods = []
         
         with db_lock:
-            # Формируем базовый запрос в зависимости от режима
-            # Исключаем фильмы, у которых есть импортированные оценки
-            base_query = """
-                SELECT COUNT(DISTINCT m.id) 
-                FROM movies m
-                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-            """
-            params = [chat_id]
-            
             if mode == 'my_votes':
-                # Фильмы с оценкой пользователя >= 8
-                base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND r.user_id = %s AND r.rating >= 8)"
-                params.append(user_id)
+                # Для режима "по моим оценкам" - получаем годы из импортированных фильмов с оценкой 9-10
+                cursor.execute("""
+                    SELECT DISTINCT m.year
+                    FROM movies m
+                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                    WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                    AND m.year IS NOT NULL
+                    ORDER BY m.year
+                """, (chat_id, user_id))
+                years_rows = cursor.fetchall()
+                years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                
+                # Определяем доступные периоды на основе найденных годов
+                for period in all_periods:
+                    if period == "До 1980":
+                        if any(y < 1980 for y in years):
+                            available_periods.append(period)
+                    elif period == "1980–1990":
+                        if any(1980 <= y <= 1990 for y in years):
+                            available_periods.append(period)
+                    elif period == "1990–2000":
+                        if any(1990 <= y <= 2000 for y in years):
+                            available_periods.append(period)
+                    elif period == "2000–2010":
+                        if any(2000 <= y <= 2010 for y in years):
+                            available_periods.append(period)
+                    elif period == "2010–2020":
+                        if any(2010 <= y <= 2020 for y in years):
+                            available_periods.append(period)
+                    elif period == "2020–сейчас":
+                        if any(y >= 2020 for y in years):
+                            available_periods.append(period)
             elif mode == 'group_votes':
-                # Фильмы со средней оценкой группы >= 8 (исключаем импортированные оценки)
-                base_query += " AND EXISTS (SELECT 1 FROM ratings r WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) GROUP BY r.film_id, r.chat_id HAVING AVG(r.rating) >= 8)"
-            
-            for period in all_periods:
-                if period == "До 1980":
-                    condition = "m.year < 1980"
-                elif period == "1980–1990":
-                    condition = "(m.year >= 1980 AND m.year <= 1990)"
-                elif period == "1990–2000":
-                    condition = "(m.year >= 1990 AND m.year <= 2000)"
-                elif period == "2000–2010":
-                    condition = "(m.year >= 2000 AND m.year <= 2010)"
-                elif period == "2010–2020":
-                    condition = "(m.year >= 2010 AND m.year <= 2020)"
-                elif period == "2020–сейчас":
-                    condition = "m.year >= 2020"
+                # Для режима "по групповым оценкам" - получаем годы из фильмов со средней оценкой группы >= 9
+                cursor.execute("""
+                    SELECT DISTINCT m.year
+                    FROM movies m
+                    WHERE m.chat_id = %s AND m.year IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                        GROUP BY r.film_id, r.chat_id 
+                        HAVING AVG(r.rating) >= 9
+                    )
+                    ORDER BY m.year
+                """, (chat_id,))
+                years_rows = cursor.fetchall()
+                years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
                 
-                query = f"{base_query} AND {condition}"
-                cursor.execute(query, tuple(params))
-                count_row = cursor.fetchone()
-                count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                # Определяем доступные периоды на основе найденных годов
+                for period in all_periods:
+                    if period == "До 1980":
+                        if any(y < 1980 for y in years):
+                            available_periods.append(period)
+                    elif period == "1980–1990":
+                        if any(1980 <= y <= 1990 for y in years):
+                            available_periods.append(period)
+                    elif period == "1990–2000":
+                        if any(1990 <= y <= 2000 for y in years):
+                            available_periods.append(period)
+                    elif period == "2000–2010":
+                        if any(2000 <= y <= 2010 for y in years):
+                            available_periods.append(period)
+                    elif period == "2010–2020":
+                        if any(2010 <= y <= 2020 for y in years):
+                            available_periods.append(period)
+                    elif period == "2020–сейчас":
+                        if any(y >= 2020 for y in years):
+                            available_periods.append(period)
+            else:
+                # Для остальных режимов - используем старую логику
+                base_query = """
+                    SELECT COUNT(DISTINCT m.id) 
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                """
+                params = [chat_id]
                 
-                if count > 0:
-                    available_periods.append(period)
+                for period in all_periods:
+                    if period == "До 1980":
+                        condition = "m.year < 1980"
+                    elif period == "1980–1990":
+                        condition = "(m.year >= 1980 AND m.year <= 1990)"
+                    elif period == "1990–2000":
+                        condition = "(m.year >= 1990 AND m.year <= 2000)"
+                    elif period == "2000–2010":
+                        condition = "(m.year >= 2000 AND m.year <= 2010)"
+                    elif period == "2010–2020":
+                        condition = "(m.year >= 2010 AND m.year <= 2020)"
+                    elif period == "2020–сейчас":
+                        condition = "m.year >= 2020"
+                    
+                    query = f"{base_query} AND {condition}"
+                    cursor.execute(query, tuple(params))
+                    count_row = cursor.fetchone()
+                    count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                    
+                    if count > 0:
+                        available_periods.append(period)
         
         user_random_state[user_id]['available_periods'] = available_periods
         
@@ -8474,7 +8545,8 @@ def random_mode_handler(call):
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
         
         bot.answer_callback_query(call.id)
-        bot.edit_message_text("🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        text = f"{mode_description}\n\n🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)"
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         logger.info(f"[RANDOM] Mode selected: {mode}, moving to period selection, user_id={user_id}")
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_mode_handler: {e}", exc_info=True)
@@ -8598,38 +8670,108 @@ def _show_genre_step(call, chat_id, user_id):
         state = user_random_state.get(user_id, {})
         selected_genres = state.get('genres', [])
         periods = state.get('periods', [])
-        
-        # Формируем WHERE условие с учетом периодов
-        base_query = """
-            SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-            FROM movies m
-            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-            AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
-        """
-        params = [chat_id]
-        
-        # Добавляем фильтр по периодам, если они выбраны
-        if periods:
-            period_conditions = []
-            for p in periods:
-                if p == "До 1980":
-                    period_conditions.append("m.year < 1980")
-                elif p == "1980–1990":
-                    period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
-                elif p == "1990–2000":
-                    period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
-                elif p == "2000–2010":
-                    period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
-                elif p == "2010–2020":
-                    period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
-                elif p == "2020–сейчас":
-                    period_conditions.append("m.year >= 2020")
-            if period_conditions:
-                base_query += " AND (" + " OR ".join(period_conditions) + ")"
+        mode = state.get('mode')
         
         with db_lock:
-            cursor.execute(base_query, params)
+            if mode == 'my_votes':
+                # Для режима "по моим оценкам" - получаем жанры из импортированных фильмов с оценкой 9-10
+                base_query = """
+                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                    FROM movies m
+                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                    WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                """
+                params = [chat_id, user_id]
+                
+                # Добавляем фильтр по периодам, если они выбраны
+                if periods:
+                    period_conditions = []
+                    for p in periods:
+                        if p == "До 1980":
+                            period_conditions.append("m.year < 1980")
+                        elif p == "1980–1990":
+                            period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
+                        elif p == "1990–2000":
+                            period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
+                        elif p == "2000–2010":
+                            period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
+                        elif p == "2010–2020":
+                            period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
+                        elif p == "2020–сейчас":
+                            period_conditions.append("m.year >= 2020")
+                    if period_conditions:
+                        base_query += " AND (" + " OR ".join(period_conditions) + ")"
+                
+                cursor.execute(base_query, params)
+            elif mode == 'group_votes':
+                # Для режима "по групповым оценкам" - получаем жанры из фильмов со средней оценкой группы >= 9
+                base_query = """
+                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                    FROM movies m
+                    WHERE m.chat_id = %s
+                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                        GROUP BY r.film_id, r.chat_id 
+                        HAVING AVG(r.rating) >= 9
+                    )
+                """
+                params = [chat_id]
+                
+                # Добавляем фильтр по периодам, если они выбраны
+                if periods:
+                    period_conditions = []
+                    for p in periods:
+                        if p == "До 1980":
+                            period_conditions.append("m.year < 1980")
+                        elif p == "1980–1990":
+                            period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
+                        elif p == "1990–2000":
+                            period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
+                        elif p == "2000–2010":
+                            period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
+                        elif p == "2010–2020":
+                            period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
+                        elif p == "2020–сейчас":
+                            period_conditions.append("m.year >= 2020")
+                    if period_conditions:
+                        base_query += " AND (" + " OR ".join(period_conditions) + ")"
+                
+                cursor.execute(base_query, params)
+            else:
+                # Для остальных режимов - используем старую логику
+                base_query = """
+                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                """
+                params = [chat_id]
+                
+                # Добавляем фильтр по периодам, если они выбраны
+                if periods:
+                    period_conditions = []
+                    for p in periods:
+                        if p == "До 1980":
+                            period_conditions.append("m.year < 1980")
+                        elif p == "1980–1990":
+                            period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
+                        elif p == "1990–2000":
+                            period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
+                        elif p == "2000–2010":
+                            period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
+                        elif p == "2010–2020":
+                            period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
+                        elif p == "2020–сейчас":
+                            period_conditions.append("m.year >= 2020")
+                    if period_conditions:
+                        base_query += " AND (" + " OR ".join(period_conditions) + ")"
+                
+                cursor.execute(base_query, params)
+            
             rows = cursor.fetchall()
             genres = []
             for row in rows:
@@ -9273,32 +9415,363 @@ def _random_final(call, chat_id, user_id):
         # Фильтр по режиму
         mode = state.get('mode')
         if mode == 'my_votes':
-            # Фильмы с импортированной оценкой пользователя 9 или 10 из Кинопоиска
-            # Исключаем просмотренные фильмы и фильмы, которым уже поставлена оценка
-            query += """ AND m.id IN (
-                SELECT DISTINCT r2.film_id 
-                FROM ratings r2 
-                WHERE r2.chat_id = %s AND r2.user_id = %s AND r2.rating IN (9, 10) AND r2.is_imported = TRUE
-            )
-            AND m.id NOT IN (SELECT film_id FROM watched_movies WHERE chat_id = %s AND user_id = %s)
-            AND m.id NOT IN (SELECT film_id FROM ratings WHERE chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL))"""
-            params.append(chat_id)
-            params.append(user_id)
-            params.append(chat_id)
-            params.append(user_id)
-            params.append(chat_id)
-            params.append(user_id)
+            # Для режима "по моим оценкам" - выбираем 3 случайных фильма с оценкой 9-10,
+            # находим похожие к ним, и выбираем случайный из похожих
+            # Сначала получаем 3 случайных фильма с импортированной оценкой 9-10
+            with db_lock:
+                cursor.execute("""
+                    SELECT DISTINCT m.kp_id, m.id
+                    FROM movies m
+                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                    WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                    AND m.kp_id IS NOT NULL
+                    ORDER BY RANDOM()
+                    LIMIT 3
+                """, (chat_id, user_id))
+                favorite_films = cursor.fetchall()
+            
+            if not favorite_films:
+                bot.edit_message_text("😔 Не найдено фильмов с оценкой 9-10, импортированных с Кинопоиска.", chat_id, call.message.message_id)
+                bot.answer_callback_query(call.id)
+                del user_random_state[user_id]
+                return
+            
+            # Собираем все похожие фильмы к выбранным любимым
+            all_similars = []
+            from api.kinopoisk_api import get_similars
+            
+            for film_row in favorite_films:
+                kp_id = film_row.get('kp_id') if isinstance(film_row, dict) else film_row[0]
+                if kp_id:
+                    similars = get_similars(str(kp_id))
+                    logger.info(f"[RANDOM] Found {len(similars)} similar films for kp_id={kp_id}")
+                    all_similars.extend(similars)
+            
+            # Убираем дубликаты по kp_id
+            seen_kp_ids = set()
+            unique_similars = []
+            for similar_kp_id, similar_title in all_similars:
+                if similar_kp_id not in seen_kp_ids:
+                    seen_kp_ids.add(similar_kp_id)
+                    unique_similars.append((similar_kp_id, similar_title))
+            
+            if not unique_similars:
+                bot.edit_message_text("😔 Не найдено похожих фильмов к вашим любимым.", chat_id, call.message.message_id)
+                bot.answer_callback_query(call.id)
+                del user_random_state[user_id]
+                return
+            
+            # Получаем выбранные периоды и жанры для фильтрации
+            periods = state.get('periods', [])
+            genres = state.get('genres', [])
+            
+            # Функция для проверки года
+            def check_year(film_year, periods_list):
+                if not periods_list:
+                    return True
+                for p in periods_list:
+                    if p == "До 1980" and film_year < 1980:
+                        return True
+                    elif p == "1980–1990" and 1980 <= film_year <= 1990:
+                        return True
+                    elif p == "1990–2000" and 1990 <= film_year <= 2000:
+                        return True
+                    elif p == "2000–2010" and 2000 <= film_year <= 2010:
+                        return True
+                    elif p == "2010–2020" and 2010 <= film_year <= 2020:
+                        return True
+                    elif p == "2020–сейчас" and film_year >= 2020:
+                        return True
+                return False
+            
+            # Функция для проверки жанра
+            def check_genre(film_genres, genres_list):
+                if not genres_list:
+                    return True
+                film_genres_lower = str(film_genres).lower() if film_genres else ""
+                for g in genres_list:
+                    if g.lower() in film_genres_lower:
+                        return True
+                return False
+            
+            # Получаем информацию о похожих фильмах через API и фильтруем
+            filtered_similars = []
+            headers = {'X-API-KEY': KP_TOKEN}
+            
+            # Исключаем фильмы, которые уже в базе или просмотрены
+            with db_lock:
+                cursor.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND (watched = 1 OR kp_id IS NOT NULL)', (chat_id,))
+                existing_movies = cursor.fetchall()
+                exclude_kp_ids = set()
+                for movie in existing_movies:
+                    kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
+                    if kp_id_val:
+                        exclude_kp_ids.add(str(kp_id_val))
+            
+            for similar_kp_id, similar_title in unique_similars:
+                if str(similar_kp_id) in exclude_kp_ids:
+                    continue
+                    
+                try:
+                    # Получаем информацию о фильме через API
+                    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{similar_kp_id}"
+                    response = requests.get(url, headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        similar_year = data.get('year')
+                        similar_genres = ', '.join([g.get('genre', '') for g in data.get('genres', [])])
+                        
+                        # Проверяем год и жанр
+                        if similar_year and check_year(similar_year, periods):
+                            if check_genre(similar_genres, genres):
+                                filtered_similars.append({
+                                    'kp_id': similar_kp_id,
+                                    'title': similar_title,
+                                    'year': similar_year,
+                                    'genres': similar_genres,
+                                    'link': f"https://www.kinopoisk.ru/film/{similar_kp_id}/"
+                                })
+                except Exception as e:
+                    logger.warning(f"[RANDOM] Error getting info for similar film {similar_kp_id}: {e}")
+                    continue
+            
+            if filtered_similars:
+                # Выбираем случайный из отфильтрованных похожих
+                selected_similar = random.choice(filtered_similars)
+                title = selected_similar['title']
+                year = selected_similar['year']
+                link = selected_similar['link']
+                kp_id_result = str(selected_similar['kp_id'])
+                logger.info(f"[RANDOM] Selected similar film: {title} ({year})")
+                
+                # Получаем полную информацию о фильме
+                from api.kinopoisk_api import extract_movie_info
+                movie_info = extract_movie_info(link)
+                
+                if movie_info:
+                    genres_str = movie_info.get('genres', '—')
+                    description = movie_info.get('description', '—')
+                    director = movie_info.get('director', 'Не указан')
+                    actors = movie_info.get('actors', '—')
+                    
+                    text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n"
+                    if description and description != '—':
+                        text += f"{description[:300]}...\n\n"
+                    text += f"🎭 <b>Жанры:</b> {genres_str}\n"
+                    text += f"🎬 <b>Режиссёр:</b> {director}\n"
+                    if actors and actors != '—':
+                        text += f"👥 <b>Актёры:</b> {actors[:100]}...\n"
+                    text += f"\n<a href='{link}'>Кинопоиск</a>"
+                    
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_movie:{kp_id_result}"))
+                    
+                    try:
+                        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    except:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    bot.answer_callback_query(call.id)
+                    del user_random_state[user_id]
+                    return
+                else:
+                    # Если не удалось получить полную информацию, показываем базовую
+                    text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_movie:{kp_id_result}"))
+                    
+                    try:
+                        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    except:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    bot.answer_callback_query(call.id)
+                    del user_random_state[user_id]
+                    return
+            else:
+                bot.edit_message_text("😔 Не найдено похожих фильмов по заданным фильтрам.", chat_id, call.message.message_id)
+                bot.answer_callback_query(call.id)
+                del user_random_state[user_id]
+                return
         elif mode == 'group_votes':
-            # Фильмы со средней оценкой группы >= 8 (исключаем импортированные оценки)
-            # Исключаем просмотренные группой фильмы
-            query += """ AND EXISTS (
-                SELECT 1 FROM ratings r 
-                WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
-                GROUP BY r.film_id, r.chat_id 
-                HAVING AVG(r.rating) >= 8
-            )
-            AND m.id NOT IN (SELECT DISTINCT film_id FROM watched_movies WHERE chat_id = %s)"""
-            params.append(chat_id)
+            # Для режима "по групповым оценкам" - выбираем 3 случайных фильма со средней оценкой >= 9,
+            # находим похожие к ним, и выбираем случайный из похожих
+            # Сначала получаем 3 случайных фильма со средней оценкой группы >= 9
+            with db_lock:
+                cursor.execute("""
+                    SELECT DISTINCT m.kp_id, m.id
+                    FROM movies m
+                    WHERE m.chat_id = %s AND m.kp_id IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                        GROUP BY r.film_id, r.chat_id 
+                        HAVING AVG(r.rating) >= 9
+                    )
+                    ORDER BY RANDOM()
+                    LIMIT 3
+                """, (chat_id,))
+                favorite_films = cursor.fetchall()
+            
+            if not favorite_films:
+                bot.edit_message_text("😔 Не найдено фильмов со средней оценкой группы 9-10.", chat_id, call.message.message_id)
+                bot.answer_callback_query(call.id)
+                del user_random_state[user_id]
+                return
+            
+            # Собираем все похожие фильмы к выбранным любимым
+            all_similars = []
+            from api.kinopoisk_api import get_similars
+            
+            for film_row in favorite_films:
+                kp_id = film_row.get('kp_id') if isinstance(film_row, dict) else film_row[0]
+                if kp_id:
+                    similars = get_similars(str(kp_id))
+                    logger.info(f"[RANDOM] Found {len(similars)} similar films for kp_id={kp_id}")
+                    all_similars.extend(similars)
+            
+            # Убираем дубликаты по kp_id
+            seen_kp_ids = set()
+            unique_similars = []
+            for similar_kp_id, similar_title in all_similars:
+                if similar_kp_id not in seen_kp_ids:
+                    seen_kp_ids.add(similar_kp_id)
+                    unique_similars.append((similar_kp_id, similar_title))
+            
+            if not unique_similars:
+                bot.edit_message_text("😔 Не найдено похожих фильмов к любимым группы.", chat_id, call.message.message_id)
+                bot.answer_callback_query(call.id)
+                del user_random_state[user_id]
+                return
+            
+            # Получаем выбранные периоды и жанры для фильтрации
+            periods = state.get('periods', [])
+            genres = state.get('genres', [])
+            
+            # Функция для проверки года
+            def check_year(film_year, periods_list):
+                if not periods_list:
+                    return True
+                for p in periods_list:
+                    if p == "До 1980" and film_year < 1980:
+                        return True
+                    elif p == "1980–1990" and 1980 <= film_year <= 1990:
+                        return True
+                    elif p == "1990–2000" and 1990 <= film_year <= 2000:
+                        return True
+                    elif p == "2000–2010" and 2000 <= film_year <= 2010:
+                        return True
+                    elif p == "2010–2020" and 2010 <= film_year <= 2020:
+                        return True
+                    elif p == "2020–сейчас" and film_year >= 2020:
+                        return True
+                return False
+            
+            # Функция для проверки жанра
+            def check_genre(film_genres, genres_list):
+                if not genres_list:
+                    return True
+                film_genres_lower = str(film_genres).lower() if film_genres else ""
+                for g in genres_list:
+                    if g.lower() in film_genres_lower:
+                        return True
+                return False
+            
+            # Получаем информацию о похожих фильмах через API и фильтруем
+            filtered_similars = []
+            headers = {'X-API-KEY': KP_TOKEN}
+            
+            # Исключаем фильмы, которые уже в базе или просмотрены
+            with db_lock:
+                cursor.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND (watched = 1 OR kp_id IS NOT NULL)', (chat_id,))
+                existing_movies = cursor.fetchall()
+                exclude_kp_ids = set()
+                for movie in existing_movies:
+                    kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
+                    if kp_id_val:
+                        exclude_kp_ids.add(str(kp_id_val))
+            
+            for similar_kp_id, similar_title in unique_similars:
+                if str(similar_kp_id) in exclude_kp_ids:
+                    continue
+                    
+                try:
+                    # Получаем информацию о фильме через API
+                    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{similar_kp_id}"
+                    response = requests.get(url, headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        similar_year = data.get('year')
+                        similar_genres = ', '.join([g.get('genre', '') for g in data.get('genres', [])])
+                        
+                        # Проверяем год и жанр
+                        if similar_year and check_year(similar_year, periods):
+                            if check_genre(similar_genres, genres):
+                                filtered_similars.append({
+                                    'kp_id': similar_kp_id,
+                                    'title': similar_title,
+                                    'year': similar_year,
+                                    'genres': similar_genres,
+                                    'link': f"https://www.kinopoisk.ru/film/{similar_kp_id}/"
+                                })
+                except Exception as e:
+                    logger.warning(f"[RANDOM] Error getting info for similar film {similar_kp_id}: {e}")
+                    continue
+            
+            if filtered_similars:
+                # Выбираем случайный из отфильтрованных похожих
+                selected_similar = random.choice(filtered_similars)
+                title = selected_similar['title']
+                year = selected_similar['year']
+                link = selected_similar['link']
+                kp_id_result = str(selected_similar['kp_id'])
+                logger.info(f"[RANDOM] Selected similar film: {title} ({year})")
+                
+                # Получаем полную информацию о фильме
+                from api.kinopoisk_api import extract_movie_info
+                movie_info = extract_movie_info(link)
+                
+                if movie_info:
+                    genres_str = movie_info.get('genres', '—')
+                    description = movie_info.get('description', '—')
+                    director = movie_info.get('director', 'Не указан')
+                    actors = movie_info.get('actors', '—')
+                    
+                    text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n"
+                    if description and description != '—':
+                        text += f"{description[:300]}...\n\n"
+                    text += f"🎭 <b>Жанры:</b> {genres_str}\n"
+                    text += f"🎬 <b>Режиссёр:</b> {director}\n"
+                    if actors and actors != '—':
+                        text += f"👥 <b>Актёры:</b> {actors[:100]}...\n"
+                    text += f"\n<a href='{link}'>Кинопоиск</a>"
+                    
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_movie:{kp_id_result}"))
+                    
+                    try:
+                        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    except:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    bot.answer_callback_query(call.id)
+                    del user_random_state[user_id]
+                    return
+                else:
+                    # Если не удалось получить полную информацию, показываем базовую
+                    text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_movie:{kp_id_result}"))
+                    
+                    try:
+                        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    except:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    bot.answer_callback_query(call.id)
+                    del user_random_state[user_id]
+                    return
+            else:
+                bot.edit_message_text("😔 Не найдено похожих фильмов по заданным фильтрам.", chat_id, call.message.message_id)
+                bot.answer_callback_query(call.id)
+                del user_random_state[user_id]
+                return
         elif mode == 'database':
             # Режим "Рандом по своей базе" - только фильмы из базы
             # Никаких дополнительных фильтров, только базовые (watched = 0, не в планах)
@@ -11272,16 +11745,18 @@ def series_episode_callback(call):
         ep_num = parts[3]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
+        message_id = call.message.message_id
         
         # Получаем film_id
         with db_lock:
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             row = cursor.fetchone()
             if not row:
                 bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
                 return
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
+            title = row.get('title') if isinstance(row, dict) else row[1]
             
             # Переключаем статус просмотра
             cursor.execute('''
@@ -11304,9 +11779,63 @@ def series_episode_callback(call):
             status = "✅ отмечен как просмотренный" if is_watched else "⬜ снята отметка о просмотре"
             bot.answer_callback_query(call.id, status)
             
-            # Обновляем список эпизодов (визуально обновляем чекбоксы)
-            call.data = f"series_season:{kp_id}:{season_num}"
-            series_season_callback(call)
+            # Обновляем список эпизодов
+            from api.kinopoisk_api import get_seasons_data
+            seasons_data = get_seasons_data(kp_id)
+            season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
+            if not season:
+                return
+            
+            episodes = season.get('episodes', [])
+            
+            # Показываем эпизоды с обновленными отметками
+            text = f"📺 <b>{title}</b> - Сезон {season_num}\n\n"
+            markup = InlineKeyboardMarkup(row_width=2)
+            
+            for ep in episodes[:20]:  # Показываем первые 20 эпизодов
+                ep_num_item = ep.get('episodeNumber', '')
+                release = ep.get('releaseDate', '—')
+                
+                # Проверяем, просмотрен ли эпизод
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s
+                ''', (chat_id, film_id, user_id, season_num, ep_num_item))
+                watched_row = cursor.fetchone()
+                is_watched_item = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                
+                mark = "✅" if is_watched_item else "⬜"
+                button_text = f"{mark} {ep_num_item}"
+                if len(button_text) > 20:
+                    button_text = button_text[:17] + "..."
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num_item}"))
+            
+            if len(episodes) > 20:
+                text += f"... и ещё {len(episodes) - 20} эпизодов\n\n"
+            text += "Нажмите на эпизод, чтобы отметить как просмотренный"
+            
+            # Добавляем кнопку "Все просмотрены"
+            all_watched = True
+            for ep in episodes:
+                ep_num_item = ep.get('episodeNumber', '')
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s
+                ''', (chat_id, film_id, user_id, season_num, ep_num_item))
+                watched_row = cursor.fetchone()
+                is_watched_item = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                if not is_watched_item:
+                    all_watched = False
+                    break
+            
+            if not all_watched:
+                markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
+            
+            markup.add(InlineKeyboardButton("◀️ К сезонам", callback_data=f"series_track:{kp_id}"))
+            
+            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
     except Exception as e:
         logger.error(f"[SERIES EPISODE] Ошибка: {e}", exc_info=True)
         try:
@@ -11323,16 +11852,18 @@ def series_season_all_callback(call):
         season_num = parts[2]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
+        message_id = call.message.message_id
         
         # Получаем film_id
         with db_lock:
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             row = cursor.fetchone()
             if not row:
                 bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
                 return
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
+            title = row.get('title') if isinstance(row, dict) else row[1]
         
         # Получаем эпизоды сезона
         from api.kinopoisk_api import get_seasons_data
@@ -11369,9 +11900,54 @@ def series_season_all_callback(call):
         
         bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
         
-        # Обновляем список эпизодов
-        call.data = f"series_season:{kp_id}:{season_num}"
-        series_season_callback(call)
+        # Обновляем список эпизодов с новыми отметками
+        text = f"📺 <b>{title}</b> - Сезон {season_num}\n\n"
+        markup = InlineKeyboardMarkup(row_width=2)
+        
+        for ep in episodes[:20]:  # Показываем первые 20 эпизодов
+            ep_num_item = ep.get('episodeNumber', '')
+            release = ep.get('releaseDate', '—')
+            
+            # Проверяем, просмотрен ли эпизод
+            cursor.execute('''
+                SELECT watched FROM series_tracking 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                AND season_number = %s AND episode_number = %s
+            ''', (chat_id, film_id, user_id, season_num, ep_num_item))
+            watched_row = cursor.fetchone()
+            is_watched_item = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+            
+            mark = "✅" if is_watched_item else "⬜"
+            button_text = f"{mark} {ep_num_item}"
+            if len(button_text) > 20:
+                button_text = button_text[:17] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num_item}"))
+        
+        if len(episodes) > 20:
+            text += f"... и ещё {len(episodes) - 20} эпизодов\n\n"
+        text += "Нажмите на эпизод, чтобы отметить как просмотренный"
+        
+        # Проверяем, все ли эпизоды просмотрены
+        all_watched = True
+        for ep in episodes:
+            ep_num_item = ep.get('episodeNumber', '')
+            cursor.execute('''
+                SELECT watched FROM series_tracking 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                AND season_number = %s AND episode_number = %s
+            ''', (chat_id, film_id, user_id, season_num, ep_num_item))
+            watched_row = cursor.fetchone()
+            is_watched_item = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+            if not is_watched_item:
+                all_watched = False
+                break
+        
+        if not all_watched:
+            markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
+        
+        markup.add(InlineKeyboardButton("◀️ К сезонам", callback_data=f"series_track:{kp_id}"))
+        
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
     except Exception as e:
         logger.error(f"[SERIES SEASON ALL] Ошибка: {e}", exc_info=True)
         try:
