@@ -14820,6 +14820,12 @@ def handle_payment_callback(call):
                 return
         
         if action.startswith("tariffs:personal"):
+            # Сохраняем информацию о том, откуда пришли (из действующей подписки или из главного меню)
+            # Проверяем, есть ли в callback_data информация о том, что это из действующей подписки
+            if "modify" in str(call.data) or "active" in str(call.data):
+                user_payment_state[user_id] = user_payment_state.get(user_id, {})
+                user_payment_state[user_id]['from_active'] = True
+            
             # Тарифы для личных подписок
             text = "👤 <b>Личные тарифы</b>\n\n"
             
@@ -14860,7 +14866,9 @@ def handle_payment_callback(call):
             markup.add(InlineKeyboardButton("📦 Все режимы - 3 месяца (499₽/мес)", callback_data="payment:subscribe:personal:all:3months"))
             markup.add(InlineKeyboardButton("📦 Все режимы - год (1499₽/мес)", callback_data="payment:subscribe:personal:all:year"))
             markup.add(InlineKeyboardButton("📦 Все режимы - навсегда (1999₽)", callback_data="payment:subscribe:personal:all:lifetime"))
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs"))
+            # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
+            back_callback = "payment:active:personal" if action == "tariffs:personal" and user_payment_state.get(user_id, {}).get('from_active') else "payment:tariffs"
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
             try:
                 bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -14870,6 +14878,12 @@ def handle_payment_callback(call):
             return
         
         if action.startswith("tariffs:group"):
+            # Сохраняем информацию о том, откуда пришли (из действующей подписки или из главного меню)
+            # Проверяем, есть ли в callback_data информация о том, что это из действующей подписки
+            if "modify" in str(call.data) or "active" in str(call.data):
+                user_payment_state[user_id] = user_payment_state.get(user_id, {})
+                user_payment_state[user_id]['from_active'] = True
+            
             # Тарифы для групповых подписок - сначала выбор количества участников
             text = "👥 <b>Групповые тарифы</b>\n\n"
             
@@ -14885,7 +14899,9 @@ def handle_payment_callback(call):
             markup.add(InlineKeyboardButton("👥 2 участника", callback_data="payment:group_size:2"))
             markup.add(InlineKeyboardButton("👥 5 участников", callback_data="payment:group_size:5"))
             markup.add(InlineKeyboardButton("👥 10 участников", callback_data="payment:group_size:10"))
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs"))
+            # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
+            back_callback = "payment:active:group:current" if user_payment_state.get(user_id, {}).get('from_active') else "payment:tariffs"
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
             try:
                 bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -14990,7 +15006,9 @@ def handle_payment_callback(call):
                     markup.add(InlineKeyboardButton(f"📦 Все режимы - 3 месяца ({prices['all']['3months']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:3months:{chat_id}"))
                     markup.add(InlineKeyboardButton(f"📦 Все режимы - год ({prices['all']['year']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:year:{chat_id}"))
                     markup.add(InlineKeyboardButton(f"📦 Все режимы - навсегда ({prices['all']['lifetime']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:lifetime:{chat_id}"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:group"))
+                    # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
+                    back_callback = "payment:active:group:current" if user_payment_state.get(user_id, {}).get('from_active') else "payment:tariffs:group"
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
                     
                     try:
                         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -15123,7 +15141,9 @@ def handle_payment_callback(call):
             markup.add(InlineKeyboardButton(f"📦 Все режимы - 3 месяца ({prices['all']['3months']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:3months"))
             markup.add(InlineKeyboardButton(f"📦 Все режимы - год ({prices['all']['year']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:year"))
             markup.add(InlineKeyboardButton(f"📦 Все режимы - навсегда ({prices['all']['lifetime']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:lifetime"))
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
+            # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
+            back_callback = "payment:active:group:current" if user_payment_state.get(user_id, {}).get('from_active') else f"payment:group_size:{group_size}"
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
             try:
                 bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -15137,13 +15157,23 @@ def handle_payment_callback(call):
             parts = action.split(":")
             sub_type = parts[1]  # personal или group
             
-            # Правильный парсинг для групп: payment:subscribe:group:2:all:month
+            # Правильный парсинг для групп: payment:subscribe:group:2:all:month или payment:subscribe:group:2:all:month:chat_id
             # Для личных: payment:subscribe:personal:all:month
             if sub_type == 'group' and len(parts) >= 5:
                 group_size_str = parts[2]
                 group_size = group_size_str  # Keep as string for SUBSCRIPTION_PRICES keys
                 plan_type = parts[3] if len(parts) > 3 else ''
                 period_type = parts[4] if len(parts) > 4 else ''
+                
+                # Если есть chat_id в конце (часть 5 или 6), используем его
+                if len(parts) >= 6:
+                    try:
+                        group_chat_id_from_callback = int(parts[5])
+                        # Если группа не выбрана в состоянии, используем chat_id из callback
+                        if not group_chat_id:
+                            group_chat_id = group_chat_id_from_callback
+                    except (ValueError, IndexError):
+                        pass
                 
                 # Получаем информацию о группе из состояния
                 state = user_payment_state.get(user_id, {})
@@ -15644,7 +15674,8 @@ def handle_payment_callback(call):
             description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
             
             # Создаем уникальный ID платежа
-            payment_id = str(uuid.uuid4())
+            import uuid as uuid_module
+            payment_id = str(uuid_module.uuid4())
             
             # Определяем URL для возврата - используем deep link для Telegram
             # Deep link откроет бота напрямую: tg://resolve?domain=movie_planner_bot
@@ -15826,7 +15857,8 @@ def handle_payment_callback(call):
             description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
             
             # Создаем уникальный ID платежа
-            payment_id = str(uuid.uuid4())
+            import uuid as uuid_module
+            payment_id = str(uuid_module.uuid4())
             
             # Определяем URL для возврата (нужно будет настроить в зависимости от вашего домена)
             # Определяем URL для возврата - используем deep link для Telegram
