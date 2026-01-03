@@ -6227,6 +6227,15 @@ def series_subscribe_callback(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
+        # Проверяем доступ к функциям уведомлений
+        if not has_notifications_access(chat_id, user_id):
+            bot.answer_callback_query(
+                call.id, 
+                "❌ Эта функция доступна только с подпиской на уведомления о сериалах. Используйте /payment для оформления подписки.", 
+                show_alert=True
+            )
+            return
+        
         with db_lock:
             # Получаем film_id
             cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
@@ -6349,6 +6358,15 @@ def series_unsubscribe_callback(call):
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
+        
+        # Проверяем доступ к функциям уведомлений
+        if not has_notifications_access(chat_id, user_id):
+            bot.answer_callback_query(
+                call.id, 
+                "❌ Эта функция доступна только с подпиской на уведомления о сериалах. Используйте /payment для оформления подписки.", 
+                show_alert=True
+            )
+            return
         
         with db_lock:
             # Получаем film_id
@@ -12202,6 +12220,17 @@ def seasons_command(message):
     log_request(message.from_user.id, username, '/seasons', message.chat.id)
     
     chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    # Проверяем доступ к функциям уведомлений
+    if not has_notifications_access(chat_id, user_id):
+        bot.reply_to(
+            message,
+            "❌ <b>Эта функция доступна только с подпиской на уведомления о сериалах</b>\n\n"
+            "Используйте /payment для оформления подписки.",
+            parse_mode='HTML'
+        )
+        return
     
     with db_lock:
         cursor.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
@@ -12253,6 +12282,15 @@ def show_seasons_callback(call):
         user_id = call.from_user.id
         message_id = call.message.message_id
         
+        # Проверяем доступ к функциям уведомлений
+        if not has_notifications_access(chat_id, user_id):
+            bot.answer_callback_query(
+                call.id, 
+                "❌ Эта функция доступна только с подпиской на уведомления о сериалах. Используйте /payment для оформления подписки.", 
+                show_alert=True
+            )
+            return
+        
         # Получаем актуальные данные о сезонах
         from api.kinopoisk_api import get_seasons
         seasons_text = get_seasons(kp_id, chat_id, user_id)
@@ -12274,7 +12312,7 @@ def show_seasons_callback(call):
                     is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
                     
                     # Объединяем текст сезонов и кнопки в одно сообщение
-                    full_text = seasons_text + "\n\n📺 Что хотите сделать с сериалом?"
+                    full_text = seasons_text
                     
                     markup = InlineKeyboardMarkup()
                     markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
@@ -12361,6 +12399,15 @@ def series_track_callback(call):
         user_id = call.from_user.id
         message_id = call.message.message_id
         
+        # Проверяем доступ к функциям уведомлений
+        if not has_notifications_access(chat_id, user_id):
+            bot.answer_callback_query(
+                call.id, 
+                "❌ Эта функция доступна только с подпиской на уведомления о сериалах. Используйте /payment для оформления подписки.", 
+                show_alert=True
+            )
+            return
+        
         # Получаем film_id
         with db_lock:
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
@@ -12380,11 +12427,38 @@ def series_track_callback(call):
             return
         
         # Показываем меню выбора сезона с отметками статуса
+        from datetime import datetime as dt
+        now = dt.now()
+        
         markup = InlineKeyboardMarkup(row_width=1)
         for season in seasons_data:
             season_num = season.get('number', '')
             episodes = season.get('episodes', [])
             episodes_count = len(episodes)
+            
+            # Проверяем, вышел ли сезон (все эпизоды должны иметь дату выхода <= текущей дате)
+            season_released = True
+            if episodes:
+                for ep in episodes:
+                    release_str = ep.get('releaseDate', '')
+                    if release_str and release_str != '—':
+                        try:
+                            release_date = None
+                            for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                try:
+                                    release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                    break
+                                except:
+                                    continue
+                            if release_date and release_date > now:
+                                season_released = False
+                                break
+                        except:
+                            pass
+            
+            # Показываем только сезоны, которые уже вышли
+            if not season_released:
+                continue
             
             # Проверяем статус сезона
             watched_count = 0
@@ -12503,7 +12577,7 @@ def series_season_callback(call):
         if not all_watched:
             markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
         
-        markup.add(InlineKeyboardButton("◀️ К сезонам", callback_data=f"series_track:{kp_id}"))
+            markup.add(InlineKeyboardButton("◀️ К сезонам", callback_data=f"seasons_kp:{kp_id}"))
         
         bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
         bot.answer_callback_query(call.id)
@@ -12615,6 +12689,18 @@ def series_episode_callback(call):
             markup.add(InlineKeyboardButton("◀️ К сезонам", callback_data=f"series_track:{kp_id}"))
             
             bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+            
+            # Обновляем главное сообщение со списком сезонов (если оно существует)
+            # Ищем последнее сообщение с сезонами для этого сериала
+            try:
+                from api.kinopoisk_api import get_seasons
+                seasons_text = get_seasons(kp_id, chat_id, user_id)
+                if seasons_text:
+                    # Пытаемся найти и обновить главное сообщение
+                    # Для этого нужно сохранять message_id главного сообщения, но пока просто обновим при возврате
+                    pass
+            except:
+                pass
     except Exception as e:
         logger.error(f"[SERIES EPISODE] Ошибка: {e}", exc_info=True)
         try:
@@ -12929,6 +13015,29 @@ SUBSCRIPTION_PRICES = {
         }
     }
 }
+
+def has_notifications_access(chat_id, user_id):
+    """Проверяет, есть ли у пользователя доступ к функциям уведомлений о сериалах
+    (требуется подписка 'notifications' или 'all')
+    """
+    from database.db_operations import get_active_subscription
+    
+    # Проверяем личную подписку
+    personal_sub = get_active_subscription(chat_id, user_id, 'personal')
+    if personal_sub:
+        plan_type = personal_sub.get('plan_type')
+        if plan_type in ['notifications', 'all']:
+            return True
+    
+    # Проверяем групповую подписку (для групповых чатов)
+    if chat_id < 0:  # Групповой чат
+        group_sub = get_active_subscription(chat_id, user_id, 'group')
+        if group_sub:
+            plan_type = group_sub.get('plan_type')
+            if plan_type in ['notifications', 'all']:
+                return True
+    
+    return False
 
 def calculate_discounted_price(user_id, subscription_type, plan_type, period_type, group_size=None):
     """Вычисляет цену с учетом скидок
