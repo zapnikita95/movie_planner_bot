@@ -4325,10 +4325,10 @@ def get_plan_day_or_date_internal(message, state):
     if not plan_dt:
         target_weekday = None
         for phrase, wd in days_full.items():
-        if phrase in text:
-            target_weekday = wd
-            logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
-            break
+            if phrase in text:
+                target_weekday = wd
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
+                break
     
     if target_weekday is not None:
         current_wd = now.weekday()
