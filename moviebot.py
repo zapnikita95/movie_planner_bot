@@ -6976,12 +6976,12 @@ def handle_add_film_callback(call):
         else:
             # Если тип не передан, проверяем в базе
             with db_lock:
-            cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-            existing = cursor.fetchone()
-            if existing:
-                film_in_db = True
-                film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
-                is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
+                cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                existing = cursor.fetchone()
+                if existing:
+                    film_in_db = True
+                    film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+                    is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
         
         # Формируем правильную ссылку в зависимости от типа
         if is_series:
