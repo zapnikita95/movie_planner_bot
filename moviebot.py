@@ -2717,6 +2717,7 @@ def premiere_notify_handler(call):
         # Добавляем в schedule "в кино" на дату выхода
         from datetime import time as time_class
         import pytz
+        from database.db_operations import get_notification_settings
         
         # Получаем часовой пояс пользователя
         user_tz = pytz.timezone('Europe/Moscow')  # По умолчанию
@@ -2729,8 +2730,24 @@ def premiere_notify_handler(call):
                     user_tz = pytz.timezone(tz_str)
         except:
             pass
-        # Время сеанса - 20:00 по умолчанию
-        session_time = time_class(20, 0)
+        
+        # Получаем настройки уведомлений для определения времени по умолчанию
+        notify_settings = get_notification_settings(chat_id)
+        
+        # Определяем, будний день или выходной (1-5 = понедельник-пятница, 6-7 = суббота-воскресенье)
+        weekday_num = premiere_date.isoweekday()
+        is_weekend = weekday_num >= 6
+        
+        # Получаем время из настроек в зависимости от дня недели
+        if is_weekend:
+            hour = notify_settings.get('cinema_weekend_hour', 9)
+            minute = notify_settings.get('cinema_weekend_minute', 0)
+        else:
+            hour = notify_settings.get('cinema_weekday_hour', 9)
+            minute = notify_settings.get('cinema_weekday_minute', 0)
+        
+        # Время сеанса из настроек пользователя
+        session_time = time_class(int(hour), int(minute))
         session_dt = user_tz.localize(datetime.combine(premiere_date, session_time))
         plan_utc = session_dt.astimezone(pytz.utc)
         
@@ -2754,10 +2771,11 @@ def premiere_notify_handler(call):
             plan_id = existing_plan.get('id') if isinstance(existing_plan, dict) else existing_plan[0]
         
         # Отправляем сообщение-подтверждение
+        time_str = f"{int(hour):02d}:{int(minute):02d}"
         confirm_text = f"✅ <b>Уведомление установлено!</b>\n\n"
         confirm_text += f"📺 <b>{title}</b>\n"
         confirm_text += f"📅 Дата выхода: {premiere_date.strftime('%d.%m.%Y')}\n"
-        confirm_text += f"🎬 Добавлено в расписание: в кино на {premiere_date.strftime('%d.%m.%Y')} в 20:00\n\n"
+        confirm_text += f"🎬 Добавлено в расписание: в кино на {premiere_date.strftime('%d.%m.%Y')} в {time_str}\n\n"
         confirm_text += f"Если это ошибка, нажмите кнопку ниже для отмены."
         
         markup = InlineKeyboardMarkup()
@@ -7116,19 +7134,24 @@ def handle_add_film_callback(call):
         text += f"<a href='{link}'>Кинопоиск</a>"
         
         # Определяем, является ли это сериалом
-        is_series_from_info = info.get('is_series') or is_series
+        # Используем film_type_from_callback как основной источник (приходит из API поиска)
+        # Если его нет, используем info.get('is_series') или is_series из базы
+        if film_type_from_callback:
+            is_series_final = film_type_from_callback == 'TV_SERIES'
+        else:
+            is_series_final = info.get('is_series', False) or is_series
         
         # Создаем кнопки
         markup = InlineKeyboardMarkup(row_width=1)
         
         # Определяем тип для передачи в callback_data
-        film_type_str = 'TV_SERIES' if is_series_from_info else 'FILM'
+        film_type_str = 'TV_SERIES' if is_series_final else 'FILM'
         
         # Всегда показываем кнопку "Добавить в базу" (если фильм уже в базе, она просто не добавит дубликат)
         markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}:{film_type_str}"))
         
         # Если это сериал, показываем кнопки для сериалов только если это действительно сериал
-        if is_series_from_info:
+        if is_series_final:
             if not film_in_db:
                 markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                 markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
@@ -7211,6 +7234,73 @@ def handle_add_film_callback(call):
             bot.answer_callback_query(call.id, "❌ Ошибка отправки описания", show_alert=True)
     except Exception as e:
         logger.error(f"[SEARCH] Ошибка в handle_add_film_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("search_back:"))
+def handle_search_back_callback(call):
+    """Обработчик кнопки 'Назад' для возврата к результатам поиска"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Извлекаем message_id результатов поиска из callback_data
+        search_results_msg_id = int(call.data.split(":")[1])
+        
+        # Удаляем текущее сообщение с описанием фильма
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except Exception as e:
+            logger.warning(f"[SEARCH] Не удалось удалить сообщение с описанием: {e}")
+        
+        # Восстанавливаем результаты поиска из user_search_state
+        if user_id in user_search_state:
+            search_data = user_search_state[user_id]
+            results_text = search_data.get('results_text', '')
+            films = search_data.get('films', [])
+            query = search_data.get('query', '')
+            total_pages = search_data.get('total_pages', 1)
+            
+            # Восстанавливаем разметку с кнопками
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            for film in films:
+                title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                year = film.get('year') or film.get('releaseYear') or 'N/A'
+                kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                film_type = film.get('type', '').upper()
+                
+                if kp_id:
+                    is_series = film_type == 'TV_SERIES'
+                    type_indicator = "📺" if is_series else "🎬"
+                    button_text = f"{type_indicator} {title} ({year})"
+                    if len(button_text) > 50:
+                        button_text = button_text[:47] + "..."
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+            
+            # Добавляем пагинацию, если нужно
+            if total_pages > 1:
+                pagination_row = []
+                query_encoded = query.replace(' ', '_')
+                pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+                if total_pages > 1:
+                    pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                markup.row(*pagination_row)
+            
+            # Отправляем восстановленное сообщение с результатами поиска
+            try:
+                bot.send_message(chat_id, results_text, reply_markup=markup, parse_mode='HTML')
+                bot.answer_callback_query(call.id, "Возврат к результатам поиска")
+            except Exception as e:
+                logger.error(f"[SEARCH] Ошибка восстановления результатов поиска: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка восстановления результатов", show_alert=True)
+        else:
+            bot.answer_callback_query(call.id, "❌ Результаты поиска не найдены", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SEARCH] Ошибка в handle_search_back_callback: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
