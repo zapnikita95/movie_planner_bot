@@ -7071,10 +7071,11 @@ def show_schedule(message):
         with db_lock:
             cursor.execute('''
                 SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
-                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket,
+                       m.watched
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.chat_id = %s
+                WHERE p.chat_id = %s AND m.watched = 0
                 ORDER BY p.plan_type DESC, p.plan_datetime ASC
             ''', (chat_id,))
             rows = cursor.fetchall()
@@ -7156,6 +7157,7 @@ def show_schedule(message):
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
                 cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"plan_detail:{plan_id}"))
+                cinema_markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
             
             cinema_text = "🎬 <b>Премьеры в кино:</b>\n\n"
             for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
@@ -7172,6 +7174,7 @@ def show_schedule(message):
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
                 home_markup.add(InlineKeyboardButton(button_text, callback_data=f"plan_detail:{plan_id}"))
+                home_markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
             
             home_text = "🏠 <b>Просмотры дома:</b>\n\n"
             for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
@@ -7715,6 +7718,110 @@ def plan_from_added_callback(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_from_calendar:"))
+def handle_remove_from_calendar_callback(call):
+    """Обработчик удаления фильма из календаря"""
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[REMOVE FROM CALENDAR] Удаление плана {plan_id} пользователем {user_id}")
+        
+        with db_lock:
+            # Получаем информацию о плане
+            cursor.execute('''
+                SELECT p.id, m.title
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            row = cursor.fetchone()
+            
+            if not row:
+                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                return
+            
+            title = row.get('title') if isinstance(row, dict) else row[1]
+            
+            # Удаляем план
+            cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+            conn.commit()
+        
+        bot.answer_callback_query(call.id, f"✅ Фильм '{title}' удалён из календаря")
+        logger.info(f"[REMOVE FROM CALENDAR] План {plan_id} удалён пользователем {user_id}")
+        
+        # Обновляем сообщение, убирая кнопку
+        try:
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except:
+            pass
+    except Exception as e:
+        logger.error(f"[REMOVE FROM CALENDAR] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("mark_watched_from_plan:") or call.data.startswith("mark_watched_from_description:"))
+def handle_mark_watched_callback(call):
+    """Обработчик отметки фильма как просмотренного"""
+    try:
+        film_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[MARK WATCHED] Отметка фильма {film_id} как просмотренного пользователем {user_id}")
+        
+        with db_lock:
+            # Получаем информацию о фильме
+            cursor.execute("SELECT title FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            row = cursor.fetchone()
+            
+            if not row:
+                bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                return
+            
+            title = row.get('title') if isinstance(row, dict) else row[0]
+            
+            # Отмечаем как просмотренный
+            cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            conn.commit()
+        
+        bot.answer_callback_query(call.id, f"✅ Фильм '{title}' отмечен как просмотренный")
+        logger.info(f"[MARK WATCHED] Фильм {film_id} отмечен как просмотренный пользователем {user_id}")
+        
+        # Обновляем сообщение, убирая кнопку
+        try:
+            # Получаем текущую разметку и удаляем кнопку "Отметить просмотренным"
+            current_markup = call.message.reply_markup
+            if current_markup:
+                new_buttons = []
+                for row in current_markup.keyboard:
+                    new_row = []
+                    for button in row:
+                        if button.callback_data and not (button.callback_data.startswith("mark_watched_from_plan:") or button.callback_data.startswith("mark_watched_from_description:")):
+                            new_row.append(button)
+                    if new_row:
+                        new_buttons.append(new_row)
+                
+                if new_buttons:
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    new_markup = InlineKeyboardMarkup()
+                    for row in new_buttons:
+                        new_markup.row(*row)
+                    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=new_markup)
+                else:
+                    bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception as e:
+            logger.warning(f"[MARK WATCHED] Не удалось обновить сообщение: {e}")
+    except Exception as e:
+        logger.error(f"[MARK WATCHED] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_rating:"))
 def handle_confirm_rating(call):
@@ -7843,20 +7950,137 @@ def handle_show_facts(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_film_description:"))
+def handle_show_film_description_callback(call):
+    """Обработчик показа описания фильма по kp_id"""
+    try:
+        kp_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[FILM DESCRIPTION] Показ описания фильма kp_id={kp_id} от пользователя {user_id}")
+        
+        # Получаем информацию о фильме из базы
+        with db_lock:
+            cursor.execute("SELECT id, title, kp_id, link, year, genres, director, actors, description, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            movie_row = cursor.fetchone()
+        
+        if not movie_row:
+            bot.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+            return
+        
+        if isinstance(movie_row, dict):
+            film_id = movie_row.get('id')
+            title = movie_row.get('title')
+            link = movie_row.get('link')
+            year = movie_row.get('year')
+            genres = movie_row.get('genres')
+            director = movie_row.get('director')
+            actors = movie_row.get('actors')
+            description = movie_row.get('description')
+            is_series = movie_row.get('is_series', 0)
+        else:
+            film_id = movie_row[0]
+            title = movie_row[1]
+            link = movie_row[3]
+            year = movie_row[4]
+            genres = movie_row[5]
+            director = movie_row[6]
+            actors = movie_row[7]
+            description = movie_row[8]
+            is_series = movie_row[9] if len(movie_row) > 9 else 0
+        
+        # Формируем описание фильма
+        if not description or description == '—':
+            description = 'Нет описания'
+        
+        # Ограничиваем длину описания
+        if len(description) > 500:
+            description = description[:497] + "..."
+        
+        text = f"🎬 <b>{title}</b> ({year or '—'})\n\n"
+        if genres and genres != '—':
+            text += f"📂 <b>Жанры:</b> {genres}\n"
+        if director and director != '—':
+            text += f"🎥 <b>Режиссёр:</b> {director}\n"
+        if actors and actors != '—':
+            text += f"👥 <b>Актёры:</b> {actors}\n"
+        text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
+        text += f"<a href='{link}'>Кинопоиск</a>"
+        
+        # Создаем кнопки
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Кнопка "Отметить просмотренным"
+        with db_lock:
+            cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            watched_row = cursor.fetchone()
+            watched = watched_row.get('watched') if isinstance(watched_row, dict) else (watched_row[0] if watched_row else 0)
+        
+        if not watched:
+            markup.add(InlineKeyboardButton("✅ Отметить просмотренным", callback_data=f"mark_watched_from_description:{film_id}"))
+        
+        # Кнопки "Оставить отзыв" и "Интересные факты"
+        try:
+            from database.db_operations import get_ratings_info
+        except ImportError:
+            def get_ratings_info(chat_id, film_id, user_id):
+                with db_lock:
+                    cursor.execute("SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)", (chat_id, film_id, user_id))
+                    row = cursor.fetchone()
+                    return {'current_user_rated': row is not None, 'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)}
+        
+        ratings_info = get_ratings_info(chat_id, film_id, user_id)
+        
+        if ratings_info['current_user_rated']:
+            markup.row(
+                InlineKeyboardButton("💬 Оставить отзыв", callback_data=f"rate_film:{kp_id}"),
+                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}")
+            )
+        else:
+            markup.row(
+                InlineKeyboardButton("💬 Оставить отзыв", callback_data=f"rate_film:{kp_id}"),
+                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}")
+            )
+        
+        # Проверяем, есть ли фильм в календаре
+        with db_lock:
+            cursor.execute("SELECT id FROM plans WHERE chat_id = %s AND film_id = %s", (chat_id, film_id))
+            plan_row = cursor.fetchone()
+        
+        if plan_row:
+            plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+            markup.add(InlineKeyboardButton("🗑️ Убрать из календаря", callback_data=f"remove_from_calendar:{plan_id}"))
+        else:
+            markup.add(InlineKeyboardButton("📅 Добавить в календарь", callback_data=f"plan_from_added:{kp_id}"))
+        
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+        # Сохраняем ссылку в bot_messages для обработки реакций
+        bot_messages[msg.message_id] = link
+        logger.info(f"[FILM DESCRIPTION] Описание фильма {title} показано пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"[FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan_detail:"))
 def handle_plan_detail_callback(call):
-    """Обработчик показа деталей плана"""
+    """Обработчик показа описания фильма из плана"""
     try:
         plan_id = int(call.data.split(":")[1])
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        logger.info(f"[PLAN DETAIL] Показ деталей плана {plan_id} от пользователя {user_id}")
+        logger.info(f"[PLAN DETAIL] Показ описания фильма из плана {plan_id} от пользователя {user_id}")
         
         with db_lock:
             cursor.execute('''
-                SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
+                SELECT p.id, m.id as film_id, m.title, m.kp_id, m.link, m.year, m.genres, m.director, m.actors, m.description, m.is_series,
+                       p.plan_datetime, p.plan_type,
                        CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
@@ -7869,59 +8093,89 @@ def handle_plan_detail_callback(call):
             return
         
         if isinstance(row, dict):
+            film_id = row.get('film_id')
             title = row.get('title')
             kp_id = row.get('kp_id')
             link = row.get('link')
-            plan_dt_value = row.get('plan_datetime')
-            plan_type = row.get('plan_type')
-            has_ticket = row.get('has_ticket', 0)
+            year = row.get('year')
+            genres = row.get('genres')
+            director = row.get('director')
+            actors = row.get('actors')
+            description = row.get('description')
+            is_series = row.get('is_series', 0)
         else:
-            title = row[1]
-            kp_id = row[2]
-            link = row[3]
-            plan_dt_value = row[4]
-            plan_type = row[5]
-            has_ticket = row[6] if len(row) > 6 else 0
+            film_id = row[1]
+            title = row[2]
+            kp_id = row[3]
+            link = row[4]
+            year = row[5]
+            genres = row[6]
+            director = row[7]
+            actors = row[8]
+            description = row[9]
+            is_series = row[10] if len(row) > 10 else 0
         
-        user_tz = get_user_timezone_or_default(user_id)
+        # Формируем описание фильма
+        if not description or description == '—':
+            description = 'Нет описания'
         
-        # Преобразуем дату
-        try:
-            if isinstance(plan_dt_value, datetime):
-                if plan_dt_value.tzinfo is None:
-                    plan_dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
-                else:
-                    plan_dt = plan_dt_value.astimezone(user_tz)
-            elif isinstance(plan_dt_value, str):
-                plan_dt_iso = plan_dt_value
-                if plan_dt_iso.endswith('Z'):
-                    plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(user_tz)
-                elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
-                    plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(user_tz)
-                else:
-                    plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(user_tz)
-            else:
-                plan_dt = datetime.now(user_tz)
-            
-            date_str = plan_dt.strftime('%d.%m.%Y %H:%M')
-        except Exception as e:
-            logger.error(f"Ошибка обработки даты: {e}")
-            date_str = str(plan_dt_value)
+        # Ограничиваем длину описания
+        if len(description) > 500:
+            description = description[:497] + "..."
         
-        text = f"📅 <b>План просмотра</b>\n\n"
-        text += f"🎬 <b>{title}</b>\n"
-        text += f"📆 {date_str}\n"
-        text += f"📍 {'Кино' if plan_type == 'cinema' else 'Дома'}\n"
-        if has_ticket:
-            text += f"🎟️ Билет прикреплён\n"
-        text += f"\n<a href='{link}'>Кинопоиск</a>"
+        text = f"🎬 <b>{title}</b> ({year or '—'})\n\n"
+        if genres and genres != '—':
+            text += f"📂 <b>Жанры:</b> {genres}\n"
+        if director and director != '—':
+            text += f"🎥 <b>Режиссёр:</b> {director}\n"
+        if actors and actors != '—':
+            text += f"👥 <b>Актёры:</b> {actors}\n"
+        text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
+        text += f"<a href='{link}'>Кинопоиск</a>"
         
+        # Создаем кнопки
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("✏️ Редактировать", callback_data=f"edit_plan:{plan_id}"))
-        markup.add(InlineKeyboardButton("🗑️ Удалить", callback_data=f"delete_plan:{plan_id}"))
+        
+        # Кнопка "Отметить просмотренным"
+        with db_lock:
+            cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            movie_row = cursor.fetchone()
+            watched = movie_row.get('watched') if isinstance(movie_row, dict) else (movie_row[0] if movie_row else 0)
+        
+        if not watched:
+            markup.add(InlineKeyboardButton("✅ Отметить просмотренным", callback_data=f"mark_watched_from_plan:{film_id}"))
+        
+        # Кнопки "Оставить отзыв" и "Интересные факты"
+        try:
+            from database.db_operations import get_ratings_info
+        except ImportError:
+            def get_ratings_info(chat_id, film_id, user_id):
+                with db_lock:
+                    cursor.execute("SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)", (chat_id, film_id, user_id))
+                    row = cursor.fetchone()
+                    return {'current_user_rated': row is not None, 'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)}
+        
+        ratings_info = get_ratings_info(chat_id, film_id, user_id)
+        
+        if ratings_info['current_user_rated']:
+            markup.row(
+                InlineKeyboardButton("💬 Оставить отзыв", callback_data=f"rate_film:{kp_id}"),
+                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}")
+            )
+        else:
+            markup.row(
+                InlineKeyboardButton("💬 Оставить отзыв", callback_data=f"rate_film:{kp_id}"),
+                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}")
+            )
+        
+        # Кнопка "Убрать из календаря" (вместо "Добавить в календарь")
+        markup.add(InlineKeyboardButton("🗑️ Убрать из календаря", callback_data=f"remove_from_calendar:{plan_id}"))
         
         bot.answer_callback_query(call.id)
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+        # Сохраняем ссылку в bot_messages для обработки реакций
+        bot_messages[msg.message_id] = link
+        logger.info(f"[PLAN DETAIL] Описание фильма {title} показано пользователю {user_id}")
     except Exception as e:
         logger.error(f"[PLAN DETAIL] Ошибка: {e}", exc_info=True)
         try:
