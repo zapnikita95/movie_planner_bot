@@ -914,7 +914,71 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         plan_type_text = "дома" if plan_type == 'home' else "в кино"
         text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
         text += f"<b>{title}</b>\n{link}"
-        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+        
+        markup = None
+        
+        # Если планируем дома, проверяем выбранный кинотеатр
+        if plan_type == 'home' and plan_id:
+            with db_lock:
+                cursor.execute('''
+                    SELECT streaming_service, streaming_url 
+                    FROM plans 
+                    WHERE id = %s
+                ''', (plan_id,))
+                stream_row = cursor.fetchone()
+                if stream_row:
+                    streaming_service = stream_row.get('streaming_service') if isinstance(stream_row, dict) else stream_row[0]
+                    streaming_url = stream_row.get('streaming_url') if isinstance(stream_row, dict) else stream_row[1]
+                    
+                    if streaming_service and streaming_url:
+                        # Кинотеатр выбран - показываем кнопку со ссылкой
+                        markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton(f"📺 Смотреть на {streaming_service}", url=streaming_url))
+                    else:
+                        # Кинотеатр не выбран - показываем предложение выбрать
+                        # Получаем сохраненные источники из ticket_file_id (JSON)
+                        cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
+                        sources_row = cursor.fetchone()
+                        sources_json = sources_row.get('ticket_file_id') if sources_row and isinstance(sources_row, dict) else (sources_row[0] if sources_row else None)
+                        
+                        if sources_json:
+                            import json
+                            try:
+                                sources_dict = json.loads(sources_json)
+                                if sources_dict:
+                                    markup = InlineKeyboardMarkup(row_width=2)
+                                    for platform, url in sources_dict.items():
+                                        markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id}:{platform}"))
+                                    text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
+                            except json.JSONDecodeError:
+                                pass
+                        else:
+                            # Если источники не сохранены, получаем из API
+                            cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                            kp_row = cursor.fetchone()
+                            if kp_row:
+                                kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0]
+                                if kp_id:
+                                    from api.kinopoisk_api import get_external_sources
+                                    sources = get_external_sources(kp_id)
+                                    if sources:
+                                        # Сохраняем источники в базу для будущего использования
+                                        import json
+                                        sources_dict = {platform: url for platform, url in sources[:6]}
+                                        sources_json = json.dumps(sources_dict, ensure_ascii=False)
+                                        cursor.execute('''
+                                            UPDATE plans 
+                                            SET ticket_file_id = %s 
+                                            WHERE id = %s
+                                        ''', (sources_json, plan_id))
+                                        conn.commit()
+                                        
+                                        markup = InlineKeyboardMarkup(row_width=2)
+                                        for platform, url in sources[:6]:
+                                            markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id}:{platform}"))
+                                        text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
+        
+        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
         # Сохраняем message_id для обработки реакций
         plan_notification_messages[msg.message_id] = {'link': link}
         logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}")
@@ -952,7 +1016,7 @@ def check_and_send_plan_notifications():
         with db_lock:
             cursor.execute('''
                 SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
-                       m.title, m.link, p.notification_sent
+                       m.title, m.link, p.notification_sent, p.streaming_service, p.streaming_url
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE ((p.plan_datetime >= %s AND p.plan_datetime <= %s)
@@ -2603,24 +2667,20 @@ def premiere_detail_handler(call):
         
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Если фильма нет в базе, показываем кнопку "Добавить в базу"
-        if not film_in_db:
-            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"premiere_add:{kp_id}"))
-        
-        # Проверяем, нужно ли показывать кнопку "Уведомить о премьере"
-        # Показываем только если фильма нет в базе И дата премьеры в будущем
+        # Проверяем, нужно ли показывать кнопку "Напомнить о выходе"
+        # Показываем если премьера еще не состоялась (независимо от наличия в базе)
         from datetime import date as date_class
         today = date_class.today()
         show_notify_button = False
         date_for_callback = ''
         
-        if not film_in_db and premiere_date:
+        if premiere_date:
             is_future = premiere_date > today
             if is_future:
-                # Дата в будущем и фильма нет в базе - показываем "Уведомить о премьере"
+                # Дата в будущем - показываем "Напомнить о выходе"
                 show_notify_button = True
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-        elif not film_in_db and not premiere_date:
+        elif not premiere_date:
             # Если дата не определена, но есть год, проверяем год
             year = data.get('year')
             if year:
@@ -2633,20 +2693,13 @@ def premiere_detail_handler(call):
                 except:
                     pass
         
+        # Кнопка "Напомнить о выходе" показывается первой, если фильм еще не вышел
         if show_notify_button:
-            markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
-        elif premiere_date and premiere_date <= today and not film_in_db:
-            # Дата в прошлом и фильма нет в базе - показываем старую кнопку "Напомнить" только если нет напоминания
-            with db_lock:
-                cursor.execute('''
-                    SELECT id FROM premiere_reminders 
-                    WHERE chat_id = %s AND user_id = %s AND kp_id = %s
-                ''', (chat_id, call.from_user.id, kp_id))
-                existing = cursor.fetchone()
-            
-            if not existing:
-                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                markup.add(InlineKeyboardButton("🔔 Напомнить о выходе премьеры", callback_data=f"premiere_remind:{kp_id}:{date_for_callback}"))
+            markup.add(InlineKeyboardButton("🔔 Напомнить о выходе", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
+        
+        # Если фильма нет в базе, показываем кнопку "Добавить в базу"
+        if not film_in_db:
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"premiere_add:{kp_id}"))
         
         # Добавляем кнопку "Назад" - возвращаемся к списку премьер
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{period}"))
@@ -3234,6 +3287,40 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
         markup = InlineKeyboardMarkup(row_width=1)
         kp_id = info.get('kp_id')
         if kp_id:
+            # Проверяем премьеру фильма
+            premiere_date = None
+            premiere_date_str = ""
+            try:
+                headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+                url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+                response_main = requests.get(url_main, headers=headers, timeout=15)
+                if response_main.status_code == 200:
+                    data_main = response_main.json()
+                    from datetime import date as date_class
+                    today = date_class.today()
+                    
+                    # Получаем дату премьеры
+                    for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+                        date_value = data_main.get(date_field)
+                        if date_value:
+                            try:
+                                if 'T' in str(date_value):
+                                    premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                                else:
+                                    premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                                premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                                break
+                            except:
+                                continue
+                    
+                    # Если премьера еще не состоялась, добавляем кнопку первой
+                    if premiere_date and premiere_date > today:
+                        date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+                        # Используем период 'current_month' по умолчанию
+                        markup.add(InlineKeyboardButton("🔔 Напомнить о выходе фильма", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
+            except Exception as e:
+                logger.warning(f"[ADD_AND_ANNOUNCE] Ошибка получения информации о премьере: {e}")
+            
             # Используем kp_id для callback_data (короче, чем полная ссылка)
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
             
@@ -10871,6 +10958,36 @@ def _random_final(call, chat_id, user_id):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "premieres_back_to_periods")
+def premieres_back_to_periods_callback(call):
+    """Обработчик возврата к выбору периода"""
+    try:
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Показываем выбор периода (как в команде /premieres)
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
+        markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
+        markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
+        markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
+        markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
+        markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+        
+        try:
+            bot.edit_message_text("📅 <b>Выберите период для просмотра премьер:</b>", chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception as e:
+            # Если не удалось отредактировать, отправляем новое сообщение
+            bot.send_message(chat_id, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
+        
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.error(f"[PREMIERES BACK TO PERIODS] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_period:"))
 def premieres_period_callback(call):
     """Обработчик выбора периода для премьер"""
@@ -10985,6 +11102,9 @@ def show_premieres_page_new_message(chat_id, premieres, period, page=0):
         if nav_buttons:
             markup.add(*nav_buttons)
         
+        # Кнопка возврата к периодам
+        markup.add(InlineKeyboardButton("◀️ Назад к периодам", callback_data="premieres_back_to_periods"))
+        
         text += f"\nСтраница {page + 1} из {total_pages}"
         text += "\n\nВыберите фильм для подробностей:"
         
@@ -11080,6 +11200,9 @@ def show_premieres_page(call, premieres, period, page=0):
         
         if nav_buttons:
             markup.add(*nav_buttons)
+        
+        # Кнопка возврата к периодам
+        markup.add(InlineKeyboardButton("◀️ Назад к периодам", callback_data="premieres_back_to_periods"))
         
         text += f"\nСтраница {page + 1} из {total_pages}"
         text += "\n\nВыберите фильм для подробностей:"
@@ -12121,6 +12244,86 @@ def ticket_session_callback(call):
             )
         bot.answer_callback_query(call.id, "Выберите действие")
 
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_select:"))
+def streaming_select_callback(call):
+    """Обработчик выбора онлайн-кинотеатра"""
+    try:
+        parts = call.data.split(":")
+        plan_id = int(parts[1])
+        platform = parts[2] if len(parts) > 2 else ''
+        
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем источники из базы (сохранены в ticket_file_id как JSON)
+        with db_lock:
+            cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
+            sources_row = cursor.fetchone()
+            sources_json = sources_row.get('ticket_file_id') if sources_row and isinstance(sources_row, dict) else (sources_row[0] if sources_row else None)
+            
+            if sources_json:
+                import json
+                try:
+                    sources_dict = json.loads(sources_json)
+                    url = sources_dict.get(platform, '')
+                    
+                    if url:
+                        # Сохраняем выбор кинотеатра в базу
+                        cursor.execute('''
+                            UPDATE plans 
+                            SET streaming_service = %s, streaming_url = %s 
+                            WHERE id = %s AND chat_id = %s AND user_id = %s
+                        ''', (platform, url, plan_id, chat_id, user_id))
+                        conn.commit()
+                        
+                        bot.answer_callback_query(call.id, f"✅ Выбран {platform}")
+                        
+                        # Обновляем сообщение, отмечая выбранный кинотеатр
+                        sources_markup = InlineKeyboardMarkup(row_width=2)
+                        for plat, plat_url in sources_dict.items():
+                            # Отмечаем выбранный кинотеатр
+                            button_text = f"✅ {plat}" if plat == platform else plat
+                            sources_markup.add(InlineKeyboardButton(button_text, callback_data=f"streaming_select:{plan_id}:{plat}"))
+                        sources_markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
+                        bot.edit_message_text(
+                            f"📺 Где посмотреть фильм?\n\nВыберите онлайн-кинотеатр:\n\n✅ Выбрано: <b>{platform}</b>",
+                            chat_id, call.message.message_id, reply_markup=sources_markup, parse_mode='HTML'
+                        )
+                    else:
+                        bot.answer_callback_query(call.id, "❌ Кинотеатр не найден", show_alert=True)
+                except json.JSONDecodeError:
+                    bot.answer_callback_query(call.id, "❌ Ошибка данных", show_alert=True)
+            else:
+                bot.answer_callback_query(call.id, "❌ Источники не найдены", show_alert=True)
+    except Exception as e:
+        logger.error(f"[STREAMING SELECT] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_done:"))
+def streaming_done_callback(call):
+    """Обработчик кнопки 'Завершить' - удаляет сообщение с кинотеатрами"""
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Удаляем сообщение
+        try:
+            bot.delete_message(chat_id, message_id)
+            bot.answer_callback_query(call.id, "✅ Сообщение удалено")
+        except Exception as e:
+            logger.warning(f"[STREAMING DONE] Не удалось удалить сообщение: {e}")
+            bot.answer_callback_query(call.id, "✅")
+    except Exception as e:
+        logger.error(f"[STREAMING DONE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
 def add_ticket_from_plan_callback(call):
@@ -17734,10 +17937,35 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         if plan_type == 'home' and kp_id:
             sources = get_external_sources(kp_id)
             if sources:
+                # Получаем plan_id из только что созданного плана
+                with db_lock:
+                    cursor.execute('''
+                        SELECT id FROM plans 
+                        WHERE chat_id = %s AND film_id = %s AND plan_type = 'home' 
+                        AND plan_datetime = %s AND user_id = %s
+                        ORDER BY id DESC LIMIT 1
+                    ''', (chat_id, film_id, plan_utc, user_id))
+                    plan_row = cursor.fetchone()
+                    plan_id_for_streaming = plan_row.get('id') if plan_row and isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
+                    
+                    if plan_id_for_streaming:
+                        # Сохраняем все источники в JSON формате для использования в callback
+                        import json
+                        sources_dict = {platform: url for platform, url in sources[:6]}
+                        sources_json = json.dumps(sources_dict, ensure_ascii=False)
+                        cursor.execute('''
+                            UPDATE plans 
+                            SET ticket_file_id = %s 
+                            WHERE id = %s
+                        ''', (sources_json, plan_id_for_streaming))
+                        conn.commit()
+                
                 sources_markup = InlineKeyboardMarkup(row_width=2)
                 for platform, url in sources[:6]:  # Максимум 6 кнопок
-                    sources_markup.add(InlineKeyboardButton(platform, url=url))
-                bot.send_message(chat_id, f"📺 Где посмотреть <b>{title}</b>?", reply_markup=sources_markup, parse_mode='HTML')
+                    # Используем только plan_id и platform в callback_data
+                    sources_markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id_for_streaming}:{platform}"))
+                sources_markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id_for_streaming}"))
+                streaming_msg = bot.send_message(chat_id, f"📺 Где посмотреть <b>{title}</b>?\n\nВыберите онлайн-кинотеатр:", reply_markup=sources_markup, parse_mode='HTML')
         
         # Планируем уведомление на время плана
         scheduler.add_job(
