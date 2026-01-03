@@ -647,19 +647,14 @@ def clean_home_plans():
             count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
 
             if count == 0:
-
                 cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
-
                 deleted_count += 1
 
                 if bot:
-                try:
-
-                    bot.send_message(chat_id, f"📅 План на фильм удалён (нет оценок за вчера).")
-
-                except:
-
-                    pass
+                    try:
+                        bot.send_message(chat_id, f"📅 План на фильм удалён (нет оценок за вчера).")
+                    except:
+                        pass
 
         conn.commit()
 
