@@ -39,7 +39,7 @@ import socket
 import psycopg2
 from psycopg2.extras import RealDictCursor
 try:
-from yookassa import Configuration, Payment
+    from yookassa import Configuration, Payment
     YOOKASSA_AVAILABLE = True
 except ImportError:
     YOOKASSA_AVAILABLE = False
