@@ -37,14 +37,21 @@ def create_web_app(bot_instance):
                 logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")
                 logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
                 logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
+                # Проверяем, является ли сообщение командой
+                if update.message.text and update.message.text.startswith('/'):
+                    logger.info(f"[WEBHOOK] ⚠️ Обнаружена команда: '{update.message.text}'")
+                    # Проверяем entities для команд
+                    if hasattr(update.message, 'entities') and update.message.entities:
+                        for entity in update.message.entities:
+                            logger.info(f"[WEBHOOK] Entity: type={entity.type}, offset={entity.offset}, length={entity.length}")
             
             # Обрабатываем обновление с обработкой ошибок
             try:
                 logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
                 bot_instance.process_new_updates([update])
-                logger.info(f"[WEBHOOK] bot.process_new_updates завершен успешно")
+                logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
             except Exception as e:
-                logger.error(f"[WEBHOOK] Ошибка в bot.process_new_updates: {e}", exc_info=True)
+                logger.error(f"[WEBHOOK] ❌ Ошибка в bot.process_new_updates: {e}", exc_info=True)
                 # Возвращаем 200, чтобы Telegram не повторял запрос
                 return '', 200
             
