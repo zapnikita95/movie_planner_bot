@@ -3423,7 +3423,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     if is_series and user_id:
                         if has_notifications_access(chat_id, user_id):
                             markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                         else:
                             markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                             markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
