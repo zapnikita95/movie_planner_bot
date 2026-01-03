@@ -8921,7 +8921,7 @@ def _show_genre_step(call, chat_id, user_id):
                 cursor.execute(base_query, params)
             else:
                 # Для остальных режимов - используем старую логику
-        base_query = """
+                base_query = """
             SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
             FROM movies m
             LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
