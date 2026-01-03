@@ -5115,16 +5115,17 @@ def main_text_handler(message):
                     type_indicator = "📺" if is_series else "🎬"
                     
                     if kp_id:
+                        # Ограничиваем длину текста кнопки
+                        type_indicator = "📺" if is_series else "🎬"
                         button_text = f"{type_indicator} {title} ({year})"
-                        # Сохраняем тип в callback_data для правильного формирования ссылки
-                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
                         if len(button_text) > 50:
                             button_text = button_text[:47] + "..."
-                        results_text += f"• <b>{title}</b> ({year})"
+                        results_text += f"• {type_indicator} <b>{title}</b> ({year})"
                         if rating != 'N/A':
                             results_text += f" ⭐ {rating}"
                         results_text += "\n"
-                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}"))
+                        # Сохраняем тип в callback_data для правильного формирования ссылки
+                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
                 
                 # Добавляем пагинацию, если нужно
                 if total_pages > 1:
@@ -5134,6 +5135,9 @@ def main_text_handler(message):
                     if total_pages > 1:
                         pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
                     markup.row(*pagination_row)
+                
+                # Добавляем пояснение про эмодзи
+                results_text += "\n🎬 - фильм\n📺 - сериал"
                 
                 bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов")
@@ -6897,6 +6901,9 @@ def handle_search(message):
             if total_pages > 1:
                 pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
             markup.row(*pagination_row)
+        
+        # Добавляем пояснение про эмодзи
+        results_text += "\n\n🎬 - фильм\n📺 - сериал"
         
         bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
         logger.info(f"✅ Ответ на /search отправлен пользователю {message.from_user.id}, найдено {len(films)} результатов")
