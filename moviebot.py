@@ -4183,14 +4183,31 @@ def get_plan_link_internal(message, state):
         link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
         if link_match:
             link = link_match.group(0)
+        
+        # Также проверяем ID в реплае
+        if not link:
+            id_match = re.search(r'\b(\d{4,})\b', message.reply_to_message.text or '')
+            if id_match:
+                kp_id = id_match.group(1)
+                with db_lock:
+                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor.fetchone()
+                    if row:
+                        link = row.get('link') if isinstance(row, dict) else row[0]
+                        logger.info(f"[PLAN] Найден фильм по ID {kp_id} в реплае (из базы): {link}")
+                    else:
+                        if len(kp_id) >= 4:
+                            link = f"https://kinopoisk.ru/film/{kp_id}"
+                            logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
         link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.text)
         if link_match:
             link = link_match.group(0)
     
+    # Ищем ID кинопоиска в тексте (может быть в начале или в любом месте)
     if not link:
-        id_match = re.search(r'^(\d+)', message.text.strip())
+        id_match = re.search(r'\b(\d{4,})\b', message.text.strip())
         if id_match:
             kp_id = id_match.group(1)
             with db_lock:
@@ -4198,8 +4215,12 @@ def get_plan_link_internal(message, state):
                 row = cursor.fetchone()
                 if row:
                     link = row.get('link') if isinstance(row, dict) else row[0]
+                    logger.info(f"[PLAN] Найден фильм по ID {kp_id} в базе: {link}")
                 else:
-                    link = f"https://kinopoisk.ru/film/{kp_id}"
+                    # Проверяем, что это похоже на kp_id (обычно 4+ цифр)
+                    if len(kp_id) >= 4:
+                        link = f"https://kinopoisk.ru/film/{kp_id}"
+                        logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
         bot.reply_to(message, "Не нашёл ссылку или ID фильма. Попробуйте снова.")
@@ -4233,12 +4254,19 @@ def get_plan_day_or_date_internal(message, state):
     now = datetime.now(user_tz)
     plan_dt = None
     
-    target_weekday = None
-    for phrase, wd in days_full.items():
-        if phrase in text:
-            target_weekday = wd
-            logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
-            break
+    # Сначала пробуем использовать parse_session_time для более полной обработки дат
+    parsed_dt = parse_session_time(message.text.strip(), user_tz)
+    if parsed_dt:
+        plan_dt = parsed_dt
+        logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
+    
+    if not plan_dt:
+        target_weekday = None
+        for phrase, wd in days_full.items():
+            if phrase in text:
+                target_weekday = wd
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
+                break
     
     if target_weekday is not None:
         current_wd = now.weekday()
@@ -4366,7 +4394,9 @@ def get_plan_day_or_date_internal(message, state):
     
     # Вызываем process_plan
     message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
-    result = process_plan(user_id, message.chat.id, link, plan_type, None, message_date_utc, plan_dt)
+    # Преобразуем plan_dt обратно в строку для process_plan
+    day_or_date_str = plan_dt.strftime('%d.%m.%Y %H:%M') if plan_dt else None
+    result = process_plan(user_id, message.chat.id, link, plan_type, day_or_date_str, message_date_utc)
     if result == 'NEEDS_TIMEZONE':
         show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
     elif result:
@@ -4798,6 +4828,27 @@ def handle_rating_internal(message, rating):
                 
                 avg_str = f"{avg:.1f}" if avg else "—"
                 bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                
+                # Проверяем, все ли активные пользователи оценили фильм
+                cursor.execute('''
+                    SELECT DISTINCT user_id
+                    FROM stats
+                    WHERE chat_id = %s AND user_id IS NOT NULL
+                ''', (chat_id,))
+                active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Получаем всех, кто оценил этот фильм (только неимпортированные оценки)
+                cursor.execute('''
+                    SELECT DISTINCT user_id FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id))
+                rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Если все активные пользователи оценили, отмечаем фильм как просмотренный
+                if active_users and active_users.issubset(rated_users):
+                    cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    conn.commit()
+                    logger.info(f"[RATE] Все активные пользователи оценили фильм {film_id}, отмечен как просмотренный")
                 
                 # Если средняя оценка > 9, показываем похожие фильмы и продолжения
                 if avg and avg > 9 and kp_id:
@@ -5739,6 +5790,9 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
             
             # Создаем кнопки пагинации
             markup = InlineKeyboardMarkup()
+            
+            # Добавляем кнопку "Запланировать просмотр"
+            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data="plan_from_list"))
             
             # Если страниц немного (<= 20), показываем все
             if total_pages <= 20:
@@ -7386,13 +7440,9 @@ def rate_movie(message):
             username = row.get('username') if isinstance(row, dict) else row[1]
             chat_users[user_id] = username or f"user_{user_id}"
     
-    # Для каждого фильма находим, кто не оценил
-    text = "📊 <b>Список просмотренных фильмов для оценки:</b>\n\n"
-    text += "💬 <i>Ответьте на это сообщение списком оценок в формате:</i>\n"
-    text += "<code>kp_id оценка</code>\n\n"
-    text += "<i>Пример:</i>\n"
-    text += "<code>123 10\n31341 8\n123123 4</code>\n\n"
-    text += "=" * 40 + "\n\n"
+    # Разделяем фильмы на две группы: все оценили и не все оценили
+    all_rated_movies = []
+    not_all_rated_movies = []
     
     for movie in movies:
         # RealDictCursor возвращает словари, но поддерживает доступ по индексу
@@ -7414,21 +7464,55 @@ def rate_movie(message):
             if user_id not in rated_users:
                 not_rated.append(username)
         
-        not_rated_text = ", ".join(not_rated[:5])
-        if len(not_rated) > 5:
-            not_rated_text += f" и ещё {len(not_rated) - 5}"
+        movie_info = {
+            'film_id': film_id,
+            'kp_id': kp_id,
+            'title': title,
+            'year': year,
+            'not_rated': not_rated,
+            'rated_users': rated_users
+        }
         
-        # Формируем ссылку на кинопоиск
-        kp_link = f"https://kinopoisk.ru/film/{kp_id}"
-        text += f"<b>{kp_id}</b> — <a href=\"{kp_link}\">{title}</a> ({year})\n"
         if not_rated:
-            text += f"   ⚠️ Не оценили: {not_rated_text}\n"
+            not_all_rated_movies.append(movie_info)
         else:
-            text += f"   ✅ Все оценили\n"
-        text += "\n"
+            all_rated_movies.append(movie_info)
+    
+    # Формируем текст сообщения
+    text = "📊 <b>Список просмотренных фильмов для оценки:</b>\n\n"
+    text += "💬 <i>Ответьте на это сообщение списком оценок в формате:</i>\n"
+    text += "<code>kp_id оценка</code>\n\n"
+    text += "<i>Пример:</i>\n"
+    text += "<code>123 10\n31341 8\n123123 4</code>\n\n"
+    text += "=" * 40 + "\n\n"
+    
+    # Показываем фильмы, которые все оценили
+    for movie in all_rated_movies:
+        kp_link = f"https://kinopoisk.ru/film/{movie['kp_id']}"
+        text += f"<b>{movie['kp_id']}</b> — <a href=\"{kp_link}\">{movie['title']}</a> ({movie['year']})\n"
+        text += f"   ✅ Все оценили\n\n"
+    
+    # Показываем фильмы, которые не все оценили
+    for movie in not_all_rated_movies:
+        not_rated_text = ", ".join(movie['not_rated'][:5])
+        if len(movie['not_rated']) > 5:
+            not_rated_text += f" и ещё {len(movie['not_rated']) - 5}"
+        kp_link = f"https://kinopoisk.ru/film/{movie['kp_id']}"
+        text += f"<b>{movie['kp_id']}</b> — <a href=\"{kp_link}\">{movie['title']}</a> ({movie['year']})\n"
+        text += f"   ⚠️ Не оценили: {not_rated_text}\n\n"
+    
+    # Создаем кнопки для неоцененных фильмов
+    markup = None
+    if not_all_rated_movies:
+        markup = InlineKeyboardMarkup(row_width=1)
+        for movie in not_all_rated_movies:
+            button_text = f"{movie['title']} ({movie['year']})"
+            if len(button_text) > 40:
+                button_text = button_text[:37] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"rate_film_card:{movie['kp_id']}"))
     
     # Отправляем сообщение и сохраняем его message_id для обработки реплая
-    sent_msg = bot.reply_to(message, text, parse_mode='HTML')
+    sent_msg = bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
     rate_list_messages[message.chat.id] = sent_msg.message_id
 
 # Обработка реплая на список фильмов с оценками
@@ -7512,6 +7596,27 @@ def handle_rate_list_reply(message):
                 ''', (chat_id, film_id, user_id, rating))
                 
                 results.append((kp_id, title, rating))
+                
+                # Проверяем, все ли активные пользователи оценили фильм
+                # Получаем всех активных пользователей чата
+                cursor.execute('''
+                    SELECT DISTINCT user_id
+                    FROM stats
+                    WHERE chat_id = %s AND user_id IS NOT NULL
+                ''', (chat_id,))
+                active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Получаем всех, кто оценил этот фильм (только неимпортированные оценки)
+                cursor.execute('''
+                    SELECT DISTINCT user_id FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id))
+                rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Если все активные пользователи оценили, отмечаем фильм как просмотренный
+                if active_users and active_users.issubset(rated_users):
+                    cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    logger.info(f"[RATE] Все активные пользователи оценили фильм {film_id}, отмечен как просмотренный")
                 
             except ValueError:
                 errors.append(f"{kp_id_str}: неверный формат оценки")
@@ -7674,6 +7779,31 @@ def plan_cancel_callback(call):
     bot.edit_message_text("✅ Режим планирования отменён. Можете использовать другие команды.", 
                          chat_id, call.message.message_id)
 
+
+@bot.callback_query_handler(func=lambda call: call.data == "plan_from_list")
+def plan_from_list_callback(call):
+    """Обработчик кнопки 'Запланировать просмотр' из /list"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        logger.info(f"[PLAN FROM LIST] Пользователь {user_id} хочет запланировать фильм из /list")
+        
+        # Устанавливаем состояние для планирования
+        user_plan_state[user_id] = {
+            'step': 1,
+            'chat_id': chat_id
+        }
+        
+        bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+        bot.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+        logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}")
+    except Exception as e:
+        logger.error(f"[PLAN FROM LIST] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan_from_added:"))
 def plan_from_added_callback(call):
@@ -7884,6 +8014,98 @@ def handle_confirm_rating(call):
                 bot.reply_to(call.message, "❌ Произошла ошибка при сохранении. Попробуйте позже.")
     except Exception as e:
         logger.error(f"Ошибка в handle_confirm_rating: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rate_film_card:"))
+def handle_rate_film_card_callback(call):
+    """Обработчик кнопки фильма из списка /rate - показывает карточку фильма"""
+    try:
+        kp_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[RATE FILM CARD] Показ карточки фильма kp_id={kp_id} от пользователя {user_id}")
+        
+        # Получаем информацию о фильме из базы
+        with db_lock:
+            cursor.execute("SELECT id, title, kp_id, link, year, genres, director, actors, description, is_series, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            movie_row = cursor.fetchone()
+        
+        if not movie_row:
+            bot.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+            return
+        
+        if isinstance(movie_row, dict):
+            film_id = movie_row.get('id')
+            title = movie_row.get('title')
+            link = movie_row.get('link')
+            year = movie_row.get('year')
+            genres = movie_row.get('genres')
+            director = movie_row.get('director')
+            actors = movie_row.get('actors')
+            description = movie_row.get('description')
+            is_series = movie_row.get('is_series', 0)
+            watched = movie_row.get('watched', 0)
+        else:
+            film_id = movie_row[0]
+            title = movie_row[1]
+            link = movie_row[3]
+            year = movie_row[4]
+            genres = movie_row[5]
+            director = movie_row[6]
+            actors = movie_row[7]
+            description = movie_row[8]
+            is_series = movie_row[9] if len(movie_row) > 9 else 0
+            watched = movie_row[10] if len(movie_row) > 10 else 0
+        
+        # Формируем описание фильма
+        if not description or description == '—':
+            description = 'Нет описания'
+        
+        # Ограничиваем длину описания
+        if len(description) > 500:
+            description = description[:497] + "..."
+        
+        text = f"🎬 <b>{title}</b> ({year or '—'})\n\n"
+        if genres and genres != '—':
+            text += f"📂 <b>Жанры:</b> {genres}\n"
+        if director and director != '—':
+            text += f"🎥 <b>Режиссёр:</b> {director}\n"
+        if actors and actors != '—':
+            text += f"👥 <b>Актёры:</b> {actors}\n"
+        text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
+        text += f"<a href='{link}'>Кинопоиск</a>"
+        
+        # Создаем кнопки
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Кнопки "Оставить отзыв" и "Интересные факты"
+        try:
+            from database.db_operations import get_ratings_info
+        except ImportError:
+            def get_ratings_info(chat_id, film_id, user_id):
+                with db_lock:
+                    cursor.execute("SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)", (chat_id, film_id, user_id))
+                    row = cursor.fetchone()
+                    return {'current_user_rated': row is not None, 'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)}
+        
+        ratings_info = get_ratings_info(chat_id, film_id, user_id)
+        
+        markup.row(
+            InlineKeyboardButton("💬 Оставить отзыв", callback_data=f"rate_film:{kp_id}"),
+            InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}")
+        )
+        
+        bot.answer_callback_query(call.id)
+        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+        # Сохраняем ссылку в bot_messages для обработки реакций
+        bot_messages[msg.message_id] = link
+        logger.info(f"[RATE FILM CARD] Карточка фильма {title} показана пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"[RATE FILM CARD] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
@@ -12942,7 +13164,7 @@ def plan_handler(message):
         if not link:
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("❌ Выйти", callback_data="plan:cancel"))
-            reply_msg = bot.reply_to(message, "Пришлите ссылку на фильм в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
+            reply_msg = bot.reply_to(message, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
             # Устанавливаем состояние для получения данных по частям
             user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id}
             return
@@ -13001,6 +13223,16 @@ def handle_plan_day_or_date(message):
             return
         
         day_or_date = message.text.strip()
+        
+        # Используем parse_session_time для более полной обработки дат
+        user_tz = get_user_timezone_or_default(user_id)
+        parsed_dt = parse_session_time(day_or_date, user_tz)
+        
+        if parsed_dt:
+            # Если parse_session_time успешно распарсил, используем его результат
+            # Но нужно передать в process_plan, который сам вызовет parse_session_time
+            # Поэтому просто передаем day_or_date, но убеждаемся, что parse_session_time вызывается первым
+            pass
         
         # Обрабатываем планирование
         result = process_plan(user_id, chat_id, link, plan_type, day_or_date, message.date)
