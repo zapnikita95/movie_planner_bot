@@ -139,6 +139,7 @@ commands = [
     BotCommand("ticket", "Работа с билетами в кино"),
     BotCommand("seasons", "Просмотр сезонов сериалов"),
     BotCommand("premieres", "Список премьер месяца"),
+    BotCommand("payment", "Оплата подписки"),
     BotCommand("help", "Помощь по командам")
 ]
 bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
@@ -2515,9 +2516,9 @@ def premiere_detail_handler(call):
         
         # Если не получилось через отдельный запрос, пробуем из основного ответа
         if not trailer_url:
-            videos = data.get('videos', {}).get('trailers', [])
-            if videos:
-                trailer_url = videos[0].get('url')  # Первый трейлер
+        videos = data.get('videos', {}).get('trailers', [])
+        if videos:
+            trailer_url = videos[0].get('url')  # Первый трейлер
         
         description = data.get('description') or data.get('shortDescription') or "Нет описания"
         genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
@@ -4283,7 +4284,7 @@ def get_plan_link_internal(message, state):
                 else:
                     # Проверяем, что это похоже на kp_id (обычно 4+ цифр)
                     if len(kp_id) >= 4:
-                        link = f"https://kinopoisk.ru/film/{kp_id}"
+                    link = f"https://kinopoisk.ru/film/{kp_id}"
                         logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
@@ -4325,10 +4326,10 @@ def get_plan_day_or_date_internal(message, state):
         logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
     
     if not plan_dt:
-        target_weekday = None
-        for phrase, wd in days_full.items():
-            if phrase in text:
-                target_weekday = wd
+    target_weekday = None
+    for phrase, wd in days_full.items():
+        if phrase in text:
+            target_weekday = wd
             logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
             break
     
@@ -5873,13 +5874,13 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
             
             # Если страниц немного (<= 20), показываем все
             if total_pages <= 20:
-                buttons = []
-                for p in range(1, total_pages + 1):
-                    label = f"•{p}" if p == page else str(p)
-                    buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
-                # Разбиваем кнопки на строки по 10 штук
-                for i in range(0, len(buttons), 10):
-                    markup.row(*buttons[i:i+10])
+            buttons = []
+            for p in range(1, total_pages + 1):
+                label = f"•{p}" if p == page else str(p)
+                buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
+            # Разбиваем кнопки на строки по 10 штук
+            for i in range(0, len(buttons), 10):
+                markup.row(*buttons[i:i+10])
             else:
                 # Для большого количества страниц используем умную пагинацию
                 buttons = []
@@ -6984,12 +6985,12 @@ def handle_add_film_callback(call):
             is_series = film_type_from_callback == 'TV_SERIES'
         else:
             # Если тип не передан, проверяем в базе
-            with db_lock:
+        with db_lock:
                 cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                existing = cursor.fetchone()
-                if existing:
-                    film_in_db = True
-                    film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+            existing = cursor.fetchone()
+            if existing:
+                film_in_db = True
+                film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
                     is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
         
         # Формируем правильную ссылку в зависимости от типа
@@ -7096,7 +7097,7 @@ def handle_add_film_callback(call):
                 
                 if is_subscribed:
                     markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                else:
+        else:
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
         # Отправляем описание
@@ -8611,9 +8612,17 @@ def random_mode_handler(call):
             'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
             'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nИщем случайный фильм на Кинопоиске по заданным фильтрам.',
             'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nВыбираем фильм среди похожих на ваши любимые (с оценкой 9-10, импортированные с Кинопоиска).',
-            'group_votes': '👥 <b>По групповым оценкам (9-10)</b>\n\nВыбираем фильм среди похожих на любимые группы (со средней оценкой 9-10, исключая импортированные оценки).'
+            'group_votes': '👥 <b>По групповым оценкам (9-10)</b>\n\nВыбираем фильм среди похожих на любимые группы (со средней оценкой 9-10, исключая импортированные оценки).\n\n💡 <i>Чем больше групповых оценок, тем больше будет вариантов фильмов и жанров.</i>'
         }
         mode_description = mode_descriptions.get(mode, '')
+        
+        # Для режима kinopoisk пропускаем периоды и сразу переходим к выбору года и жанра
+        if mode == 'kinopoisk':
+            user_random_state[user_id]['step'] = 'year'
+            bot.answer_callback_query(call.id)
+            _show_year_step(call, chat_id, user_id)
+            logger.info(f"[RANDOM] Mode selected: {mode}, moving to year selection, user_id={user_id}")
+            return
         
         # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
         all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
@@ -8692,7 +8701,7 @@ def random_mode_handler(call):
                             available_periods.append(period)
             else:
                 # Для остальных режимов - используем старую логику
-                base_query = """
+            base_query = """
                 SELECT COUNT(DISTINCT m.id) 
                 FROM movies m
                 LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
@@ -8847,6 +8856,47 @@ def random_period_handler(call):
         except:
             pass
 
+def _show_year_step(call, chat_id, user_id):
+    """Показывает шаг выбора года для режима kinopoisk"""
+    try:
+        logger.info(f"[RANDOM] Showing year step for user {user_id}")
+        
+        state = user_random_state.get(user_id, {})
+        selected_year = state.get('year')
+        mode_description = {
+            'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nИщем случайный фильм на Кинопоиске по заданным фильтрам.'
+        }.get(state.get('mode'), '')
+        
+        # Генерируем список годов от 1950 до текущего года
+        current_year = datetime.now().year
+        years = list(range(1950, current_year + 1))
+        years.reverse()  # От новых к старым
+        
+        markup = InlineKeyboardMarkup(row_width=4)
+        
+        # Группируем годы по декадам для удобства
+        decade_buttons = []
+        for year in years:
+            label = f"✓ {year}" if selected_year == year else str(year)
+            decade_buttons.append(InlineKeyboardButton(label, callback_data=f"rand_year:{year}"))
+        
+        # Разбиваем на строки по 4 кнопки
+        for i in range(0, len(decade_buttons), 4):
+            markup.row(*decade_buttons[i:i+4])
+        
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
+        
+        text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите год</b>\n\n(можно выбрать один год или пропустить)"
+        
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except:
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        
+        logger.info(f"[RANDOM] Year step shown for user {user_id}")
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in _show_year_step: {e}", exc_info=True)
+
 def _show_genre_step(call, chat_id, user_id):
     """Показывает шаг выбора жанра с учетом выбранных периодов"""
     try:
@@ -8928,7 +8978,7 @@ def _show_genre_step(call, chat_id, user_id):
                 cursor.execute(base_query, params)
             else:
                 # Для остальных режимов - используем старую логику
-                base_query = """
+        base_query = """
             SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
             FROM movies m
             LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
@@ -9000,6 +9050,89 @@ def _show_genre_step(call, chat_id, user_id):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_year:"))
+def random_year_handler(call):
+    """Обработчик выбора года для режима kinopoisk"""
+    try:
+        logger.info(f"[RANDOM] ===== YEAR HANDLER: data={call.data}, user_id={call.from_user.id}")
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        data = call.data.split(":", 1)[1]
+        
+        if user_id not in user_random_state:
+            logger.warning(f"[RANDOM] State not found for user {user_id}")
+            bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+            return
+        
+        if data == "skip":
+            logger.info(f"[RANDOM] Year skipped, moving to genre")
+            user_random_state[user_id]['year'] = None
+            user_random_state[user_id]['step'] = 'genre'
+            _show_genre_step_kinopoisk(call, chat_id, user_id)
+        else:
+            # Сохраняем выбранный год
+            selected_year = int(data)
+            user_random_state[user_id]['year'] = selected_year
+            logger.info(f"[RANDOM] Year selected: {selected_year}")
+            
+            # Переходим к выбору жанра
+            user_random_state[user_id]['step'] = 'genre'
+            _show_genre_step_kinopoisk(call, chat_id, user_id)
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in random_year_handler: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+def _show_genre_step_kinopoisk(call, chat_id, user_id):
+    """Показывает шаг выбора жанра для режима kinopoisk"""
+    try:
+        logger.info(f"[RANDOM] Showing genre step for kinopoisk mode, user {user_id}")
+        
+        state = user_random_state.get(user_id, {})
+        selected_genres = state.get('genres', [])
+        
+        # Список популярных жанров для выбора
+        all_genres = [
+            'драма', 'комедия', 'боевик', 'триллер', 'ужасы', 'фантастика',
+            'детектив', 'мелодрама', 'приключения', 'фэнтези', 'криминал',
+            'военный', 'семейный', 'биография', 'история', 'мультфильм',
+            'аниме', 'документальный', 'спорт', 'вестерн', 'мюзикл', 'нуар'
+        ]
+        
+        markup = InlineKeyboardMarkup(row_width=2)
+        for genre in all_genres:
+            label = f"✓ {genre}" if genre in selected_genres else genre
+            markup.add(InlineKeyboardButton(label, callback_data=f"rand_genre:{genre}"))
+        
+        nav_buttons = []
+        nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="rand_genre:back"))
+        if selected_genres:
+            nav_buttons.append(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_genre:done"))
+        else:
+            nav_buttons.append(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
+        markup.row(*nav_buttons)
+        
+        selected_text = f"\n\nВыбрано: {', '.join(selected_genres)}" if selected_genres else ""
+        mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nИщем случайный фильм на Кинопоиске по заданным фильтрам.'
+        
+        text = f"{mode_description}\n\n🎬 <b>Шаг 2/2: Выберите жанр</b>\n\n(можно выбрать несколько или пропустить){selected_text}"
+        
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except:
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        
+        bot.answer_callback_query(call.id)
+        logger.info(f"[RANDOM] Genre step shown for kinopoisk, user_id={user_id}")
+    except Exception as e:
+        logger.error(f"[RANDOM] ERROR in _show_genre_step_kinopoisk: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка загрузки жанров")
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
 def random_genre_handler(call):
     try:
@@ -9028,8 +9161,11 @@ def random_genre_handler(call):
             user_random_state[user_id]['genres'] = genres
             user_random_state[user_id]['step'] = 'genre'
             
-            # Для режимов my_votes и group_votes после выбора жанра сразу переходим к финалу
-            if mode in ['my_votes', 'group_votes']:
+            # Для режимов my_votes, group_votes и kinopoisk после выбора жанра обновляем клавиатуру
+            if mode == 'kinopoisk':
+                _show_genre_step_kinopoisk(call, chat_id, user_id)
+                return
+            elif mode in ['my_votes', 'group_votes']:
                 # Переходим сразу к финалу (жанр уже сохранен)
                 logger.info(f"[RANDOM] Mode {mode}: genre '{data}' selected, moving to final")
                 user_random_state[user_id]['step'] = 'final'
@@ -9039,6 +9175,25 @@ def random_genre_handler(call):
                 # Для обычного режима обновляем клавиатуру
                 _show_genre_step(call, chat_id, user_id)
                 return
+        
+        # Для режима kinopoisk после подтверждения жанров сразу переходим к финалу
+        if mode == 'kinopoisk':
+            if data == "skip":
+                user_random_state[user_id]['genres'] = []
+            elif data == "done":
+                pass  # Жанры уже сохранены
+            elif data == "back":
+                # Возврат к выбору года
+                logger.info(f"[RANDOM] Genre back, moving to year")
+                user_random_state[user_id]['step'] = 'year'
+                _show_year_step(call, chat_id, user_id)
+                return
+            
+            # Переходим к финалу
+            logger.info(f"[RANDOM] Mode kinopoisk: moving to final")
+            user_random_state[user_id]['step'] = 'final'
+            _random_final(call, chat_id, user_id)
+            return
         
         # Для режимов my_votes и group_votes после подтверждения жанров сразу переходим к финалу
         if mode in ['my_votes', 'group_votes']:
@@ -9457,38 +9612,15 @@ def _random_final(call, chat_id, user_id):
         # Для режима "kinopoisk" используем поиск по кинопоиску
         if mode == 'kinopoisk':
             # Получаем фильтры из состояния
-            periods = state.get('periods', [])
+            selected_year = state.get('year')
             genres = state.get('genres', [])
             
             # Формируем параметры поиска
             search_params = {}
-            if periods:
-                # Определяем диапазон годов
-                min_year = None
-                max_year = None
-                for p in periods:
-                    if p == "До 1980":
-                        max_year = 1979
-                    elif p == "1980–1990":
-                        min_year = 1980 if min_year is None else min(min_year, 1980)
-                        max_year = 1990 if max_year is None else max(max_year, 1990)
-                    elif p == "1990–2000":
-                        min_year = 1990 if min_year is None else min(min_year, 1990)
-                        max_year = 2000 if max_year is None else max(max_year, 2000)
-                    elif p == "2000–2010":
-                        min_year = 2000 if min_year is None else min(min_year, 2000)
-                        max_year = 2010 if max_year is None else max(max_year, 2010)
-                    elif p == "2010–2020":
-                        min_year = 2010 if min_year is None else min(min_year, 2010)
-                        max_year = 2020 if max_year is None else max(max_year, 2020)
-                    elif p == "2020–сейчас":
-                        min_year = 2020 if min_year is None else min(min_year, 2020)
-                        max_year = datetime.now().year
-                
-                if min_year:
-                    search_params['yearFrom'] = min_year
-                if max_year:
-                    search_params['yearTo'] = max_year
+            if selected_year:
+                # Используем выбранный год
+                search_params['yearFrom'] = selected_year
+                search_params['yearTo'] = selected_year
             
             if genres:
                 # Берем первый жанр для поиска (API не поддерживает несколько жанров одновременно)
@@ -9528,18 +9660,23 @@ def _random_final(call, chat_id, user_id):
                     data = response.json()
                     films = data.get('films', [])
                     
-                    # Фильтруем по исключенным kp_id и жанрам
+                    # Фильтруем по исключенным kp_id, году и жанрам
                     filtered_films = []
                     for film in films:
                         kp_id_film = str(film.get('filmId') or film.get('kinopoiskId', ''))
                         if kp_id_film and kp_id_film not in exclude_kp_ids:
+                            # Проверяем год, если указан
+                            film_year = film.get('year')
+                            if selected_year and film_year != selected_year:
+                                continue
+                            
                             # Проверяем жанры, если указаны
                             if genres:
                                 film_genres = [g.get('genre', '').lower() for g in film.get('genres', [])]
-                                if any(g.lower() in film_genres for g in genres):
-                                    filtered_films.append(film)
-                            else:
-                                filtered_films.append(film)
+                                if not any(g.lower() in film_genres for g in genres):
+                                    continue
+                            
+                            filtered_films.append(film)
                     
                     if filtered_films:
                         # Выбираем случайный фильм
@@ -10454,7 +10591,7 @@ def show_premieres_page(call, premieres, period, page=0):
         # Используем edit_message_text вместо send_message, если это callback
         if call.message.message_id:
             try:
-                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e:
                 error_str = str(e)
                 # Игнорируем ошибку "message is not modified" и "there is no text in the message to edit"
@@ -10470,7 +10607,7 @@ def show_premieres_page(call, premieres, period, page=0):
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
         if call.id:
-            bot.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
@@ -12305,6 +12442,558 @@ def ticket_command(message):
         except:
             pass
 
+# ==================== PAYMENT HANDLERS ====================
+
+# Тарифы подписок
+SUBSCRIPTION_PRICES = {
+    'personal': {
+        'notifications': {'month': 100},
+        'recommendations': {'month': 100},
+        'tickets': {'month': 150},
+        'all': {'month': 199, '3months': 499, 'year': 1499, 'lifetime': 1999}
+    },
+    'group': {
+        'notifications': {'month': 100},
+        'recommendations': {'month': 200},
+        'tickets': {'month': 200},
+        'all': {'month': 299, '3months': 650, 'year': 1999, 'lifetime': 2500}
+    }
+}
+
+def calculate_discounted_price(user_id, subscription_type, plan_type, period_type):
+    """Вычисляет цену с учетом скидок"""
+    base_price = SUBSCRIPTION_PRICES[subscription_type][plan_type].get(period_type, 0)
+    
+    if subscription_type == 'group':
+        # Проверяем, есть ли у пользователя персональная подписка
+        from database.db_operations import get_user_personal_subscriptions
+        personal_subs = get_user_personal_subscriptions(user_id)
+        if personal_subs:
+            # Скидка 20% от суммы платежа пользователя
+            # Находим подписку с таким же plan_type или all
+            for sub in personal_subs:
+                if sub.get('plan_type') == plan_type or sub.get('plan_type') == 'all':
+                    user_price = float(sub.get('price', 0))
+                    return int(user_price * 0.2)
+        
+        # Проверяем, есть ли у пользователя другие групповые подписки
+        from database.db_operations import get_user_group_subscriptions
+        group_subs = get_user_group_subscriptions(user_id)
+        if group_subs:
+            # Скидка 10% от стоимости групповой подписки
+            return int(base_price * 0.1)
+    
+    return base_price
+
+@bot.message_handler(commands=['payment'])
+def payment_command(message):
+    """Команда /payment - управление подписками"""
+    logger.info(f"[HANDLER] /payment вызван от {message.from_user.id}")
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        username = message.from_user.username or f"user_{user_id}"
+        log_request(user_id, username, '/payment', chat_id)
+        
+        is_private = message.chat.type == 'private'
+        
+        # Получаем активные подписки
+        from database.db_operations import get_active_subscription
+        personal_sub = get_active_subscription(chat_id, user_id, 'personal')
+        group_sub = get_active_subscription(chat_id, user_id, 'group')
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
+        markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
+        if personal_sub or group_sub:
+            markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
+        
+        text = "💳 <b>Оплата подписки</b>\n\n"
+        text += "Выберите действие:"
+        
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /payment: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке команды /payment")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("payment:"))
+def handle_payment_callback(call):
+    """Обработчик callback для кнопок оплаты"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        action = call.data.split(":", 1)[1]
+        is_private = call.message.chat.type == 'private'
+        
+        from database.db_operations import (
+            get_active_subscription, get_active_subscription_by_username, 
+            get_active_group_subscription, get_user_personal_subscriptions,
+            get_user_group_subscriptions, cancel_subscription
+        )
+        from datetime import datetime
+        
+        if action == "active":
+            # Показываем действующие подписки
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("👤 Личная подписка", callback_data="payment:active:personal"))
+            markup.add(InlineKeyboardButton("👥 Групповая подписка", callback_data="payment:active:group"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
+            
+            bot.edit_message_text(
+                "📋 <b>Действующая подписка</b>\n\nВыберите тип подписки:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        
+        if action.startswith("active:personal"):
+            # Проверка личной подписки
+            if is_private:
+                # В личке - проверяем подписку текущего пользователя
+                sub = get_active_subscription(chat_id, user_id, 'personal')
+                if sub:
+                    expires_at = sub.get('expires_at')
+                    next_payment = sub.get('next_payment_date')
+                    price = sub.get('price', 0)
+                    activated = sub.get('activated_at')
+                    
+                    text = f"👤 <b>Личная подписка</b>\n\n"
+                    text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
+                    if activated:
+                        text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                    if next_payment:
+                        text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                    if expires_at:
+                        text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                    else:
+                        text += f"⏰ Действует: <b>Навсегда</b>\n"
+                else:
+                    text = "👤 <b>Личная подписка</b>\n\nУ вас нет активной личной подписки."
+            else:
+                # В группе - просим указать username
+                user_payment_state[user_id] = {
+                    'step': 'check_personal_username',
+                    'chat_id': chat_id
+                }
+                text = "👤 <b>Проверка личной подписки</b>\n\n"
+                text += "Укажите ваш ник в Telegram (без @):"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        
+        if action.startswith("active:group"):
+            # Проверка групповой подписки
+            if is_private:
+                # В личке - показываем выбор группы
+                user_payment_state[user_id] = {
+                    'step': 'check_group_username',
+                    'chat_id': chat_id
+                }
+                text = "👥 <b>Проверка групповой подписки</b>\n\n"
+                text += "Укажите ник группы в Telegram (без @):"
+            else:
+                # В группе - показываем выбор текущей или другой группы
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("📍 Текущая группа", callback_data="payment:active:group:current"))
+                markup.add(InlineKeyboardButton("📍 Другая группа", callback_data="payment:active:group:other"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                bot.edit_message_text(
+                    "👥 <b>Групповая подписка</b>\n\nВыберите группу:",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        
+        if action == "active:group:current":
+            # Проверка подписки текущей группы
+            sub = get_active_subscription(chat_id, user_id, 'group')
+            if sub:
+                expires_at = sub.get('expires_at')
+                next_payment = sub.get('next_payment_date')
+                price = sub.get('price', 0)
+                activated = sub.get('activated_at')
+                
+                text = f"👥 <b>Групповая подписка</b>\n\n"
+                text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
+                if activated:
+                    text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                if next_payment:
+                    text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                if expires_at:
+                    text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                else:
+                    text += f"⏰ Действует: <b>Навсегда</b>\n"
+            else:
+                text = "👥 <b>Групповая подписка</b>\n\nУ этой группы нет активной подписки."
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        
+        if action == "active:group:other":
+            # Проверка подписки другой группы
+            user_payment_state[user_id] = {
+                'step': 'check_group_username',
+                'chat_id': chat_id
+            }
+            text = "👥 <b>Проверка групповой подписки</b>\n\n"
+            text += "Укажите ник группы в Telegram (без @):"
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        
+        if action == "tariffs":
+            # Показываем выбор типа подписки (личная/групповая)
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("👤 Личные", callback_data="payment:tariffs:personal"))
+            markup.add(InlineKeyboardButton("👥 Групповые", callback_data="payment:tariffs:group"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
+            
+            bot.edit_message_text(
+                "💰 <b>Тарифы</b>\n\nВыберите тип подписки:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        
+        if action.startswith("tariffs:personal"):
+            # Тарифы для личных подписок
+            text = "👤 <b>Личные тарифы</b>\n\n"
+            text += "🔔 <b>Уведомления о сериалах:</b> 100₽/мес\n"
+            text += "🎯 <b>Персональные рекомендации:</b> 100₽/мес\n"
+            text += "🎫 <b>Билеты на мероприятия:</b> 150₽/мес\n\n"
+            text += "📦 <b>Все режимы:</b>\n"
+            text += "• 199₽/мес\n"
+            text += "• 499₽ за 3 месяца\n"
+            text += "• 1499₽ за год\n"
+            text += "• 1999₽ навсегда\n\n"
+            text += "Выберите тариф:"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🔔 Уведомления (100₽/мес)", callback_data="payment:subscribe:personal:notifications:month"))
+            markup.add(InlineKeyboardButton("🎯 Рекомендации (100₽/мес)", callback_data="payment:subscribe:personal:recommendations:month"))
+            markup.add(InlineKeyboardButton("🎫 Билеты (150₽/мес)", callback_data="payment:subscribe:personal:tickets:month"))
+            markup.add(InlineKeyboardButton("📦 Все режимы - месяц (199₽)", callback_data="payment:subscribe:personal:all:month"))
+            markup.add(InlineKeyboardButton("📦 Все режимы - 3 месяца (499₽)", callback_data="payment:subscribe:personal:all:3months"))
+            markup.add(InlineKeyboardButton("📦 Все режимы - год (1499₽)", callback_data="payment:subscribe:personal:all:year"))
+            markup.add(InlineKeyboardButton("📦 Все режимы - навсегда (1999₽)", callback_data="payment:subscribe:personal:all:lifetime"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs"))
+            
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        
+        if action.startswith("tariffs:group"):
+            # Тарифы для групповых подписок
+            text = "👥 <b>Групповые тарифы</b>\n\n"
+            text += "🔔 <b>Уведомления о сериалах:</b> 100₽/мес\n"
+            text += "🎯 <b>Персональные рекомендации:</b> 200₽/мес\n"
+            text += "🎫 <b>Билеты на мероприятия:</b> 200₽/мес\n\n"
+            text += "📦 <b>Все режимы:</b>\n"
+            text += "• 299₽/мес\n"
+            text += "• 650₽ за 3 месяца\n"
+            text += "• 1999₽ за год\n"
+            text += "• 2500₽ навсегда\n\n"
+            text += "Выберите тариф:"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🔔 Уведомления (100₽/мес)", callback_data="payment:subscribe:group:notifications:month"))
+            markup.add(InlineKeyboardButton("🎯 Рекомендации (200₽/мес)", callback_data="payment:subscribe:group:recommendations:month"))
+            markup.add(InlineKeyboardButton("🎫 Билеты (200₽/мес)", callback_data="payment:subscribe:group:tickets:month"))
+            markup.add(InlineKeyboardButton("📦 Все режимы - месяц (299₽)", callback_data="payment:subscribe:group:all:month"))
+            markup.add(InlineKeyboardButton("📦 Все режимы - 3 месяца (650₽)", callback_data="payment:subscribe:group:all:3months"))
+            markup.add(InlineKeyboardButton("📦 Все режимы - год (1999₽)", callback_data="payment:subscribe:group:all:year"))
+            markup.add(InlineKeyboardButton("📦 Все режимы - навсегда (2500₽)", callback_data="payment:subscribe:group:all:lifetime"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs"))
+            
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        
+        if action.startswith("subscribe:"):
+            # Обработка подписки
+            parts = action.split(":")
+            sub_type = parts[1]  # personal или group
+            plan_type = parts[2]  # notifications, recommendations, tickets, all
+            period_type = parts[3]  # month, 3months, year, lifetime
+            
+            # Вычисляем цену с учетом скидок
+            price = calculate_discounted_price(user_id, sub_type, plan_type, period_type)
+            
+            if sub_type == 'personal':
+                if is_private:
+                    # В личке - используем текущего пользователя
+                    telegram_username = call.from_user.username
+                    user_payment_state[user_id] = {
+                        'step': 'confirm_personal',
+                        'subscription_type': sub_type,
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'price': price,
+                        'chat_id': chat_id,
+                        'telegram_username': telegram_username
+                    }
+                    text = f"👤 <b>Подтверждение личной подписки</b>\n\n"
+                    text += f"Тариф: <b>{plan_type}</b>\n"
+                    text += f"Период: <b>{period_type}</b>\n"
+                    text += f"Цена: <b>{price}₽</b>\n\n"
+                    text += "Для завершения оплаты свяжитесь с администратором."
+                else:
+                    # В группе - просим указать username
+                    user_payment_state[user_id] = {
+                        'step': 'enter_personal_username',
+                        'subscription_type': sub_type,
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'price': price,
+                        'chat_id': chat_id
+                    }
+                    text = "👤 <b>Личная подписка</b>\n\n"
+                    text += "Укажите ваш ник в Telegram (без @):"
+            else:  # group
+                if is_private:
+                    # В личке - просим указать username группы
+                    user_payment_state[user_id] = {
+                        'step': 'enter_group_username',
+                        'subscription_type': sub_type,
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'price': price,
+                        'chat_id': chat_id
+                    }
+                    text = "👥 <b>Групповая подписка</b>\n\n"
+                    text += "Укажите ник группы в Telegram (без @):"
+                else:
+                    # В группе - используем текущую группу
+                    group_username = call.message.chat.username
+                    user_payment_state[user_id] = {
+                        'step': 'confirm_group',
+                        'subscription_type': sub_type,
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'price': price,
+                        'chat_id': chat_id,
+                        'group_username': group_username
+                    }
+                    text = f"👥 <b>Подтверждение групповой подписки</b>\n\n"
+                    text += f"Группа: <b>@{group_username}</b>\n"
+                    text += f"Тариф: <b>{plan_type}</b>\n"
+                    text += f"Период: <b>{period_type}</b>\n"
+                    text += f"Цена: <b>{price}₽</b>\n\n"
+                    text += "Для завершения оплаты свяжитесь с администратором."
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            return
+        
+        if action == "cancel":
+            # Отмена подписки
+            personal_sub = get_active_subscription(chat_id, user_id, 'personal')
+            group_sub = get_active_subscription(chat_id, user_id, 'group')
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            if personal_sub:
+                markup.add(InlineKeyboardButton("❌ Отменить личную подписку", callback_data="payment:cancel:personal"))
+            if group_sub:
+                markup.add(InlineKeyboardButton("❌ Отменить групповую подписку", callback_data="payment:cancel:group"))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
+            
+            bot.edit_message_text(
+                "❌ <b>Отмена подписки</b>\n\nВыберите подписку для отмены:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        
+        if action.startswith("cancel:"):
+            # Подтверждение отмены
+            sub_type = action.split(":")[1]
+            sub = get_active_subscription(chat_id, user_id, sub_type)
+            
+            if sub and cancel_subscription(sub.get('id'), user_id):
+                bot.answer_callback_query(call.id, "Подписка отменена")
+                bot.edit_message_text(
+                    f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    parse_mode='HTML'
+                )
+            else:
+                bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
+            return
+        
+        if action == "back":
+            # Возврат в главное меню оплаты
+            personal_sub = get_active_subscription(chat_id, user_id, 'personal')
+            group_sub = get_active_subscription(chat_id, user_id, 'group')
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
+            markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
+            if personal_sub or group_sub:
+                markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
+            
+            bot.edit_message_text(
+                "💳 <b>Оплата подписки</b>\n\nВыберите действие:",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка в handle_payment_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
+
+@bot.message_handler(func=lambda m: m.from_user.id in user_payment_state and user_payment_state[m.from_user.id].get('step') in ['check_personal_username', 'enter_personal_username', 'check_group_username', 'enter_group_username'])
+def handle_payment_username(message):
+    """Обработчик ввода username для проверки/оформления подписки"""
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        state = user_payment_state.get(user_id, {})
+        step = state.get('step')
+        username = message.text.strip().lstrip('@')
+        
+        from database.db_operations import (
+            get_active_subscription_by_username, get_active_group_subscription,
+            check_user_in_group
+        )
+        from datetime import datetime
+        
+        if step == 'check_personal_username':
+            # Проверка личной подписки по username
+            if username != message.from_user.username:
+                bot.reply_to(message, "⚠️ Возможно, вы указали другого пользователя. Если это не так, просим проверить персональный план в личке бота!")
+                return
+            
+            sub = get_active_subscription_by_username(username, 'personal')
+            if sub:
+                expires_at = sub.get('expires_at')
+                next_payment = sub.get('next_payment_date')
+                price = sub.get('price', 0)
+                activated = sub.get('activated_at')
+                
+                text = f"👤 <b>Личная подписка</b>\n\n"
+                text += f"Пользователь: <b>@{username}</b>\n"
+                text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
+                if activated:
+                    text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                if next_payment:
+                    text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                if expires_at:
+                    text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                else:
+                    text += f"⏰ Действует: <b>Навсегда</b>\n"
+            else:
+                text = f"👤 <b>Личная подписка</b>\n\nУ пользователя @{username} нет активной личной подписки."
+            
+            bot.reply_to(message, text, parse_mode='HTML')
+            del user_payment_state[user_id]
+            return
+        
+        if step == 'check_group_username':
+            # Проверка групповой подписки по username
+            sub = get_active_group_subscription(username)
+            if sub:
+                # Проверяем, состоит ли пользователь в группе
+                if not check_user_in_group(bot, user_id, username):
+                    bot.reply_to(message, "⚠️ Сначала нужно вступить в группу и добавить в неё бота.")
+                    del user_payment_state[user_id]
+                    return
+                
+                expires_at = sub.get('expires_at')
+                next_payment = sub.get('next_payment_date')
+                price = sub.get('price', 0)
+                activated = sub.get('activated_at')
+                
+                text = f"👥 <b>Групповая подписка</b>\n\n"
+                text += f"Группа: <b>@{username}</b>\n"
+                text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
+                if activated:
+                    text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                if next_payment:
+                    text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                if expires_at:
+                    text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                else:
+                    text += f"⏰ Действует: <b>Навсегда</b>\n"
+            else:
+                text = f"👥 <b>Групповая подписка</b>\n\nУ группы @{username} нет активной подписки."
+            
+            bot.reply_to(message, text, parse_mode='HTML')
+            del user_payment_state[user_id]
+            return
+        
+        if step == 'enter_personal_username':
+            # Оформление личной подписки - сохранение username
+            state['telegram_username'] = username
+            state['step'] = 'confirm_personal'
+            
+            text = f"👤 <b>Подтверждение личной подписки</b>\n\n"
+            text += f"Пользователь: <b>@{username}</b>\n"
+            text += f"Тариф: <b>{state.get('plan_type')}</b>\n"
+            text += f"Период: <b>{state.get('period_type')}</b>\n"
+            text += f"Цена: <b>{state.get('price')}₽</b>\n\n"
+            text += "Для завершения оплаты свяжитесь с администратором."
+            
+            bot.reply_to(message, text, parse_mode='HTML')
+            return
+        
+        if step == 'enter_group_username':
+            # Оформление групповой подписки - проверка и сохранение username
+            # Проверяем, состоит ли пользователь в группе
+            if not check_user_in_group(bot, user_id, username):
+                bot.reply_to(message, "⚠️ Сначала нужно вступить в группу и добавить в неё бота.")
+                del user_payment_state[user_id]
+                return
+            
+            state['group_username'] = username
+            state['step'] = 'confirm_group'
+            
+            text = f"👥 <b>Подтверждение групповой подписки</b>\n\n"
+            text += f"Группа: <b>@{username}</b>\n"
+            text += f"Тариф: <b>{state.get('plan_type')}</b>\n"
+            text += f"Период: <b>{state.get('period_type')}</b>\n"
+            text += f"Цена: <b>{state.get('price')}₽</b>\n\n"
+            text += "Для завершения оплаты свяжитесь с администратором."
+            
+            bot.reply_to(message, text, parse_mode='HTML')
+            return
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка в handle_payment_username: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "Произошла ошибка при обработке запроса")
+        except:
+            pass
+        if user_id in user_payment_state:
+            del user_payment_state[user_id]
+
 @bot.message_handler(commands=['help'])
 def help_command(message):
     logger.info(f"[HANDLER] /help вызван от {message.from_user.id}")
@@ -13288,10 +13977,10 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         logger.info(f"[PROCESS_PLAN] Использован parse_session_time: {plan_dt}")
     else:
         # Если parse_session_time не сработал, используем стандартную логику
-        # Обработка специальных случаев
-        day_lower = day_or_date.lower().strip()
-        
-        # Обработка "сегодня"
+    # Обработка специальных случаев
+    day_lower = day_or_date.lower().strip()
+    
+    # Обработка "сегодня"
     if 'сегодня' in day_lower:
         plan_date = now.date()
         if plan_type == 'home':
@@ -13454,12 +14143,12 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                 hour = 19 if plan_date.weekday() < 5 else 10
                             plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                     else:
-                        if plan_type == 'cinema':
-                            hour = 9
-                        else:  # home
-                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                            hour = 19 if plan_date.weekday() < 5 else 10
-                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                    if plan_type == 'cinema':
+                        hour = 9
+                    else:  # home
+                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                        hour = 19 if plan_date.weekday() < 5 else 10
+                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                 except ValueError:
                     logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
                     return False
@@ -13526,13 +14215,13 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                     hour = 19 if plan_date.weekday() < 5 else 10
                                 plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                         else:
-                            if plan_type == 'cinema':
-                                hour = 9
-                            else:  # home
-                                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                                hour = 19 if plan_date.weekday() < 5 else 10
-                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
+                        if plan_type == 'cinema':
+                            hour = 9
+                        else:  # home
+                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                            hour = 19 if plan_date.weekday() < 5 else 10
+                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
                     except ValueError as e:
                         logger.error(f"[PLAN] Некорректная дата: {day_num}.{month_num}.{year_str if year_str else 'N/A'}: {e}")
                         return False
@@ -13890,15 +14579,15 @@ def plan_handler(message):
                             day_or_date = f"{day_num}.{month_num} {hour}:{minute}"
                         logger.info(f"[PLAN] Найдена дата с временем: {day_or_date}")
                 else:
-                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                    if date_match:
-                        day_num = int(date_match.group(1))
-                        month_num = int(date_match.group(2))
-                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
-                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
-                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                if date_match:
+                    day_num = int(date_match.group(1))
+                    month_num = int(date_match.group(2))
+                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         # Проверяем, есть ли отдельно указанное время (если дата уже найдена, но время не включено)
         if day_or_date and plan_type == 'cinema':
