@@ -2505,6 +2505,10 @@ def premiere_detail_handler(call):
         genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
         countries = ', '.join([c['country'] for c in data.get('countries', [])]) or '—'
         
+        # Получаем режиссера
+        directors = data.get('directors', [])
+        director_str = ', '.join([d.get('nameRu') or d.get('nameEn', '') for d in directors if d.get('nameRu') or d.get('nameEn')]) or '—'
+        
         # Получаем дату премьеры
         premiere_date = None
         premiere_date_str = ""
@@ -2523,9 +2527,12 @@ def premiere_detail_handler(call):
         
         text = f"<b>{title}</b> ({year})\n\n"
         if premiere_date_str:
-            text += f"📅 Премьера: {premiere_date_str}\n\n"
-        text += f"{description}\n\n"
-        text += f"🌍 {countries}\n"
+            text += f"📅 Премьера: {premiere_date_str}\n"
+        if director_str != '—':
+            text += f"🎥 Режиссёр: {director_str}\n"
+        if countries != '—':
+            text += f"🌍 {countries}\n"
+        text += f"\n{description}\n\n"
         text += f"🎭 {genres}\n"
         
         markup = InlineKeyboardMarkup(row_width=1)
@@ -2799,19 +2806,25 @@ def premieres_back_handler(call):
         chat_id = call.message.chat.id
         message_id = call.message.message_id
         
+        # Удаляем сообщение о фильме
+        try:
+            bot.delete_message(chat_id, message_id)
+        except Exception as e:
+            logger.warning(f"[PREMIERES BACK] Не удалось удалить сообщение: {e}")
+        
         # Получаем премьеры для периода
         from api.kinopoisk_api import get_premieres_for_period
         premieres = get_premieres_for_period(period)
         
         if not premieres:
             try:
-                bot.edit_message_text("❌ Не удалось получить список премьер.", chat_id, message_id)
-            except:
                 bot.send_message(chat_id, "❌ Не удалось получить список премьер.")
+            except:
+                pass
             return
         
-        # Показываем первую страницу
-        show_premieres_page(call, premieres, period, page=0)
+        # Показываем первую страницу - отправляем новое сообщение
+        show_premieres_page_new_message(chat_id, premieres, period, page=0)
     except Exception as e:
         logger.error(f"[PREMIERES BACK] Ошибка: {e}", exc_info=True)
         try:
@@ -8301,7 +8314,6 @@ def _show_director_step(call, chat_id, user_id):
             LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
             WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
             AND m.director IS NOT NULL AND m.director != 'Не указан' AND m.director != ''
-            GROUP BY m.director
         """
         params = [chat_id]
         
@@ -8332,6 +8344,8 @@ def _show_director_step(call, chat_id, user_id):
                 params.append(f"%{genre}%")
             if genre_conditions:
                 base_query += " AND (" + " OR ".join(genre_conditions) + ")"
+        
+        base_query += " GROUP BY m.director"
         
         base_query += " ORDER BY cnt DESC LIMIT 10"
         
@@ -8607,9 +8621,17 @@ def random_final_handler(call):
         chat_id = call.message.chat.id
         
         if user_id not in user_random_state:
-            logger.warning(f"[RANDOM] State not found for user {user_id}")
-            bot.answer_callback_query(call.id, "Ошибка: сессия устарела. Начните заново /random")
-            return
+            logger.warning(f"[RANDOM] State not found for user {user_id}, initializing default state")
+            # Инициализируем состояние по умолчанию для быстрого доступа
+            user_random_state[user_id] = {
+                'step': 'final',
+                'mode': 'database',  # Режим по умолчанию - база данных
+                'periods': [],
+                'genres': [],
+                'directors': [],
+                'actors': []
+            }
+            logger.info(f"[RANDOM] Default state initialized for user {user_id}")
         
         _random_final(call, chat_id, user_id)
     except Exception as e:
@@ -9133,6 +9155,87 @@ def premieres_period_callback(call):
         except:
             pass
 
+def show_premieres_page_new_message(chat_id, premieres, period, page=0):
+    """Отправляет новое сообщение со списком премьер (используется когда старое сообщение удалено)"""
+    try:
+        items_per_page = 10
+        total_pages = (len(premieres) + items_per_page - 1) // items_per_page
+        start_idx = page * items_per_page
+        end_idx = min(start_idx + items_per_page, len(premieres))
+        
+        period_names = {
+            'current_month': 'текущего месяца',
+            'next_month': 'следующего месяца',
+            '3_months': '3 месяцев',
+            '6_months': '6 месяцев',
+            'current_year': 'текущего года',
+            'next_year': 'ближайшего года'
+        }
+        period_name = period_names.get(period, 'периода')
+        
+        text = f"📅 <b>Премьеры {period_name}:</b>\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+    
+        # Сортируем премьеры по дате выхода
+        def get_premiere_date(p):
+            """Извлекает дату премьеры из данных"""
+            if p.get('premiereRuDate'):
+                try:
+                    return datetime.strptime(p.get('premiereRuDate'), '%Y-%m-%d').date()
+                except:
+                    pass
+            if p.get('year') and p.get('month'):
+                try:
+                    day = p.get('day', 1)
+                    return datetime(int(p.get('year')), int(p.get('month')), int(day)).date()
+                except:
+                    pass
+            return datetime(2099, 12, 31).date()
+        
+        premieres_sorted = sorted(premieres, key=get_premiere_date)
+        
+        for p in premieres_sorted[start_idx:end_idx]:
+            kp_id = p.get('kinopoiskId') or p.get('filmId')
+            title_ru = p.get('nameRu') or p.get('nameEn') or "Без названия"
+            
+            # Получаем дату выхода
+            premiere_date = get_premiere_date(p)
+            date_str = ""
+            if premiere_date and premiere_date.year < 2099:
+                date_str = f" ({premiere_date.strftime('%d.%m.%Y')})"
+            elif p.get('year') and p.get('month'):
+                year = p.get('year')
+                month = p.get('month')
+                day = p.get('day')
+                if day:
+                    date_str = f" ({day:02d}.{month:02d}.{year})"
+                else:
+                    date_str = f" ({month:02d}.{year})"
+            
+            text += f"• <b>{title_ru}</b>{date_str}\n"
+            
+            button_text = title_ru
+            if len(button_text) > 30:
+                button_text = button_text[:27] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"premiere_detail:{kp_id}:{period}"))
+        
+        # Кнопки пагинации
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_page:{period}:{page-1}"))
+        if page < total_pages - 1:
+            nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"premieres_page:{period}:{page+1}"))
+        
+        if nav_buttons:
+            markup.add(*nav_buttons)
+        
+        text += f"\nСтраница {page + 1} из {total_pages}"
+        text += "\n\nВыберите фильм для подробностей:"
+        
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[PREMIERES PAGE NEW] Ошибка: {e}", exc_info=True)
+
 def show_premieres_page(call, premieres, period, page=0):
     """Показывает страницу премьер с пагинацией"""
     try:
@@ -9214,15 +9317,25 @@ def show_premieres_page(call, premieres, period, page=0):
         text += "\n\nВыберите фильм для подробностей:"
         
         # Используем edit_message_text вместо send_message, если это callback
-        try:
-            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception as e:
-            logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
-            # Если не получилось отредактировать, отправляем новое
+        if call.message.message_id:
+            try:
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                error_str = str(e)
+                # Игнорируем ошибку "message is not modified" и "there is no text in the message to edit"
+                if "message is not modified" not in error_str and "there is no text in the message to edit" not in error_str:
+                    logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
+                    # Если не получилось отредактировать, отправляем новое
+                    try:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    except:
+                        pass
+        else:
+            # Если message_id нет, отправляем новое сообщение
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
-        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-        bot.answer_callback_query(call.id)
+        if call.id:
+            bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
