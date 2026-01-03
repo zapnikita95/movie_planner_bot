@@ -597,9 +597,9 @@ def clean_home_plans():
             saturday = yesterday - timedelta(days=1)  # Вчера было воскресенье, значит суббота - позавчера
             sunday = yesterday
 
-        cursor.execute('''
+            cursor.execute('''
                 SELECT p.id, p.film_id, p.chat_id, m.title
-            FROM plans p
+                FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.plan_type = 'home' 
                 AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
