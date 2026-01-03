@@ -8683,7 +8683,7 @@ def random_mode_handler(call):
                             available_periods.append(period)
             else:
                 # Для остальных режимов - используем старую логику
-            base_query = """
+                base_query = """
                 SELECT COUNT(DISTINCT m.id) 
                 FROM movies m
                 LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
