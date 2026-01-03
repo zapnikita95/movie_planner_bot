@@ -6997,7 +6997,7 @@ def handle_add_film_callback(call):
                 if is_series:
                     link = f"https://www.kinopoisk.ru/film/{kp_id}/"
                 else:
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
             info = extract_movie_info(link)
                 if info:
                     is_series = info.get('is_series', False)
