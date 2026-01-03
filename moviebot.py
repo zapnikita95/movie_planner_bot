@@ -12993,9 +12993,117 @@ def seasons_command(message):
                 is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
         
         button_text = title
+        
+        # Проверяем, все ли серии просмотрены (только если есть доступ)
+        all_episodes_watched = False
+        if has_access:
+            from api.kinopoisk_api import get_seasons_data
+            from datetime import datetime as dt
+            seasons_data = get_seasons_data(kp_id)
+            if seasons_data:
+                now = dt.now()
+                # Проверяем, выходит ли сериал (есть ли будущие эпизоды)
+                is_airing = False
+                for season in seasons_data:
+                    episodes = season.get('episodes', [])
+                    for ep in episodes:
+                        release_str = ep.get('releaseDate', '')
+                        if release_str and release_str != '—':
+                            try:
+                                release_date = None
+                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                    try:
+                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                        break
+                                    except:
+                                        continue
+                                if release_date and release_date > now:
+                                    is_airing = True
+                                    break
+                            except:
+                                pass
+                    if is_airing:
+                        break
+                
+                # Если сериал не выходит, проверяем, все ли серии просмотрены
+                if not is_airing:
+                    total_episodes = 0
+                    watched_episodes = 0
+                    with db_lock:
+                        cursor.execute('''
+                            SELECT season_number, episode_number 
+                            FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id, user_id))
+                        watched_rows = cursor.fetchall()
+                        watched_set = set()
+                        for w_row in watched_rows:
+                            if isinstance(w_row, dict):
+                                watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
+                            else:
+                                watched_set.add((w_row[0], w_row[1]))
+                        
+                        for season in seasons_data:
+                            episodes = season.get('episodes', [])
+                            season_num = season.get('number', '')
+                            for ep in episodes:
+                                total_episodes += 1
+                                ep_num = str(ep.get('episodeNumber', ''))
+                                if (season_num, ep_num) in watched_set:
+                                    watched_episodes += 1
+                    
+                    if total_episodes > 0 and watched_episodes == total_episodes:
+                        all_episodes_watched = True
+                else:
+                    # Если сериал выходит, проверяем, все ли вышедшие серии просмотрены
+                    total_episodes = 0
+                    watched_episodes = 0
+                    with db_lock:
+                        cursor.execute('''
+                            SELECT season_number, episode_number 
+                            FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id, user_id))
+                        watched_rows = cursor.fetchall()
+                        watched_set = set()
+                        for w_row in watched_rows:
+                            if isinstance(w_row, dict):
+                                watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
+                            else:
+                                watched_set.add((w_row[0], w_row[1]))
+                        
+                        for season in seasons_data:
+                            episodes = season.get('episodes', [])
+                            season_num = season.get('number', '')
+                            for ep in episodes:
+                                release_str = ep.get('releaseDate', '')
+                                if release_str and release_str != '—':
+                                    try:
+                                        release_date = None
+                                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                            try:
+                                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                                break
+                                            except:
+                                                continue
+                                        # Считаем только вышедшие эпизоды
+                                        if release_date and release_date <= now:
+                                            total_episodes += 1
+                                            ep_num = str(ep.get('episodeNumber', ''))
+                                            if (season_num, ep_num) in watched_set:
+                                                watched_episodes += 1
+                                    except:
+                                        pass
+                    
+                    if total_episodes > 0 and watched_episodes == total_episodes:
+                        all_episodes_watched = True
+        
         # Добавляем колокольчик, если подписан
         if is_subscribed:
             button_text = f"🔔 {button_text}"
+        # Добавляем галочку, если все серии просмотрены и есть активная подписка
+        if all_episodes_watched and is_subscribed:
+            button_text = f"✅ {button_text}"
         
         if len(button_text) > 30:
             button_text = button_text[:27] + "..."
