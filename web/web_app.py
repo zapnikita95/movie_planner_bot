@@ -99,7 +99,10 @@ def create_web_app(bot_instance):
                 
                 logger.info(f"[YOOKASSA] Текущий статус в БД: {payment_data.get('status')}, статус из ЮKassa: {payment_status}")
                 
-                if payment_status == 'succeeded' and payment_data.get('status') != 'succeeded':
+                # Обрабатываем успешный платеж, если он еще не был обработан
+                # Проверяем, что статус из ЮKassa succeeded и в БД статус не succeeded
+                db_status = payment_data.get('status')
+                if payment_status == 'succeeded' and db_status != 'succeeded':
                     logger.info(f"[YOOKASSA] Платеж успешен, обновляем статус и создаем/продлеваем подписку")
                     # Обновляем статус платежа
                     update_payment_status(payment_data['payment_id'], 'succeeded')
@@ -249,69 +252,135 @@ def create_web_app(bot_instance):
                                 logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения")
                             
                         elif subscription_type == 'group':
-                            # Для групповой подписки отправляем в группу
+                            # Для групповой подписки отправляем в группу и в личку
                             from database.db_operations import get_active_group_users, get_subscription_members
-                            
-                            text = "✅ <b>Платеж успешно обработан!</b>\n\n"
-                            text += "👥 <b>Групповая подписка активирована</b>\n\n"
-                            
-                            if plan_type == 'all':
-                                text += "📦 <b>Доступные функции:</b>\n\n"
-                                text += "🔔 <b>Уведомления о сериалах:</b>\n"
-                                text += "• Автоматические уведомления о выходе новых серий\n"
-                                text += "• Настройка времени уведомлений\n\n"
-                                text += "🎯 <b>Персональные рекомендации:</b>\n"
-                                text += "• Режим \"по моим оценкам\"\n"
-                                text += "• Режим \"по групповым оценкам\"\n"
-                                text += "• Режим \"рандом по кинопоиск\"\n"
-                                text += "• Импорт базы из Кинопоиска\n\n"
-                                text += "🎫 <b>Билеты в кино:</b>\n"
-                                text += "• Добавление билетов на сеансы\n"
-                                text += "• Уведомления с билетами перед сеансом\n"
-                            
-                            # Проверяем количество участников
-                            active_users = get_active_group_users(chat_id)
-                            active_count = len(active_users) if active_users else 0
                             
                             # Получаем участников подписки
                             # get_subscription_members возвращает dict {user_id: username}
                             members_dict = get_subscription_members(subscription_id) if subscription_id else {}
                             members_count = len(members_dict) if members_dict else 0
                             
+                            # Проверяем количество участников
+                            active_users = get_active_group_users(chat_id)
+                            active_count = len(active_users) if active_users else 0
+                            
+                            # Формируем список участников, получивших доступ
+                            members_list = ""
+                            if members_dict:
+                                members_list = "\n\n👥 <b>Участники с доступом:</b>\n"
+                                for member_user_id, member_username in list(members_dict.items())[:20]:  # Ограничение на 20 участников
+                                    members_list += f"• @{member_username or f'user_{member_user_id}'}\n"
+                                if len(members_dict) > 20:
+                                    members_list += f"• ... и еще {len(members_dict) - 20} участников\n"
+                            elif active_users and active_count <= (group_size or active_count):
+                                # Если участники не выбраны, но активных пользователей не больше лимита, показываем всех
+                                members_list = "\n\n👥 <b>Участники с доступом:</b>\n"
+                                for member_user_id, member_username in list(active_users.items())[:20]:
+                                    members_list += f"• @{member_username or f'user_{member_user_id}'}\n"
+                                if active_count > 20:
+                                    members_list += f"• ... и еще {active_count - 20} участников\n"
+                            
+                            # Формируем описание возможностей
+                            features_text = ""
+                            if plan_type == 'all':
+                                features_text = "📦 <b>Доступные функции:</b>\n\n"
+                                features_text += "🔔 <b>Уведомления о сериалах:</b>\n"
+                                features_text += "• Автоматические уведомления о выходе новых серий\n"
+                                features_text += "• Настройка времени уведомлений (будни/выходные)\n"
+                                features_text += "• Персонализированные напоминания для каждого сериала\n\n"
+                                features_text += "🎯 <b>Персональные рекомендации:</b>\n"
+                                features_text += "• Режим \"по моим оценкам\" (9-10)\n"
+                                features_text += "• Режим \"по групповым оценкам\" (9-10)\n"
+                                features_text += "• Режим \"рандом по кинопоиск\" с фильтрами\n"
+                                features_text += "• Импорт базы оценок из Кинопоиска\n\n"
+                                features_text += "🎫 <b>Билеты в кино:</b>\n"
+                                features_text += "• Добавление билетов на сеансы в кино\n"
+                                features_text += "• Хранение билетов в базе бота\n"
+                                features_text += "• Уведомления с билетами перед сеансом\n"
+                            elif plan_type == 'notifications':
+                                features_text = "🔔 <b>Доступные функции:</b>\n"
+                                features_text += "• Автоматические уведомления о выходе новых серий\n"
+                                features_text += "• Настройка времени уведомлений (будни/выходные)\n"
+                                features_text += "• Персонализированные напоминания для каждого сериала\n"
+                            elif plan_type == 'recommendations':
+                                features_text = "🎯 <b>Доступные функции:</b>\n"
+                                features_text += "• Режим \"по моим оценкам\" (9-10)\n"
+                                features_text += "• Режим \"по групповым оценкам\" (9-10)\n"
+                                features_text += "• Режим \"рандом по кинопоиск\" с фильтрами\n"
+                                features_text += "• Импорт базы оценок из Кинопоиска\n"
+                            elif plan_type == 'tickets':
+                                features_text = "🎫 <b>Доступные функции:</b>\n"
+                                features_text += "• Добавление билетов на сеансы в кино\n"
+                                features_text += "• Хранение билетов в базе бота\n"
+                                features_text += "• Уведомления с билетами перед сеансом\n"
+                            
+                            # Сообщение для группы
+                            group_text = "✅ <b>Платеж успешно обработан!</b>\n\n"
+                            group_text += "👥 <b>Групповая подписка активирована</b>\n\n"
+                            group_text += features_text
+                            group_text += members_list
+                            
+                            if group_size:
+                                group_text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b> из {group_size}"
+                            
                             # Если есть ограничение по количеству участников и активных пользователей больше
                             if group_size and active_count > group_size and members_count < group_size:
-                                text += f"\n\n⚠️ <b>Внимание!</b>\n"
-                                text += f"В группе <b>{active_count}</b> активных участников, а подписка рассчитана на <b>{group_size}</b>.\n"
-                                text += f"Выберите участников для подписки:"
+                                group_text += f"\n\n⚠️ <b>Внимание!</b>\n"
+                                group_text += f"В группе <b>{active_count}</b> активных участников, а подписка рассчитана на <b>{group_size}</b>.\n"
+                                group_text += f"Выберите участников для подписки:"
                                 
                                 markup = InlineKeyboardMarkup(row_width=1)
                                 markup.add(InlineKeyboardButton("👥 Выбрать участников", callback_data=f"payment:select_members:{subscription_id}"))
                                 try:
-                                    result = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                                    result = bot_instance.send_message(chat_id, group_text, reply_markup=markup, parse_mode='HTML')
                                     logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой выбора участников отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
                                 except Exception as send_error:
                                     logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения с кнопкой выбора участников: {send_error}", exc_info=True)
                             else:
-                                text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b>"
-                                if group_size:
-                                    text += f" из {group_size}"
-                                text += "\n\nСпасибо за покупку! 🎉"
+                                group_text += "\n\nСпасибо за покупку! 🎉"
                                 logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в группу chat_id={chat_id}, user_id={user_id}")
                                 try:
-                                    result = bot_instance.send_message(chat_id, text, parse_mode='HTML')
+                                    result = bot_instance.send_message(chat_id, group_text, parse_mode='HTML')
                                     logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено в группу {chat_id}, user_id {user_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
                                 except Exception as send_error:
                                     logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в группу: {send_error}", exc_info=True)
-                                    # Не прерываем выполнение, просто логируем ошибку
                                     logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения в группу")
+                            
+                            # Отправляем такое же сообщение в личку тому, кто оплатил
+                            private_text = "✅ <b>Платеж успешно обработан!</b>\n\n"
+                            private_text += "👥 <b>Групповая подписка активирована</b>\n\n"
+                            private_text += features_text
+                            private_text += members_list
+                            
+                            if group_size:
+                                private_text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b> из {group_size}"
+                            
+                            private_text += "\n\nСпасибо за покупку! 🎉"
+                            
+                            try:
+                                result = bot_instance.send_message(user_id, private_text, parse_mode='HTML')
+                                logger.info(f"[YOOKASSA] ✅ Сообщение об успешной оплате отправлено в личку пользователю {user_id}, message_id={result.message_id if result else 'N/A'}")
+                            except Exception as send_error:
+                                logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в личку пользователю {user_id}: {send_error}", exc_info=True)
+                                logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения в личку")
                             
                             logger.info(f"[YOOKASSA] Подписка создана для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
                         
                     except Exception as e:
                         logger.error(f"[YOOKASSA] Ошибка отправки уведомления: {e}", exc_info=True)
                         # Не прерываем выполнение, просто логируем ошибку
+                elif payment_status == 'succeeded' and db_status == 'succeeded':
+                    # Платеж уже обработан, проверяем, есть ли подписка
+                    logger.info(f"[YOOKASSA] Платеж уже обработан (статус: {db_status}), проверяем наличие подписки")
+                    subscription_id_from_payment = payment_data.get('subscription_id')
+                    if not subscription_id_from_payment:
+                        logger.warning(f"[YOOKASSA] Платеж обработан, но subscription_id отсутствует. Возможно, подписка не была создана.")
+                        # Можно попробовать создать подписку заново, но это может привести к дублированию
+                        # Пока просто логируем
+                    else:
+                        logger.info(f"[YOOKASSA] Платеж обработан, подписка {subscription_id_from_payment} существует")
                 else:
-                    logger.warning(f"[YOOKASSA] Событие payment.succeeded, но статус платежа не succeeded: {payment_status}")
+                    logger.warning(f"[YOOKASSA] Событие payment.succeeded, но статус платежа не succeeded: {payment_status} (статус в БД: {db_status})")
             elif event_json.get('event') == 'payment.canceled':
                 # Обработка отмены платежа
                 payment_id = event_json.get('object', {}).get('id')

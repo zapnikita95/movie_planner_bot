@@ -13943,6 +13943,9 @@ def handle_payment_callback(call):
             if not is_private and chat_id < 0:
                 # В группе - показываем только текущую группу
                 try:
+                    from database.db_operations import get_subscription_members
+                    from datetime import datetime
+                    
                     chat = bot.get_chat(chat_id)
                     group_username = chat.username
                     group_title = chat.title
