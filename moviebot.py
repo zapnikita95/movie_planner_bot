@@ -38,7 +38,20 @@ from flask import Flask, request, abort, jsonify
 import socket
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from yookassa import Configuration, Payment
+try:
+    from yookassa import Configuration, Payment
+    YOOKASSA_AVAILABLE = True
+except ImportError:
+    YOOKASSA_AVAILABLE = False
+    logger.warning("Модуль yookassa не установлен. Функции оплаты будут недоступны.")
+    # Создаем заглушки для типов
+    class Configuration:
+        account_id = None
+        secret_key = None
+    class Payment:
+        @staticmethod
+        def find_one(payment_id):
+            return None
 import uuid
 
 # Импортируем функции из модулей для использования в обработчиках

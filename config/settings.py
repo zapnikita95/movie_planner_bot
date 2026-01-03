@@ -21,6 +21,16 @@ TOKEN = os.getenv('BOT_TOKEN')
 KP_TOKEN = os.getenv('KP_TOKEN')
 DATABASE_URL = os.getenv('DATABASE_URL')
 
+# Настройки ЮKassa (из переменных окружения)
+YOOKASSA_SHOP_ID = os.getenv('YOOKASSA_SHOP_ID')
+YOOKASSA_SECRET_KEY = os.getenv('YOOKASSA_SECRET_KEY')
+
+# Проверка обязательных переменных для ЮKassa (если используются платежи)
+if YOOKASSA_SHOP_ID and not YOOKASSA_SECRET_KEY:
+    logger.warning("YOOKASSA_SHOP_ID задан, но YOOKASSA_SECRET_KEY отсутствует!")
+if YOOKASSA_SECRET_KEY and not YOOKASSA_SHOP_ID:
+    logger.warning("YOOKASSA_SECRET_KEY задан, но YOOKASSA_SHOP_ID отсутствует!")
+
 # Проверка обязательных переменных
 if not TOKEN:
     logger.error("BOT_TOKEN не задан! Бот не может работать.")
