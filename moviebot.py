@@ -12915,7 +12915,8 @@ def show_seasons_callback(call):
                     is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
                     
                     # Объединяем текст сезонов и кнопки в одно сообщение
-                    full_text = seasons_text
+                    # Добавляем название сериала в начало
+                    full_text = f"📺 <b>{title}</b>\n\n{seasons_text}"
                     
                     markup = InlineKeyboardMarkup()
                     markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
@@ -13408,13 +13409,17 @@ def series_episode_callback(call):
             is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
             
             status = "✅ отмечен как просмотренный" if is_watched else "⬜ снята отметка о просмотре"
-            bot.answer_callback_query(call.id, status)
             
             # Обновляем список эпизодов
             from api.kinopoisk_api import get_seasons_data
             seasons_data = get_seasons_data(kp_id)
+            if not seasons_data:
+                bot.answer_callback_query(call.id, "❌ Не удалось получить данные о сезонах", show_alert=True)
+                return
+            
             season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
             if not season:
+                bot.answer_callback_query(call.id, "❌ Сезон не найден", show_alert=True)
                 return
             
             episodes = season.get('episodes', [])
@@ -13468,6 +13473,9 @@ def series_episode_callback(call):
             
             bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
             
+            # Отвечаем на callback_query после успешного обновления
+            bot.answer_callback_query(call.id, status)
+            
             # Обновляем главное сообщение со списком сезонов (если оно существует)
             # Ищем последнее сообщение с сезонами для этого сериала
             try:
@@ -13481,6 +13489,10 @@ def series_episode_callback(call):
                 pass
     except Exception as e:
         logger.error(f"[SERIES EPISODE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка при обновлении", show_alert=True)
+        except:
+            pass
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
