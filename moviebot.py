@@ -5619,6 +5619,17 @@ def main_text_handler(message):
                     handle_settings_emojis_internal(message, state)
                     return
     
+    # === user_view_film_state ===
+    if user_id in user_view_film_state:
+        state = user_view_film_state[user_id]
+        chat_id = state.get('chat_id', message.chat.id)
+        
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_view_film_state, chat_id={chat_id}")
+        
+        # Обработка ответного сообщения для просмотра фильма
+        handle_view_film_reply_internal(message, state)
+        return
+    
     # === user_plan_state ===
     if user_id in user_plan_state:
         state = user_plan_state[user_id]
@@ -6237,6 +6248,7 @@ def handle_cinema_vote(message):
 user_list_state = {}  # user_id: {'page': int, 'total_pages': int, 'chat_id': int}
 user_cancel_subscription_state = {}  # user_id: {'subscription_id': int, 'subscription_type': str, 'chat_id': int}
 user_episodes_state = {}  # user_id: {'kp_id': str, 'season_num': str, 'page': int, 'total_pages': int, 'chat_id': int}
+user_view_film_state = {}  # user_id: {'chat_id': int} - состояние ожидания ответного сообщения для просмотра страницы фильма
 
 def show_list_page(chat_id, user_id, page=1, message_id=None):
     """Показывает страницу списка фильмов"""
@@ -6305,8 +6317,11 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
             # Создаем кнопки пагинации
             markup = InlineKeyboardMarkup()
             
-            # Добавляем кнопку "Запланировать просмотр"
-            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data="plan_from_list"))
+            # Добавляем кнопки действий
+            markup.row(
+                InlineKeyboardButton("📅 Запланировать просмотр", callback_data="plan_from_list"),
+                InlineKeyboardButton("👁️ Посмотреть страницу фильма", callback_data="view_film_from_list")
+            )
             
             # Если страниц немного (<= 20), показываем все
             if total_pages <= 20:
@@ -9022,6 +9037,30 @@ def plan_from_list_callback(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "view_film_from_list")
+def view_film_from_list_callback(call):
+    """Обработчик кнопки 'Посмотреть страницу фильма' из /list"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        logger.info(f"[VIEW FILM FROM LIST] Пользователь {user_id} хочет посмотреть страницу фильма из /list")
+        
+        # Устанавливаем состояние для просмотра фильма
+        user_view_film_state[user_id] = {
+            'chat_id': chat_id
+        }
+        
+        bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+        bot.send_message(chat_id, "Пришлите в ответном сообщении ссылку или ID фильма, чье описание хотите посмотреть")
+        logger.info(f"[VIEW FILM FROM LIST] Состояние установлено для пользователя {user_id}")
+    except Exception as e:
+        logger.error(f"[VIEW FILM FROM LIST] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan_from_added:"))
 def plan_from_added_callback(call):
     """Обработчик кнопки 'Запланировать просмотр' из сообщения о добавлении фильма"""
@@ -9057,6 +9096,192 @@ def plan_from_added_callback(call):
         
         bot.answer_callback_query(call.id, "Выберите тип просмотра")
         bot.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
+    except Exception as e:
+        logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+def handle_view_film_reply_internal(message, state):
+    """Обработка ответного сообщения для просмотра страницы фильма"""
+    try:
+        user_id = message.from_user.id
+        chat_id = state.get('chat_id', message.chat.id)
+        text = message.text or ""
+        
+        logger.info(f"[VIEW FILM REPLY] Обработка ответного сообщения от {user_id}, текст: {text[:100]}")
+        
+        # Удаляем состояние
+        if user_id in user_view_film_state:
+            del user_view_film_state[user_id]
+        
+        # Извлекаем ссылку или ID из текста
+        link = None
+        kp_id = None
+        
+        # Пробуем извлечь ссылку
+        import re
+        url_pattern = r'https?://(?:www\.)?(?:kinopoisk\.ru|kino\.poisk|kinopoiskapiunofficial\.tech)/film/(\d+)'
+        match = re.search(url_pattern, text)
+        if match:
+            kp_id = match.group(1)
+            link = match.group(0)
+        else:
+            # Пробуем извлечь ID из текста (только цифры)
+            id_match = re.search(r'\b(\d+)\b', text)
+            if id_match:
+                kp_id = id_match.group(1)
+                link = f"https://kinopoisk.ru/film/{kp_id}/"
+        
+        if not kp_id:
+            bot.reply_to(message, "❌ Не удалось найти ссылку или ID фильма в сообщении. Попробуйте еще раз.")
+            return
+        
+        # Получаем информацию о фильме
+        from api.kinopoisk_api import extract_movie_info
+        info = extract_movie_info(link)
+        if not info:
+            bot.reply_to(message, f"❌ Не удалось получить информацию о фильме. Проверьте ссылку или ID: {kp_id}")
+            return
+        
+        # Проверяем, есть ли фильм в базе
+        with db_lock:
+            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            existing = cursor.fetchone()
+        
+        # Показываем описание фильма с кнопками
+        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+        
+    except Exception as e:
+        logger.error(f"[VIEW FILM REPLY] Ошибка: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
+        except:
+            pass
+
+def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None):
+    """Показывает описание фильма с кнопками действий"""
+    try:
+        is_series = info.get('is_series', False)
+        type_emoji = "📺" if is_series else "🎬"
+        
+        # Формируем текст описания
+        text = f"{type_emoji} <b>{info['title']}</b> ({info['year'] or '—'})\n"
+        if info.get('director'):
+            text += f"<i>Режиссёр:</i> {info['director']}\n"
+        if info.get('genres'):
+            text += f"<i>Жанры:</i> {info['genres']}\n"
+        if info.get('actors'):
+            text += f"<i>В ролях:</i> {info['actors']}\n"
+        if info.get('description'):
+            text += f"\n<i>Кратко:</i> {info['description']}\n"
+        text += f"\n<a href='{link}'>Кинопоиск</a>"
+        
+        # Если фильм уже в базе, показываем дополнительную информацию
+        if existing:
+            film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+            watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
+            
+            if watched:
+                with db_lock:
+                    cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
+                    avg_result = cursor.fetchone()
+                    if avg_result:
+                        avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                        avg = float(avg) if avg is not None else None
+                    else:
+                        avg = None
+                
+                text += f"\n\n✅ <b>Просмотрено</b>"
+                if avg:
+                    text += f"\n⭐ <b>Средняя оценка: {avg:.1f}/10</b>"
+            else:
+                text += f"\n\n⏳ <b>Ещё не просмотрено</b>"
+        
+        # Создаем кнопки
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Проверяем премьеру
+        russia_release = info.get('russia_release')
+        premiere_date = None
+        premiere_date_str = ""
+        
+        if russia_release and russia_release.get('date'):
+            premiere_date = russia_release['date']
+            premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
+        else:
+            try:
+                headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+                url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+                response_main = requests.get(url_main, headers=headers, timeout=15)
+                if response_main.status_code == 200:
+                    data_main = response_main.json()
+                    from datetime import date as date_class
+                    today = date_class.today()
+                    
+                    for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+                        date_value = data_main.get(date_field)
+                        if date_value:
+                            try:
+                                if 'T' in str(date_value):
+                                    premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                                else:
+                                    premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                                premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                                break
+                            except:
+                                continue
+            except Exception as e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
+        
+        # Если премьера еще не состоялась, добавляем кнопку
+        if premiere_date:
+            from datetime import date as date_class
+            today = date_class.today()
+            if premiere_date > today:
+                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+                markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
+        
+        # Добавляем основные кнопки
+        markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+        
+        # Получаем film_id для проверки оценок
+        film_id = None
+        if existing:
+            film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+        else:
+            with db_lock:
+                cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                film_row = cursor.fetchone()
+                if film_row:
+                    film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+        
+        if film_id:
+            markup.row(
+                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+            )
+            
+            # Если это сериал, добавляем кнопки для сериалов
+            if is_series and user_id:
+                if has_notifications_access(chat_id, user_id):
+                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+        
+        # Отправляем сообщение
+        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+        logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}")
+        
+    except Exception as e:
+        logger.error(f"[SHOW FILM INFO] Ошибка: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
+        except:
+            pass
         logger.info(f"[PLAN FROM ADDED] Состояние установлено для пользователя {user_id}, link={link}")
     except Exception as e:
         logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
