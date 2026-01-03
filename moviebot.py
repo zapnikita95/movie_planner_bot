@@ -3428,7 +3428,7 @@ def send_welcome(message):
 
 🎯 <b>Персональные рекомендации</b> — режимы рандомайзера "по моим оценкам", "по групповым оценкам", "рандом по кинопоиск", импорт базы из Кинопоиска
 
-🎫 <b>Билеты на мероприятия</b> — добавление билетов на сеансы, уведомления с билетами перед сеансом
+🎫 <b>Билеты в кино</b> — добавление билетов на сеансы, уведомления с билетами перед сеансом
 
 📦 <b>Пакетные подписки</b> — все режимы сразу с выгодной скидкой
 
@@ -3477,7 +3477,7 @@ def send_welcome(message):
 
 🎯 <b>Персональные рекомендации</b> — режимы рандомайзера "по моим оценкам", "по групповым оценкам", "рандом по кинопоиск", импорт базы из Кинопоиска
 
-🎫 <b>Билеты на мероприятия</b> — добавление билетов на сеансы, уведомления с билетами перед сеансом
+🎫 <b>Билеты в кино</b> — добавление билетов на сеансы, уведомления с билетами перед сеансом
 
 📦 <b>Пакетные подписки</b> — все режимы сразу с выгодной скидкой (для групп и лично)
 
@@ -5365,6 +5365,29 @@ def main_text_handler(message):
             handle_clean_confirm_internal(message)
             return
     
+    # === user_cancel_subscription_state ===
+    # Проверяем состояние отмены подписки (для групповых подписок требуется подтверждение)
+    if 'user_cancel_subscription_state' in globals() and user_id in globals().get('user_cancel_subscription_state', {}):
+        if text.upper().strip() == 'ДА, ОТМЕНИТЬ':
+            # Обработка подтверждения отмены подписки
+            user_cancel_subscription_state = globals().get('user_cancel_subscription_state', {})
+            state = user_cancel_subscription_state.get(user_id)
+            if state:
+                subscription_id = state.get('subscription_id')
+                subscription_type = state.get('subscription_type')
+                chat_id = state.get('chat_id', message.chat.id)
+                
+                if subscription_id:
+                    from database.db_operations import cancel_subscription
+                    if cancel_subscription(subscription_id, user_id):
+                        bot.reply_to(message, "✅ <b>Групповая подписка отменена</b>\n\nВаша групповая подписка была успешно отменена.", parse_mode='HTML')
+                        # Удаляем состояние
+                        del user_cancel_subscription_state[user_id]
+                    else:
+                        bot.reply_to(message, "❌ Ошибка отмены подписки. Попробуйте позже.", parse_mode='HTML')
+                        del user_cancel_subscription_state[user_id]
+            return
+    
     # === user_payment_state ===
     # Проверяем состояние оплаты - если пользователь вводит username для подписки,
     # передаем управление специализированному обработчику (он имеет более высокий priority=10)
@@ -5896,6 +5919,7 @@ def handle_cinema_vote(message):
 
 # Состояние пагинации для /list
 user_list_state = {}  # user_id: {'page': int, 'total_pages': int, 'chat_id': int}
+user_cancel_subscription_state = {}  # user_id: {'subscription_id': int, 'subscription_type': str, 'chat_id': int}
 
 def show_list_page(chat_id, user_id, page=1, message_id=None):
     """Показывает страницу списка фильмов"""
@@ -13856,9 +13880,14 @@ def handle_payment_callback(call):
                     
                     markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
                 
-                # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
+                # Показываем кнопки "Изменить" и "Отменить" для всех активных подписок
                 if subscription_id and subscription_id > 0:
-                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
+                elif subscription_id == 0 or subscription_id is None:
+                    # Для виртуальных подписок или подписок без id предлагаем тарифы
+                    markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:group"))
+                    markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:group"))
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             else:
@@ -13980,13 +14009,14 @@ def handle_payment_callback(call):
             text += "💎 <b>Платные функции:</b>\n\n"
             text += "🔔 <b>Уведомления о сериалах:</b> 100₽/мес\n"
             text += "   • Уведомления о новых сериях\n"
-            text += "   • Настройка времени уведомлений\n\n"
+            text += "   • Настройка времени уведомлений\n"
+            text += "   • Отслеживание прогресса просмотра сезонов\n\n"
             text += "🎯 <b>Персональные рекомендации:</b> 100₽/мес\n"
             text += "   • Режим рандомайзера \"по моим оценкам\"\n"
             text += "   • Режим \"по групповым оценкам\"\n"
             text += "   • Режим \"рандом по кинопоиск\"\n"
             text += "   • Импорт базы из Кинопоиска\n\n"
-            text += "🎫 <b>Билеты на мероприятия:</b> 150₽/мес\n"
+            text += "🎫 <b>Билеты в кино:</b> 150₽/мес\n"
             text += "   • Добавление билетов на сеансы\n"
             text += "   • Уведомления с билетами перед сеансом\n\n"
             text += "📦 <b>Все режимы:</b>\n"
@@ -14051,13 +14081,14 @@ def handle_payment_callback(call):
             text += "💎 <b>Платные функции:</b>\n\n"
             text += f"🔔 <b>Уведомления о сериалах:</b> {prices['notifications']['month']}₽/мес\n"
             text += "   • Уведомления о новых сериях\n"
-            text += "   • Настройка времени уведомлений\n\n"
+            text += "   • Настройка времени уведомлений\n"
+            text += "   • Отслеживание прогресса просмотра сезонов\n\n"
             text += f"🎯 <b>Персональные рекомендации:</b> {prices['recommendations']['month']}₽/мес\n"
             text += "   • Режим рандомайзера \"по моим оценкам\"\n"
             text += "   • Режим \"по групповым оценкам\"\n"
             text += "   • Режим \"рандом по кинопоиск\"\n"
             text += "   • Импорт базы из Кинопоиска\n\n"
-            text += f"🎫 <b>Билеты на мероприятия:</b> {prices['tickets']['month']}₽/мес\n"
+            text += f"🎫 <b>Билеты в кино:</b> {prices['tickets']['month']}₽/мес\n"
             text += "   • Добавление билетов на сеансы\n"
             text += "   • Уведомления с билетами перед сеансом\n\n"
             text += f"📦 <b>Все режимы:</b>\n"
@@ -14169,7 +14200,7 @@ def handle_payment_callback(call):
             text += "💎 <b>Платные функции:</b>\n\n"
             text += f"🔔 <b>Уведомления о сериалах:</b> {prices['notifications']['month']}₽/мес\n"
             text += f"🎯 <b>Персональные рекомендации:</b> {prices['recommendations']['month']}₽/мес\n"
-            text += f"🎫 <b>Билеты на мероприятия:</b> {prices['tickets']['month']}₽/мес\n\n"
+            text += f"🎫 <b>Билеты в кино:</b> {prices['tickets']['month']}₽/мес\n\n"
             text += f"📦 <b>Все режимы:</b>\n"
             text += f"• {prices['all']['month']}₽/мес\n"
             text += f"• {prices['all']['3months']}₽ за 3 месяца\n"
@@ -14213,7 +14244,7 @@ def handle_payment_callback(call):
             # Для личных: payment:subscribe:personal:all:month
             if sub_type == 'group' and len(parts) >= 5:
                 group_size_str = parts[2]
-                group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                group_size = group_size_str  # Keep as string for SUBSCRIPTION_PRICES keys
                 plan_type = parts[3] if len(parts) > 3 else ''
                 period_type = parts[4] if len(parts) > 4 else ''
                 
@@ -14280,31 +14311,100 @@ def handle_payment_callback(call):
             
             # Проверяем, есть ли уже подписка с этими функциями (только для не-владельца)
             if not is_owner:
-                from database.db_operations import get_active_subscription, has_subscription_feature
+                from database.db_operations import get_active_subscription, has_subscription_feature, get_active_group_subscription
                 
-                # Проверяем, какие функции уже есть
+                # Для групповых подписок проверяем существующую подписку группы
+                if sub_type == 'group' and group_chat_id:
+                    # Получаем информацию о группе для проверки подписки
+                    try:
+                        if not group_username:
+                            chat_info = bot.get_chat(group_chat_id)
+                            group_username = chat_info.username
+                    except:
+                        pass
+                    
+                    if group_username:
+                        existing_group_sub = get_active_group_subscription(group_username)
+                        if existing_group_sub:
+                            existing_plan_type = existing_group_sub.get('plan_type', '')
+                            existing_price = existing_group_sub.get('price', 0)
+                            
+                            # Получаем цену выбранного тарифа
+                            try:
+                                if plan_type == 'all':
+                                    selected_price = SUBSCRIPTION_PRICES['group'][group_size]['all'].get(period_type, 0)
+                                else:
+                                    # Для отдельных функций только месячная подписка
+                                    if period_type == 'month':
+                                        selected_price = SUBSCRIPTION_PRICES['group'][group_size][plan_type].get('month', 0)
+                                    else:
+                                        selected_price = 0
+                            except Exception as e:
+                                logger.error(f"[PAYMENT] Ошибка получения цены: {e}")
+                                selected_price = 0
+                            
+                            # Проверяем, если существующая подписка покрывает выбранную функцию или имеет более высокий тариф
+                            covers_selected = False
+                            if existing_plan_type == 'all':
+                                covers_selected = True
+                            elif existing_plan_type == plan_type:
+                                # Если тот же тип подписки, проверяем цену
+                                if period_type == 'month':
+                                    existing_month_price = SUBSCRIPTION_PRICES['group'][group_size].get(existing_plan_type, {}).get('month', 0)
+                                    if existing_month_price >= selected_price:
+                                        covers_selected = True
+                            
+                            if covers_selected:
+                                plan_names = {
+                                    'notifications': '🔔 Уведомления о сериалах',
+                                    'recommendations': '🎯 Персональные рекомендации',
+                                    'tickets': '🎫 Билеты в кино',
+                                    'all': '📦 Все режимы'
+                                }
+                                existing_plan_name = plan_names.get(existing_plan_type, existing_plan_type)
+                                selected_plan_name = plan_names.get(plan_type, plan_type)
+                                
+                                text = f"ℹ️ <b>Информация о подписке</b>\n\n"
+                                text += f"В группе <b>{group_title or 'группе'}</b> уже активна подписка:\n"
+                                text += f"<b>{existing_plan_name}</b> ({existing_price}₽)\n\n"
+                                text += f"Выбранный тариф <b>{selected_plan_name}</b> ({selected_price}₽) "
+                                text += "уже включен в текущую подписку или имеет меньшую стоимость.\n\n"
+                                text += "Если вы хотите изменить подписку, сначала отмените текущую."
+                                
+                                markup = InlineKeyboardMarkup(row_width=1)
+                                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:select_group:{group_size}:{group_chat_id}"))
+                                
+                                try:
+                                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                except Exception as e:
+                                    if "message is not modified" not in str(e):
+                                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                                return
+                
+                # Проверяем, какие функции уже есть (для личных подписок)
                 has_notifications = has_subscription_feature(chat_id, user_id, 'notifications')
                 has_recommendations = has_subscription_feature(chat_id, user_id, 'recommendations')
                 has_tickets = has_subscription_feature(chat_id, user_id, 'tickets')
                 
-                # Определяем, нужно ли показывать предупреждение
-                need_expansion = False
-                expansion_text = ""
-                
-                if plan_type == 'notifications' and has_notifications:
-                    need_expansion = True
-                    expansion_text = "🔔 Уведомления о сериалах уже включены в вашу подписку."
-                elif plan_type == 'recommendations' and has_recommendations:
-                    need_expansion = True
-                    expansion_text = "🎯 Персональные рекомендации уже включены в вашу подписку."
-                elif plan_type == 'tickets' and has_tickets:
-                    need_expansion = True
-                    expansion_text = "🎫 Билеты на мероприятия уже включены в вашу подписку."
-                elif plan_type == 'all' and has_notifications and has_recommendations and has_tickets:
-                    need_expansion = True
-                    expansion_text = "📦 Все режимы уже включены в вашу подписку."
-                
-                if need_expansion:
+                # Определяем, нужно ли показывать предупреждение (только для личных подписок)
+                if sub_type == 'personal':
+                    need_expansion = False
+                    expansion_text = ""
+                    
+                    if plan_type == 'notifications' and has_notifications:
+                        need_expansion = True
+                        expansion_text = "🔔 Уведомления о сериалах уже включены в вашу подписку."
+                    elif plan_type == 'recommendations' and has_recommendations:
+                        need_expansion = True
+                        expansion_text = "🎯 Персональные рекомендации уже включены в вашу подписку."
+                    elif plan_type == 'tickets' and has_tickets:
+                        need_expansion = True
+                        expansion_text = "🎫 Билеты в кино уже включены в вашу подписку."
+                    elif plan_type == 'all' and has_notifications and has_recommendations and has_tickets:
+                        need_expansion = True
+                        expansion_text = "📦 Все режимы уже включены в вашу подписку."
+                    
+                    if need_expansion:
                     text = "✅ <b>Ваша подписка оформлена, но вы можете ее расширить:</b>\n\n"
                     text += expansion_text + "\n\n"
                     text += "💡 <b>Доступные варианты расширения:</b>\n\n"
@@ -14316,7 +14416,7 @@ def handle_payment_callback(call):
                     if not has_recommendations:
                         expansion_options.append(("🎯 Персональные рекомендации", "payment:subscribe:personal:recommendations:month"))
                     if not has_tickets:
-                        expansion_options.append(("🎫 Билеты на мероприятия", "payment:subscribe:personal:tickets:month"))
+                        expansion_options.append(("🎫 Билеты в кино", "payment:subscribe:personal:tickets:month"))
                     if not (has_notifications and has_recommendations and has_tickets):
                         expansion_options.append(("📦 Все режимы", "payment:subscribe:personal:all:month"))
                     
@@ -14358,7 +14458,7 @@ def handle_payment_callback(call):
                     text += "• Импорт базы из Кинопоиска недоступен\n\n"
                     text += f"💰 <b>Стоимость:</b> {SUBSCRIPTION_PRICES['personal']['recommendations']['month']}₽/мес"
                 elif plan_type == 'tickets':
-                    text = "🎫 <b>Билеты на мероприятия</b>\n\n"
+                    text = "🎫 <b>Билеты в кино</b>\n\n"
                     text += "💎 <b>Что входит в подписку:</b>\n"
                     text += "• Добавление билетов на сеансы в кино\n"
                     text += "• Хранение билетов в базе бота\n"
@@ -14387,7 +14487,7 @@ def handle_payment_callback(call):
                     text += "• Режим \"по групповым оценкам\"\n"
                     text += "• Режим \"рандом по кинопоиск\"\n"
                     text += "• Импорт базы из Кинопоиска\n\n"
-                    text += "🎫 <b>Билеты на мероприятия:</b>\n"
+                    text += "🎫 <b>Билеты в кино:</b>\n"
                     text += "• Добавление билетов на сеансы\n"
                     text += "• Уведомления с билетами перед сеансом\n\n"
                     text += f"💰 <b>Стоимость:</b> {price}₽ за {period_name}"
@@ -14424,7 +14524,7 @@ def handle_payment_callback(call):
                     if price < base_price:
                         text += f" <s>(было {base_price}₽)</s>"
                 elif plan_type == 'tickets':
-                    text = f"🎫 <b>Билеты на мероприятия (на {group_size} участников)</b>\n\n"
+                    text = f"🎫 <b>Билеты в кино (на {group_size} участников)</b>\n\n"
                     text += "💎 <b>Что входит в подписку:</b>\n"
                     text += "• Добавление билетов на сеансы в кино для всех участников\n"
                     text += "• Хранение билетов в базе бота\n"
@@ -14458,7 +14558,7 @@ def handle_payment_callback(call):
                     text += "• Режим \"по групповым оценкам\"\n"
                     text += "• Режим \"рандом по кинопоиск\"\n"
                     text += "• Импорт базы из Кинопоиска\n\n"
-                    text += "🎫 <b>Билеты на мероприятия:</b>\n"
+                    text += "🎫 <b>Билеты в кино:</b>\n"
                     text += "• Добавление билетов на сеансы\n"
                     text += "• Уведомления с билетами перед сеансом\n\n"
                     text += f"💰 <b>Стоимость:</b> {price}₽ за {period_name}"
@@ -14632,7 +14732,7 @@ def handle_payment_callback(call):
             plan_names = {
                 'notifications': 'Уведомления о сериалах',
                 'recommendations': 'Персональные рекомендации',
-                'tickets': 'Билеты на мероприятия',
+                'tickets': 'Билеты в кино',
                 'all': 'Все режимы'
             }
             plan_name = plan_names.get(plan_type, plan_type)
@@ -14643,8 +14743,10 @@ def handle_payment_callback(call):
             # Создаем уникальный ID платежа
             payment_id = str(uuid.uuid4())
             
-            # Определяем URL для возврата
-            return_url = os.getenv('YOOKASSA_RETURN_URL', 'https://t.me/movie_planner_bot')
+            # Определяем URL для возврата - используем deep link для Telegram
+            # Deep link откроет бота напрямую: tg://resolve?domain=movie_planner_bot
+            # Или можно использовать https://t.me/movie_planner_bot - это тоже работает
+            return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
             
             # Для групповых подписок используем выбранный chat_id группы
             if sub_type == 'group' and group_chat_id:
@@ -14811,7 +14913,7 @@ def handle_payment_callback(call):
             plan_names = {
                 'notifications': 'Уведомления о сериалах',
                 'recommendations': 'Персональные рекомендации',
-                'tickets': 'Билеты на мероприятия',
+                'tickets': 'Билеты в кино',
                 'all': 'Все режимы'
             }
             plan_name = plan_names.get(plan_type, plan_type)
@@ -14823,7 +14925,8 @@ def handle_payment_callback(call):
             payment_id = str(uuid.uuid4())
             
             # Определяем URL для возврата (нужно будет настроить в зависимости от вашего домена)
-            return_url = os.getenv('YOOKASSA_RETURN_URL', 'https://t.me/movie_planner_bot')
+            # Определяем URL для возврата - используем deep link для Telegram
+            return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
             
             # Подготавливаем metadata для платежа
             metadata = {
@@ -15017,7 +15120,7 @@ def handle_payment_callback(call):
             plan_names = {
                 'notifications': '🔔 Уведомления о сериалах',
                 'recommendations': '🎯 Персональные рекомендации',
-                'tickets': '🎫 Билеты на мероприятия',
+                'tickets': '🎫 Билеты в кино',
                 'all': '📦 Все режимы'
             }
             
@@ -15061,27 +15164,82 @@ def handle_payment_callback(call):
             # Проверяем, является ли второй параметр числом (subscription_id) или строкой (personal/group)
             try:
                 subscription_id = int(second_param)
-                # Это subscription_id - отменяем конкретную подписку
-                if cancel_subscription(subscription_id, user_id):
-                    bot.answer_callback_query(call.id, "Подписка отменена")
-                    try:
-                        bot.edit_message_text(
-                            "✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.",
-                            call.message.chat.id,
-                            call.message.message_id,
-                            parse_mode='HTML'
-                        )
-                    except Exception as e:
-                        if "message is not modified" not in str(e):
-                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                # Это subscription_id - проверяем тип подписки
+                from database.db_operations import get_subscription_by_id
+                sub = get_subscription_by_id(subscription_id)
+                
+                if sub:
+                    subscription_type = sub.get('subscription_type')
+                    
+                    # Для групповых подписок требуем подтверждение через текст
+                    if subscription_type == 'group':
+                        bot.answer_callback_query(call.id)
+                        try:
+                            bot.edit_message_text(
+                                "⚠️ <b>Отмена групповой подписки</b>\n\n"
+                                "Вы уверены, что хотите отменить групповую подписку?\n\n"
+                                "Это действие нельзя отменить.\n\n"
+                                "Отправьте <b>ДА, ОТМЕНИТЬ</b> в ответ на это сообщение для подтверждения.",
+                                call.message.chat.id,
+                                call.message.message_id,
+                                parse_mode='HTML'
+                            )
+                            # Сохраняем состояние для подтверждения
+                            user_cancel_subscription_state[user_id] = {
+                                'subscription_id': subscription_id,
+                                'subscription_type': 'group',
+                                'chat_id': chat_id
+                            }
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    else:
+                        # Для личных подписок отменяем сразу
+                        if cancel_subscription(subscription_id, user_id):
+                            bot.answer_callback_query(call.id, "Подписка отменена")
+                            try:
+                                bot.edit_message_text(
+                                    "✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.",
+                                    call.message.chat.id,
+                                    call.message.message_id,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                        else:
+                            bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
                 else:
-                    bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
+                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
             except ValueError:
                 # Это строка (personal/group) - используем старую логику
                 sub_type = second_param
                 sub = get_active_subscription(chat_id, user_id, sub_type)
                 
-                if sub and cancel_subscription(sub.get('id'), user_id):
+                # Для групповых подписок требуем подтверждение через текст
+                if sub_type == 'group' and sub:
+                    bot.answer_callback_query(call.id)
+                    try:
+                        bot.edit_message_text(
+                            "⚠️ <b>Отмена групповой подписки</b>\n\n"
+                            "Вы уверены, что хотите отменить групповую подписку?\n\n"
+                            "Это действие нельзя отменить.\n\n"
+                            "Отправьте <b>ДА, ОТМЕНИТЬ</b> в ответ на это сообщение для подтверждения.",
+                            call.message.chat.id,
+                            call.message.message_id,
+                            parse_mode='HTML'
+                        )
+                        # Сохраняем состояние для подтверждения
+                        user_cancel_subscription_state[user_id] = {
+                            'subscription_id': sub.get('id'),
+                            'subscription_type': 'group',
+                            'chat_id': chat_id
+                        }
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                elif sub and cancel_subscription(sub.get('id'), user_id):
+                    # Для личных подписок отменяем сразу
                     bot.answer_callback_query(call.id, "Подписка отменена")
                     try:
                         bot.edit_message_text(
@@ -15369,7 +15527,7 @@ def handle_payment_username(message):
                 desc += "• Импорт базы оценок из Кинопоиска\n"
                 desc += "• Умные рекомендации на основе ваших предпочтений\n"
             elif plan_type == 'tickets':
-                desc = "🎫 <b>Билеты на мероприятия</b>\n\n"
+                desc = "🎫 <b>Билеты в кино</b>\n\n"
                 desc += "💎 <b>Что входит:</b>\n"
                 desc += "• Добавление билетов на сеансы в кино\n"
                 desc += "• Хранение билетов в базе бота\n"
@@ -15388,7 +15546,7 @@ def handle_payment_username(message):
                 desc += "• Режим \"по групповым оценкам\"\n"
                 desc += "• Режим \"рандом по кинопоиск\"\n"
                 desc += "• Импорт базы из Кинопоиска\n\n"
-                desc += "🎫 <b>Билеты на мероприятия:</b>\n"
+                desc += "🎫 <b>Билеты в кино:</b>\n"
                 desc += "• Добавление билетов на сеансы\n"
                 desc += "• Уведомления с билетами перед сеансом\n"
             
@@ -15486,7 +15644,7 @@ def handle_payment_username(message):
                 desc += "• Импорт базы оценок из Кинопоиска для всех участников\n"
                 desc += "• Умные рекомендации на основе предпочтений группы\n"
             elif plan_type == 'tickets':
-                desc = f"🎫 <b>Билеты на мероприятия (на {group_size} участников)</b>\n\n"
+                desc = f"🎫 <b>Билеты в кино (на {group_size} участников)</b>\n\n"
                 desc += "💎 <b>Что входит:</b>\n"
                 desc += "• Добавление билетов на сеансы в кино для всех участников\n"
                 desc += "• Хранение билетов в базе бота\n"
@@ -15505,7 +15663,7 @@ def handle_payment_username(message):
                 desc += "• Режим \"по групповым оценкам\"\n"
                 desc += "• Режим \"рандом по кинопоиск\"\n"
                 desc += "• Импорт базы из Кинопоиска\n\n"
-                desc += "🎫 <b>Билеты на мероприятия:</b>\n"
+                desc += "🎫 <b>Билеты в кино:</b>\n"
                 desc += "• Добавление билетов на сеансы\n"
                 desc += "• Уведомления с билетами перед сеансом\n"
             

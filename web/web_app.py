@@ -54,23 +54,24 @@ def create_web_app(bot_instance):
             
             if event_json.get('event') == 'payment.succeeded':
                 payment_id = event_json.get('object', {}).get('id')
-                if payment_id:
-                    logger.info(f"[YOOKASSA] Платеж успешен: {payment_id}")
-                else:
+                if not payment_id:
                     logger.warning(f"[YOOKASSA] Платеж успешен, но payment_id отсутствует в объекте")
                     logger.warning(f"[YOOKASSA] Объект: {event_json.get('object')}")
-                    
-                    # Импортируем функции для обработки платежа
-                    from database.db_operations import get_payment_by_yookassa_id, update_payment_status, create_subscription
-                    from config.settings import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
-                    
-                    # Инициализируем ЮKassa для получения информации о платеже
-                    Configuration.account_id = YOOKASSA_SHOP_ID
-                    Configuration.secret_key = YOOKASSA_SECRET_KEY
-                    
-                    # Получаем платеж из БД
-                    logger.info(f"[YOOKASSA] Поиск платежа в БД по yookassa_payment_id: {payment_id}")
-                    payment_data = get_payment_by_yookassa_id(payment_id)
+                    return jsonify({'status': 'error', 'message': 'Payment ID not found'}), 400
+                
+                logger.info(f"[YOOKASSA] Платеж успешен: {payment_id}")
+                
+                # Импортируем функции для обработки платежа
+                from database.db_operations import get_payment_by_yookassa_id, update_payment_status, create_subscription
+                from config.settings import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+                
+                # Инициализируем ЮKassa для получения информации о платеже
+                Configuration.account_id = YOOKASSA_SHOP_ID
+                Configuration.secret_key = YOOKASSA_SECRET_KEY
+                
+                # Получаем платеж из БД
+                logger.info(f"[YOOKASSA] Поиск платежа в БД по yookassa_payment_id: {payment_id}")
+                payment_data = get_payment_by_yookassa_id(payment_id)
                     
                     if not payment_data:
                         logger.warning(f"[YOOKASSA] Платеж {payment_id} не найден в БД")
@@ -231,20 +232,21 @@ def create_web_app(bot_instance):
                                     text += "• Режим \"по групповым оценкам\"\n"
                                     text += "• Режим \"рандом по кинопоиск\"\n"
                                     text += "• Импорт базы из Кинопоиска\n\n"
-                                    text += "🎫 <b>Билеты на мероприятия:</b>\n"
+                                    text += "🎫 <b>Билеты в кино:</b>\n"
                                     text += "• Добавление билетов на сеансы\n"
                                     text += "• Уведомления с билетами перед сеансом\n"
                                 
                                 text += "\n\nСпасибо за покупку! 🎉"
                                 
                                 # Отправляем сообщение для личной подписки
-                                logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в chat_id={target_chat_id}")
+                                logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в chat_id={target_chat_id}, user_id={user_id}")
                                 try:
-                                    bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
-                                    logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено для пользователя {user_id}, chat_id {target_chat_id}, subscription_id {subscription_id}")
+                                    result = bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
+                                    logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено для пользователя {user_id}, chat_id {target_chat_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
                                 except Exception as send_error:
                                     logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения: {send_error}", exc_info=True)
-                                    raise
+                                    # Не прерываем выполнение, просто логируем ошибку
+                                    logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения")
                                 
                             elif subscription_type == 'group':
                                 # Для групповой подписки отправляем в группу
@@ -263,7 +265,7 @@ def create_web_app(bot_instance):
                                     text += "• Режим \"по групповым оценкам\"\n"
                                     text += "• Режим \"рандом по кинопоиск\"\n"
                                     text += "• Импорт базы из Кинопоиска\n\n"
-                                    text += "🎫 <b>Билеты на мероприятия:</b>\n"
+                                    text += "🎫 <b>Билеты в кино:</b>\n"
                                     text += "• Добавление билетов на сеансы\n"
                                     text += "• Уведомления с билетами перед сеансом\n"
                                 
@@ -284,24 +286,34 @@ def create_web_app(bot_instance):
                                     
                                     markup = InlineKeyboardMarkup(row_width=1)
                                     markup.add(InlineKeyboardButton("👥 Выбрать участников", callback_data=f"payment:select_members:{subscription_id}"))
-                                    bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                                    try:
+                                        result = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                                        logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой выбора участников отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
+                                    except Exception as send_error:
+                                        logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения с кнопкой выбора участников: {send_error}", exc_info=True)
                                 else:
                                     text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b>"
                                     if group_size:
                                         text += f" из {group_size}"
                                     text += "\n\nСпасибо за покупку! 🎉"
-                                    logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в группу chat_id={chat_id}")
+                                    logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в группу chat_id={chat_id}, user_id={user_id}")
                                     try:
-                                        bot_instance.send_message(chat_id, text, parse_mode='HTML')
-                                        logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено в группу {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
+                                        result = bot_instance.send_message(chat_id, text, parse_mode='HTML')
+                                        logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено в группу {chat_id}, user_id {user_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
                                     except Exception as send_error:
                                         logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в группу: {send_error}", exc_info=True)
-                                        raise
+                                        # Не прерываем выполнение, просто логируем ошибку
+                                        logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения в группу")
                                 
                                 logger.info(f"[YOOKASSA] Подписка создана для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
                             
                         except Exception as e:
                             logger.error(f"[YOOKASSA] Ошибка отправки уведомления: {e}", exc_info=True)
+                            # Не прерываем выполнение, просто логируем ошибку
+                    else:
+                        logger.warning(f"[YOOKASSA] Событие payment.succeeded, но статус платежа не succeeded: {payment_status}")
+                else:
+                    logger.warning(f"[YOOKASSA] Платеж уже обработан ранее (статус: {payment_data.get('status')})")
             
             elif event_json.get('event') == 'payment.canceled':
                 payment_id = event_json.get('object', {}).get('id')
@@ -311,7 +323,12 @@ def create_web_app(bot_instance):
                     payment_data = get_payment_by_yookassa_id(payment_id)
                     if payment_data:
                         update_payment_status(payment_data['payment_id'], 'canceled')
+                else:
+                    logger.warning(f"[YOOKASSA] Платеж отменен, но payment_id отсутствует")
+            else:
+                logger.info(f"[YOOKASSA] Неизвестное событие: {event_json.get('event')}")
             
+            logger.info(f"[YOOKASSA] Обработка завершена, возвращаем успешный ответ")
             return jsonify({'status': 'ok'}), 200
             
         except Exception as e:
