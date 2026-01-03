@@ -15434,6 +15434,11 @@ def handle_payment_callback(call):
             
             # Сразу создаем платеж, без промежуточного шага
             # Инициализируем ЮKassa
+            if not YOOKASSA_AVAILABLE:
+                logger.error(f"[PAYMENT] YooKassa библиотека не установлена!")
+                bot.answer_callback_query(call.id, "Ошибка: система оплаты недоступна. Обратитесь к администратору.", show_alert=True)
+                return
+            
             if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
                 logger.error(f"[PAYMENT] YooKassa ключи не настроены! YOOKASSA_SHOP_ID={YOOKASSA_SHOP_ID is not None}, YOOKASSA_SECRET_KEY={YOOKASSA_SECRET_KEY is not None}")
                 bot.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
@@ -15448,6 +15453,7 @@ def handle_payment_callback(call):
             shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
             secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
             
+            from yookassa import Configuration
             Configuration.account_id = shop_id
             Configuration.secret_key = secret_key
             
@@ -15629,6 +15635,7 @@ def handle_payment_callback(call):
             shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
             secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
             
+            from yookassa import Configuration
             Configuration.account_id = shop_id
             Configuration.secret_key = secret_key
             
