@@ -4631,8 +4631,9 @@ def get_plan_day_or_date_internal(message, state):
         logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
     
     if not plan_dt:
-        # Пробуем найти время отдельно (например, "завтра 10:00", "в субботу 15:00")
-        time_match = re.search(r'(\d{1,2})[: ](\d{2})', text)
+        # Пробуем найти время отдельно (например, "завтра 10:00", "в субботу 15:00", "10.01 20:30")
+        # Ищем формат ЧЧ:ММ (два цифры, двоеточие, две цифры)
+        time_match = re.search(r'\b(\d{1,2}):(\d{2})\b', text)
         extracted_time = None
         if time_match:
             hour = int(time_match.group(1))
@@ -4711,8 +4712,8 @@ def get_plan_day_or_date_internal(message, state):
                     logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (кино): {plan_dt}")
             else:
                 # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
-                # Сначала пробуем формат с временем: "15 января 17:00"
-                date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2})[.:](\d{2})', text)
+                # Сначала пробуем формат с временем: "15 января 17:00" или "10 января 20:30"
+                date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2}):(\d{2})', text)
                 if date_time_match:
                     day_num = int(date_time_match.group(1))
                     month_str = date_time_match.group(2)
@@ -4756,36 +4757,62 @@ def get_plan_day_or_date_internal(message, state):
                             except ValueError as e:
                                 logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга текстовой даты: {e}")
                     else:
-                        # Парсинг "10.01" или "06.01"
-                        date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                        if date_match:
-                            day_num = int(date_match.group(1))
-                            month_num = int(date_match.group(2))
-                            if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        # Парсинг "10.01" или "06.01", возможно с временем "10.01 20:30"
+                        # Сначала пробуем формат с временем: "10.01 20:30"
+                        date_time_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\s+(\d{1,2}):(\d{2})', text)
+                        if date_time_match:
+                            day_num = int(date_time_match.group(1))
+                            month_num = int(date_time_match.group(2))
+                            year_str = date_time_match.group(3)
+                            hour = int(date_time_match.group(4))
+                            minute = int(date_time_match.group(5))
+                            if 1 <= month_num <= 12 and 1 <= day_num <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59:
                                 try:
                                     year = now.year
-                                    if date_match.group(3):
-                                        year_part = int(date_match.group(3))
+                                    if year_str:
+                                        year_part = int(year_str)
                                         if year_part < 100:
                                             year = 2000 + year_part
                                         else:
                                             year = year_part
-                                    candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                    candidate = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
                                     if candidate < now:
                                         year += 1
-                                    # Используем извлеченное время, если есть, иначе стандартное
-                                    if extracted_time:
-                                        hour, minute = extracted_time
-                                    elif plan_type == 'home':
-                                        hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
-                                        minute = 0
-                                    else:
-                                        hour = 9
-                                        minute = 0
                                     plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
-                                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
+                                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом с временем: {plan_dt}")
                                 except ValueError as e:
-                                    logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
+                                    logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты с временем: {e}")
+                        else:
+                            # Парсинг "10.01" или "06.01" без времени
+                            date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                            if date_match:
+                                day_num = int(date_match.group(1))
+                                month_num = int(date_match.group(2))
+                                if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                                    try:
+                                        year = now.year
+                                        if date_match.group(3):
+                                            year_part = int(date_match.group(3))
+                                            if year_part < 100:
+                                                year = 2000 + year_part
+                                            else:
+                                                year = year_part
+                                        candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                        if candidate < now:
+                                            year += 1
+                                        # Используем извлеченное время, если есть, иначе стандартное
+                                        if extracted_time:
+                                            hour, minute = extracted_time
+                                        elif plan_type == 'home':
+                                            hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
+                                            minute = 0
+                                        else:
+                                            hour = 9
+                                            minute = 0
+                                        plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
+                                        logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
+                                    except ValueError as e:
+                                        logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
     
     if not plan_dt:
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать дату из текста: '{text}'")
@@ -7427,6 +7454,8 @@ def join_command(message):
                             p_username = row.get('username') if isinstance(row, dict) else row[1]
                             display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
                             response_text += f"• {display_name}\n"
+            except Exception as e:
+                logger.warning(f"[JOIN] Ошибка при получении участников: {e}")
         
         bot.reply_to(message, response_text, parse_mode='HTML')
         logger.info(f"✅ Команда /join обработана для пользователя {user_id}")
