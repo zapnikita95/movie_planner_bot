@@ -7857,7 +7857,14 @@ def random_start(message):
         # Шаг 0: Выбор режима
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
-        markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+        
+        # Проверяем доступ к рекомендациям
+        has_rec_access = has_recommendations_access(chat_id, user_id)
+        
+        if has_rec_access:
+            markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
         
         # Проверяем, есть ли у пользователя больше 50 оценок (включая импортированные из КП)
         with db_lock:
@@ -7865,11 +7872,15 @@ def random_start(message):
             user_ratings_count = cursor.fetchone()
             user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
             
-            if user_ratings >= 50:
+            if has_rec_access and user_ratings >= 50:
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
             else:
-                # Заблокированная кнопка
-                markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
+                if not has_rec_access:
+                    # Заблокированная кнопка из-за отсутствия подписки
+                    markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
+                else:
+                    # Заблокированная кнопка из-за недостаточного количества оценок
+                    markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
             
             # Проверяем условие для group_votes: больше 20 групповых оценок, где хотя бы 20 фильмов оценили все участники группы
             # Сначала получаем общее количество уникальных пользователей в группе (исключаем импортированные оценки)
@@ -7892,10 +7903,15 @@ def random_start(message):
                 if len(group_rated_films) >= 20:
                     group_votes_available = True
             
-            if group_votes_available:
+            if has_rec_access and group_votes_available:
                 markup.add(InlineKeyboardButton("👥 По групповым оценкам (9-10)", callback_data="rand_mode:group_votes"))
             else:
-                markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
+                if not has_rec_access:
+                    # Заблокированная кнопка из-за отсутствия подписки
+                    markup.add(InlineKeyboardButton("🔒 По групповым оценкам (9-10)", callback_data="rand_mode_locked:group_votes"))
+                else:
+                    # Заблокированная кнопка из-за недостаточного количества групповых оценок
+                    markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
         
         bot.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
         logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
@@ -8874,12 +8890,19 @@ def handle_show_film_description_callback(call):
             
             # Если это план для кино, добавляем кнопку для билетов
             if plan_type == 'cinema':
-                if ticket_file_id:
-                    # Билеты есть - кнопка "Перейти к билетам"
-                    markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
+                if has_tickets_access(chat_id, user_id):
+                    if ticket_file_id:
+                        # Билеты есть - кнопка "Перейти к билетам"
+                        markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
+                    else:
+                        # Билетов нет - кнопка "Добавить билеты"
+                        markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
                 else:
-                    # Билетов нет - кнопка "Добавить билеты"
-                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                    # Нет доступа - заблокированная кнопка
+                    if ticket_file_id:
+                        markup.add(InlineKeyboardButton("🔒 Перейти к билетам", callback_data=f"ticket_locked:{plan_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
             
             # Кнопки "Изменить" и "Удалить из расписания" в одной строке (50/50)
             markup.row(
@@ -9009,12 +9032,19 @@ def handle_plan_detail_callback(call):
         
         # Если это план для кино, добавляем кнопку для билетов
         if plan_type == 'cinema':
-            if ticket_file_id:
-                # Билеты есть - кнопка "Перейти к билетам"
-                markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
+            if has_tickets_access(chat_id, user_id):
+                if ticket_file_id:
+                    # Билеты есть - кнопка "Перейти к билетам"
+                    markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
+                else:
+                    # Билетов нет - кнопка "Добавить билеты"
+                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
             else:
-                # Билетов нет - кнопка "Добавить билеты"
-                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                # Нет доступа - заблокированная кнопка
+                if ticket_file_id:
+                    markup.add(InlineKeyboardButton("🔒 Перейти к билетам", callback_data=f"ticket_locked:{plan_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
         
         # Кнопки "Изменить" и "Удалить из расписания" в одной строке (50/50)
         markup.row(
@@ -9041,6 +9071,16 @@ def random_mode_handler(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         mode = call.data.split(":")[1]
+        
+        # Проверяем доступ к рекомендациям для режимов, требующих подписку
+        if mode in ['kinopoisk', 'my_votes', 'group_votes']:
+            if not has_recommendations_access(chat_id, user_id):
+                bot.answer_callback_query(
+                    call.id, 
+                    "❌ Этот режим доступен только с подпиской на рекомендации. Используйте /payment для оформления подписки.", 
+                    show_alert=True
+                )
+                return
         
         if user_id not in user_random_state:
             bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
@@ -9196,10 +9236,37 @@ def random_mode_handler(call):
 def random_mode_locked_handler(call):
     """Обработчик заблокированных режимов рандомайзера"""
     try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
         mode = call.data.split(":")[1]
-        bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
+        
+        # Проверяем, заблокирован ли режим из-за отсутствия подписки
+        has_rec_access = has_recommendations_access(chat_id, user_id)
+        
+        if not has_rec_access:
+            # Режим заблокирован из-за отсутствия подписки
+            bot.answer_callback_query(
+                call.id, 
+                "❌ Этот режим доступен только с подпиской на рекомендации. Используйте /payment для оформления подписки.", 
+                show_alert=True
+            )
+        else:
+            # Режим заблокирован по другим причинам (недостаточно оценок)
+            bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_mode_locked_handler: {e}", exc_info=True)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_locked:"))
+def ticket_locked_handler(call):
+    """Обработчик заблокированных кнопок билетов"""
+    try:
+        bot.answer_callback_query(
+            call.id, 
+            "❌ Эта функция доступна только с подпиской на билеты в кино. Используйте /payment для оформления подписки.", 
+            show_alert=True
+        )
+    except Exception as e:
+        logger.error(f"[TICKET] ERROR in ticket_locked_handler: {e}", exc_info=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_period:"))
 def random_period_handler(call):
@@ -12136,15 +12203,24 @@ def ticket_session_callback(call):
             # Создаем кнопки в зависимости от наличия времени
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
-            if not has_time:
-                # Если нет времени, добавляем обе кнопки
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-                bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
+            if has_tickets_access(chat_id, user_id):
+                if not has_time:
+                    # Если нет времени, добавляем обе кнопки
+                    markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                    markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+                    bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
+                else:
+                    # Если время есть, только кнопка добавления билетов
+                    markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
+                    bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
             else:
-                # Если время есть, только кнопка добавления билетов
-                markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
-                bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
+                if not has_time:
+                    markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
+                    bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Добавить еще билет", callback_data=f"ticket_locked:{plan_id}"))
+                    bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
         else:
             logger.warning(f"[TICKET SESSION] file_id в БД пустой")
             bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
@@ -12179,13 +12255,20 @@ def ticket_session_callback(call):
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
-        if not has_time:
-            # Если нет времени, добавляем обе кнопки
-            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-            markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+        if has_tickets_access(chat_id, user_id):
+            if not has_time:
+                # Если нет времени, добавляем обе кнопки
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+            else:
+                # Если время есть, только кнопка указания времени (на случай изменения)
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
         else:
-            # Если время есть, только кнопка указания времени (на случай изменения)
-            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            if not has_time:
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
+            else:
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
         if not has_time:
@@ -12220,13 +12303,20 @@ def ticket_session_callback(call):
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
-        if not has_time:
-            # Если нет времени, добавляем обе кнопки
-            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+        if has_tickets_access(chat_id, user_id):
+            if not has_time:
+                # Если нет времени, добавляем обе кнопки
+                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            else:
+                # Если время есть, только кнопка добавления билетов
+                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
         else:
-            # Если время есть, только кнопка добавления билетов
-            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+            if not has_time:
+                markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
         if not has_time:
@@ -12332,6 +12422,15 @@ def add_ticket_from_plan_callback(call):
     chat_id = call.message.chat.id
     plan_id = int(call.data.split(":")[1])
     
+    # Проверяем доступ к функциям билетов
+    if not has_tickets_access(chat_id, user_id):
+        bot.answer_callback_query(
+            call.id, 
+            "❌ Эта функция доступна только с подпиской на билеты в кино. Используйте /payment для оформления подписки.", 
+            show_alert=True
+        )
+        return
+    
     user_ticket_state[user_id] = {
         'step': 'waiting_ticket_file',
         'plan_id': plan_id,
@@ -12417,6 +12516,15 @@ def ticket_add_more_callback(call):
     user_id = call.from_user.id
     chat_id = call.message.chat.id
     plan_id = int(call.data.split(":")[1])
+    
+    # Проверяем доступ к функциям билетов
+    if not has_tickets_access(chat_id, user_id):
+        bot.answer_callback_query(
+            call.id, 
+            "❌ Эта функция доступна только с подпиской на билеты в кино. Используйте /payment для оформления подписки.", 
+            show_alert=True
+        )
+        return
     
     logger.info(f"[TICKET ADD MORE] Пользователь {user_id} хочет добавить еще билеты к plan_id={plan_id}")
     
@@ -13260,6 +13368,52 @@ def has_notifications_access(chat_id, user_id):
         if group_sub:
             plan_type = group_sub.get('plan_type')
             if plan_type in ['notifications', 'all']:
+                return True
+    
+    return False
+
+def has_tickets_access(chat_id, user_id):
+    """Проверяет, есть ли у пользователя доступ к функциям билетов в кино
+    (требуется подписка 'tickets' или 'all')
+    """
+    from database.db_operations import get_active_subscription
+    
+    # Проверяем личную подписку
+    personal_sub = get_active_subscription(chat_id, user_id, 'personal')
+    if personal_sub:
+        plan_type = personal_sub.get('plan_type')
+        if plan_type in ['tickets', 'all']:
+            return True
+    
+    # Проверяем групповую подписку (для групповых чатов)
+    if chat_id < 0:  # Групповой чат
+        group_sub = get_active_subscription(chat_id, user_id, 'group')
+        if group_sub:
+            plan_type = group_sub.get('plan_type')
+            if plan_type in ['tickets', 'all']:
+                return True
+    
+    return False
+
+def has_recommendations_access(chat_id, user_id):
+    """Проверяет, есть ли у пользователя доступ к функциям рекомендаций
+    (требуется подписка 'recommendations' или 'all')
+    """
+    from database.db_operations import get_active_subscription
+    
+    # Проверяем личную подписку
+    personal_sub = get_active_subscription(chat_id, user_id, 'personal')
+    if personal_sub:
+        plan_type = personal_sub.get('plan_type')
+        if plan_type in ['recommendations', 'all']:
+            return True
+    
+    # Проверяем групповую подписку (для групповых чатов)
+    if chat_id < 0:  # Групповой чат
+        group_sub = get_active_subscription(chat_id, user_id, 'group')
+        if group_sub:
+            plan_type = group_sub.get('plan_type')
+            if plan_type in ['recommendations', 'all']:
                 return True
     
     return False
@@ -17918,7 +18072,10 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                 if plan_row:
                     plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
                     markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                    if has_tickets_access(chat_id, user_id):
+                        markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
         
         plan_message = f"✅ Запланирован фильм {plan_type_text}: <b>{title}</b>"
         if episode_info:
