@@ -13860,9 +13860,75 @@ def handle_payment_callback(call):
             # Обработка подписки
             parts = action.split(":")
             sub_type = parts[1]  # personal или group
-            group_size = parts[2] if len(parts) > 4 and sub_type == 'group' else None  # 2, 5, 10 для групп
-            plan_type = parts[3] if group_size else parts[2]  # notifications, recommendations, tickets, all
-            period_type = parts[4] if group_size else parts[3]  # month, 3months, year, lifetime
+            
+            # Правильный парсинг для групп: payment:subscribe:group:2:all:month
+            # Для личных: payment:subscribe:personal:all:month
+            if sub_type == 'group' and len(parts) >= 5:
+                group_size_str = parts[2]
+                group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                plan_type = parts[3] if len(parts) > 3 else ''
+                period_type = parts[4] if len(parts) > 4 else ''
+            else:
+                group_size = None
+                plan_type = parts[2] if len(parts) > 2 else ''
+                period_type = parts[3] if len(parts) > 3 else ''
+            
+            # Для пользователя 301810276 разрешаем оплату всегда
+            is_owner = (user_id == 301810276)
+            
+            # Проверяем, есть ли уже подписка с этими функциями (только для не-владельца)
+            if not is_owner:
+                from database.db_operations import get_active_subscription, has_subscription_feature
+                
+                # Проверяем, какие функции уже есть
+                has_notifications = has_subscription_feature(chat_id, user_id, 'notifications')
+                has_recommendations = has_subscription_feature(chat_id, user_id, 'recommendations')
+                has_tickets = has_subscription_feature(chat_id, user_id, 'tickets')
+                
+                # Определяем, нужно ли показывать предупреждение
+                need_expansion = False
+                expansion_text = ""
+                
+                if plan_type == 'notifications' and has_notifications:
+                    need_expansion = True
+                    expansion_text = "🔔 Уведомления о сериалах уже включены в вашу подписку."
+                elif plan_type == 'recommendations' and has_recommendations:
+                    need_expansion = True
+                    expansion_text = "🎯 Персональные рекомендации уже включены в вашу подписку."
+                elif plan_type == 'tickets' and has_tickets:
+                    need_expansion = True
+                    expansion_text = "🎫 Билеты на мероприятия уже включены в вашу подписку."
+                elif plan_type == 'all' and has_notifications and has_recommendations and has_tickets:
+                    need_expansion = True
+                    expansion_text = "📦 Все режимы уже включены в вашу подписку."
+                
+                if need_expansion:
+                    text = "✅ <b>Ваша подписка оформлена, но вы можете ее расширить:</b>\n\n"
+                    text += expansion_text + "\n\n"
+                    text += "💡 <b>Доступные варианты расширения:</b>\n\n"
+                    
+                    # Предлагаем варианты расширения
+                    expansion_options = []
+                    if not has_notifications:
+                        expansion_options.append(("🔔 Уведомления о сериалах", "payment:subscribe:personal:notifications:month"))
+                    if not has_recommendations:
+                        expansion_options.append(("🎯 Персональные рекомендации", "payment:subscribe:personal:recommendations:month"))
+                    if not has_tickets:
+                        expansion_options.append(("🎫 Билеты на мероприятия", "payment:subscribe:personal:tickets:month"))
+                    if not (has_notifications and has_recommendations and has_tickets):
+                        expansion_options.append(("📦 Все режимы", "payment:subscribe:personal:all:month"))
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    for option_text, callback_data in expansion_options:
+                        markup.add(InlineKeyboardButton(option_text, callback_data=callback_data))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                    
+                    try:
+                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    return
             
             # Показываем подробное описание тарифа
             if sub_type == 'personal':
@@ -14096,10 +14162,25 @@ def handle_payment_callback(call):
             
             parts = action.split(":")
             sub_type = parts[1]  # personal или group
-            group_size_str = parts[2] if len(parts) > 5 else ''  # 2, 5, 10 для групп или пусто
-            group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
-            plan_type = parts[3] if group_size else parts[2]  # notifications, recommendations, tickets, all
-            period_type = parts[4] if group_size else parts[3]  # month, 3months, year, lifetime
+            
+            # Правильный парсинг: payment:pay:personal::tickets:month или payment:pay:group:2:all:month
+            if len(parts) >= 5:
+                # Есть group_size (для групп)
+                group_size_str = parts[2] if parts[2] else ''
+                group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                plan_type = parts[3] if parts[3] else ''
+                period_type = parts[4] if parts[4] else ''
+            else:
+                # Нет group_size (для личных)
+                group_size = None
+                plan_type = parts[2] if len(parts) > 2 and parts[2] else ''
+                period_type = parts[3] if len(parts) > 3 and parts[3] else ''
+            
+            # Проверка на пустые значения
+            if not plan_type or not period_type:
+                logger.error(f"[PAYMENT] Ошибка парсинга callback_data: {action}, parts={parts}")
+                bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                return
             
             # Вычисляем финальную цену с учетом скидок
             if sub_type == 'personal':
@@ -14532,6 +14613,7 @@ def handle_payment_username(message):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                 logger.info(f"[PAYMENT] Отправка информации о подписке для группы @{username}")
                 bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+                del user_payment_state[user_id]  # Удаляем state после обработки
             else:
                 text = f"👥 <b>Групповая подписка</b>\n\n"
                 text += "❌ Активная подписка отсутствует, выберите тариф для подключения"
