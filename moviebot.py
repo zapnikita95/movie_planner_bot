@@ -2520,27 +2520,45 @@ def premiere_detail_handler(call):
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"premiere_add:{kp_id}"))
         
+        # Проверяем, нужно ли показывать кнопку уведомления
+        from datetime import date as date_class
+        today = date_class.today()
+        show_notify_button = False
+        date_for_callback = ''
+        
         if premiere_date:
-            from datetime import date as date_class
-            today = date_class.today()
             is_future = premiere_date > today
-            
             if is_future:
                 # Дата в будущем - показываем "Уведомить о выходе"
+                show_notify_button = True
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                markup.add(InlineKeyboardButton("🔔 Уведомить о выходе", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
-            else:
-                # Дата в прошлом - показываем старую кнопку "Напомнить"
-                with db_lock:
-                    cursor.execute('''
-                        SELECT id FROM premiere_reminders 
-                        WHERE chat_id = %s AND user_id = %s AND kp_id = %s
-                    ''', (chat_id, call.from_user.id, kp_id))
-                    existing = cursor.fetchone()
-                
-                if not existing:
-                    date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                    markup.add(InlineKeyboardButton("🔔 Напомнить о выходе премьеры", callback_data=f"premiere_remind:{kp_id}:{date_for_callback}"))
+        else:
+            # Если дата не определена, но есть год, проверяем год
+            year = data.get('year')
+            if year:
+                try:
+                    year_int = int(year)
+                    current_year = today.year
+                    if year_int > current_year or (year_int == current_year and today.month < 12):
+                        # Год в будущем или текущий год, но еще не декабрь - показываем кнопку
+                        show_notify_button = True
+                except:
+                    pass
+        
+        if show_notify_button:
+            markup.add(InlineKeyboardButton("🔔 Уведомить о выходе", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
+        elif premiere_date and premiere_date <= today:
+            # Дата в прошлом - показываем старую кнопку "Напомнить" только если нет напоминания
+            with db_lock:
+                cursor.execute('''
+                    SELECT id FROM premiere_reminders 
+                    WHERE chat_id = %s AND user_id = %s AND kp_id = %s
+                ''', (chat_id, call.from_user.id, kp_id))
+                existing = cursor.fetchone()
+            
+            if not existing:
+                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+                markup.add(InlineKeyboardButton("🔔 Напомнить о выходе премьеры", callback_data=f"premiere_remind:{kp_id}:{date_for_callback}"))
         
         # Добавляем кнопку "Назад" - возвращаемся к списку премьер
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{period}"))
@@ -2765,15 +2783,20 @@ def premieres_back_handler(call):
     """Обработчик возврата к списку премьер"""
     try:
         bot.answer_callback_query(call.id)
-        period = call.data.split(":")[1] if ":" in call.data else 'current_month'
+        parts = call.data.split(":")
+        period = parts[1] if len(parts) > 1 else 'current_month'
         chat_id = call.message.chat.id
+        message_id = call.message.message_id
         
         # Получаем премьеры для периода
         from api.kinopoisk_api import get_premieres_for_period
         premieres = get_premieres_for_period(period)
         
         if not premieres:
-            bot.edit_message_text("❌ Не удалось получить список премьер.", chat_id, call.message.message_id)
+            try:
+                bot.edit_message_text("❌ Не удалось получить список премьер.", chat_id, message_id)
+            except:
+                bot.send_message(chat_id, "❌ Не удалось получить список премьер.")
             return
         
         # Показываем первую страницу
@@ -6790,8 +6813,11 @@ def handle_add_film_callback(call):
         # Создаем кнопки
         markup = InlineKeyboardMarkup(row_width=1)
         
+        # Всегда показываем кнопку "Добавить в базу" (если фильм уже в базе, она просто не добавит дубликат)
+        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
+        
         if film_in_db:
-            # Фильм уже в базе - показываем кнопки планирования, фактов и оценки
+            # Фильм уже в базе - показываем дополнительные кнопки планирования, фактов и оценки
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
             
             # Получаем информацию об оценках для текущего пользователя
@@ -6832,9 +6858,6 @@ def handle_add_film_callback(call):
                     markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
                 else:
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-        else:
-            # Фильм не в базе - показываем кнопку добавления
-            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
         
         # Отправляем описание
         try:
@@ -7563,6 +7586,49 @@ def handle_timezone_callback(call):
         logger.error(f"[SETTINGS] Ошибка в handle_timezone_callback: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan_type:"))
+def plan_type_callback(call):
+    """Обработчик выбора типа просмотра (дома/в кино)"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        plan_type = call.data.split(":")[1]  # 'home' или 'cinema'
+        
+        # Проверяем, есть ли состояние пользователя
+        if user_id not in user_plan_state:
+            bot.edit_message_text("❌ Ошибка: сессия истекла. Начните заново с /plan", chat_id, call.message.message_id)
+            return
+        
+        state = user_plan_state[user_id]
+        link = state.get('link')
+        
+        if not link:
+            bot.edit_message_text("❌ Ошибка: не найдена ссылка на фильм. Начните заново с /plan", chat_id, call.message.message_id)
+            del user_plan_state[user_id]
+            return
+        
+        # Сохраняем тип просмотра
+        state['type'] = plan_type
+        state['step'] = 3
+        
+        # Удаляем сообщение с выбором типа
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
+        
+        # Просим указать дату/день
+        bot.send_message(chat_id, f"📅 Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\nМожно указать:\n• День недели (сегодня, завтра, понедельник и т.д.)\n• Дату (01.01, 1 января и т.д.)\n• Время (19:00, 20:30)")
+        
+        logger.info(f"[PLAN TYPE] Пользователь {user_id} выбрал {plan_type}, link={link}")
+    except Exception as e:
+        logger.error(f"[PLAN TYPE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
@@ -9136,6 +9202,14 @@ def show_premieres_page(call, premieres, period, page=0):
         text += f"\nСтраница {page + 1} из {total_pages}"
         text += "\n\nВыберите фильм для подробностей:"
         
+        # Используем edit_message_text вместо send_message, если это callback
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
+            # Если не получилось отредактировать, отправляем новое
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        
         bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         bot.answer_callback_query(call.id)
     except Exception as e:
@@ -10046,6 +10120,7 @@ def ticket_session_callback(call):
             
             # Создаем кнопки в зависимости от наличия времени
             markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
             if not has_time:
                 # Если нет времени, добавляем обе кнопки
                 markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
@@ -10088,6 +10163,7 @@ def ticket_session_callback(call):
                 has_time = True
         
         markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
         if not has_time:
             # Если нет времени, добавляем обе кнопки
             markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
@@ -10128,6 +10204,7 @@ def ticket_session_callback(call):
                 has_time = True
         
         markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
         if not has_time:
             # Если нет времени, добавляем обе кнопки
             markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
@@ -11840,10 +11917,19 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
     user_tz = get_user_timezone_or_default(user_id)
     now = datetime.now(user_tz)
     
-    # Обработка специальных случаев
-    day_lower = day_or_date.lower().strip()
-    
-    # Обработка "сегодня"
+    # Сначала пробуем использовать parse_session_time для форматов с датой и временем
+    # Это особенно важно для режима "в кино", где время часто указывается явно
+    # Форматы: "03.01 21:25", "15 января 10:30", "17.01.2025 15:20"
+    parsed_dt = parse_session_time(day_or_date, user_tz)
+    if parsed_dt:
+        plan_dt = parsed_dt
+        logger.info(f"[PROCESS_PLAN] Использован parse_session_time: {plan_dt}")
+    else:
+        # Если parse_session_time не сработал, используем стандартную логику
+        # Обработка специальных случаев
+        day_lower = day_or_date.lower().strip()
+        
+        # Обработка "сегодня"
     if 'сегодня' in day_lower:
         plan_date = now.date()
         if plan_type == 'home':
@@ -11990,12 +12076,28 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     else:
                         plan_date = datetime(year, month, day_num)
                     
-                    if plan_type == 'cinema':
-                        hour = 9
-                    else:  # home
-                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                        hour = 19 if plan_date.weekday() < 5 else 10
-                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                    # Проверяем, есть ли время в исходной строке
+                    time_match = re.search(r'(\d{1,2})[: ](\d{1,2})', day_or_date)
+                    if time_match:
+                        hour = int(time_match.group(1))
+                        minute = int(time_match.group(2))
+                        if 0 <= hour <= 23 and 0 <= minute <= 59:
+                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=minute))
+                            logger.info(f"[PLAN] Найдена дата с временем (текстовый формат): {day_num} {month_str} {year if year_str else now.year} {hour}:{minute}")
+                        else:
+                            # Некорректное время, используем значения по умолчанию
+                            if plan_type == 'cinema':
+                                hour = 9
+                            else:  # home
+                                hour = 19 if plan_date.weekday() < 5 else 10
+                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                    else:
+                        if plan_type == 'cinema':
+                            hour = 9
+                        else:  # home
+                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                            hour = 19 if plan_date.weekday() < 5 else 10
+                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                 except ValueError:
                     logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
                     return False
@@ -12046,13 +12148,29 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                         else:
                             plan_date = datetime(year, month_num, day_num)
                         
-                        if plan_type == 'cinema':
-                            hour = 9
-                        else:  # home
-                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                            hour = 19 if plan_date.weekday() < 5 else 10
-                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
+                        # Проверяем, есть ли время в исходной строке
+                        time_match = re.search(r'(\d{1,2})[: ](\d{1,2})', day_or_date)
+                        if time_match:
+                            hour = int(time_match.group(1))
+                            minute = int(time_match.group(2))
+                            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=minute))
+                                logger.info(f"[PLAN] Найдена дата с временем (числовой формат): {day_num}.{month_num}.{year} {hour}:{minute}")
+                            else:
+                                # Некорректное время, используем значения по умолчанию
+                                if plan_type == 'cinema':
+                                    hour = 9
+                                else:  # home
+                                    hour = 19 if plan_date.weekday() < 5 else 10
+                                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                        else:
+                            if plan_type == 'cinema':
+                                hour = 9
+                            else:  # home
+                                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                                hour = 19 if plan_date.weekday() < 5 else 10
+                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
                     except ValueError as e:
                         logger.error(f"[PLAN] Некорректная дата: {day_num}.{month_num}.{year_str if year_str else 'N/A'}: {e}")
                         return False
@@ -12394,21 +12512,48 @@ def plan_handler(message):
                 logger.info(f"[PLAN] Найдена дата (текстовый формат): {day_or_date}")
             else:
                 # Формат "15.01", "15/01", "15.01.25", "15.01.2025", "15/01/25", "15/01/2025"
-                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                if date_match:
-                    day_num = int(date_match.group(1))
-                    month_num = int(date_match.group(2))
+                # Также проверяем наличие времени: "15.01 21:25", "15.01.2025 21:25"
+                date_time_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\s+(\d{1,2})[: ](\d{1,2})', text)
+                if date_time_match:
+                    # Есть дата и время - сохраняем полный формат
+                    day_num = int(date_time_match.group(1))
+                    month_num = int(date_time_match.group(2))
+                    year_str = date_time_match.group(3)
+                    hour = int(date_time_match.group(4))
+                    minute = int(date_time_match.group(5))
                     if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
-                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
-                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+                        if year_str:
+                            day_or_date = f"{day_num}.{month_num}.{year_str} {hour}:{minute}"
+                        else:
+                            day_or_date = f"{day_num}.{month_num} {hour}:{minute}"
+                        logger.info(f"[PLAN] Найдена дата с временем: {day_or_date}")
+                else:
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+        
+        # Проверяем, есть ли отдельно указанное время (если дата уже найдена, но время не включено)
+        if day_or_date and plan_type == 'cinema':
+            # Для режима "в кино" ищем время отдельно, если оно не было включено в дату
+            time_match = re.search(r'\b(\d{1,2})[: ](\d{1,2})\b', text)
+            if time_match and ':' not in day_or_date and ' ' not in day_or_date.split()[-1]:
+                hour = int(time_match.group(1))
+                minute = int(time_match.group(2))
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    day_or_date = f"{day_or_date} {hour}:{minute}"
+                    logger.info(f"[PLAN] Добавлено время к дате: {day_or_date}")
         
         logger.info(f"[PLAN] link={link}, plan_type={plan_type}, day_or_date={day_or_date}")
         
         if link and plan_type and day_or_date:
             try:
-                process_plan(user_id, chat_id, link, plan_type, day_or_date)
+                process_plan(user_id, chat_id, link, plan_type, day_or_date, message.date)
             except Exception as e:
                 bot.reply_to(message, f"Ошибка при планировании: {e}")
                 logger.error(f"Ошибка process_plan: {e}", exc_info=True)
@@ -12455,6 +12600,48 @@ def plan_handler(message):
         logger.error(f"❌ Ошибка в /plan: {e}", exc_info=True)
         try:
             bot.reply_to(message, "Произошла ошибка при обработке команды /plan")
+        except:
+            pass
+
+@bot.message_handler(content_types=['text'], func=lambda message: message.from_user.id in user_plan_state and user_plan_state.get(message.from_user.id, {}).get('step') == 3)
+def handle_plan_day_or_date(message):
+    """Обработчик ввода дня/даты для планирования"""
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        if user_id not in user_plan_state:
+            return
+        
+        state = user_plan_state[user_id]
+        plan_type = state.get('type')
+        link = state.get('link')
+        
+        if not plan_type or not link:
+            bot.reply_to(message, "❌ Ошибка: не указан тип просмотра или ссылка. Начните заново с /plan")
+            del user_plan_state[user_id]
+            return
+        
+        day_or_date = message.text.strip()
+        
+        # Обрабатываем планирование
+        result = process_plan(user_id, chat_id, link, plan_type, day_or_date, message.date)
+        
+        if result == 'NEEDS_TIMEZONE':
+            # Нужно уточнить часовой пояс - это обрабатывается в process_plan
+            return
+        elif result:
+            # Успешно - удаляем состояние
+            if user_id in user_plan_state:
+                del user_plan_state[user_id]
+        else:
+            # Ошибка - состояние остается для повторной попытки
+            pass
+            
+    except Exception as e:
+        logger.error(f"[PLAN DAY/DATE HANDLER] Ошибка: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке даты. Попробуйте еще раз.")
         except:
             pass
 
