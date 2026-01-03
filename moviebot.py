@@ -5367,15 +5367,8 @@ def main_text_handler(message):
     
     # === user_payment_state ===
     # Проверяем состояние оплаты - если пользователь вводит username для подписки,
-    # передаем управление специализированному обработчику
-    if user_id in user_payment_state:
-        state = user_payment_state[user_id]
-        step = state.get('step')
-        if step in ['check_personal_username', 'enter_personal_username', 'check_group_username', 'enter_group_username']:
-            # Передаем управление обработчику оплаты
-            # Он будет вызван автоматически благодаря декоратору
-            logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_payment_state, step={step}, передаем управление обработчику оплаты")
-            return  # Возвращаемся, чтобы не логировать "не обработано"
+    # передаем управление специализированному обработчику (он имеет более высокий priority=10)
+    # Не обрабатываем здесь, чтобы обработчик оплаты мог обработать сообщение
     
     # 2. Обработка реплаев
     
@@ -12965,6 +12958,8 @@ def handle_payment_callback(call):
         action = call.data.split(":", 1)[1]
         is_private = call.message.chat.type == 'private'
         
+        logger.info(f"[PAYMENT CALLBACK] Получен callback от {user_id}, action={action}, is_private={is_private}, chat_id={chat_id}")
+        
         from database.db_operations import (
             get_active_subscription, get_active_subscription_by_username, 
             get_active_group_subscription, get_user_personal_subscriptions,
@@ -13061,45 +13056,7 @@ def handle_payment_callback(call):
             bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             return
         
-        if action.startswith("active:group"):
-            # Проверка групповой подписки
-            if is_private:
-                # В личке - показываем выбор группы
-                user_payment_state[user_id] = {
-                    'step': 'check_group_username',
-                    'chat_id': chat_id
-                }
-                text = "👥 <b>Проверка групповой подписки</b>\n\n"
-                text += "Укажите ник группы в Telegram (можно с @ или без):"
-            else:
-                # В группе - показываем выбор текущей или другой группы
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("📍 Текущая группа", callback_data="payment:active:group:current"))
-                markup.add(InlineKeyboardButton("📍 Другая группа", callback_data="payment:active:group:other"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                try:
-                    bot.edit_message_text(
-                        "👥 <b>Групповая подписка</b>\n\nВыберите группу:",
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    # Игнорируем ошибку "message is not modified"
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                return
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-            try:
-                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e:
-                if "message is not modified" not in str(e):
-                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-            return
-        
+        # Сначала проверяем точные совпадения для групповых подписок
         if action == "active:group:current":
             # Проверка подписки текущей группы
             try:
@@ -13729,6 +13686,44 @@ def handle_payment_callback(call):
                 if "message is not modified" not in str(e):
                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
             return
+        
+        # Общая проверка для групповых подписок (после обработки точных совпадений)
+        if action == "active:group":
+            # Проверка групповой подписки (общий случай, не current и не other)
+            if is_private:
+                # В личке - показываем выбор группы
+                user_payment_state[user_id] = {
+                    'step': 'check_group_username',
+                    'chat_id': chat_id
+                }
+                text = "👥 <b>Проверка групповой подписки</b>\n\n"
+                text += "Укажите ник группы в Telegram (можно с @ или без):"
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                try:
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
+            else:
+                # В группе - показываем выбор текущей или другой группы
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("📍 Текущая группа", callback_data="payment:active:group:current"))
+                markup.add(InlineKeyboardButton("📍 Другая группа", callback_data="payment:active:group:other"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                try:
+                    bot.edit_message_text(
+                        "👥 <b>Групповая подписка</b>\n\nВыберите группу:",
+                        call.message.chat.id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
         
         if action.startswith("tariffs:personal"):
             # Тарифы для личных подписок
@@ -14592,7 +14587,7 @@ def handle_payment_callback(call):
         except:
             pass
 
-@bot.message_handler(func=lambda m: m.from_user.id in user_payment_state and user_payment_state[m.from_user.id].get('step') in ['check_personal_username', 'enter_personal_username', 'check_group_username', 'enter_group_username'], priority=1)
+@bot.message_handler(content_types=['text'], func=lambda m: m.from_user.id in user_payment_state and user_payment_state[m.from_user.id].get('step') in ['check_personal_username', 'enter_personal_username', 'check_group_username', 'enter_group_username'], priority=10)
 def handle_payment_username(message):
     """Обработчик ввода username для проверки/оформления подписки"""
     try:
@@ -14601,6 +14596,8 @@ def handle_payment_username(message):
         state = user_payment_state.get(user_id, {})
         step = state.get('step')
         username = message.text.strip().lstrip('@')
+        
+        logger.info(f"[PAYMENT USERNAME HANDLER] Получено сообщение от {user_id}, step={step}, username={username}")
         
         from database.db_operations import (
             get_active_subscription_by_username, get_active_group_subscription,
