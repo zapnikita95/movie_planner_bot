@@ -4326,12 +4326,12 @@ def get_plan_day_or_date_internal(message, state):
         logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
     
     if not plan_dt:
-    target_weekday = None
-    for phrase, wd in days_full.items():
-        if phrase in text:
-            target_weekday = wd
-            logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
-            break
+        target_weekday = None
+        for phrase, wd in days_full.items():
+            if phrase in text:
+                target_weekday = wd
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
+                break
     
     if target_weekday is not None:
         current_wd = now.weekday()
@@ -5874,13 +5874,13 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
             
             # Если страниц немного (<= 20), показываем все
             if total_pages <= 20:
-            buttons = []
-            for p in range(1, total_pages + 1):
-                label = f"•{p}" if p == page else str(p)
-                buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
-            # Разбиваем кнопки на строки по 10 штук
-            for i in range(0, len(buttons), 10):
-                markup.row(*buttons[i:i+10])
+                buttons = []
+                for p in range(1, total_pages + 1):
+                    label = f"•{p}" if p == page else str(p)
+                    buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
+                # Разбиваем кнопки на строки по 10 штук
+                for i in range(0, len(buttons), 10):
+                    markup.row(*buttons[i:i+10])
             else:
                 # Для большого количества страниц используем умную пагинацию
                 buttons = []
@@ -6985,12 +6985,12 @@ def handle_add_film_callback(call):
             is_series = film_type_from_callback == 'TV_SERIES'
         else:
             # Если тип не передан, проверяем в базе
-        with db_lock:
+            with db_lock:
                 cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-            existing = cursor.fetchone()
-            if existing:
-                film_in_db = True
-                film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+                existing = cursor.fetchone()
+                if existing:
+                    film_in_db = True
+                    film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
                     is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
         
         # Формируем правильную ссылку в зависимости от типа
@@ -8701,13 +8701,13 @@ def random_mode_handler(call):
                             available_periods.append(period)
             else:
                 # Для остальных режимов - используем старую логику
-            base_query = """
-                SELECT COUNT(DISTINCT m.id) 
-                FROM movies m
-                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-            """
-            params = [chat_id]
+                base_query = """
+                    SELECT COUNT(DISTINCT m.id) 
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                """
+                params = [chat_id]
             
             for period in all_periods:
                 if period == "До 1980":
@@ -8978,14 +8978,14 @@ def _show_genre_step(call, chat_id, user_id):
                 cursor.execute(base_query, params)
             else:
                 # Для остальных режимов - используем старую логику
-        base_query = """
-            SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-            FROM movies m
-            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-            AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
-        """
-        params = [chat_id]
+                base_query = """
+                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                """
+                params = [chat_id]
         
         # Добавляем фильтр по периодам, если они выбраны
         if periods:
@@ -10591,7 +10591,7 @@ def show_premieres_page(call, premieres, period, page=0):
         # Используем edit_message_text вместо send_message, если это callback
         if call.message.message_id:
             try:
-        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e:
                 error_str = str(e)
                 # Игнорируем ошибку "message is not modified" и "there is no text in the message to edit"
@@ -10601,13 +10601,13 @@ def show_premieres_page(call, premieres, period, page=0):
                 try:
                     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 except:
-                        pass
+                    pass
         else:
             # Если message_id нет, отправляем новое сообщение
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
         if call.id:
-        bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
@@ -13977,125 +13977,125 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         logger.info(f"[PROCESS_PLAN] Использован parse_session_time: {plan_dt}")
     else:
         # Если parse_session_time не сработал, используем стандартную логику
-    # Обработка специальных случаев
-    day_lower = day_or_date.lower().strip()
-    
-    # Обработка "сегодня"
-    if 'сегодня' in day_lower:
-        plan_date = now.date()
-        if plan_type == 'home':
-            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-            hour = 19 if now.weekday() < 5 else 10
-        else:
-            hour = 9
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
-        if plan_dt < now:
-            # Если время уже прошло, переносим на завтра
-            plan_dt = plan_dt + timedelta(days=1)
-    
-    # Обработка "завтра" (для обоих режимов)
-    elif 'завтра' in day_lower:
-        plan_date = (now.date() + timedelta(days=1))
-        if plan_type == 'cinema':
-            hour = 9
-        else:  # home
-            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-            hour = 19 if plan_date.weekday() < 5 else 10
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
-    
-    # Обработка "следующая неделя" (для обоих режимов)
-    elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower or 'на следующей неделе' in day_lower:
-        if plan_type == 'cinema':
-            # Для кино - напоминание в четверг, день премьер
-            current_wd = now.weekday()
-            days_until_thursday = (3 - current_wd + 7) % 7
-            if days_until_thursday == 0:
-                # Если сегодня четверг, берем следующий четверг
-                days_until_thursday = 7
-            else:
-                # Добавляем еще неделю, чтобы получить четверг следующей недели
-                days_until_thursday += 7
-            plan_date = now.date() + timedelta(days=days_until_thursday)
-            hour = 9
-        else:  # home
-            # Для дома - суббота следующей недели в 10:00
-            current_wd = now.weekday()
-            days_until_next_saturday = (5 - current_wd + 7) % 7
-            if days_until_next_saturday == 0:
-                # Если сегодня суббота, берем следующую
-                days_until_next_saturday = 7
-            else:
-                # Иначе добавляем еще неделю, чтобы получить субботу следующей недели
-                days_until_next_saturday += 7
-            plan_date = now.date() + timedelta(days=days_until_next_saturday)
-            hour = 10
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
-    
-    # Обработка "в марте", "в апреле" и т.д. (для обоих режимов - напоминание 1 числа месяца)
-    elif re.search(r'в\s+([а-яё]+)', day_lower):
-        month_match = re.search(r'в\s+([а-яё]+)', day_lower)
-        if month_match:
-            month_str = month_match.group(1)
-            month = months_map.get(month_str)
-            if month:
-                year = now.year
-                # Проверяем, не прошел ли уже этот месяц
-                candidate_date = datetime(year, month, 1).date()
-                if candidate_date < now.date():
-                    # Месяц уже прошел, берем следующий год
-                    year += 1
-                plan_date = datetime(year, month, 1)
-                if plan_type == 'cinema':
-                    hour = 9
-                else:  # home
-                    # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                    hour = 19 if plan_date.weekday() < 5 else 10
-                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-    
-    # Ищем день недели в расширенном словаре (для обоих режимов)
-    if not plan_dt:
-        target_weekday = None
-        # Сортируем фразы по длине (от длинных к коротким), чтобы сначала находить более специфичные варианты
-        sorted_phrases = sorted(days_full.items(), key=lambda x: len(x[0]), reverse=True)
-        for phrase, wd in sorted_phrases:
-            if phrase in day_lower:
-                target_weekday = wd
-                break
-    
-    if target_weekday is not None:
-        # Вычисляем ближайший указанный день (вперёд)
-        current_wd = now.weekday()
-        delta = (target_weekday - current_wd + 7) % 7
+        # Обработка специальных случаев
+        day_lower = day_or_date.lower().strip()
         
-        # Если сегодня указанный день недели
-        if delta == 0:
-            # Проверяем время: если до 20:00, можно планировать на сегодня
-            if now.hour < 20:
-                # Планируем на сегодня
-                plan_date = now.date()
+        # Обработка "сегодня"
+        if 'сегодня' in day_lower:
+            plan_date = now.date()
+            if plan_type == 'home':
+                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                hour = 19 if now.weekday() < 5 else 10
             else:
-                # Уже 20:00 или позже - переносим на следующую неделю
-                delta = 7
+                hour = 9
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+            plan_dt = user_tz.localize(plan_dt)
+            if plan_dt < now:
+                # Если время уже прошло, переносим на завтра
+                plan_dt = plan_dt + timedelta(days=1)
+        
+        # Обработка "завтра" (для обоих режимов)
+        elif 'завтра' in day_lower:
+            plan_date = (now.date() + timedelta(days=1))
+            if plan_type == 'cinema':
+                hour = 9
+            else:  # home
+                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                hour = 19 if plan_date.weekday() < 5 else 10
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+            plan_dt = user_tz.localize(plan_dt)
+        
+        # Обработка "следующая неделя" (для обоих режимов)
+        elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower or 'на следующей неделе' in day_lower:
+            if plan_type == 'cinema':
+                # Для кино - напоминание в четверг, день премьер
+                current_wd = now.weekday()
+                days_until_thursday = (3 - current_wd + 7) % 7
+                if days_until_thursday == 0:
+                    # Если сегодня четверг, берем следующий четверг
+                    days_until_thursday = 7
+                else:
+                    # Добавляем еще неделю, чтобы получить четверг следующей недели
+                    days_until_thursday += 7
+                plan_date = now.date() + timedelta(days=days_until_thursday)
+                hour = 9
+            else:  # home
+                # Для дома - суббота следующей недели в 10:00
+                current_wd = now.weekday()
+                days_until_next_saturday = (5 - current_wd + 7) % 7
+                if days_until_next_saturday == 0:
+                    # Если сегодня суббота, берем следующую
+                    days_until_next_saturday = 7
+                else:
+                    # Иначе добавляем еще неделю, чтобы получить субботу следующей недели
+                    days_until_next_saturday += 7
+                plan_date = now.date() + timedelta(days=days_until_next_saturday)
+                hour = 10
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+            plan_dt = user_tz.localize(plan_dt)
+        
+        # Обработка "в марте", "в апреле" и т.д. (для обоих режимов - напоминание 1 числа месяца)
+        elif re.search(r'в\s+([а-яё]+)', day_lower):
+            month_match = re.search(r'в\s+([а-яё]+)', day_lower)
+            if month_match:
+                month_str = month_match.group(1)
+                month = months_map.get(month_str)
+                if month:
+                    year = now.year
+                    # Проверяем, не прошел ли уже этот месяц
+                    candidate_date = datetime(year, month, 1).date()
+                    if candidate_date < now.date():
+                        # Месяц уже прошел, берем следующий год
+                        year += 1
+                    plan_date = datetime(year, month, 1)
+                    if plan_type == 'cinema':
+                        hour = 9
+                    else:  # home
+                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                        hour = 19 if plan_date.weekday() < 5 else 10
+                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+        
+        # Ищем день недели в расширенном словаре (для обоих режимов)
+        if not plan_dt:
+            target_weekday = None
+            # Сортируем фразы по длине (от длинных к коротким), чтобы сначала находить более специфичные варианты
+            sorted_phrases = sorted(days_full.items(), key=lambda x: len(x[0]), reverse=True)
+            for phrase, wd in sorted_phrases:
+                if phrase in day_lower:
+                    target_weekday = wd
+                    break
+        
+        if target_weekday is not None:
+            # Вычисляем ближайший указанный день (вперёд)
+            current_wd = now.weekday()
+            delta = (target_weekday - current_wd + 7) % 7
+            
+            # Если сегодня указанный день недели
+            if delta == 0:
+                # Проверяем время: если до 20:00, можно планировать на сегодня
+                if now.hour < 20:
+                    # Планируем на сегодня
+                    plan_date = now.date()
+                else:
+                    # Уже 20:00 или позже - переносим на следующую неделю
+                    delta = 7
+                    plan_date = now.date() + timedelta(days=delta)
+            else:
                 plan_date = now.date() + timedelta(days=delta)
+            
+            if plan_type == 'home':
+                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                hour = 19 if target_weekday < 5 else 10
+            else:  # cinema
+                hour = 9
+            
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+            plan_dt = user_tz.localize(plan_dt)
+        
         else:
-            plan_date = now.date() + timedelta(days=delta)
-        
-        if plan_type == 'home':
-            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-            hour = 19 if target_weekday < 5 else 10
-        else:  # cinema
-            hour = 9
-        
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
-    
-    else:
-        # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
-        # Формат "15 января", "15 янв", "15 января 2025"
-        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?', day_lower)
+            # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
+            # Формат "15 января", "15 янв", "15 января 2025"
+            date_match = re.search(r'(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?', day_lower)
         if date_match:
             day_num = int(date_match.group(1))
             month_str = date_match.group(2)
@@ -14143,12 +14143,12 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                 hour = 19 if plan_date.weekday() < 5 else 10
                             plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                     else:
-                    if plan_type == 'cinema':
-                        hour = 9
-                    else:  # home
-                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                        hour = 19 if plan_date.weekday() < 5 else 10
-                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                        if plan_type == 'cinema':
+                            hour = 9
+                        else:  # home
+                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                            hour = 19 if plan_date.weekday() < 5 else 10
+                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                 except ValueError:
                     logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
                     return False
@@ -14215,12 +14215,12 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                     hour = 19 if plan_date.weekday() < 5 else 10
                                 plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                         else:
-                        if plan_type == 'cinema':
-                            hour = 9
-                        else:  # home
-                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                            hour = 19 if plan_date.weekday() < 5 else 10
-                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                            if plan_type == 'cinema':
+                                hour = 9
+                            else:  # home
+                                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                                hour = 19 if plan_date.weekday() < 5 else 10
+                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                         logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
                     except ValueError as e:
                         logger.error(f"[PLAN] Некорректная дата: {day_num}.{month_num}.{year_str if year_str else 'N/A'}: {e}")
@@ -14579,15 +14579,15 @@ def plan_handler(message):
                             day_or_date = f"{day_num}.{month_num} {hour}:{minute}"
                         logger.info(f"[PLAN] Найдена дата с временем: {day_or_date}")
                 else:
-                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                if date_match:
-                    day_num = int(date_match.group(1))
-                    month_num = int(date_match.group(2))
-                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
-                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
-                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         # Проверяем, есть ли отдельно указанное время (если дата уже найдена, но время не включено)
         if day_or_date and plan_type == 'cinema':
