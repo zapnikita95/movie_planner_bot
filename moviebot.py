@@ -15989,7 +15989,7 @@ def handle_payment_callback(call):
             shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
             secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
             
-            from yookassa import Configuration
+            from yookassa import Configuration, Payment
             Configuration.account_id = shop_id
             Configuration.secret_key = secret_key
             
@@ -16172,7 +16172,7 @@ def handle_payment_callback(call):
             shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
             secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
             
-            from yookassa import Configuration
+            from yookassa import Configuration, Payment
             Configuration.account_id = shop_id
             Configuration.secret_key = secret_key
             
