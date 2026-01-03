@@ -183,7 +183,9 @@ cursor.execute('''
         plan_type TEXT,
         plan_datetime TIMESTAMP WITH TIME ZONE,
         user_id BIGINT,
-        ticket_file_id TEXT
+        ticket_file_id TEXT,
+        notification_sent BOOLEAN DEFAULT FALSE,
+        ticket_notification_sent BOOLEAN DEFAULT FALSE
     )
 ''')
 cursor.execute('''
@@ -355,6 +357,15 @@ try:
     cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS notification_sent BOOLEAN DEFAULT FALSE")
     conn.commit()
     logger.info("Поле notification_sent добавлено в таблицу plans (или уже существует)")
+except Exception as e:
+    logger.warning(f"Ошибка при добавлении поля notification_sent: {e}")
+    conn.rollback()
+
+# Добавляем поле ticket_notification_sent в таблицу plans, если его нет
+try:
+    cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS ticket_notification_sent BOOLEAN DEFAULT FALSE")
+    conn.commit()
+    logger.info("Поле ticket_notification_sent добавлено в таблицу plans (или уже существует)")
 except Exception as e:
     logger.warning(f"Ошибка при добавлении поля notification_sent: {e}")
     conn.rollback()
