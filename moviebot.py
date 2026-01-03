@@ -7153,7 +7153,7 @@ def handle_confirm_add_film_callback(call):
         if film_type_from_callback == 'TV_SERIES':
             link = f"https://www.kinopoisk.ru/series/{kp_id}/"
         else:
-        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         
         # Получаем информацию о фильме
         info = extract_movie_info(link)
