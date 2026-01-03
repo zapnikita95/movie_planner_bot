@@ -869,8 +869,12 @@ def get_active_group_users(chat_id):
         """, (chat_id,))
         users = {}
         for row in cursor.fetchall():
-            user_id = row[0] if isinstance(row, dict) else row[0]
-            username = row[1] if isinstance(row, dict) else row[1]
+            if isinstance(row, dict):
+                user_id = row.get('user_id')
+                username = row.get('username')
+            else:
+                user_id = row[0] if len(row) > 0 else None
+                username = row[1] if len(row) > 1 else None
             if user_id:
                 users[user_id] = username or f"user_{user_id}"
         
