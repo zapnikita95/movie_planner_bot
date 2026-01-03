@@ -488,17 +488,18 @@ def set_notification_setting(chat_id, key, value):
 def get_active_subscription(chat_id, user_id, subscription_type=None):
     """Получает активную подписку для чата/пользователя"""
     # Специальный доступ для создателя бота (@zap_nikita, user_id=301810276)
-    # Возвращаем виртуальную подписку "all" с lifetime периодом
-    if user_id == 301810276:
+    # Возвращаем виртуальную подписку "all" с lifetime периодом ТОЛЬКО для личных подписок
+    # Для групповых подписок создатель должен покупать подписку как и все остальные
+    if user_id == 301810276 and subscription_type == 'personal':
         from datetime import datetime
         import pytz
         now = datetime.now(pytz.UTC)
-        # Возвращаем словарь с данными полной подписки
+        # Возвращаем словарь с данными полной подписки только для личных подписок
         virtual_sub = {
             'id': None,
             'chat_id': chat_id,
             'user_id': user_id,
-            'subscription_type': subscription_type or 'group',
+            'subscription_type': 'personal',
             'plan_type': 'all',
             'period_type': 'lifetime',
             'price': 0,
