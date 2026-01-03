@@ -272,6 +272,35 @@ def init_database():
     except Exception as e:
         logger.debug(f"Миграция subscriptions.group_size: {e}")
     
+    # Миграция: создание таблицы payments (если не существует)
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS payments (
+                id SERIAL PRIMARY KEY,
+                payment_id TEXT UNIQUE NOT NULL,
+                yookassa_payment_id TEXT,
+                user_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                subscription_type TEXT NOT NULL CHECK(subscription_type IN ('personal', 'group')),
+                plan_type TEXT NOT NULL CHECK(plan_type IN ('notifications', 'recommendations', 'tickets', 'all')),
+                period_type TEXT NOT NULL CHECK(period_type IN ('month', '3months', 'year', 'lifetime')),
+                group_size INTEGER,
+                amount DECIMAL(10, 2) NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        ''')
+        conn.commit()
+        logger.info("Миграция: таблица payments создана")
+    except Exception as e:
+        logger.error(f"Миграция payments: {e}", exc_info=True)
+        try:
+            conn.rollback()
+        except:
+            pass
+    
     try:
         cursor.execute('ALTER TABLE settings ALTER COLUMN chat_id TYPE BIGINT')
         logger.info("Миграция: settings.chat_id изменён на BIGINT")
