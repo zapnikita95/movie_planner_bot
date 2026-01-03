@@ -315,7 +315,7 @@ def create_web_app(bot_instance):
             else:
                 logger.warning(f"[YOOKASSA] Платеж уже обработан ранее (статус: {payment_data.get('status')})")
             
-            elif event_json.get('event') == 'payment.canceled':
+            if event_json.get('event') == 'payment.canceled':
                 payment_id = event_json.get('object', {}).get('id')
                 if payment_id:
                     logger.info(f"[YOOKASSA] Платеж отменен: {payment_id}")
