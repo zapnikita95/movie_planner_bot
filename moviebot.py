@@ -13019,10 +13019,15 @@ def handle_payment_callback(call):
                     if subscription_id is None:
                         subscription_id = 0
                     markup = InlineKeyboardMarkup(row_width=1)
-                    # Показываем кнопки только для реальных подписок (id > 0)
+                    # Показываем кнопки для всех активных подписок
+                    # Для подписок с id=0 используем специальный callback
                     if subscription_id and subscription_id > 0:
                         markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
                         markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
+                    elif subscription_id == 0 or subscription_id is None:
+                        # Для виртуальных подписок или подписок без id предлагаем тарифы
+                        markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:personal"))
+                        markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:personal"))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     try:
                         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -13071,8 +13076,14 @@ def handle_payment_callback(call):
                     if subscription_id is None:
                         subscription_id = 0
                     markup = InlineKeyboardMarkup(row_width=1)
+                    # Показываем кнопки для всех активных подписок
                     if subscription_id and subscription_id > 0:
-                        markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                        markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
+                        markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
+                    elif subscription_id == 0 or subscription_id is None:
+                        # Для виртуальных подписок или подписок без id предлагаем тарифы
+                        markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:personal"))
+                        markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:personal"))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                 else:
                     text = "👤 <b>Личная подписка</b>\n\n"
@@ -14064,11 +14075,13 @@ def handle_payment_callback(call):
                 elif group_size in ['5', '10']:
                     text += "💡 <i>У вас есть личная подписка - скидка 50% на группу</i>\n\n"
             
-            text += "Выберите тариф:"
-            
             # Сначала нужно выбрать группу
             from database.db_operations import get_user_groups
-            user_groups = get_user_groups(user_id, bot)
+            try:
+                user_groups = get_user_groups(user_id, bot)
+            except Exception as e:
+                logger.error(f"[PAYMENT] Ошибка получения групп пользователя: {e}", exc_info=True)
+                user_groups = []
             
             if not user_groups:
                 text = f"👥 <b>Групповые тарифы на {group_size} участников</b>\n\n"
@@ -14900,6 +14913,52 @@ def handle_payment_callback(call):
             except Exception as e:
                 logger.error(f"[PAYMENT] Ошибка создания платежа в ЮKassa: {e}", exc_info=True)
                 bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+            return
+        
+        if action.startswith("modify:"):
+            # Изменение подписки - показываем тарифы
+            subscription_id = action.split(":")[1]
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+            
+            # Получаем информацию о текущей подписке
+            from database.db_operations import get_subscription_by_id
+            sub = get_subscription_by_id(int(subscription_id)) if subscription_id.isdigit() else None
+            
+            if sub:
+                subscription_type = sub.get('subscription_type', 'personal')
+                if subscription_type == 'personal':
+                    # Перенаправляем на тарифы для личных подписок
+                    text = "💰 <b>Тарифы</b>\n\n"
+                    text += "Выберите тип подписки:"
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("👤 Личные", callback_data="payment:tariffs:personal"))
+                    markup.add(InlineKeyboardButton("👥 Групповые", callback_data="payment:tariffs:group"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                else:
+                    # Для групповых подписок
+                    text = "💰 <b>Тарифы</b>\n\n"
+                    text += "Выберите тип подписки:"
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("👤 Личные", callback_data="payment:tariffs:personal"))
+                    markup.add(InlineKeyboardButton("👥 Групповые", callback_data="payment:tariffs:group"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+            else:
+                # Если подписка не найдена, просто показываем тарифы
+                text = "💰 <b>Тарифы</b>\n\n"
+                text += "Выберите тип подписки:"
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("👤 Личные", callback_data="payment:tariffs:personal"))
+                markup.add(InlineKeyboardButton("👥 Групповые", callback_data="payment:tariffs:group"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
             return
         
         if action == "cancel":
