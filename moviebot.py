@@ -2909,8 +2909,14 @@ def add_movie_from_random(call):
             pass
 
 # Новая функция для поиска фильмов через API
-def search_films(query, page=1):
-    """Поиск фильмов через Kinopoisk API"""
+def search_films(query, page=1, search_type='mixed'):
+    """Поиск фильмов через Kinopoisk API
+    
+    Args:
+        query: Поисковый запрос
+        page: Номер страницы
+        search_type: Тип поиска - 'film' (только фильмы), 'series' (только сериалы), 'mixed' (все)
+    """
     if not KP_TOKEN:
         logger.error("[SEARCH] KP_TOKEN не установлен")
         return [], 0
@@ -2923,7 +2929,7 @@ def search_films(query, page=1):
         "accept": "application/json"
     }
     
-    logger.info(f"[SEARCH] Запрос: query='{query}', page={page}, url={url}")
+    logger.info(f"[SEARCH] Запрос: query='{query}', page={page}, search_type={search_type}, url={url}")
     
     try:
         response = requests.get(url, params=params, headers=headers, timeout=15)
@@ -2937,7 +2943,21 @@ def search_films(query, page=1):
         data = response.json()
         items = data.get("films", []) or data.get("items", [])
         total_pages = data.get("totalPages", 1) or data.get("pagesCount", 1)
-        logger.info(f"[SEARCH] Найдено результатов: {len(items)}, всего страниц: {total_pages}")
+        logger.info(f"[SEARCH] Найдено результатов до фильтрации: {len(items)}, всего страниц: {total_pages}")
+        
+        # Фильтруем по типу, если указан
+        if search_type != 'mixed' and items:
+            filtered_items = []
+            for item in items:
+                film_type = item.get('type') or item.get('typeRu') or ''
+                is_series = 'SERIES' in str(film_type).upper() or 'СЕРИАЛ' in str(film_type).upper() or item.get('isSeries', False)
+                
+                if search_type == 'film' and not is_series:
+                    filtered_items.append(item)
+                elif search_type == 'series' and is_series:
+                    filtered_items.append(item)
+            items = filtered_items
+            logger.info(f"[SEARCH] Найдено результатов после фильтрации: {len(items)}")
         
         # Логируем структуру первого элемента для отладки
         if items and len(items) > 0:
@@ -3113,7 +3133,9 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
     
     if inserted:
         # Только если реально добавили в БД — отправляем сообщение и сохраняем message_id
-        text = f"🎬 <b>Добавлено в базу!</b>\n\n"
+        is_series = info.get('is_series', False)
+        type_emoji = "📺" if is_series else "🎬"
+        text = f"{type_emoji} <b>Добавлено в базу!</b>\n\n"
         text += f"<b>{info['title']}</b> ({info['year'] or '—'})\n"
         text += f"<i>Режиссёр:</i> {info['director']}\n"
         text += f"<i>Жанры:</i> {info['genres']}\n"
@@ -3140,12 +3162,35 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                         InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
                         InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                     )
+                    
+                    # Если это сериал, добавляем кнопки для сериалов
+                    if is_series:
+                        markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
         try:
             logger.info(f"Отправляем сообщение в чат {chat_id}")
             msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
             # Только если сообщение отправлено успешно и фильм добавлен в БД — сохраняем для реакций
             bot_messages[msg.message_id] = link
+            
+            # Если добавлен сериал, отправляем дополнительное сообщение о планировании серий
+            if is_series:
+                try:
+                    series_text = f"📺 <b>Сериал добавлен в базу!</b>\n\n"
+                    series_text += f"Вы можете:\n"
+                    series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
+                    series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
+                    series_text += f"Используйте команду /seasons для управления сериалами."
+                    
+                    series_markup = InlineKeyboardMarkup(row_width=1)
+                    series_markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                    series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    
+                    bot.send_message(chat_id, series_text, parse_mode='HTML', reply_markup=series_markup)
+                    logger.info(f"[ADD SERIES] Отправлено сообщение о планировании серий для {info.get('title')}")
+                except Exception as e:
+                    logger.error(f"[ADD SERIES] Ошибка отправки сообщения о планировании серий: {e}", exc_info=True)
             
             # Сохраняем информацию о фильме для обработки реплаев с оценками
             with db_lock:
@@ -5024,11 +5069,13 @@ def main_text_handler(message):
         if message.reply_to_message and message.reply_to_message.message_id == state.get('message_id'):
             query = text
             if query:
+                # Получаем тип поиска из состояния
+                search_type = state.get('search_type', 'mixed')
                 # Удаляем состояние
                 del user_search_state[user_id]
                 # Вызываем обработчик поиска
-                logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}")
-                films, total_pages = search_films(query, page=1)
+                logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}")
+                films, total_pages = search_films(query, page=1, search_type=search_type)
                 if not films:
                     bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
                     return
@@ -5043,8 +5090,13 @@ def main_text_handler(message):
                     rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
                     kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                     
+                    # Определяем тип (сериал или фильм)
+                    film_type = film.get('type') or film.get('typeRu') or ''
+                    is_series = 'SERIES' in str(film_type).upper() or 'СЕРИАЛ' in str(film_type).upper() or film.get('isSeries', False)
+                    type_indicator = "📺" if is_series else "🎬"
+                    
                     if kp_id:
-                        button_text = f"{title} ({year})"
+                        button_text = f"{type_indicator} {title} ({year})"
                         if len(button_text) > 50:
                             button_text = button_text[:47] + "..."
                         results_text += f"• <b>{title}</b> ({year})"
@@ -6762,14 +6814,22 @@ def handle_search(message):
         
         query = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
         if not query:
-            reply_msg = bot.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик")
-            # Сохраняем состояние для получения запроса
-            user_search_state[message.from_user.id] = {'chat_id': message.chat.id, 'message_id': reply_msg.message_id}
+            # Создаем кнопки для выбора типа поиска
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+            )
+            reply_msg = bot.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
+            # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
+            user_search_state[message.from_user.id] = {'chat_id': message.chat.id, 'message_id': reply_msg.message_id, 'search_type': 'mixed'}
             return
         
         logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
         
-        films, total_pages = search_films(query, page=1)
+        # Получаем тип поиска из состояния, если есть
+        search_type = user_search_state.get(message.from_user.id, {}).get('search_type', 'mixed')
+        films, total_pages = search_films(query, page=1, search_type=search_type)
         if not films:
             bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
             return
@@ -6822,6 +6882,42 @@ def handle_search(message):
         logger.error(f"❌ Ошибка в /search: {e}", exc_info=True)
         try:
             bot.reply_to(message, "Произошла ошибка при обработке команды /search")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("search_type:"))
+def handle_search_type_callback(call):
+    """Обработчик выбора типа поиска (фильм/сериал)"""
+    try:
+        search_type = call.data.split(":")[1]  # 'film' или 'series'
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        logger.info(f"[SEARCH] Выбран тип поиска: {search_type} от пользователя {user_id}")
+        
+        # Обновляем состояние
+        if user_id in user_search_state:
+            user_search_state[user_id]['search_type'] = search_type
+        else:
+            user_search_state[user_id] = {
+                'chat_id': chat_id,
+                'message_id': call.message.message_id,
+                'search_type': search_type
+            }
+        
+        # Обновляем сообщение с указанием выбранного типа
+        type_text = "🎬 фильмы" if search_type == 'film' else "📺 сериалы" if search_type == 'series' else "🎬📺 фильмы и сериалы"
+        bot.answer_callback_query(call.id, f"Выбран поиск: {type_text}")
+        bot.edit_message_text(
+            f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик",
+            chat_id,
+            call.message.message_id,
+            reply_markup=call.message.reply_markup
+        )
+    except Exception as e:
+        logger.error(f"[SEARCH] Ошибка в handle_search_type_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
@@ -6888,11 +6984,19 @@ def handle_add_film_callback(call):
         text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
         text += f"<a href='{link}'>Кинопоиск</a>"
         
+        # Определяем, является ли это сериалом
+        is_series_from_info = info.get('is_series') or is_series
+        
         # Создаем кнопки
         markup = InlineKeyboardMarkup(row_width=1)
         
         # Всегда показываем кнопку "Добавить в базу" (если фильм уже в базе, она просто не добавит дубликат)
         markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
+        
+        # Если это сериал, показываем кнопки для сериалов даже если не в базе
+        if is_series_from_info and not film_in_db:
+            markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
         if film_in_db:
             # Фильм уже в базе - показываем дополнительные кнопки планирования, фактов и оценки
@@ -6924,8 +7028,10 @@ def handle_add_film_callback(call):
                     InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                 )
             
-            # Если это сериал, добавляем кнопку подписки
+            # Если это сериал, добавляем кнопки для сериалов
             if info.get('is_series') or is_series:
+                markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                
                 # Проверяем, подписан ли уже пользователь
                 with db_lock:
                     cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
