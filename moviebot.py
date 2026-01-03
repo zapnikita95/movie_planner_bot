@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()  # загружает .env (для локальной разработки)
 
 # Импорты модулей проекта
-from config.settings import TOKEN, KP_TOKEN, DATABASE_URL, PLANS_TZ, MONTHS_MAP, DAYS_MAP, DEFAULT_WATCHED_EMOJIS
+from config.settings import TOKEN, KP_TOKEN, DATABASE_URL, PLANS_TZ, MONTHS_MAP, DAYS_MAP, DEFAULT_WATCHED_EMOJIS, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
 from database.db_connection import get_db_connection, get_db_cursor, db_lock, init_database
 from database import db_operations
 from api import kinopoisk_api
@@ -31,6 +31,8 @@ from flask import Flask, request, abort, jsonify
 import socket
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from yookassa import Configuration, Payment
+import uuid
 
 # Импортируем функции из модулей для использования в обработчиках
 from database.db_operations import (
@@ -13869,7 +13871,12 @@ def handle_payment_callback(call):
             return
         
         if action.startswith("pay:"):
-            # Обработка нажатия на кнопку "Оплатить"
+            # Обработка нажатия на кнопку "Оплатить" - создание платежа через ЮKassa
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+            
             parts = action.split(":")
             sub_type = parts[1]  # personal или group
             group_size_str = parts[2] if len(parts) > 5 else ''  # 2, 5, 10 для групп или пусто
@@ -13883,7 +13890,15 @@ def handle_payment_callback(call):
             else:  # group
                 final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
             
-            # Показываем сообщение о необходимости связаться с администратором
+            if final_price <= 0:
+                bot.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
+                return
+            
+            # Инициализируем ЮKassa
+            Configuration.account_id = YOOKASSA_SHOP_ID
+            Configuration.secret_key = YOOKASSA_SECRET_KEY
+            
+            # Формируем описание платежа
             period_names = {
                 'month': 'месяц',
                 '3months': '3 месяца',
@@ -13892,33 +13907,109 @@ def handle_payment_callback(call):
             }
             period_name = period_names.get(period_type, period_type)
             
-            text = f"💳 <b>Оплата подписки</b>\n\n"
-            text += f"📋 <b>Выбранный тариф:</b>\n"
-            if sub_type == 'personal':
-                text += f"👤 Личная подписка\n"
-            else:
-                text += f"👥 Групповая подписка (на {group_size} участников)\n"
-            
             plan_names = {
-                'notifications': '🔔 Уведомления о сериалах',
-                'recommendations': '🎯 Персональные рекомендации',
-                'tickets': '🎫 Билеты на мероприятия',
-                'all': '📦 Все режимы'
+                'notifications': 'Уведомления о сериалах',
+                'recommendations': 'Персональные рекомендации',
+                'tickets': 'Билеты на мероприятия',
+                'all': 'Все режимы'
             }
-            text += f"{plan_names.get(plan_type, plan_type)}\n"
-            text += f"⏰ Период: {period_name}\n"
-            text += f"💰 Сумма: <b>{final_price}₽</b>\n\n"
-            text += "Для завершения оплаты свяжитесь с администратором."
+            plan_name = plan_names.get(plan_type, plan_type)
             
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
+            subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+            description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
             
+            # Создаем уникальный ID платежа
+            payment_id = str(uuid.uuid4())
+            
+            # Определяем URL для возврата (нужно будет настроить в зависимости от вашего домена)
+            return_url = os.getenv('YOOKASSA_RETURN_URL', 'https://t.me/movie_planner_bot')
+            
+            # Подготавливаем metadata для платежа
+            metadata = {
+                "user_id": str(user_id),
+                "chat_id": str(chat_id),
+                "subscription_type": sub_type,
+                "plan_type": plan_type,
+                "period_type": period_type,
+                "payment_id": payment_id
+            }
+            
+            # Добавляем group_size, telegram_username или group_username в зависимости от типа подписки
+            if sub_type == 'group':
+                metadata["group_size"] = str(group_size) if group_size else ""
+                if not is_private:
+                    # В группе - сохраняем username группы
+                    group_username = call.message.chat.username
+                    if group_username:
+                        metadata["group_username"] = group_username
+            else:
+                # Для личной подписки
+                if is_private:
+                    # В личке - сохраняем username пользователя
+                    telegram_username = call.from_user.username
+                    if telegram_username:
+                        metadata["telegram_username"] = telegram_username
+            
+            # Создаем платеж
             try:
-                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot.answer_callback_query(call.id, "Для оплаты свяжитесь с администратором")
+                payment = Payment.create({
+                    "amount": {
+                        "value": f"{final_price:.2f}",
+                        "currency": "RUB"
+                    },
+                    "confirmation": {
+                        "type": "redirect",
+                        "return_url": return_url
+                    },
+                    "capture": True,
+                    "description": description,
+                    "metadata": metadata
+                })
+                
+                # Сохраняем информацию о платеже в БД
+                from database.db_operations import save_payment
+                save_payment(
+                    payment_id=payment_id,
+                    yookassa_payment_id=payment.id,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    subscription_type=sub_type,
+                    plan_type=plan_type,
+                    period_type=period_type,
+                    group_size=group_size,
+                    amount=final_price,
+                    status='pending'
+                )
+                
+                # Получаем URL для оплаты
+                confirmation_url = payment.confirmation.confirmation_url
+                
+                # Отправляем сообщение с кнопкой для оплаты
+                text = f"💳 <b>Оплата подписки</b>\n\n"
+                text += f"📋 <b>Выбранный тариф:</b>\n"
+                if sub_type == 'personal':
+                    text += f"👤 Личная подписка\n"
+                else:
+                    text += f"👥 Групповая подписка (на {group_size} участников)\n"
+                text += f"{plan_names.get(plan_type, plan_type)}\n"
+                text += f"⏰ Период: {period_name}\n"
+                text += f"💰 Сумма: <b>{final_price}₽</b>\n\n"
+                text += "Нажмите кнопку ниже для перехода к оплате:"
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
+                
+                try:
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                
             except Exception as e:
-                if "message is not modified" not in str(e):
-                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                logger.error(f"[PAYMENT] Ошибка создания платежа в ЮKassa: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
             return
         
         if action == "cancel":
