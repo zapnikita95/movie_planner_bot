@@ -2549,7 +2549,7 @@ def premiere_detail_handler(call):
         if director_str != '—':
             text += f"🎥 Режиссёр: {director_str}\n"
         if countries != '—':
-            text += f"🌍 {countries}
+            text += f"🌍 {countries}\n"
 "        text += f"\n{description}\n\n"
         text += f"🎭 {genres}\n"
         
