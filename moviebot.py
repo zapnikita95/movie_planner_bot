@@ -4284,7 +4284,7 @@ def get_plan_link_internal(message, state):
                 else:
                     # Проверяем, что это похоже на kp_id (обычно 4+ цифр)
                     if len(kp_id) >= 4:
-                    link = f"https://kinopoisk.ru/film/{kp_id}"
+                        link = f"https://kinopoisk.ru/film/{kp_id}"
                         logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
