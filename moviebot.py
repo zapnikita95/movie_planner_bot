@@ -6999,8 +6999,8 @@ def handle_add_film_callback(call):
                 else:
                     link = f"https://www.kinopoisk.ru/series/{kp_id}/"
             info = extract_movie_info(link)
-                if info:
-                    is_series = info.get('is_series', False)
+            if info:
+                is_series = info.get('is_series', False)
         
         if not info:
             bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
