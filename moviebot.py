@@ -2516,9 +2516,9 @@ def premiere_detail_handler(call):
         
         # Если не получилось через отдельный запрос, пробуем из основного ответа
         if not trailer_url:
-        videos = data.get('videos', {}).get('trailers', [])
-        if videos:
-            trailer_url = videos[0].get('url')  # Первый трейлер
+            videos = data.get('videos', {}).get('trailers', [])
+            if videos:
+                trailer_url = videos[0].get('url')  # Первый трейлер
         
         description = data.get('description') or data.get('shortDescription') or "Нет описания"
         genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'

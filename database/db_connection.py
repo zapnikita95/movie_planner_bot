@@ -80,7 +80,8 @@ def init_database():
             plan_datetime TIMESTAMP WITH TIME ZONE,
             user_id BIGINT,
             ticket_file_id TEXT,
-            notification_sent BOOLEAN DEFAULT FALSE
+            notification_sent BOOLEAN DEFAULT FALSE,
+            ticket_notification_sent BOOLEAN DEFAULT FALSE
         )
     ''')
     
@@ -190,6 +191,36 @@ def init_database():
             reminder_sent BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             UNIQUE(chat_id, user_id, kp_id)
+        )
+    ''')
+    
+    # Таблицы для подписок
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS subscriptions (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT NOT NULL,
+            user_id BIGINT NOT NULL,
+            subscription_type TEXT NOT NULL CHECK(subscription_type IN ('personal', 'group')),
+            plan_type TEXT NOT NULL CHECK(plan_type IN ('notifications', 'recommendations', 'tickets', 'all')),
+            period_type TEXT NOT NULL CHECK(period_type IN ('month', '3months', 'year', 'lifetime')),
+            price DECIMAL(10, 2) NOT NULL,
+            activated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            next_payment_date TIMESTAMP WITH TIME ZONE,
+            expires_at TIMESTAMP WITH TIME ZONE,
+            is_active BOOLEAN DEFAULT TRUE,
+            cancelled_at TIMESTAMP WITH TIME ZONE,
+            telegram_username TEXT,
+            group_username TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS subscription_features (
+            id SERIAL PRIMARY KEY,
+            subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE CASCADE,
+            feature_type TEXT NOT NULL CHECK(feature_type IN ('notifications', 'recommendations', 'tickets')),
+            UNIQUE(subscription_id, feature_type)
         )
     ''')
     
@@ -338,6 +369,10 @@ def init_database():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_stats_chat_id ON stats (chat_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_chat_id ON cinema_votes (chat_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_cinema_votes_film_id ON cinema_votes (film_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_chat_id ON subscriptions (chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions (user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions (is_active, expires_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscription_features_subscription_id ON subscription_features (subscription_id)')
         logger.info("Индексы созданы")
     except Exception as e:
         logger.error(f"Ошибка при создании индексов: {e}", exc_info=True)

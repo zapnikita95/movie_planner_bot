@@ -37,3 +37,6 @@ user_list_state = {}  # user_id: {'chat_id': int, 'page': int}
 # Сообщения "Добавлено в базу" для обработки реплаев с оценками
 added_movie_messages = {}  # message_id: {'chat_id': int, 'film_id': int, 'kp_id': str, 'link': str, 'title': str}
 
+# Состояния оплаты
+user_payment_state = {}  # user_id: {'step': str, 'subscription_type': str, 'plan_type': str, 'period_type': str, 'chat_id': int, 'group_username': str, 'telegram_username': str}
+
