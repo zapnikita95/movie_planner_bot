@@ -39,7 +39,7 @@ import socket
 import psycopg2
 from psycopg2.extras import RealDictCursor
 try:
-    from yookassa import Configuration, Payment
+from yookassa import Configuration, Payment
     YOOKASSA_AVAILABLE = True
 except ImportError:
     YOOKASSA_AVAILABLE = False
@@ -2704,25 +2704,25 @@ def premiere_detail_handler(call):
             premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
         else:
             # Иначе получаем дату премьеры из основного ответа
-            for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-                date_value = data.get(date_field)
-                if date_value:
-                    try:
-                        if 'T' in str(date_value):
-                            premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                        else:
-                            premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                        premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                        break
-                    except:
-                        continue
+        for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+            date_value = data.get(date_field)
+            if date_value:
+                try:
+                    if 'T' in str(date_value):
+                        premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                    else:
+                        premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                    break
+                except:
+                    continue
         
         text = f"<b>{title}</b> ({year})\n\n"
         if premiere_date_str:
             if russia_release:
                 text += f"📅 Премьера в России: {premiere_date_str}\n"
             else:
-                text += f"📅 Премьера: {premiere_date_str}\n"
+            text += f"📅 Премьера: {premiere_date_str}\n"
         if director_str != '—':
             text += f"🎥 Режиссёр: {director_str}\n"
         if countries != '—':
@@ -3422,10 +3422,10 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     # Если это сериал, добавляем кнопки для сериалов (заблокированные, если нет доступа)
                     if is_series and user_id:
                         if has_notifications_access(chat_id, user_id):
-                            markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                            markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                         else:
-                            markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                            markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                             markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
         try:
@@ -3440,20 +3440,20 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     has_access = has_notifications_access(chat_id, user_id)
                     series_text = f"📺 <b>Сериал добавлен в базу!</b>\n\n"
                     if has_access:
-                        series_text += f"Вы можете:\n"
-                        series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
-                        series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
-                        series_text += f"Используйте команду /seasons для управления сериалами."
+                    series_text += f"Вы можете:\n"
+                    series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
+                    series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
+                    series_text += f"Используйте команду /seasons для управления сериалами."
                     else:
                         series_text += f"🔒 <b>Функционал доступен с подпиской на уведомления о сериалах</b>\n\n"
                         series_text += f"Используйте /payment для оформления подписки."
                     
                     series_markup = InlineKeyboardMarkup(row_width=1)
                     if has_access:
-                        series_markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                        series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                        series_markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                    series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                     else:
-                        series_markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                        series_markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                         series_markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
                     
                     bot.send_message(chat_id, series_text, parse_mode='HTML', reply_markup=series_markup)
@@ -3482,12 +3482,12 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                 has_access = has_notifications_access(chat_id, user_id)
                 if has_access:
                     seasons_text = get_seasons(info['kp_id'], chat_id, user_id)
-                    if seasons_text:
-                        bot.send_message(chat_id, seasons_text, parse_mode='HTML')
-                        
-                        # Предлагаем отметить сезоны/серии как просмотренные
-                        markup = InlineKeyboardMarkup()
-                        markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{info['kp_id']}"))
+                if seasons_text:
+                    bot.send_message(chat_id, seasons_text, parse_mode='HTML')
+                    
+                    # Предлагаем отметить сезоны/серии как просмотренные
+                    markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{info['kp_id']}"))
                         # Проверяем, подписан ли уже пользователь
                         with db_lock:
                             cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, info['kp_id']))
@@ -3503,12 +3503,12 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                                 else:
                                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                             else:
-                                markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
-                        bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
+                    bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
                 else:
                     # Нет доступа - показываем заблокированные кнопки
                     markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{info['kp_id']}"))
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{info['kp_id']}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{info['kp_id']}"))
                     bot.send_message(
                         chat_id,
@@ -7503,29 +7503,29 @@ def handle_add_film_callback(call):
             # Если это сериал, добавляем кнопки для сериалов (заблокированные, если нет доступа)
             if is_series_final:
                 if has_notifications_access(chat_id, user_id):
-                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                    
-                    # Проверяем, подписан ли уже пользователь
-                    with db_lock:
-                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                        sub_row = cursor.fetchone()
-                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                    
-                    if is_subscribed:
-                        markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                    else:
-                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                
+                # Проверяем, подписан ли уже пользователь
+                with db_lock:
+                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                    sub_row = cursor.fetchone()
+                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                
+                if is_subscribed:
+                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
                 else:
-                    markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+        else:
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         else:
             # Если фильм не в базе, но это сериал - показываем кнопки для сериалов (заблокированные, если нет доступа)
             if is_series_final:
                 if has_notifications_access(chat_id, user_id):
-                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
-                    markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
         # Сохраняем информацию о сообщении с результатами поиска для кнопки "Назад"
@@ -7764,25 +7764,25 @@ def handle_confirm_add_film_callback(call):
             if info.get('is_series'):
                 if has_notifications_access(chat_id, user_id):
                     # Добавляем кнопку для отметки сезонов/серий
-                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
                     
                     # Проверяем, подписан ли уже пользователь (только если film_id определен)
                     if film_row:
-                        with db_lock:
-                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                            sub_row = cursor.fetchone()
-                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                        
-                        if is_subscribed:
-                            markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                        else:
-                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                with db_lock:
+                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                    sub_row = cursor.fetchone()
+                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                
+                if is_subscribed:
+                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                     else:
                         # Если film_id еще не определен, просто добавляем кнопку подписки
                         markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
                     # Нет доступа - заблокированные кнопки
-                    markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
             
             # Отправляем новое сообщение
@@ -7985,7 +7985,7 @@ def random_start(message):
         has_rec_access = has_recommendations_access(chat_id, user_id)
         
         if has_rec_access:
-            markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+        markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
         else:
             markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
         
@@ -8003,7 +8003,7 @@ def random_start(message):
                     markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
                 else:
                     # Заблокированная кнопка из-за недостаточного количества оценок
-                    markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
+                markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
             
             # Проверяем условие для group_votes: больше 20 групповых оценок, где хотя бы 20 фильмов оценили все участники группы
             # Сначала получаем общее количество уникальных пользователей в группе (исключаем импортированные оценки)
@@ -8034,7 +8034,7 @@ def random_start(message):
                     markup.add(InlineKeyboardButton("🔒 По групповым оценкам (9-10)", callback_data="rand_mode_locked:group_votes"))
                 else:
                     # Заблокированная кнопка из-за недостаточного количества групповых оценок
-                    markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
+                markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
         
         bot.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
         logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
@@ -8396,8 +8396,19 @@ def settings_command(message):
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
         markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
+        
+        # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
+        if has_notifications_access(chat_id, user_id):
         markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
+        
+        # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
+        if has_recommendations_access(chat_id, user_id):
         markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
+        
         markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
         
         sent = bot.send_message(chat_id,
@@ -9014,12 +9025,12 @@ def handle_show_film_description_callback(call):
             # Если это план для кино, добавляем кнопку для билетов
             if plan_type == 'cinema':
                 if has_tickets_access(chat_id, user_id):
-                    if ticket_file_id:
-                        # Билеты есть - кнопка "Перейти к билетам"
-                        markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
-                    else:
-                        # Билетов нет - кнопка "Добавить билеты"
-                        markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                if ticket_file_id:
+                    # Билеты есть - кнопка "Перейти к билетам"
+                    markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
+                else:
+                    # Билетов нет - кнопка "Добавить билеты"
+                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
                 else:
                     # Нет доступа - заблокированная кнопка
                     if ticket_file_id:
@@ -9156,12 +9167,12 @@ def handle_plan_detail_callback(call):
         # Если это план для кино, добавляем кнопку для билетов
         if plan_type == 'cinema':
             if has_tickets_access(chat_id, user_id):
-                if ticket_file_id:
-                    # Билеты есть - кнопка "Перейти к билетам"
-                    markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
-                else:
-                    # Билетов нет - кнопка "Добавить билеты"
-                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+            if ticket_file_id:
+                # Билеты есть - кнопка "Перейти к билетам"
+                markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
+            else:
+                # Билетов нет - кнопка "Добавить билеты"
+                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
             else:
                 # Нет доступа - заблокированная кнопка
                 if ticket_file_id:
@@ -9375,7 +9386,7 @@ def random_mode_locked_handler(call):
             )
         else:
             # Режим заблокирован по другим причинам (недостаточно оценок)
-            bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
+        bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_mode_locked_handler: {e}", exc_info=True)
 
@@ -12327,15 +12338,15 @@ def ticket_session_callback(call):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
             if has_tickets_access(chat_id, user_id):
-                if not has_time:
-                    # Если нет времени, добавляем обе кнопки
-                    markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-                    markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-                    bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
-                else:
-                    # Если время есть, только кнопка добавления билетов
-                    markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
-                    bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
+            if not has_time:
+                # Если нет времени, добавляем обе кнопки
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+                bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
+            else:
+                # Если время есть, только кнопка добавления билетов
+                markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
+                bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
             else:
                 if not has_time:
                     markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
@@ -12379,13 +12390,13 @@ def ticket_session_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
         if has_tickets_access(chat_id, user_id):
-            if not has_time:
-                # Если нет времени, добавляем обе кнопки
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-            else:
-                # Если время есть, только кнопка указания времени (на случай изменения)
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+        if not has_time:
+            # Если нет времени, добавляем обе кнопки
+            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+        else:
+            # Если время есть, только кнопка указания времени (на случай изменения)
+            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
         else:
             if not has_time:
                 markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
@@ -12427,13 +12438,13 @@ def ticket_session_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
         if has_tickets_access(chat_id, user_id):
-            if not has_time:
-                # Если нет времени, добавляем обе кнопки
-                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-            else:
-                # Если время есть, только кнопка добавления билетов
-                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+        if not has_time:
+            # Если нет времени, добавляем обе кнопки
+            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+        else:
+            # Если время есть, только кнопка добавления билетов
+            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
         else:
             if not has_time:
                 markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
@@ -12704,10 +12715,10 @@ def seasons_command(message):
         # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
         is_subscribed = False
         if has_access:
-            with db_lock:
-                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                sub_row = cursor.fetchone()
-                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+        with db_lock:
+            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+            sub_row = cursor.fetchone()
+            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
         
         button_text = title
         # Добавляем колокольчик, если подписан
@@ -12719,13 +12730,13 @@ def seasons_command(message):
         
         # Если нет доступа, кнопки заблокированы
         if has_access:
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
         else:
             markup.add(InlineKeyboardButton(f"🔒 {button_text}", callback_data=f"seasons_locked:{kp_id}"))
     
     # Сохраняем message_id для возможности вернуться назад
     if has_access:
-        msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
+    msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
     else:
         msg = bot.reply_to(
             message,
@@ -12790,7 +12801,7 @@ def show_seasons_callback(call):
                     full_text = seasons_text
                     
                     markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
                     
                     if is_subscribed:
                         markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
@@ -12869,9 +12880,22 @@ def seasons_list_callback(call):
 def series_locked_callback(call):
     """Обработчик заблокированных кнопок сериалов"""
     try:
+        # Определяем, какая кнопка была нажата (по тексту сообщения или по callback_data)
+        callback_data = call.data
+        message_text = call.message.text or ""
+        
+        # Определяем тип функционала по тексту кнопки или сообщения
+        if "Отметить" in message_text or "сезоны" in message_text.lower() or "серии" in message_text.lower():
+            if "Подписаться" in message_text or "subscribe" in callback_data:
+                message = "🔔 Поставить уведомление о выходе новых серий. Функционал можно подключить с подпиской 🔔 Уведомления через /payment"
+            else:
+                message = "✅ Отметить просмотренные серии. Функционал можно подключить с подпиской 🔔 Уведомления через /payment"
+        else:
+            message = "🔒 Функционал можно подключить с подпиской 🔔 Уведомления через /payment"
+        
         bot.answer_callback_query(
             call.id, 
-            "🔒 Функционал можно подключить через /payment", 
+            message, 
             show_alert=True
         )
     except Exception as e:
@@ -13519,7 +13543,7 @@ def has_notifications_access(chat_id, user_id):
     """Проверяет, есть ли у пользователя доступ к функциям уведомлений о сериалах
     (требуется подписка 'notifications' или 'all')
     """
-    from database.db_operations import get_active_subscription
+    from database.db_operations import get_active_subscription, get_active_group_subscription
     
     # Проверяем личную подписку
     personal_sub = get_active_subscription(chat_id, user_id, 'personal')
@@ -13530,7 +13554,9 @@ def has_notifications_access(chat_id, user_id):
     
     # Проверяем групповую подписку (для групповых чатов)
     if chat_id < 0:  # Групповой чат
-        group_sub = get_active_subscription(chat_id, user_id, 'group')
+        # Для групповых подписок нужно использовать get_active_group_subscription
+        # Она ищет подписку по chat_id группы
+        group_sub = get_active_group_subscription(chat_id)
         if group_sub:
             plan_type = group_sub.get('plan_type')
             if plan_type in ['notifications', 'all']:
@@ -13836,8 +13862,8 @@ def handle_payment_callback(call):
                         subscription_id = 0
                     
                     logger.info(f"[PAYMENT] Личная подписка для пользователя {user_id} (в группе): subscription_id={subscription_id}, sub={sub}")
-                    
-                    markup = InlineKeyboardMarkup(row_width=1)
+            
+            markup = InlineKeyboardMarkup(row_width=1)
                     # Показываем кнопки для всех активных подписок
                     if subscription_id and subscription_id > 0:
                         logger.info(f"[PAYMENT] Добавляем кнопки для реальной подписки {subscription_id} (в группе)")
@@ -13848,20 +13874,20 @@ def handle_payment_callback(call):
                         logger.info(f"[PAYMENT] Добавляем кнопки для виртуальной подписки (subscription_id={subscription_id}) (в группе)")
                         markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:personal"))
                         markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:personal"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                else:
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+            else:
                     text = "👤 <b>Личная подписка</b>\n\n"
                     text += "❌ Активная подписка отсутствует, выберите тариф для подключения"
-                    markup = InlineKeyboardMarkup(row_width=1)
+                markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                 
-                try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                return
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
         
         # Сначала проверяем точные совпадения для групповых подписок
         if action == "active:group:current":
@@ -14468,11 +14494,11 @@ def handle_payment_callback(call):
             user_groups = get_user_groups(user_id, bot)
             
             if not user_groups:
-                text = "👥 <b>Проверка групповой подписки</b>\n\n"
+            text = "👥 <b>Проверка групповой подписки</b>\n\n"
                 text += "❌ Не найдено групп, где вы и бот состоите вместе.\n\n"
                 text += "Добавьте бота в группу и отправьте любое сообщение, чтобы группа появилась в списке."
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                 try:
                     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
@@ -14809,15 +14835,15 @@ def handle_payment_callback(call):
                 try:
                     bot.edit_message_text(
                         "👥 <b>Групповая подписка</b>\n\nВыберите группу:",
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                return
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
         
         if action.startswith("tariffs:personal"):
             # Сохраняем информацию о том, откуда пришли (из действующей подписки или из главного меню)
@@ -15165,6 +15191,17 @@ def handle_payment_callback(call):
                 plan_type = parts[3] if len(parts) > 3 else ''
                 period_type = parts[4] if len(parts) > 4 else ''
                 
+                # Инициализируем переменные группы
+                group_chat_id = None
+                group_username = None
+                group_title = None
+                
+                # Получаем информацию о группе из состояния
+                state = user_payment_state.get(user_id, {})
+                group_chat_id = state.get('group_chat_id')
+                group_username = state.get('group_username')
+                group_title = state.get('group_title')
+                
                 # Если есть chat_id в конце (часть 5 или 6), используем его
                 if len(parts) >= 6:
                     try:
@@ -15174,12 +15211,6 @@ def handle_payment_callback(call):
                             group_chat_id = group_chat_id_from_callback
                     except (ValueError, IndexError):
                         pass
-                
-                # Получаем информацию о группе из состояния
-                state = user_payment_state.get(user_id, {})
-                group_chat_id = state.get('group_chat_id')
-                group_username = state.get('group_username')
-                group_title = state.get('group_title')
                 
                 # Если группа не выбрана, используем текущий чат (если это группа)
                 if not group_chat_id:
@@ -15758,19 +15789,19 @@ def handle_payment_callback(call):
                 text += f"💰 Сумма: <b>{final_price}₽{period_suffix}</b>\n\n"
                 text += "Нажмите кнопку ниже для перехода к оплате:"
                 
-                markup = InlineKeyboardMarkup(row_width=1)
+            markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+            
+            if group_size:
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
+            else:
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
                 
-                if group_size:
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
-                else:
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
-                
-                try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                         bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
                 
             except Exception as e:
@@ -15792,7 +15823,7 @@ def handle_payment_callback(call):
             if len(parts) >= 5:
                 # Есть group_size (для групп)
                 group_size_str = parts[2] if parts[2] else ''
-                group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+            group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
                 plan_type = parts[3] if parts[3] else ''
                 period_type = parts[4] if parts[4] else ''
             else:
@@ -16364,20 +16395,20 @@ def handle_payment_callback(call):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                     else:
                         # Для личных подписок отменяем сразу
-                        if cancel_subscription(subscription_id, user_id):
-                            bot.answer_callback_query(call.id, "Подписка отменена")
-                            try:
-                                bot.edit_message_text(
-                                    "✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.",
-                                    call.message.chat.id,
-                                    call.message.message_id,
-                                    parse_mode='HTML'
-                                )
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                        else:
-                            bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
+                if cancel_subscription(subscription_id, user_id):
+                    bot.answer_callback_query(call.id, "Подписка отменена")
+                    try:
+                        bot.edit_message_text(
+                            "✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.",
+                            call.message.chat.id,
+                            call.message.message_id,
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                else:
+                    bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
                 else:
                     bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
             except ValueError:
@@ -16409,18 +16440,18 @@ def handle_payment_callback(call):
                     
                     if rows_updated > 0:
                         logger.info(f"[PAYMENT CANCEL] Деактивировано {rows_updated} виртуальных подписок")
-                        bot.answer_callback_query(call.id, "Подписка отменена")
-                        try:
-                            bot.edit_message_text(
-                                f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
-                                call.message.chat.id,
-                                call.message.message_id,
-                                parse_mode='HTML'
-                            )
-                        except Exception as e:
-                            if "message is not modified" not in str(e):
-                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                    else:
+                    bot.answer_callback_query(call.id, "Подписка отменена")
+                    try:
+                        bot.edit_message_text(
+                            f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
+                            call.message.chat.id,
+                            call.message.message_id,
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                else:
                         logger.info(f"[PAYMENT CANCEL] Виртуальная подписка не найдена в БД для деактивации")
                         bot.answer_callback_query(call.id, "Виртуальная подписка уже отменена", show_alert=True)
                     return
@@ -16469,7 +16500,7 @@ def handle_payment_callback(call):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                     else:
                         logger.error(f"[PAYMENT CANCEL] Ошибка отмены личной подписки {sub_id}")
-                        bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
+                    bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
             return
         
         if action == "back":
@@ -16995,6 +17026,24 @@ def handle_settings_callback(call):
                 'action': 'add',
                 'chat_id': chat_id
             }
+            return
+        
+        if action == "notifications_locked":
+            # Заблокированная кнопка настроек напоминаний
+            bot.answer_callback_query(
+                call.id,
+                "⏰ Настройки напоминаний. Функционал можно подключить с подпиской 🔔 Уведомления через /payment",
+                show_alert=True
+            )
+            return
+        
+        if action == "import_locked":
+            # Заблокированная кнопка импорта базы
+            bot.answer_callback_query(
+                call.id,
+                "📥 Импорт базы из Кинопоиска. Функционал можно подключить с подпиской 🎯 Рекомендации через /payment",
+                show_alert=True
+            )
             return
         
         if action == "notifications":
@@ -18278,7 +18327,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
                     markup = InlineKeyboardMarkup()
                     if has_tickets_access(chat_id, user_id):
-                        markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
                     else:
                         markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
         
