@@ -12890,10 +12890,17 @@ def payment_command(message):
         personal_sub = get_active_subscription(chat_id, user_id, 'personal')
         group_sub = get_active_subscription(chat_id, user_id, 'group')
         
+        # Проверяем, есть ли реальные подписки (не виртуальные, id > 0)
+        has_real_subscription = False
+        if personal_sub and personal_sub.get('id', 0) > 0:
+            has_real_subscription = True
+        if group_sub and group_sub.get('id', 0) > 0:
+            has_real_subscription = True
+        
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
-        if personal_sub or group_sub:
+        if has_real_subscription:
             markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
         
         text = "💳 <b>Оплата подписки</b>\n\n"
@@ -12971,7 +12978,11 @@ def handle_payment_callback(call):
                     else:
                         text += f"⏰ Действует: <b>Навсегда</b>\n"
                     
+                    subscription_id = sub.get('id', 0)
                     markup = InlineKeyboardMarkup(row_width=1)
+                    # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
+                    if subscription_id > 0:
+                        markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     try:
                         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -13046,7 +13057,13 @@ def handle_payment_callback(call):
         
         if action == "active:group:current":
             # Проверка подписки текущей группы
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+            
             from database.db_operations import get_subscription_members, get_active_group_users
+            from datetime import datetime
             sub = get_active_subscription(chat_id, user_id, 'group')
             
             # Если подписки нет, но бот присутствует в группе, создаем виртуальную подписку
@@ -13061,7 +13078,6 @@ def handle_payment_callback(call):
                         active_users = get_active_group_users(chat_id)
                         if active_users:
                             # Создаем виртуальную подписку
-                            from datetime import datetime
                             import pytz
                             now = datetime.now(pytz.UTC)
                             sub = {
@@ -13153,6 +13169,10 @@ def handle_payment_callback(call):
                         diff_10 = int(price_10 * 0.5) - current_price
                     
                     markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
+                
+                # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
+                if subscription_id and subscription_id > 0:
+                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             else:
@@ -13443,6 +13463,11 @@ def handle_payment_callback(call):
         
         if action == "active:group:other":
             # Проверка подписки другой группы
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+            
             user_payment_state[user_id] = {
                 'step': 'check_group_username',
                 'chat_id': chat_id
@@ -13450,8 +13475,12 @@ def handle_payment_callback(call):
             text = "👥 <b>Проверка групповой подписки</b>\n\n"
             text += "Укажите ник группы в Telegram (можно с @ или без):"
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
             return
         
         if action == "tariffs":
@@ -13745,9 +13774,22 @@ def handle_payment_callback(call):
                     if price < base_price:
                         text += f" <s>(было {base_price}₽)</s>"
             
-            text += "\n\nДля завершения оплаты свяжитесь с администратором."
+            # Определяем формат периодичности для кнопки
+            period_display = {
+                'month': '/мес',
+                '3months': ' за 3 мес',
+                'year': ' за год',
+                'lifetime': ' навсегда'
+            }
+            period_suffix = period_display.get(period_type, '')
             
-            # Сохраняем состояние для подтверждения
+            # Вычисляем финальную цену с учетом скидок
+            if sub_type == 'personal':
+                final_price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period_type, 0)
+            else:  # group
+                final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
+            
+            # Сохраняем состояние для подтверждения (используем final_price вместо price)
             if sub_type == 'personal':
                 if is_private:
                     telegram_username = call.from_user.username
@@ -13756,7 +13798,7 @@ def handle_payment_callback(call):
                         'subscription_type': sub_type,
                         'plan_type': plan_type,
                         'period_type': period_type,
-                        'price': price,
+                        'price': final_price,
                         'chat_id': chat_id,
                         'telegram_username': telegram_username
                     }
@@ -13766,7 +13808,7 @@ def handle_payment_callback(call):
                         'subscription_type': sub_type,
                         'plan_type': plan_type,
                         'period_type': period_type,
-                        'price': price,
+                        'price': final_price,
                         'chat_id': chat_id
                     }
                     text += "\n\nУкажите ваш ник в Telegram (можно с @ или без):"
@@ -13777,7 +13819,7 @@ def handle_payment_callback(call):
                         'subscription_type': sub_type,
                         'plan_type': plan_type,
                         'period_type': period_type,
-                        'price': price,
+                        'price': final_price,
                         'group_size': group_size,
                         'chat_id': chat_id
                     }
@@ -13806,7 +13848,11 @@ def handle_payment_callback(call):
                         'group_username': group_username
                     }
             
+            # Создаем кнопку "Оплатить" с указанием суммы и периодичности
             markup = InlineKeyboardMarkup(row_width=1)
+            button_text = f"💳 Оплатить {final_price}₽{period_suffix}"
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"payment:pay:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}"))
+            
             if group_size:
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
             else:
@@ -13845,23 +13891,46 @@ def handle_payment_callback(call):
         
         if action.startswith("cancel:"):
             # Подтверждение отмены
-            sub_type = action.split(":")[1]
-            sub = get_active_subscription(chat_id, user_id, sub_type)
+            parts = action.split(":")
+            second_param = parts[1]
             
-            if sub and cancel_subscription(sub.get('id'), user_id):
-                bot.answer_callback_query(call.id, "Подписка отменена")
-                try:
-                    bot.edit_message_text(
-                        f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
-                        call.message.chat.id,
-                        call.message.message_id,
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-            else:
-                bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
+            # Проверяем, является ли второй параметр числом (subscription_id) или строкой (personal/group)
+            try:
+                subscription_id = int(second_param)
+                # Это subscription_id - отменяем конкретную подписку
+                if cancel_subscription(subscription_id, user_id):
+                    bot.answer_callback_query(call.id, "Подписка отменена")
+                    try:
+                        bot.edit_message_text(
+                            "✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.",
+                            call.message.chat.id,
+                            call.message.message_id,
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                else:
+                    bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
+            except ValueError:
+                # Это строка (personal/group) - используем старую логику
+                sub_type = second_param
+                sub = get_active_subscription(chat_id, user_id, sub_type)
+                
+                if sub and cancel_subscription(sub.get('id'), user_id):
+                    bot.answer_callback_query(call.id, "Подписка отменена")
+                    try:
+                        bot.edit_message_text(
+                            f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
+                            call.message.chat.id,
+                            call.message.message_id,
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                else:
+                    bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
             return
         
         if action == "back":
@@ -13869,10 +13938,17 @@ def handle_payment_callback(call):
             personal_sub = get_active_subscription(chat_id, user_id, 'personal')
             group_sub = get_active_subscription(chat_id, user_id, 'group')
             
+            # Проверяем, есть ли реальные подписки (не виртуальные, id > 0)
+            has_real_subscription = False
+            if personal_sub and personal_sub.get('id', 0) > 0:
+                has_real_subscription = True
+            if group_sub and group_sub.get('id', 0) > 0:
+                has_real_subscription = True
+            
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
             markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
-            if personal_sub or group_sub:
+            if has_real_subscription:
                 markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
             
             try:
@@ -13955,8 +14031,11 @@ def handle_payment_username(message):
         
         if step == 'check_group_username':
             # Проверка групповой подписки по username
+            logger.info(f"[PAYMENT] Проверка групповой подписки для группы @{username}, user_id={user_id}")
+            
             # Проверяем, состоит ли пользователь в группе
             if not check_user_in_group(bot, user_id, username):
+                logger.warning(f"[PAYMENT] Пользователь {user_id} не состоит в группе @{username}")
                 bot.reply_to(message, "⚠️ Сначала нужно вступить в группу и добавить в неё бота.")
                 del user_payment_state[user_id]
                 return
@@ -13965,19 +14044,23 @@ def handle_payment_username(message):
             try:
                 chat = bot.get_chat(f"@{username}")
                 group_chat_id = chat.id
-            except:
+                logger.info(f"[PAYMENT] Найдена группа @{username}, chat_id={group_chat_id}")
+            except Exception as e:
+                logger.error(f"[PAYMENT] Ошибка получения информации о группе @{username}: {e}")
                 bot.reply_to(message, "❌ Не удалось найти группу.")
                 del user_payment_state[user_id]
                 return
             
             # Проверяем подписку
             sub = get_active_group_subscription(username)
+            logger.info(f"[PAYMENT] Результат проверки подписки для @{username}: {sub is not None}")
             
             # Если подписки нет, но бот присутствует в группе, создаем виртуальную подписку
             if not sub:
                 # Проверяем наличие активности в группе
                 from database.db_operations import get_active_group_users
                 active_users = get_active_group_users(group_chat_id)
+                logger.info(f"[PAYMENT] Активных пользователей в группе {group_chat_id}: {len(active_users) if active_users else 0}")
                 if active_users:
                     # Создаем виртуальную подписку
                     from datetime import datetime
@@ -14001,6 +14084,7 @@ def handle_payment_username(message):
                         'group_size': None,
                         'created_at': now
                     }
+                    logger.info(f"[PAYMENT] Создана виртуальная подписка для группы @{username}")
             
             if sub:
                 expires_at = sub.get('expires_at')
@@ -14068,7 +14152,16 @@ def handle_payment_username(message):
                     
                     markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
                 
+                # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
+                if subscription_id and subscription_id > 0:
+                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                
+                # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
+                if subscription_id and subscription_id > 0:
+                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+                logger.info(f"[PAYMENT] Отправка информации о подписке для группы @{username}")
                 bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
             else:
                 text = f"👥 <b>Групповая подписка</b>\n\n"
@@ -14076,6 +14169,7 @@ def handle_payment_username(message):
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:group"))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+                logger.info(f"[PAYMENT] Подписка для группы @{username} не найдена")
                 bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
             
             del user_payment_state[user_id]
