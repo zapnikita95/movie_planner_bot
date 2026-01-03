@@ -211,6 +211,7 @@ def init_database():
             cancelled_at TIMESTAMP WITH TIME ZONE,
             telegram_username TEXT,
             group_username TEXT,
+            group_size INTEGER DEFAULT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
     ''')
@@ -224,6 +225,36 @@ def init_database():
         )
     ''')
     
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS subscription_members (
+            id SERIAL PRIMARY KEY,
+            subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE CASCADE,
+            user_id BIGINT NOT NULL,
+            username TEXT,
+            added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(subscription_id, user_id)
+        )
+    ''')
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS payments (
+            id SERIAL PRIMARY KEY,
+            payment_id TEXT UNIQUE NOT NULL,
+            yookassa_payment_id TEXT,
+            user_id BIGINT NOT NULL,
+            chat_id BIGINT NOT NULL,
+            subscription_type TEXT NOT NULL CHECK(subscription_type IN ('personal', 'group')),
+            plan_type TEXT NOT NULL CHECK(plan_type IN ('notifications', 'recommendations', 'tickets', 'all')),
+            period_type TEXT NOT NULL CHECK(period_type IN ('month', '3months', 'year', 'lifetime')),
+            group_size INTEGER,
+            amount DECIMAL(10, 2) NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            subscription_id INTEGER REFERENCES subscriptions(id) ON DELETE SET NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        )
+    ''')
+    
     # Дефолтные настройки
     cursor.execute('INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING', 
                    (-1, "watched_emoji", DEFAULT_WATCHED_EMOJIS))
@@ -234,6 +265,12 @@ def init_database():
         logger.info("Миграция: movies.chat_id изменён на BIGINT")
     except Exception as e:
         logger.debug(f"Миграция movies.chat_id: {e}")
+    
+    try:
+        cursor.execute('ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS group_size INTEGER')
+        logger.info("Миграция: subscriptions.group_size добавлен")
+    except Exception as e:
+        logger.debug(f"Миграция subscriptions.group_size: {e}")
     
     try:
         cursor.execute('ALTER TABLE settings ALTER COLUMN chat_id TYPE BIGINT')

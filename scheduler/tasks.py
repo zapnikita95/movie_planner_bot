@@ -139,6 +139,19 @@ def send_ticket_notification(chat_id, plan_id):
                 logger.error(f"[TICKET NOTIFICATION] Ошибка отправки билетов: {e}")
                 bot.send_message(chat_id, f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>", parse_mode='HTML')
         
+        # Отмечаем как отправленное в базе данных
+        try:
+            with db_lock:
+                cursor.execute('''
+                    UPDATE plans 
+                    SET ticket_notification_sent = TRUE 
+                    WHERE id = %s
+                ''', (plan_id,))
+                conn.commit()
+            logger.info(f"[TICKET NOTIFICATION] План {plan_id} отмечен как уведомление с билетами отправлено")
+        except Exception as e:
+            logger.warning(f"[TICKET NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}")
+        
         logger.info(f"[TICKET NOTIFICATION] Напоминание с билетами отправлено для {title} в чат {chat_id}")
     except Exception as e:
         logger.error(f"[TICKET NOTIFICATION] Ошибка отправки напоминания: {e}", exc_info=True)
@@ -165,7 +178,7 @@ def check_and_send_plan_notifications():
 
                 SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
 
-                       m.title, m.link
+                       m.title, m.link, p.notification_sent, p.ticket_notification_sent
 
                 FROM plans p
 
@@ -211,6 +224,10 @@ def check_and_send_plan_notifications():
 
                 link = plan.get('link')
 
+                notification_sent = plan.get('notification_sent', False)
+
+                ticket_notification_sent = plan.get('ticket_notification_sent', False)
+
             else:
 
                 plan_id = plan[0]
@@ -228,6 +245,10 @@ def check_and_send_plan_notifications():
                 title = plan[6]
 
                 link = plan[7]
+
+                notification_sent = plan[8] if len(plan) > 8 else False
+
+                ticket_notification_sent = plan[9] if len(plan) > 9 else False
 
             
 
@@ -295,8 +316,8 @@ def check_and_send_plan_notifications():
                 
 
                 # Планируем напоминание, если оно еще не запланировано и время еще не прошло
-
-                if reminder_utc and reminder_utc > now_utc:
+                # Проверяем, не было ли уже отправлено уведомление
+                if reminder_utc and reminder_utc > now_utc and not notification_sent:
 
                     try:
 
@@ -314,7 +335,7 @@ def check_and_send_plan_notifications():
 
                                 run_date=reminder_utc,
 
-                                args=[chat_id, film_id, title, link, plan_type],
+                                args=[chat_id, film_id, title, link, plan_type, plan_id],
 
                                 id=job_id
 
@@ -329,16 +350,21 @@ def check_and_send_plan_notifications():
                 elif reminder_utc and reminder_utc <= now_utc and reminder_utc >= now_utc - timedelta(minutes=30):
 
                     # Время напоминания уже прошло, но не более 30 минут назад - отправляем сразу
-
-                    try:
-
-                        send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
-
-                        logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана кино {plan_id} (фильм {title})")
-
-                    except Exception as e:
-
-                        logger.error(f"[PLAN CHECK] Ошибка отправки напоминания для плана {plan_id}: {e}", exc_info=True)
+                    # Проверяем, не было ли уже отправлено уведомление
+                    if not notification_sent:
+                        try:
+                            # Проверяем, не запланировано ли уже уведомление
+                            job_id = f'plan_reminder_{chat_id}_{plan_id}_{int(reminder_utc.timestamp())}'
+                            existing_job = scheduler.get_job(job_id)
+                            if not existing_job:
+                                send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                                logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана кино {plan_id} (фильм {title})")
+                            else:
+                                logger.info(f"[PLAN CHECK] Напоминание уже запланировано для плана кино {plan_id}")
+                        except Exception as e:
+                            logger.error(f"[PLAN CHECK] Ошибка отправки напоминания для плана {plan_id}: {e}", exc_info=True)
+                    else:
+                        logger.info(f"[PLAN CHECK] Напоминание уже отправлено для плана кино {plan_id}, пропускаем")
 
                 
 
@@ -373,8 +399,8 @@ def check_and_send_plan_notifications():
                 if ticket_file_id and ticket_utc:
 
                     # Планируем напоминание с билетами, если оно еще не запланировано и время еще не прошло
-
-                    if ticket_utc > now_utc:
+                    # Проверяем, не было ли уже отправлено уведомление с билетами
+                    if ticket_utc > now_utc and not ticket_notification_sent:
 
                         try:
 
@@ -407,16 +433,25 @@ def check_and_send_plan_notifications():
                     elif ticket_utc <= now_utc and ticket_utc >= now_utc - timedelta(minutes=30):
 
                         # Время напоминания с билетами уже прошло, но не более 30 минут назад - отправляем сразу
-
-                        try:
-
-                            send_ticket_notification(chat_id, plan_id)
-
-                            logger.info(f"[PLAN CHECK] Уведомление с билетами отправлено сразу для плана {plan_id} (фильм {title})")
-
-                        except Exception as e:
-
-                            logger.error(f"[PLAN CHECK] Ошибка отправки уведомления с билетами для плана {plan_id}: {e}", exc_info=True)
+                        # Проверяем, не было ли уже отправлено уведомление с билетами
+                        if not ticket_notification_sent:
+                            try:
+                                # Проверяем, не запланировано ли уже уведомление
+                                job_id = f'ticket_notify_{chat_id}_{plan_id}_{int(ticket_utc.timestamp())}'
+                                existing_job = scheduler.get_job(job_id)
+                                if not existing_job:
+                                    send_ticket_notification(chat_id, plan_id)
+                                    # Отмечаем как отправленное
+                                    with db_lock:
+                                        cursor.execute('UPDATE plans SET ticket_notification_sent = TRUE WHERE id = %s', (plan_id,))
+                                        conn.commit()
+                                    logger.info(f"[PLAN CHECK] Уведомление с билетами отправлено сразу для плана {plan_id} (фильм {title})")
+                                else:
+                                    logger.info(f"[PLAN CHECK] Уведомление с билетами уже запланировано для плана {plan_id}")
+                            except Exception as e:
+                                logger.error(f"[PLAN CHECK] Ошибка отправки уведомления с билетами для плана {plan_id}: {e}", exc_info=True)
+                        else:
+                            logger.info(f"[PLAN CHECK] Уведомление с билетами уже отправлено для плана {plan_id}, пропускаем")
 
             else:
 
@@ -451,8 +486,8 @@ def check_and_send_plan_notifications():
                     
 
                     # Планируем напоминание, если оно еще не запланировано и время еще не прошло
-
-                    if reminder_utc > now_utc:
+                    # Проверяем, не было ли уже отправлено уведомление
+                    if reminder_utc > now_utc and not notification_sent:
 
                         try:
 
@@ -470,7 +505,7 @@ def check_and_send_plan_notifications():
 
                                     run_date=reminder_utc,
 
-                                    args=[chat_id, film_id, title, link, plan_type],
+                                    args=[chat_id, film_id, title, link, plan_type, plan_id],
 
                                     id=job_id
 
@@ -485,16 +520,21 @@ def check_and_send_plan_notifications():
                     elif reminder_utc <= now_utc and reminder_utc >= now_utc - timedelta(minutes=30):
 
                         # Время напоминания уже прошло, но не более 30 минут назад - отправляем сразу
-
-                        try:
-
-                            send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
-
-                            logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана дома {plan_id} (фильм {title})")
-
-                        except Exception as e:
-
-                            logger.error(f"[PLAN CHECK] Ошибка отправки напоминания для плана {plan_id}: {e}", exc_info=True)
+                        # Проверяем, не было ли уже отправлено уведомление
+                        if not notification_sent:
+                            try:
+                                # Проверяем, не запланировано ли уже уведомление
+                                job_id = f'plan_reminder_{chat_id}_{plan_id}_{int(reminder_utc.timestamp())}'
+                                existing_job = scheduler.get_job(job_id)
+                                if not existing_job:
+                                    send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                                    logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана дома {plan_id} (фильм {title})")
+                                else:
+                                    logger.info(f"[PLAN CHECK] Напоминание уже запланировано для плана дома {plan_id}")
+                            except Exception as e:
+                                logger.error(f"[PLAN CHECK] Ошибка отправки напоминания для плана {plan_id}: {e}", exc_info=True)
+                        else:
+                            logger.info(f"[PLAN CHECK] Напоминание уже отправлено для плана дома {plan_id}, пропускаем")
 
                 
 
@@ -502,25 +542,29 @@ def check_and_send_plan_notifications():
 
                 if plan_datetime <= now_utc and plan_datetime >= now_utc - timedelta(minutes=30):
 
-                    try:
+                    # Проверяем, не было ли уже отправлено уведомление
+                    if not notification_sent:
+                        try:
 
-                        # Проверяем, не было ли уже запланировано это уведомление
+                            # Проверяем, не было ли уже запланировано это уведомление
 
-                        job_id = f'plan_notify_{chat_id}_{film_id}_{int(plan_datetime.timestamp())}'
+                            job_id = f'plan_notify_{chat_id}_{film_id}_{int(plan_datetime.timestamp())}'
 
-                        existing_job = scheduler.get_job(job_id)
+                            existing_job = scheduler.get_job(job_id)
 
-                        if not existing_job:
+                            if not existing_job:
 
-                            # Отправляем уведомление сразу, так как время уже наступило
+                                # Отправляем уведомление сразу, так как время уже наступило
 
-                            send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                                send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
 
-                            logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
+                                logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
 
-                    except Exception as e:
+                        except Exception as e:
 
-                        logger.error(f"[PLAN CHECK] Ошибка отправки уведомления для плана {plan_id}: {e}", exc_info=True)
+                            logger.error(f"[PLAN CHECK] Ошибка отправки уведомления для плана {plan_id}: {e}", exc_info=True)
+                    else:
+                        logger.info(f"[PLAN CHECK] Уведомление уже отправлено для плана {plan_id}, пропускаем")
 
     except Exception as e:
 
@@ -536,44 +580,66 @@ def check_and_send_plan_notifications():
 # Очистка планов
 
 def clean_home_plans():
-    """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок"""
+    """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок.
+    Также удаляет все планы дома на прошедшие выходные (суббота и воскресенье) в понедельник."""
 
-    yesterday = (datetime.now(plans_tz) - timedelta(days=1)).date()
+    now = datetime.now(plans_tz)
+    today = now.date()
+    yesterday = (now - timedelta(days=1)).date()
+    today_weekday = today.weekday()  # 0 = Monday, 6 = Sunday
 
-    
+    deleted_count = 0
 
     with db_lock:
-
-        # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
+        # Если сегодня понедельник, удаляем все планы дома на прошедшие выходные (суббота и воскресенье)
+        if today_weekday == 0:  # Monday
+            # Находим субботу и воскресенье прошлой недели
+            saturday = yesterday - timedelta(days=1)  # Вчера было воскресенье, значит суббота - позавчера
+            sunday = yesterday
 
         cursor.execute('''
-
-            SELECT p.id, p.film_id, p.chat_id
-
+                SELECT p.id, p.film_id, p.chat_id, m.title
             FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.plan_type = 'home' 
+                AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
+            ''', (saturday, sunday))
 
+            weekend_rows = cursor.fetchall()
+
+            for row in weekend_rows:
+                plan_id = row.get('id') if isinstance(row, dict) else row[0]
+                film_id = row.get('film_id') if isinstance(row, dict) else row[1]
+                chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
+                title = row.get('title') if isinstance(row, dict) else row[3]
+                
+                cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                deleted_count += 1
+                
+                if bot:
+                    try:
+                        bot.send_message(chat_id, f"📅 План на фильм <b>{title}</b> удалён (выходные прошли).", parse_mode='HTML')
+                    except:
+                        pass
+            
+            logger.info(f"Очищены планы дома на выходные: {len(weekend_rows)} планов")
+        
+        # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
+        cursor.execute('''
+            SELECT p.id, p.film_id, p.chat_id
+            FROM plans p
             WHERE p.plan_type = 'home' AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') = %s
-
         ''', (yesterday,))
 
         rows = cursor.fetchall()
 
-        
-
-        deleted_count = 0
-
         for row in rows:
-
             # RealDictCursor возвращает словари, но поддерживает доступ по индексу
-
             plan_id = row.get('id') if isinstance(row, dict) else row[0]
-
             film_id = row.get('film_id') if isinstance(row, dict) else row[1]
-
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
 
             # Проверяем, есть ли оценки по фильму
-
             cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
 
             count_row = cursor.fetchone()
@@ -586,6 +652,7 @@ def clean_home_plans():
 
                 deleted_count += 1
 
+                if bot:
                 try:
 
                     bot.send_message(chat_id, f"📅 План на фильм удалён (нет оценок за вчера).")
@@ -594,11 +661,7 @@ def clean_home_plans():
 
                     pass
 
-        
-
         conn.commit()
-
-    
 
     logger.info(f"Очищены планы дома без оценок: {deleted_count} планов")
 
