@@ -2515,9 +2515,9 @@ def premiere_detail_handler(call):
         
         # Если не получилось через отдельный запрос, пробуем из основного ответа
         if not trailer_url:
-            videos = data.get('videos', {}).get('trailers', [])
-            if videos:
-                trailer_url = videos[0].get('url')  # Первый трейлер
+        videos = data.get('videos', {}).get('trailers', [])
+        if videos:
+            trailer_url = videos[0].get('url')  # Первый трейлер
         
         description = data.get('description') or data.get('shortDescription') or "Нет описания"
         genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
@@ -2549,7 +2549,7 @@ def premiere_detail_handler(call):
         if director_str != '—':
             text += f"🎥 Режиссёр: {director_str}\n"
         if countries != '—':
-            text += f"🌍 {countries}\n"
+        text += f"🌍 {countries}\n"
         text += f"\n{description}\n\n"
         text += f"🎭 {genres}\n"
         
@@ -4281,11 +4281,11 @@ def get_plan_link_internal(message, state):
                 else:
                     # Проверяем, что это похоже на kp_id (обычно 4+ цифр)
                     if len(kp_id) >= 4:
-                        link = f"https://kinopoisk.ru/film/{kp_id}"
+                    link = f"https://kinopoisk.ru/film/{kp_id}"
                         logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
-        if not link:
-            bot.reply_to(message, "Не нашёл ссылку или ID фильма. Попробуйте снова.")
+    if not link:
+        bot.reply_to(message, "Не нашёл ссылку или ID фильма. Попробуйте снова.")
         return
     
     user_plan_state[user_id]['link'] = link
@@ -4323,12 +4323,12 @@ def get_plan_day_or_date_internal(message, state):
         logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
     
     if not plan_dt:
-        target_weekday = None
-        for phrase, wd in days_full.items():
-            if phrase in text:
-                target_weekday = wd
-                logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
-                break
+    target_weekday = None
+    for phrase, wd in days_full.items():
+        if phrase in text:
+            target_weekday = wd
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
+            break
     
     if target_weekday is not None:
         current_wd = now.weekday()
@@ -6975,13 +6975,13 @@ def handle_add_film_callback(call):
             is_series = film_type_from_callback == 'TV_SERIES'
         else:
             # Если тип не передан, проверяем в базе
-            with db_lock:
-                cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                existing = cursor.fetchone()
-                if existing:
-                    film_in_db = True
-                    film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
-                    is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
+        with db_lock:
+            cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            existing = cursor.fetchone()
+            if existing:
+                film_in_db = True
+                film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+                is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
         
         # Формируем правильную ссылку в зависимости от типа
         if is_series:
@@ -6997,7 +6997,7 @@ def handle_add_film_callback(call):
                 if is_series:
                     link = f"https://www.kinopoisk.ru/film/{kp_id}/"
                 else:
-                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
             info = extract_movie_info(link)
             if info:
                 is_series = info.get('is_series', False)
@@ -7151,7 +7151,7 @@ def handle_confirm_add_film_callback(call):
         if film_type_from_callback == 'TV_SERIES':
             link = f"https://www.kinopoisk.ru/series/{kp_id}/"
         else:
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         
         # Получаем информацию о фильме
         info = extract_movie_info(link)
@@ -7159,7 +7159,7 @@ def handle_confirm_add_film_callback(call):
             # Если не получилось и тип был неопределен, пробуем другой вариант
             if not film_type_from_callback:
                 if link.endswith('/film/'):
-                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
                 else:
                     link = f"https://www.kinopoisk.ru/film/{kp_id}/"
             info = extract_movie_info(link)
@@ -8683,7 +8683,7 @@ def random_mode_handler(call):
                             available_periods.append(period)
             else:
                 # Для остальных режимов - используем старую логику
-                base_query = """
+            base_query = """
                 SELECT COUNT(DISTINCT m.id) 
                 FROM movies m
                 LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
@@ -8919,7 +8919,7 @@ def _show_genre_step(call, chat_id, user_id):
                 cursor.execute(base_query, params)
             else:
                 # Для остальных режимов - используем старую логику
-                base_query = """
+        base_query = """
             SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
             FROM movies m
             LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
