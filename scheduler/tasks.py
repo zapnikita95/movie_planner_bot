@@ -792,6 +792,244 @@ def resolve_cinema_votes():
 # Добавляем задачи очистки и голосования в scheduler
 # Вызовы scheduler.add_job должны быть в moviebot.py после импорта модуля
 
+def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
+    """Отправляет уведомление о выходе новой серии и проверяет следующую дату"""
+    try:
+        if not bot:
+            logger.error("[SERIES NOTIFICATION] bot не установлен")
+            return
+        
+        text = f"🔔 <b>Новая серия вышла!</b>\n\n"
+        text += f"📺 <b>{title}</b>\n"
+        text += f"📅 Сезон {season}, Эпизод {episode}\n\n"
+        text += f"<a href='https://www.kinopoisk.ru/series/{kp_id}/'>Кинопоиск</a>"
+        
+        # Отправляем уведомление всем подписанным пользователям
+        with db_lock:
+            cursor.execute('''
+                SELECT DISTINCT user_id 
+                FROM series_subscriptions 
+                WHERE chat_id = %s AND film_id = %s AND subscribed = TRUE
+            ''', (chat_id, film_id))
+            subscribers = cursor.fetchall()
+        
+        subscribers_list = []
+        for sub_row in subscribers:
+            user_id = sub_row.get('user_id') if isinstance(sub_row, dict) else sub_row[0]
+            subscribers_list.append(user_id)
+            try:
+                bot.send_message(chat_id, text, parse_mode='HTML')
+                logger.info(f"[SERIES NOTIFICATION] Уведомление отправлено для сериала {title} (kp_id={kp_id})")
+            except Exception as e:
+                logger.error(f"[SERIES NOTIFICATION] Ошибка отправки уведомления: {e}")
+        
+        # После отправки уведомления проверяем, есть ли следующая серия
+        from api.kinopoisk_api import get_seasons_data
+        seasons = get_seasons_data(kp_id)
+        
+        if seasons:
+            from datetime import datetime as dt, timedelta
+            import pytz
+            now = dt.now()
+            next_episode_date = None
+            next_episode = None
+            
+            for season in seasons:
+                episodes = season.get('episodes', [])
+                for ep in episodes:
+                    release_str = ep.get('releaseDate', '')
+                    if release_str and release_str != '—':
+                        try:
+                            release_date = None
+                            for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                try:
+                                    release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                    break
+                                except:
+                                    continue
+                            
+                            if release_date and release_date > now:
+                                if not next_episode_date or release_date < next_episode_date:
+                                    next_episode_date = release_date
+                                    next_episode = {
+                                        'season': season.get('number', ''),
+                                        'episode': ep.get('episodeNumber', ''),
+                                        'date': release_date
+                                    }
+                        except:
+                            pass
+            
+            if next_episode_date and next_episode:
+                # Есть следующая серия - ставим уведомление и отправляем сообщение
+                # Получаем часовой пояс пользователя
+                user_tz = pytz.timezone('Europe/Moscow')
+                try:
+                    with db_lock:
+                        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
+                        tz_row = cursor.fetchone()
+                        if tz_row:
+                            tz_str = tz_row.get('value') if isinstance(tz_row, dict) else tz_row[0]
+                            user_tz = pytz.timezone(tz_str)
+                except:
+                    pass
+                
+                # Уведомление за день до выхода
+                notification_time = next_episode_date - timedelta(days=1)
+                notification_time = user_tz.localize(notification_time.replace(hour=10, minute=0))
+                
+                # Ставим уведомление для каждого подписанного пользователя
+                for user_id in subscribers_list:
+                    scheduler.add_job(
+                        send_series_notification,
+                        'date',
+                        run_date=notification_time.astimezone(pytz.utc),
+                        args=[chat_id, film_id, kp_id, title, next_episode['season'], next_episode['episode']],
+                        id=f'series_notification_{chat_id}_{film_id}_{user_id}_{next_episode_date.strftime("%Y%m%d")}'
+                    )
+                
+                # Отправляем сообщение о следующей серии
+                next_text = f"📅 <b>Следующая серия:</b>\n\n"
+                next_text += f"📺 <b>{title}</b>\n"
+                next_text += f"📅 Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode_date.strftime('%d.%m.%Y')}\n\n"
+                next_text += f"✅ Уведомление установлено на {notification_time.strftime('%d.%m.%Y в %H:%M')}"
+                
+                try:
+                    bot.send_message(chat_id, next_text, parse_mode='HTML')
+                    logger.info(f"[SERIES NOTIFICATION] Сообщение о следующей серии отправлено для {title} (kp_id={kp_id})")
+                except Exception as e:
+                    logger.error(f"[SERIES NOTIFICATION] Ошибка отправки сообщения о следующей серии: {e}")
+            else:
+                # Нет следующей серии - ставим периодическую проверку
+                check_time = dt.now(pytz.utc) + timedelta(weeks=3)
+                for user_id in subscribers_list:
+                    scheduler.add_job(
+                        check_series_for_new_episodes,
+                        'date',
+                        run_date=check_time,
+                        args=[chat_id, film_id, kp_id, user_id],
+                        id=f'series_check_{chat_id}_{film_id}_{user_id}_{int(check_time.timestamp())}'
+                    )
+                logger.info(f"[SERIES NOTIFICATION] Следующая проверка через 3 недели для {title} (kp_id={kp_id})")
+    except Exception as e:
+        logger.error(f"[SERIES NOTIFICATION] Ошибка: {e}", exc_info=True)
+
+def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
+    """Проверяет сериал на наличие новых серий и ставит уведомления"""
+    try:
+        if not bot or not scheduler:
+            logger.error("[SERIES CHECK] bot или scheduler не установлен")
+            return
+        
+        from api.kinopoisk_api import get_seasons_data
+        seasons = get_seasons_data(kp_id)
+        
+        if not seasons:
+            logger.warning(f"[SERIES CHECK] Не удалось получить данные о сезонах для kp_id={kp_id}")
+            return
+        
+        # Проверяем, подписан ли еще пользователь
+        with db_lock:
+            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+            sub_row = cursor.fetchone()
+            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+        
+        if not is_subscribed:
+            logger.info(f"[SERIES CHECK] Пользователь {user_id} отписался от сериала kp_id={kp_id}")
+            return
+        
+        # Ищем следующую серию
+        from datetime import datetime as dt
+        now = dt.now()
+        next_episode_date = None
+        next_episode = None
+        
+        for season in seasons:
+            episodes = season.get('episodes', [])
+            for ep in episodes:
+                release_str = ep.get('releaseDate', '')
+                if release_str and release_str != '—':
+                    try:
+                        release_date = None
+                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                            try:
+                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                break
+                            except:
+                                continue
+                        
+                        if release_date and release_date > now:
+                            if not next_episode_date or release_date < next_episode_date:
+                                next_episode_date = release_date
+                                next_episode = {
+                                    'season': season.get('number', ''),
+                                    'episode': ep.get('episodeNumber', ''),
+                                    'date': release_date
+                                }
+                    except:
+                        pass
+        
+        if next_episode_date and next_episode:
+            # Есть ближайшая дата - ставим уведомление и отправляем сообщение
+            from datetime import timedelta
+            import pytz
+            
+            # Получаем часовой пояс пользователя
+            user_tz = pytz.timezone('Europe/Moscow')
+            try:
+                with db_lock:
+                    cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
+                    tz_row = cursor.fetchone()
+                    if tz_row:
+                        tz_str = tz_row.get('value') if isinstance(tz_row, dict) else tz_row[0]
+                        user_tz = pytz.timezone(tz_str)
+            except:
+                pass
+            
+            # Уведомление за день до выхода
+            notification_time = next_episode_date - timedelta(days=1)
+            notification_time = user_tz.localize(notification_time.replace(hour=10, minute=0))
+            
+            with db_lock:
+                cursor.execute("SELECT title FROM movies WHERE id = %s", (film_id,))
+                title_row = cursor.fetchone()
+                title = title_row.get('title') if title_row and isinstance(title_row, dict) else (title_row[0] if title_row else "Сериал")
+            
+            scheduler.add_job(
+                send_series_notification,
+                'date',
+                run_date=notification_time.astimezone(pytz.utc),
+                args=[chat_id, film_id, kp_id, title, next_episode['season'], next_episode['episode']],
+                id=f'series_notification_{chat_id}_{film_id}_{user_id}_{next_episode_date.strftime("%Y%m%d")}'
+            )
+            
+            # Отправляем уведомление о найденной новой серии
+            notification_text = f"🔔 <b>Найдена новая серия!</b>\n\n"
+            notification_text += f"📺 <b>{title}</b>\n"
+            notification_text += f"📅 Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode_date.strftime('%d.%m.%Y')}\n\n"
+            notification_text += f"✅ Уведомление установлено на {notification_time.strftime('%d.%m.%Y в %H:%M')}\n\n"
+            notification_text += f"<a href='https://www.kinopoisk.ru/series/{kp_id}/'>Кинопоиск</a>"
+            
+            try:
+                bot.send_message(chat_id, notification_text, parse_mode='HTML')
+                logger.info(f"[SERIES CHECK] Уведомление о новой серии отправлено для {title} (kp_id={kp_id})")
+            except Exception as e:
+                logger.error(f"[SERIES CHECK] Ошибка отправки уведомления: {e}")
+            
+            logger.info(f"[SERIES CHECK] Уведомление поставлено на {next_episode_date.strftime('%d.%m.%Y')} для сериала kp_id={kp_id}")
+        else:
+            # Нет ближайшей даты - ставим следующую проверку через 3 недели
+            check_time = dt.now(pytz.utc) + timedelta(weeks=3)
+            scheduler.add_job(
+                check_series_for_new_episodes,
+                'date',
+                run_date=check_time,
+                args=[chat_id, film_id, kp_id, user_id],
+                id=f'series_check_{chat_id}_{film_id}_{user_id}_{int(check_time.timestamp())}'
+            )
+            logger.info(f"[SERIES CHECK] Следующая проверка через 3 недели для сериала kp_id={kp_id}")
+    except Exception as e:
+        logger.error(f"[SERIES CHECK] Ошибка: {e}", exc_info=True)
+
 
 
 def send_rating_reminder(chat_id, film_id, film_title, user_id):
