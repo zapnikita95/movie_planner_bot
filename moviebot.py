@@ -6977,7 +6977,7 @@ def handle_add_film_callback(call):
             is_series = film_type_from_callback == 'TV_SERIES'
         else:
             # Если тип не передан, проверяем в базе
-        with db_lock:
+            with db_lock:
             cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
             existing = cursor.fetchone()
             if existing:
