@@ -2551,7 +2551,7 @@ def premiere_detail_handler(call):
         if countries != '—':
             text += f"🌍 {countries}"
 
-"
+        text += f"\n{description}\n\n"
 ""        text += f"\n{description}\n\n"
         text += f"🎭 {genres}\n"
         
