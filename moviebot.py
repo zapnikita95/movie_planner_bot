@@ -10446,7 +10446,7 @@ def show_premieres_page(call, premieres, period, page=0):
         
         # Используем edit_message_text вместо send_message, если это callback
         if call.message.message_id:
-        try:
+            try:
             bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         except Exception as e:
                 error_str = str(e)
