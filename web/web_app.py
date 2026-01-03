@@ -72,107 +72,93 @@ def create_web_app(bot_instance):
                 # Получаем платеж из БД
                 logger.info(f"[YOOKASSA] Поиск платежа в БД по yookassa_payment_id: {payment_id}")
                 payment_data = get_payment_by_yookassa_id(payment_id)
-                    
-                    if not payment_data:
-                        logger.warning(f"[YOOKASSA] Платеж {payment_id} не найден в БД")
-                        logger.warning(f"[YOOKASSA] Это может быть нормально, если платеж был создан в другом экземпляре бота")
-                        return jsonify({'status': 'ok', 'message': 'Payment not found in DB'}), 200
-                    
-                    logger.info(f"[YOOKASSA] Платеж найден в БД: payment_id={payment_data.get('payment_id')}, user_id={payment_data.get('user_id')}, chat_id={payment_data.get('chat_id')}, status={payment_data.get('status')}")
-                    
-                    # Получаем информацию о платеже из ЮKassa (только если не тестовый режим)
-                    payment = None
-                    payment_status = None
-                    if not is_test:
-                        try:
-                            logger.info(f"[YOOKASSA] Получение информации о платеже из ЮKassa API...")
-                            payment = Payment.find_one(payment_id)
-                            payment_status = payment.status if payment else None
-                            logger.info(f"[YOOKASSA] Статус платежа из ЮKassa: {payment_status}")
-                        except Exception as e:
-                            logger.error(f"[YOOKASSA] Ошибка получения платежа из ЮKassa: {e}", exc_info=True)
-                            # В тестовом режиме или при ошибке используем данные из БД
-                            payment_status = 'succeeded' if event_json.get('event') == 'payment.succeeded' else 'canceled'
-                    else:
-                        # В тестовом режиме используем статус из события
+                
+                if not payment_data:
+                    logger.warning(f"[YOOKASSA] Платеж {payment_id} не найден в БД")
+                    logger.warning(f"[YOOKASSA] Это может быть нормально, если платеж был создан в другом экземпляре бота")
+                    return jsonify({'status': 'ok', 'message': 'Payment not found in DB'}), 200
+                
+                logger.info(f"[YOOKASSA] Платеж найден в БД: payment_id={payment_data.get('payment_id')}, user_id={payment_data.get('user_id')}, chat_id={payment_data.get('chat_id')}, status={payment_data.get('status')}")
+                
+                # Получаем информацию о платеже из ЮKassa (только если не тестовый режим)
+                payment = None
+                payment_status = None
+                if not is_test:
+                    try:
+                        logger.info(f"[YOOKASSA] Получение информации о платеже из ЮKassa API...")
+                        payment = Payment.find_one(payment_id)
+                        payment_status = payment.status if payment else None
+                        logger.info(f"[YOOKASSA] Статус платежа из ЮKassa: {payment_status}")
+                    except Exception as e:
+                        logger.error(f"[YOOKASSA] Ошибка получения платежа из ЮKassa: {e}", exc_info=True)
+                        # В тестовом режиме или при ошибке используем данные из БД
                         payment_status = 'succeeded' if event_json.get('event') == 'payment.succeeded' else 'canceled'
+                else:
+                    # В тестовом режиме используем статус из события
+                    payment_status = 'succeeded' if event_json.get('event') == 'payment.succeeded' else 'canceled'
+                
+                logger.info(f"[YOOKASSA] Текущий статус в БД: {payment_data.get('status')}, статус из ЮKassa: {payment_status}")
+                
+                if payment_status == 'succeeded' and payment_data.get('status') != 'succeeded':
+                    logger.info(f"[YOOKASSA] Платеж успешен, обновляем статус и создаем/продлеваем подписку")
+                    # Обновляем статус платежа
+                    update_payment_status(payment_data['payment_id'], 'succeeded')
                     
-                    logger.info(f"[YOOKASSA] Текущий статус в БД: {payment_data.get('status')}, статус из ЮKassa: {payment_status}")
+                    # Создаем подписку
+                    if payment and hasattr(payment, 'metadata') and payment.metadata:
+                        metadata = payment.metadata
+                    elif is_test and event_json.get('object', {}).get('metadata'):
+                        # В тестовом режиме берем metadata из тестового уведомления
+                        metadata = event_json.get('object', {}).get('metadata', {})
+                    else:
+                        metadata = {}
                     
-                    if payment_status == 'succeeded' and payment_data.get('status') != 'succeeded':
-                        logger.info(f"[YOOKASSA] Платеж успешен, обновляем статус и создаем/продлеваем подписку")
-                        # Обновляем статус платежа
-                        update_payment_status(payment_data['payment_id'], 'succeeded')
-                        
-                        # Создаем подписку
-                        if payment and hasattr(payment, 'metadata') and payment.metadata:
-                            metadata = payment.metadata
-                        elif is_test and event_json.get('object', {}).get('metadata'):
-                            # В тестовом режиме берем metadata из тестового уведомления
-                            metadata = event_json.get('object', {}).get('metadata', {})
-                        else:
-                            metadata = {}
-                        
-                        user_id = int(metadata.get('user_id', payment_data['user_id']))
-                        chat_id = int(metadata.get('chat_id', payment_data['chat_id']))
-                        subscription_type = metadata.get('subscription_type', payment_data['subscription_type'])
-                        plan_type = metadata.get('plan_type', payment_data['plan_type'])
-                        period_type = metadata.get('period_type', payment_data['period_type'])
-                        
-                        # Обрабатываем group_size
-                        group_size = None
-                        if metadata.get('group_size'):
-                            try:
-                                group_size = int(metadata.get('group_size'))
-                            except:
-                                group_size = payment_data.get('group_size')
-                        else:
+                    user_id = int(metadata.get('user_id', payment_data['user_id']))
+                    chat_id = int(metadata.get('chat_id', payment_data['chat_id']))
+                    subscription_type = metadata.get('subscription_type', payment_data['subscription_type'])
+                    plan_type = metadata.get('plan_type', payment_data['plan_type'])
+                    period_type = metadata.get('period_type', payment_data['period_type'])
+                    
+                    # Обрабатываем group_size
+                    group_size = None
+                    if metadata.get('group_size'):
+                        try:
+                            group_size = int(metadata.get('group_size'))
+                        except:
                             group_size = payment_data.get('group_size')
+                    else:
+                        group_size = payment_data.get('group_size')
+                    
+                    # Получаем сумму из платежа или из БД
+                    if payment:
+                        amount = float(payment.amount.value)
+                    else:
+                        amount = float(payment_data['amount'])
+                    
+                    # Определяем telegram_username и group_username из metadata
+                    telegram_username = metadata.get('telegram_username')
+                    group_username = metadata.get('group_username')
+                    
+                    # Проверяем, есть ли уже активная подписка с такими же параметрами
+                    from database.db_operations import get_active_subscription, renew_subscription
+                    existing_sub = get_active_subscription(chat_id, user_id, subscription_type)
+                    
+                    if existing_sub and existing_sub.get('id') and existing_sub.get('id') > 0:
+                        # Проверяем, совпадают ли параметры подписки
+                        existing_plan = existing_sub.get('plan_type')
+                        existing_period = existing_sub.get('period_type')
+                        existing_group_size = existing_sub.get('group_size')
                         
-                        # Получаем сумму из платежа или из БД
-                        if payment:
-                            amount = float(payment.amount.value)
+                        # Если параметры совпадают, продлеваем подписку
+                        if (existing_plan == plan_type and 
+                            existing_period == period_type and 
+                            (subscription_type != 'group' or existing_group_size == group_size)):
+                            subscription_id = existing_sub.get('id')
+                            # Продлеваем подписку
+                            renew_subscription(subscription_id, period_type)
+                            logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
                         else:
-                            amount = float(payment_data['amount'])
-                        
-                        # Определяем telegram_username и group_username из metadata
-                        telegram_username = metadata.get('telegram_username')
-                        group_username = metadata.get('group_username')
-                        
-                        # Проверяем, есть ли уже активная подписка с такими же параметрами
-                        from database.db_operations import get_active_subscription, renew_subscription
-                        existing_sub = get_active_subscription(chat_id, user_id, subscription_type)
-                        
-                        if existing_sub and existing_sub.get('id') and existing_sub.get('id') > 0:
-                            # Проверяем, совпадают ли параметры подписки
-                            existing_plan = existing_sub.get('plan_type')
-                            existing_period = existing_sub.get('period_type')
-                            existing_group_size = existing_sub.get('group_size')
-                            
-                            # Если параметры совпадают, продлеваем подписку
-                            if (existing_plan == plan_type and 
-                                existing_period == period_type and 
-                                (subscription_type != 'group' or existing_group_size == group_size)):
-                                subscription_id = existing_sub.get('id')
-                                # Продлеваем подписку
-                                renew_subscription(subscription_id, period_type)
-                                logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
-                            else:
-                                # Параметры не совпадают - создаем новую подписку
-                                subscription_id = create_subscription(
-                                    chat_id=chat_id,
-                                    user_id=user_id,
-                                    subscription_type=subscription_type,
-                                    plan_type=plan_type,
-                                    period_type=period_type,
-                                    price=amount,
-                                    telegram_username=telegram_username,
-                                    group_username=group_username,
-                                    group_size=group_size
-                                )
-                                logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
-                        else:
-                            # Нет активной подписки - создаем новую
+                            # Параметры не совпадают - создаем новую подписку
                             subscription_id = create_subscription(
                                 chat_id=chat_id,
                                 user_id=user_id,
@@ -185,135 +171,149 @@ def create_web_app(bot_instance):
                                 group_size=group_size
                             )
                             logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
-                        
-                        # Обновляем платеж с subscription_id
-                        logger.info(f"[YOOKASSA] Обновляем статус платежа на 'succeeded' с subscription_id={subscription_id}")
-                        update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)
-                        
-                        # Отправляем подробное уведомление пользователю
-                        try:
-                            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                            
-                            # Определяем, куда отправлять сообщение
-                            target_chat_id = chat_id
-                            logger.info(f"[YOOKASSA] Подготовка отправки уведомления в chat_id={target_chat_id}, user_id={user_id}")
-                            
-                            # Формируем описание функций в зависимости от типа подписки
-                            if subscription_type == 'personal':
-                                text = "✅ <b>Платеж успешно обработан!</b>\n\n"
-                                text += "👤 <b>Личная подписка активирована</b>\n\n"
-                                
-                                if plan_type == 'notifications':
-                                    text += "🔔 <b>Доступные функции:</b>\n"
-                                    text += "• Автоматические уведомления о выходе новых серий\n"
-                                    text += "• Настройка времени уведомлений (будни/выходные)\n"
-                                    text += "• Персонализированные напоминания для каждого сериала\n"
-                                    text += "• Отслеживание прогресса просмотра сезонов\n"
-                                elif plan_type == 'recommendations':
-                                    text += "🎯 <b>Доступные функции:</b>\n"
-                                    text += "• Режим рандомайзера \"по моим оценкам\" (9-10)\n"
-                                    text += "• Режим \"по групповым оценкам\" (9-10)\n"
-                                    text += "• Режим \"рандом по кинопоиск\" с фильтрами\n"
-                                    text += "• Импорт базы оценок из Кинопоиска\n"
-                                    text += "• Умные рекомендации на основе ваших предпочтений\n"
-                                elif plan_type == 'tickets':
-                                    text += "🎫 <b>Доступные функции:</b>\n"
-                                    text += "• Добавление билетов на сеансы в кино\n"
-                                    text += "• Хранение билетов в базе бота\n"
-                                    text += "• Уведомления с билетами перед сеансом\n"
-                                    text += "• Настройка времени напоминания о билетах\n"
-                                else:  # all
-                                    text += "📦 <b>Доступные функции:</b>\n\n"
-                                    text += "🔔 <b>Уведомления о сериалах:</b>\n"
-                                    text += "• Автоматические уведомления о выходе новых серий\n"
-                                    text += "• Настройка времени уведомлений\n\n"
-                                    text += "🎯 <b>Персональные рекомендации:</b>\n"
-                                    text += "• Режим \"по моим оценкам\"\n"
-                                    text += "• Режим \"по групповым оценкам\"\n"
-                                    text += "• Режим \"рандом по кинопоиск\"\n"
-                                    text += "• Импорт базы из Кинопоиска\n\n"
-                                    text += "🎫 <b>Билеты в кино:</b>\n"
-                                    text += "• Добавление билетов на сеансы\n"
-                                    text += "• Уведомления с билетами перед сеансом\n"
-                                
-                                text += "\n\nСпасибо за покупку! 🎉"
-                                
-                                # Отправляем сообщение для личной подписки
-                                logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в chat_id={target_chat_id}, user_id={user_id}")
-                                try:
-                                    result = bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
-                                    logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено для пользователя {user_id}, chat_id {target_chat_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
-                                except Exception as send_error:
-                                    logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения: {send_error}", exc_info=True)
-                                    # Не прерываем выполнение, просто логируем ошибку
-                                    logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения")
-                                
-                            elif subscription_type == 'group':
-                                # Для групповой подписки отправляем в группу
-                                from database.db_operations import get_active_group_users, get_subscription_members
-                                
-                                text = "✅ <b>Платеж успешно обработан!</b>\n\n"
-                                text += "👥 <b>Групповая подписка активирована</b>\n\n"
-                                
-                                if plan_type == 'all':
-                                    text += "📦 <b>Доступные функции:</b>\n\n"
-                                    text += "🔔 <b>Уведомления о сериалах:</b>\n"
-                                    text += "• Автоматические уведомления о выходе новых серий\n"
-                                    text += "• Настройка времени уведомлений\n\n"
-                                    text += "🎯 <b>Персональные рекомендации:</b>\n"
-                                    text += "• Режим \"по моим оценкам\"\n"
-                                    text += "• Режим \"по групповым оценкам\"\n"
-                                    text += "• Режим \"рандом по кинопоиск\"\n"
-                                    text += "• Импорт базы из Кинопоиска\n\n"
-                                    text += "🎫 <b>Билеты в кино:</b>\n"
-                                    text += "• Добавление билетов на сеансы\n"
-                                    text += "• Уведомления с билетами перед сеансом\n"
-                                
-                                # Проверяем количество участников
-                                active_users = get_active_group_users(chat_id)
-                                active_count = len(active_users) if active_users else 0
-                                
-                                # Получаем участников подписки
-                                # get_subscription_members возвращает dict {user_id: username}
-                                members_dict = get_subscription_members(subscription_id) if subscription_id else {}
-                                members_count = len(members_dict) if members_dict else 0
-                                
-                                # Если есть ограничение по количеству участников и активных пользователей больше
-                                if group_size and active_count > group_size and members_count < group_size:
-                                    text += f"\n\n⚠️ <b>Внимание!</b>\n"
-                                    text += f"В группе <b>{active_count}</b> активных участников, а подписка рассчитана на <b>{group_size}</b>.\n"
-                                    text += f"Выберите участников для подписки:"
-                                    
-                                    markup = InlineKeyboardMarkup(row_width=1)
-                                    markup.add(InlineKeyboardButton("👥 Выбрать участников", callback_data=f"payment:select_members:{subscription_id}"))
-                                    try:
-                                        result = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                                        logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой выбора участников отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
-                                    except Exception as send_error:
-                                        logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения с кнопкой выбора участников: {send_error}", exc_info=True)
-                                else:
-                                    text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b>"
-                                    if group_size:
-                                        text += f" из {group_size}"
-                                    text += "\n\nСпасибо за покупку! 🎉"
-                                    logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в группу chat_id={chat_id}, user_id={user_id}")
-                                    try:
-                                        result = bot_instance.send_message(chat_id, text, parse_mode='HTML')
-                                        logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено в группу {chat_id}, user_id {user_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
-                                    except Exception as send_error:
-                                        logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в группу: {send_error}", exc_info=True)
-                                        # Не прерываем выполнение, просто логируем ошибку
-                                        logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения в группу")
-                                
-                                logger.info(f"[YOOKASSA] Подписка создана для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
-                            
-                        except Exception as e:
-                            logger.error(f"[YOOKASSA] Ошибка отправки уведомления: {e}", exc_info=True)
-                            # Не прерываем выполнение, просто логируем ошибку
                     else:
-                        logger.warning(f"[YOOKASSA] Событие payment.succeeded, но статус платежа не succeeded: {payment_status}")
+                        # Нет активной подписки - создаем новую
+                        subscription_id = create_subscription(
+                            chat_id=chat_id,
+                            user_id=user_id,
+                            subscription_type=subscription_type,
+                            plan_type=plan_type,
+                            period_type=period_type,
+                            price=amount,
+                            telegram_username=telegram_username,
+                            group_username=group_username,
+                            group_size=group_size
+                        )
+                        logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                    
+                    # Обновляем платеж с subscription_id
+                    logger.info(f"[YOOKASSA] Обновляем статус платежа на 'succeeded' с subscription_id={subscription_id}")
+                    update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)
+                    
+                    # Отправляем подробное уведомление пользователю
+                    try:
+                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                        
+                        # Определяем, куда отправлять сообщение
+                        target_chat_id = chat_id
+                        logger.info(f"[YOOKASSA] Подготовка отправки уведомления в chat_id={target_chat_id}, user_id={user_id}")
+                        
+                        # Формируем описание функций в зависимости от типа подписки
+                        if subscription_type == 'personal':
+                            text = "✅ <b>Платеж успешно обработан!</b>\n\n"
+                            text += "👤 <b>Личная подписка активирована</b>\n\n"
+                            
+                            if plan_type == 'notifications':
+                                text += "🔔 <b>Доступные функции:</b>\n"
+                                text += "• Автоматические уведомления о выходе новых серий\n"
+                                text += "• Настройка времени уведомлений (будни/выходные)\n"
+                                text += "• Персонализированные напоминания для каждого сериала\n"
+                                text += "• Отслеживание прогресса просмотра сезонов\n"
+                            elif plan_type == 'recommendations':
+                                text += "🎯 <b>Доступные функции:</b>\n"
+                                text += "• Режим рандомайзера \"по моим оценкам\" (9-10)\n"
+                                text += "• Режим \"по групповым оценкам\" (9-10)\n"
+                                text += "• Режим \"рандом по кинопоиск\" с фильтрами\n"
+                                text += "• Импорт базы оценок из Кинопоиска\n"
+                                text += "• Умные рекомендации на основе ваших предпочтений\n"
+                            elif plan_type == 'tickets':
+                                text += "🎫 <b>Доступные функции:</b>\n"
+                                text += "• Добавление билетов на сеансы в кино\n"
+                                text += "• Хранение билетов в базе бота\n"
+                                text += "• Уведомления с билетами перед сеансом\n"
+                                text += "• Настройка времени напоминания о билетах\n"
+                            else:  # all
+                                text += "📦 <b>Доступные функции:</b>\n\n"
+                                text += "🔔 <b>Уведомления о сериалах:</b>\n"
+                                text += "• Автоматические уведомления о выходе новых серий\n"
+                                text += "• Настройка времени уведомлений\n\n"
+                                text += "🎯 <b>Персональные рекомендации:</b>\n"
+                                text += "• Режим \"по моим оценкам\"\n"
+                                text += "• Режим \"по групповым оценкам\"\n"
+                                text += "• Режим \"рандом по кинопоиск\"\n"
+                                text += "• Импорт базы из Кинопоиска\n\n"
+                                text += "🎫 <b>Билеты в кино:</b>\n"
+                                text += "• Добавление билетов на сеансы\n"
+                                text += "• Уведомления с билетами перед сеансом\n"
+                            
+                            text += "\n\nСпасибо за покупку! 🎉"
+                            
+                            # Отправляем сообщение для личной подписки
+                            logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в chat_id={target_chat_id}, user_id={user_id}")
+                            try:
+                                result = bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
+                                logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено для пользователя {user_id}, chat_id {target_chat_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
+                            except Exception as send_error:
+                                logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения: {send_error}", exc_info=True)
+                                # Не прерываем выполнение, просто логируем ошибку
+                                logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения")
+                            
+                        elif subscription_type == 'group':
+                            # Для групповой подписки отправляем в группу
+                            from database.db_operations import get_active_group_users, get_subscription_members
+                            
+                            text = "✅ <b>Платеж успешно обработан!</b>\n\n"
+                            text += "👥 <b>Групповая подписка активирована</b>\n\n"
+                            
+                            if plan_type == 'all':
+                                text += "📦 <b>Доступные функции:</b>\n\n"
+                                text += "🔔 <b>Уведомления о сериалах:</b>\n"
+                                text += "• Автоматические уведомления о выходе новых серий\n"
+                                text += "• Настройка времени уведомлений\n\n"
+                                text += "🎯 <b>Персональные рекомендации:</b>\n"
+                                text += "• Режим \"по моим оценкам\"\n"
+                                text += "• Режим \"по групповым оценкам\"\n"
+                                text += "• Режим \"рандом по кинопоиск\"\n"
+                                text += "• Импорт базы из Кинопоиска\n\n"
+                                text += "🎫 <b>Билеты в кино:</b>\n"
+                                text += "• Добавление билетов на сеансы\n"
+                                text += "• Уведомления с билетами перед сеансом\n"
+                            
+                            # Проверяем количество участников
+                            active_users = get_active_group_users(chat_id)
+                            active_count = len(active_users) if active_users else 0
+                            
+                            # Получаем участников подписки
+                            # get_subscription_members возвращает dict {user_id: username}
+                            members_dict = get_subscription_members(subscription_id) if subscription_id else {}
+                            members_count = len(members_dict) if members_dict else 0
+                            
+                            # Если есть ограничение по количеству участников и активных пользователей больше
+                            if group_size and active_count > group_size and members_count < group_size:
+                                text += f"\n\n⚠️ <b>Внимание!</b>\n"
+                                text += f"В группе <b>{active_count}</b> активных участников, а подписка рассчитана на <b>{group_size}</b>.\n"
+                                text += f"Выберите участников для подписки:"
+                                
+                                markup = InlineKeyboardMarkup(row_width=1)
+                                markup.add(InlineKeyboardButton("👥 Выбрать участников", callback_data=f"payment:select_members:{subscription_id}"))
+                                try:
+                                    result = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                                    logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой выбора участников отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
+                                except Exception as send_error:
+                                    logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения с кнопкой выбора участников: {send_error}", exc_info=True)
+                            else:
+                                text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b>"
+                                if group_size:
+                                    text += f" из {group_size}"
+                                text += "\n\nСпасибо за покупку! 🎉"
+                                logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в группу chat_id={chat_id}, user_id={user_id}")
+                                try:
+                                    result = bot_instance.send_message(chat_id, text, parse_mode='HTML')
+                                    logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено в группу {chat_id}, user_id {user_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
+                                except Exception as send_error:
+                                    logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в группу: {send_error}", exc_info=True)
+                                    # Не прерываем выполнение, просто логируем ошибку
+                                    logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения в группу")
+                            
+                            logger.info(f"[YOOKASSA] Подписка создана для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
+                        
+                    except Exception as e:
+                        logger.error(f"[YOOKASSA] Ошибка отправки уведомления: {e}", exc_info=True)
+                        # Не прерываем выполнение, просто логируем ошибку
                 else:
-                    logger.warning(f"[YOOKASSA] Платеж уже обработан ранее (статус: {payment_data.get('status')})")
+                    logger.warning(f"[YOOKASSA] Событие payment.succeeded, но статус платежа не succeeded: {payment_status}")
+            else:
+                logger.warning(f"[YOOKASSA] Платеж уже обработан ранее (статус: {payment_data.get('status')})")
             
             elif event_json.get('event') == 'payment.canceled':
                 payment_id = event_json.get('object', {}).get('id')
