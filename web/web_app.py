@@ -63,11 +63,15 @@ def create_web_app(bot_instance):
                     Configuration.secret_key = YOOKASSA_SECRET_KEY
                     
                     # Получаем платеж из БД
+                    logger.info(f"[YOOKASSA] Поиск платежа в БД по yookassa_payment_id: {payment_id}")
                     payment_data = get_payment_by_yookassa_id(payment_id)
                     
                     if not payment_data:
                         logger.warning(f"[YOOKASSA] Платеж {payment_id} не найден в БД")
+                        logger.warning(f"[YOOKASSA] Это может быть нормально, если платеж был создан в другом экземпляре бота")
                         return jsonify({'status': 'ok', 'message': 'Payment not found in DB'}), 200
+                    
+                    logger.info(f"[YOOKASSA] Платеж найден в БД: {payment_data}")
                     
                     # Получаем информацию о платеже из ЮKassa (только если не тестовый режим)
                     payment = None
@@ -171,6 +175,7 @@ def create_web_app(bot_instance):
                             logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
                         
                         # Обновляем платеж с subscription_id
+                        logger.info(f"[YOOKASSA] Обновляем статус платежа на 'succeeded' с subscription_id={subscription_id}")
                         update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)
                         
                         # Отправляем подробное уведомление пользователю
@@ -179,6 +184,7 @@ def create_web_app(bot_instance):
                             
                             # Определяем, куда отправлять сообщение
                             target_chat_id = chat_id
+                            logger.info(f"[YOOKASSA] Подготовка отправки уведомления в chat_id={target_chat_id}, user_id={user_id}")
                             
                             # Формируем описание функций в зависимости от типа подписки
                             if subscription_type == 'personal':
@@ -221,8 +227,13 @@ def create_web_app(bot_instance):
                                 text += "\n\nСпасибо за покупку! 🎉"
                                 
                                 # Отправляем сообщение для личной подписки
-                                bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
-                                logger.info(f"[YOOKASSA] Подписка создана для пользователя {user_id}, chat_id {target_chat_id}, subscription_id {subscription_id}")
+                                logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в chat_id={target_chat_id}")
+                                try:
+                                    bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
+                                    logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено для пользователя {user_id}, chat_id {target_chat_id}, subscription_id {subscription_id}")
+                                except Exception as send_error:
+                                    logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения: {send_error}", exc_info=True)
+                                    raise
                                 
                             elif subscription_type == 'group':
                                 # Для групповой подписки отправляем в группу
@@ -268,7 +279,13 @@ def create_web_app(bot_instance):
                                     if group_size:
                                         text += f" из {group_size}"
                                     text += "\n\nСпасибо за покупку! 🎉"
-                                    bot_instance.send_message(chat_id, text, parse_mode='HTML')
+                                    logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в группу chat_id={chat_id}")
+                                    try:
+                                        bot_instance.send_message(chat_id, text, parse_mode='HTML')
+                                        logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено в группу {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
+                                    except Exception as send_error:
+                                        logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в группу: {send_error}", exc_info=True)
+                                        raise
                                 
                                 logger.info(f"[YOOKASSA] Подписка создана для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
                             
@@ -300,18 +317,32 @@ def create_web_app(bot_instance):
         logger.info("[HEALTH] Health check запрос получен")
         return jsonify({'status': 'ok', 'bot': 'running'}), 200
     
-    @app.route('/yookassa/webhook', methods=['POST'])
+    @app.route('/yookassa/webhook', methods=['POST', 'GET'])
     def yookassa_webhook():
         """Обработчик webhook от ЮKassa"""
+        if request.method == 'GET':
+            # Для проверки доступности endpoint
+            return jsonify({'status': 'ok', 'message': 'YooKassa webhook endpoint is active'}), 200
+        
         try:
-            logger.info("[YOOKASSA WEBHOOK] Получен запрос от ЮKassa")
+            logger.info("=" * 80)
+            logger.info("[YOOKASSA WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС ОТ ЮKASSA =====")
+            logger.info(f"[YOOKASSA WEBHOOK] Headers: {dict(request.headers)}")
+            logger.info(f"[YOOKASSA WEBHOOK] Content-Type: {request.content_type}")
+            
             event_json = request.json
             if not event_json:
                 logger.warning("[YOOKASSA WEBHOOK] Пустой JSON")
+                logger.warning(f"[YOOKASSA WEBHOOK] Raw data: {request.get_data()}")
                 return jsonify({'error': 'Empty JSON'}), 400
             
+            logger.info(f"[YOOKASSA WEBHOOK] JSON получен: {event_json}")
             logger.info(f"[YOOKASSA WEBHOOK] Событие: {event_json.get('event')}")
-            return process_yookassa_notification(event_json, is_test=False)
+            logger.info(f"[YOOKASSA WEBHOOK] Payment ID: {event_json.get('object', {}).get('id')}")
+            
+            result = process_yookassa_notification(event_json, is_test=False)
+            logger.info(f"[YOOKASSA WEBHOOK] Обработка завершена успешно")
+            return result
         except Exception as e:
             logger.error(f"[YOOKASSA WEBHOOK] Ошибка: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
