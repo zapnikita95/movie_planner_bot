@@ -2030,6 +2030,42 @@ def handle_import_count_callback(call):
         except:
             pass
 
+def get_film_distribution(kp_id):
+    """Получает информацию о прокате фильма в России"""
+    headers = {
+        'X-API-KEY': KP_TOKEN,
+        'accept': 'application/json'
+    }
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/distributions"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get('items', [])
+            # Ищем прокат в России (COUNTRY_SPECIFIC для России)
+            for item in items:
+                if item.get('type') == 'COUNTRY_SPECIFIC':
+                    country = item.get('country', {})
+                    if isinstance(country, dict) and country.get('country') == 'Россия':
+                        date_str = item.get('date')
+                        if date_str:
+                            try:
+                                from datetime import date as date_class
+                                release_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                                today = date_class.today()
+                                # Возвращаем только если дата в будущем
+                                if release_date > today:
+                                    return {
+                                        'date': release_date,
+                                        'date_str': release_date.strftime('%d.%m.%Y')
+                                    }
+                            except Exception as e:
+                                logger.warning(f"[DISTRIBUTION] Ошибка парсинга даты {date_str}: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"[DISTRIBUTION] Ошибка получения информации о прокате для {kp_id}: {e}")
+        return None
+
 def extract_movie_info(link):
     match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
     if not match:
@@ -2046,11 +2082,29 @@ def extract_movie_info(link):
     try:
         # Основные данные (название, год, жанры, описание)
         url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+        
+        # Если это фильм, параллельно запрашиваем информацию о прокате
+        distribution_info = None
+        if not is_series:
+            import threading
+            distribution_result = [None]
+            
+            def fetch_distribution():
+                distribution_result[0] = get_film_distribution(kp_id)
+            
+            dist_thread = threading.Thread(target=fetch_distribution)
+            dist_thread.start()
+        
         response_main = requests.get(url_main, headers=headers, timeout=15)
         if response_main.status_code != 200:
             logger.error(f"Основной запрос ошибка {response_main.status_code}")
             return None
         data_main = response_main.json()
+        
+        # Ждем завершения запроса distributions
+        if not is_series:
+            dist_thread.join(timeout=10)
+            distribution_info = distribution_result[0]
 
         title = data_main.get('nameRu') or data_main.get('nameOriginal') or "Unknown"
         year = data_main.get('year') or "—"
@@ -2104,7 +2158,7 @@ def extract_movie_info(link):
 
         logger.info(f"Успешно: {title} ({year}), режиссёр: {director}, актёры: {actors}")
 
-        return {
+        result = {
             'kp_id': kp_id,
             'title': title,
             'year': year,
@@ -2114,6 +2168,12 @@ def extract_movie_info(link):
             'description': description,
             'is_series': is_series
         }
+        
+        # Добавляем информацию о прокате в России, если есть
+        if distribution_info:
+            result['russia_release'] = distribution_info
+        
+        return result
     except Exception as e:
         logger.error(f"Ошибка получения данных для {kp_id}: {e}")
         return None
@@ -2633,25 +2693,36 @@ def premiere_detail_handler(call):
         directors = data.get('directors', [])
         director_str = ', '.join([d.get('nameRu') or d.get('nameEn', '') for d in directors if d.get('nameRu') or d.get('nameEn')]) or '—'
         
-        # Получаем дату премьеры
+        # Получаем информацию о прокате в России (приоритет)
+        russia_release = get_film_distribution(kp_id)
         premiere_date = None
         premiere_date_str = ""
-        for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-            date_value = data.get(date_field)
-            if date_value:
-                try:
-                    if 'T' in str(date_value):
-                        premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                    else:
-                        premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                    break
-                except:
-                    continue
+        
+        # Если есть информация о прокате в России с будущей датой
+        if russia_release and russia_release.get('date'):
+            premiere_date = russia_release['date']
+            premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
+        else:
+            # Иначе получаем дату премьеры из основного ответа
+            for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+                date_value = data.get(date_field)
+                if date_value:
+                    try:
+                        if 'T' in str(date_value):
+                            premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                        else:
+                            premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                        premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                        break
+                    except:
+                        continue
         
         text = f"<b>{title}</b> ({year})\n\n"
         if premiere_date_str:
-            text += f"📅 Премьера: {premiere_date_str}\n"
+            if russia_release:
+                text += f"📅 Премьера в России: {premiere_date_str}\n"
+            else:
+                text += f"📅 Премьера: {premiere_date_str}\n"
         if director_str != '—':
             text += f"🎥 Режиссёр: {director_str}\n"
         if countries != '—':
@@ -2667,8 +2738,8 @@ def premiere_detail_handler(call):
         
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Проверяем, нужно ли показывать кнопку "Напомнить о выходе"
-        # Показываем если премьера еще не состоялась (независимо от наличия в базе)
+        # Проверяем, нужно ли показывать кнопку "Уведомить о премьере"
+        # Показываем если премьера/прокат еще не состоялись (независимо от наличия в базе)
         from datetime import date as date_class
         today = date_class.today()
         show_notify_button = False
@@ -2677,7 +2748,7 @@ def premiere_detail_handler(call):
         if premiere_date:
             is_future = premiere_date > today
             if is_future:
-                # Дата в будущем - показываем "Напомнить о выходе"
+                # Дата в будущем - показываем "Уведомить о премьере"
                 show_notify_button = True
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
         elif not premiere_date:
@@ -2693,9 +2764,9 @@ def premiere_detail_handler(call):
                 except:
                     pass
         
-        # Кнопка "Напомнить о выходе" показывается первой, если фильм еще не вышел
+        # Кнопка "Уведомить о премьере" показывается первой, если фильм еще не вышел
         if show_notify_button:
-            markup.add(InlineKeyboardButton("🔔 Напомнить о выходе", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
+            markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
         
         # Если фильма нет в базе, показываем кнопку "Добавить в базу"
         if not film_in_db:
@@ -3287,39 +3358,50 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
         markup = InlineKeyboardMarkup(row_width=1)
         kp_id = info.get('kp_id')
         if kp_id:
-            # Проверяем премьеру фильма
+            # Проверяем прокат в России (приоритет) или премьеру фильма
+            russia_release = info.get('russia_release')
             premiere_date = None
             premiere_date_str = ""
-            try:
-                headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-                url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-                response_main = requests.get(url_main, headers=headers, timeout=15)
-                if response_main.status_code == 200:
-                    data_main = response_main.json()
-                    from datetime import date as date_class
-                    today = date_class.today()
-                    
-                    # Получаем дату премьеры
-                    for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-                        date_value = data_main.get(date_field)
-                        if date_value:
-                            try:
-                                if 'T' in str(date_value):
-                                    premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                                else:
-                                    premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                                premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                                break
-                            except:
-                                continue
-                    
-                    # Если премьера еще не состоялась, добавляем кнопку первой
-                    if premiere_date and premiere_date > today:
-                        date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                        # Используем период 'current_month' по умолчанию
-                        markup.add(InlineKeyboardButton("🔔 Напомнить о выходе фильма", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
-            except Exception as e:
-                logger.warning(f"[ADD_AND_ANNOUNCE] Ошибка получения информации о премьере: {e}")
+            
+            # Если есть информация о прокате в России с будущей датой
+            if russia_release and russia_release.get('date'):
+                premiere_date = russia_release['date']
+                premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
+            else:
+                # Иначе проверяем премьеру через основной API
+                try:
+                    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+                    url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+                    response_main = requests.get(url_main, headers=headers, timeout=15)
+                    if response_main.status_code == 200:
+                        data_main = response_main.json()
+                        from datetime import date as date_class
+                        today = date_class.today()
+                        
+                        # Получаем дату премьеры
+                        for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+                            date_value = data_main.get(date_field)
+                            if date_value:
+                                try:
+                                    if 'T' in str(date_value):
+                                        premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                                    else:
+                                        premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                                    break
+                                except:
+                                    continue
+                except Exception as e:
+                    logger.warning(f"[ADD_AND_ANNOUNCE] Ошибка получения информации о премьере: {e}")
+            
+            # Если премьера/прокат еще не состоялись, добавляем кнопку первой
+            if premiere_date:
+                from datetime import date as date_class
+                today = date_class.today()
+                if premiere_date > today:
+                    date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+                    # Используем период 'current_month' по умолчанию
+                    markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
             
             # Используем kp_id для callback_data (короче, чем полная ссылка)
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
@@ -3337,10 +3419,14 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                         InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                     )
                     
-                    # Если это сериал, добавляем кнопки для сериалов (только если есть доступ)
-                    if is_series and user_id and has_notifications_access(chat_id, user_id):
-                        markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    # Если это сериал, добавляем кнопки для сериалов (заблокированные, если нет доступа)
+                    if is_series and user_id:
+                        if has_notifications_access(chat_id, user_id):
+                            markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                        else:
+                            markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                            markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
         try:
             logger.info(f"Отправляем сообщение в чат {chat_id}")
@@ -3348,18 +3434,27 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
             # Только если сообщение отправлено успешно и фильм добавлен в БД — сохраняем для реакций
             bot_messages[msg.message_id] = link
             
-            # Если добавлен сериал, отправляем дополнительное сообщение о планировании серий (только если есть доступ)
-            if is_series and user_id and has_notifications_access(chat_id, user_id):
+            # Если добавлен сериал, отправляем дополнительное сообщение о планировании серий
+            if is_series and user_id:
                 try:
+                    has_access = has_notifications_access(chat_id, user_id)
                     series_text = f"📺 <b>Сериал добавлен в базу!</b>\n\n"
-                    series_text += f"Вы можете:\n"
-                    series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
-                    series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
-                    series_text += f"Используйте команду /seasons для управления сериалами."
+                    if has_access:
+                        series_text += f"Вы можете:\n"
+                        series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
+                        series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
+                        series_text += f"Используйте команду /seasons для управления сериалами."
+                    else:
+                        series_text += f"🔒 <b>Функционал доступен с подпиской на уведомления о сериалах</b>\n\n"
+                        series_text += f"Используйте /payment для оформления подписки."
                     
                     series_markup = InlineKeyboardMarkup(row_width=1)
-                    series_markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                    series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    if has_access:
+                        series_markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                        series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    else:
+                        series_markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                        series_markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
                     
                     bot.send_message(chat_id, series_text, parse_mode='HTML', reply_markup=series_markup)
                     logger.info(f"[ADD SERIES] Отправлено сообщение о планировании серий для {info.get('title')}")
@@ -3382,32 +3477,47 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
             
             logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}, message_id={msg.message_id}")
             
-            # Если это сериал, показываем сезоны и предлагаем отметить просмотренные (только если есть доступ)
-            if info.get('is_series') and user_id and has_notifications_access(chat_id, user_id):
-                seasons_text = get_seasons(info['kp_id'], chat_id, user_id)
-                if seasons_text:
-                    bot.send_message(chat_id, seasons_text, parse_mode='HTML')
-                    
-                    # Предлагаем отметить сезоны/серии как просмотренные
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{info['kp_id']}"))
-                    # Проверяем, подписан ли уже пользователь
-                    with db_lock:
-                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, info['kp_id']))
-                        film_row = cursor.fetchone()
-                        if film_row:
-                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                            sub_row = cursor.fetchone()
-                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                            
-                            if is_subscribed:
-                                markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{info['kp_id']}"))
+            # Если это сериал, показываем сезоны и предлагаем отметить просмотренные
+            if info.get('is_series') and user_id:
+                has_access = has_notifications_access(chat_id, user_id)
+                if has_access:
+                    seasons_text = get_seasons(info['kp_id'], chat_id, user_id)
+                    if seasons_text:
+                        bot.send_message(chat_id, seasons_text, parse_mode='HTML')
+                        
+                        # Предлагаем отметить сезоны/серии как просмотренные
+                        markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{info['kp_id']}"))
+                        # Проверяем, подписан ли уже пользователь
+                        with db_lock:
+                            cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, info['kp_id']))
+                            film_row = cursor.fetchone()
+                            if film_row:
+                                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                                sub_row = cursor.fetchone()
+                                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                                
+                                if is_subscribed:
+                                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{info['kp_id']}"))
+                                else:
+                                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                             else:
                                 markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
-                        else:
-                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
-                    bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
+                        bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
+                else:
+                    # Нет доступа - показываем заблокированные кнопки
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{info['kp_id']}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{info['kp_id']}"))
+                    bot.send_message(
+                        chat_id,
+                        "📺 <b>Сериал добавлен в базу!</b>\n\n"
+                        "🔒 <b>Функционал доступен с подпиской на уведомления о сериалах</b>\n\n"
+                        "Используйте /payment для оформления подписки.",
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
             
             return True
         except Exception as e:
@@ -6340,7 +6450,7 @@ def series_subscribe_callback(call):
         if not has_notifications_access(chat_id, user_id):
             bot.answer_callback_query(
                 call.id, 
-                "❌ Эта функция доступна только с подпиской на уведомления о сериалах. Используйте /payment для оформления подписки.", 
+                "🔒 Функционал можно подключить через /payment", 
                 show_alert=True
             )
             return
@@ -6472,7 +6582,7 @@ def series_unsubscribe_callback(call):
         if not has_notifications_access(chat_id, user_id):
             bot.answer_callback_query(
                 call.id, 
-                "❌ Эта функция доступна только с подпиской на уведомления о сериалах. Используйте /payment для оформления подписки.", 
+                "🔒 Функционал можно подключить через /payment", 
                 show_alert=True
             )
             return
@@ -7390,25 +7500,33 @@ def handle_add_film_callback(call):
                     InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                 )
             
-            # Если это сериал, добавляем кнопки для сериалов (только если есть доступ)
-            if is_series_final and has_notifications_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                
-                # Проверяем, подписан ли уже пользователь
-                with db_lock:
-                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                    sub_row = cursor.fetchone()
-                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                
-                if is_subscribed:
-                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+            # Если это сериал, добавляем кнопки для сериалов (заблокированные, если нет доступа)
+            if is_series_final:
+                if has_notifications_access(chat_id, user_id):
+                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                    
+                    # Проверяем, подписан ли уже пользователь
+                    with db_lock:
+                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                        sub_row = cursor.fetchone()
+                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                    
+                    if is_subscribed:
+                        markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         else:
-            # Если фильм не в базе, но это сериал - показываем кнопки для сериалов (только если есть доступ)
-            if is_series_final and has_notifications_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+            # Если фильм не в базе, но это сериал - показываем кнопки для сериалов (заблокированные, если нет доступа)
+            if is_series_final:
+                if has_notifications_access(chat_id, user_id):
+                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
         # Сохраняем информацию о сообщении с результатами поиска для кнопки "Назад"
         search_results_msg_id = None
@@ -7642,25 +7760,30 @@ def handle_confirm_add_film_callback(call):
                         InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
                     )
             
-            # Если это сериал, добавляем кнопки для сериалов (только если есть доступ)
-            if info.get('is_series') and has_notifications_access(chat_id, user_id):
-                # Добавляем кнопку для отметки сезонов/серий
-                markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                
-                # Проверяем, подписан ли уже пользователь (только если film_id определен)
-                if film_row:
-                    with db_lock:
-                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                        sub_row = cursor.fetchone()
-                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+            # Если это сериал, добавляем кнопки для сериалов (заблокированные, если нет доступа)
+            if info.get('is_series'):
+                if has_notifications_access(chat_id, user_id):
+                    # Добавляем кнопку для отметки сезонов/серий
+                    markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                     
-                    if is_subscribed:
-                        markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                    # Проверяем, подписан ли уже пользователь (только если film_id определен)
+                    if film_row:
+                        with db_lock:
+                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                            sub_row = cursor.fetchone()
+                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                        
+                        if is_subscribed:
+                            markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                        else:
+                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                     else:
+                        # Если film_id еще не определен, просто добавляем кнопку подписки
                         markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
-                    # Если film_id еще не определен, просто добавляем кнопку подписки
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    # Нет доступа - заблокированные кнопки
+                    markup.add(InlineKeyboardButton("🔒 Отметить сезоны/серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
             
             # Отправляем новое сообщение
             msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
@@ -12556,14 +12679,7 @@ def seasons_command(message):
     user_id = message.from_user.id
     
     # Проверяем доступ к функциям уведомлений
-    if not has_notifications_access(chat_id, user_id):
-        bot.reply_to(
-            message,
-            "❌ <b>Эта функция доступна только с подпиской на уведомления о сериалах</b>\n\n"
-            "Используйте /payment для оформления подписки.",
-            parse_mode='HTML'
-        )
-        return
+    has_access = has_notifications_access(chat_id, user_id)
     
     with db_lock:
         cursor.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
@@ -12574,7 +12690,6 @@ def seasons_command(message):
         return
     
     markup = InlineKeyboardMarkup(row_width=1)
-    user_id = message.from_user.id
     
     for row in series:
         if isinstance(row, dict):
@@ -12586,12 +12701,13 @@ def seasons_command(message):
             title = row[1]
             kp_id = row[2]
         
-        # Проверяем, подписан ли пользователь на этот сериал
+        # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
         is_subscribed = False
-        with db_lock:
-            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-            sub_row = cursor.fetchone()
-            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+        if has_access:
+            with db_lock:
+                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                sub_row = cursor.fetchone()
+                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
         
         button_text = title
         # Добавляем колокольчик, если подписан
@@ -12600,11 +12716,37 @@ def seasons_command(message):
         
         if len(button_text) > 30:
             button_text = button_text[:27] + "..."
-        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+        
+        # Если нет доступа, кнопки заблокированы
+        if has_access:
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+        else:
+            markup.add(InlineKeyboardButton(f"🔒 {button_text}", callback_data=f"seasons_locked:{kp_id}"))
     
     # Сохраняем message_id для возможности вернуться назад
-    msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
-    # Можно сохранить message_id в каком-то хранилище, но пока просто используем последнее сообщение
+    if has_access:
+        msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
+    else:
+        msg = bot.reply_to(
+            message,
+            "📺 <b>Выберите сериал:</b>\n\n"
+            "🔒 <b>Функционал доступен с подпиской на уведомления о сериалах</b>\n\n"
+            "Используйте /payment для оформления подписки.",
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("seasons_locked:"))
+def seasons_locked_callback(call):
+    """Обработчик заблокированных кнопок сериалов"""
+    try:
+        bot.answer_callback_query(
+            call.id, 
+            "🔒 Функционал можно подключить через /payment", 
+            show_alert=True
+        )
+    except Exception as e:
+        logger.error(f"[SEASONS] ERROR in seasons_locked_callback: {e}", exc_info=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
 def show_seasons_callback(call):
@@ -12619,7 +12761,7 @@ def show_seasons_callback(call):
         if not has_notifications_access(chat_id, user_id):
             bot.answer_callback_query(
                 call.id, 
-                "❌ Эта функция доступна только с подпиской на уведомления о сериалах. Используйте /payment для оформления подписки.", 
+                "🔒 Функционал можно подключить через /payment", 
                 show_alert=True
             )
             return
@@ -12723,6 +12865,18 @@ def seasons_list_callback(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("series_locked:"))
+def series_locked_callback(call):
+    """Обработчик заблокированных кнопок сериалов"""
+    try:
+        bot.answer_callback_query(
+            call.id, 
+            "🔒 Функционал можно подключить через /payment", 
+            show_alert=True
+        )
+    except Exception as e:
+        logger.error(f"[SERIES] ERROR in series_locked_callback: {e}", exc_info=True)
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
 def series_track_callback(call):
     """Обработчик для отметки сезонов/серий как просмотренных"""
@@ -12736,7 +12890,7 @@ def series_track_callback(call):
         if not has_notifications_access(chat_id, user_id):
             bot.answer_callback_query(
                 call.id, 
-                "❌ Эта функция доступна только с подпиской на уведомления о сериалах. Используйте /payment для оформления подписки.", 
+                "🔒 Функционал можно подключить через /payment", 
                 show_alert=True
             )
             return
@@ -13286,6 +13440,18 @@ def ticket_command(message):
         chat_id = message.chat.id
         username = message.from_user.username or f"user_{user_id}"
         log_request(user_id, username, '/ticket', chat_id)
+        
+        # Проверяем доступ к функциям билетов
+        if not has_tickets_access(chat_id, user_id):
+            text = "🎫 <b>Билеты в кино</b>\n\n"
+            text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+            text += "Используйте /payment для оформления подписки."
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+            
+            bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+            return
         
         # Проверяем, есть ли файл в сообщении
         has_photo = message.photo is not None and len(message.photo) > 0
