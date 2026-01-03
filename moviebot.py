@@ -3092,10 +3092,16 @@ def premiere_add_to_db(call):
 def add_movie_from_random(call):
     """Добавляет фильм из рандома по кинопоиску в базу"""
     try:
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Проверяем участие в боте
+        if not check_participation_and_notify(call, chat_id, user_id):
+            return
+        
         bot.answer_callback_query(call.id)
         kp_id = call.data.split(":")[1]
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        chat_id = call.message.chat.id
         message_id = call.message.message_id
         
         # Проверяем, есть ли фильм уже в базе
@@ -3706,6 +3712,20 @@ def handle_reaction(reaction):
     
     chat_id = reaction.chat.id
     message_id = reaction.message_id
+    user_id = reaction.user.id if hasattr(reaction, 'user') and reaction.user else None
+    
+    # Проверяем участие в боте (только для реакций на сообщения о фильмах, не для настроек)
+    if user_id and message_id not in settings_messages:
+        if not is_bot_participant(chat_id, user_id):
+            try:
+                bot.send_message(
+                    chat_id,
+                    f"Чтобы взаимодействовать с ботом, начните участие в нём с любой команды, например, /join",
+                    reply_to_message_id=message_id
+                )
+            except:
+                pass
+            return
     
     # Проверяем, не это ли реакция на сообщение settings
     if message_id in settings_messages:
@@ -6018,6 +6038,15 @@ def handle_added_movie_rating_reply(message):
 def handle_rating(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
+    
+    # Проверяем участие в боте
+    if not is_bot_participant(chat_id, user_id):
+        bot.reply_to(
+            message,
+            "Чтобы взаимодействовать с ботом, начните участие в нём с любой команды, например, /join"
+        )
+        return
+    
     rating = int(message.text)
     
     film_id = None
@@ -6537,11 +6566,16 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
 def handle_confirm_rating(call):
     """Обработчик подтверждения оценки и просмотра для фильма из 'Добавлено в базу'"""
     try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Проверяем участие в боте
+        if not check_participation_and_notify(call, chat_id, user_id):
+            return
+        
         parts = call.data.split(":")
         film_id = int(parts[1])
         rating = int(parts[2])
-        user_id = call.from_user.id
-        chat_id = call.message.chat.id
         
         with db_lock:
             # Проверяем, существует ли фильм
@@ -7239,79 +7273,212 @@ def stats_command(message):
             logger.error(f"❌ Ошибка при отправке сообщения об ошибке: {reply_error}", exc_info=True)
 
 # /join — регистрация участника группы
+def is_bot_participant(chat_id, user_id):
+    """Проверяет, является ли пользователь участником бота (есть ли запись в stats)"""
+    try:
+        with db_lock:
+            cursor.execute('''
+                SELECT COUNT(*) FROM stats 
+                WHERE chat_id = %s AND user_id = %s
+            ''', (chat_id, user_id))
+            count = cursor.fetchone()
+            return (count.get('count') if isinstance(count, dict) else count[0]) > 0
+    except Exception as e:
+        logger.error(f"[IS_BOT_PARTICIPANT] Ошибка: {e}")
+        return False
+
+def check_participation_and_notify(call, chat_id=None, user_id=None):
+    """Проверяет участие пользователя в боте. Если не участвует, отправляет уведомление и возвращает False"""
+    if chat_id is None:
+        chat_id = call.message.chat.id
+    if user_id is None:
+        user_id = call.from_user.id
+    
+    if not is_bot_participant(chat_id, user_id):
+        try:
+            bot.answer_callback_query(
+                call.id,
+                "Чтобы взаимодействовать с ботом, начните участие в нём с любой команды, например, /join",
+                show_alert=True
+            )
+        except:
+            pass
+        return False
+    return True
+
 @bot.message_handler(commands=['join'])
 def join_command(message):
     logger.info(f"[HANDLER] /join вызван от {message.from_user.id}")
     try:
         username = message.from_user.username or f"user_{message.from_user.id}"
-        log_request(message.from_user.id, username, '/join', message.chat.id)
         logger.info(f"Команда /join от пользователя {message.from_user.id}, chat_id={message.chat.id}")
         chat_id = message.chat.id
         user_id = message.from_user.id
         
-        # Регистрируем текущего пользователя
-        registered_users = [{'user_id': user_id, 'username': username}]
+        # Проверяем, является ли пользователь уже участником
+        is_participant = is_bot_participant(chat_id, user_id)
         
-        # Парсим текст сообщения для поиска упоминаний
-        text = message.text or ""
-        logger.info(f"[JOIN] Текст сообщения: {text}")
-        
-        # Извлекаем упоминания из entities (если есть реальные упоминания пользователей)
-        mentioned_user_ids = set()
-        if message.entities:
-            for entity in message.entities:
-                if entity.type == 'mention' and hasattr(entity, 'user') and entity.user:
-                    mentioned_user = entity.user
-                    mentioned_user_ids.add(mentioned_user.id)
-                    mentioned_username = mentioned_user.username or f"user_{mentioned_user.id}"
-                    registered_users.append({
-                        'user_id': mentioned_user.id,
-                        'username': mentioned_username
-                    })
-                    logger.info(f"[JOIN] Найдено упоминание через entity: user_id={mentioned_user.id}, username={mentioned_username}")
-        
-        # Также парсим текст для поиска @username (на случай, если entities не сработали)
-        # Разбиваем по пробелам и знакам препинания
-        import re
-        # Ищем все @username в тексте
-        text_mentions = re.findall(r'@(\w+)', text)
-        logger.info(f"[JOIN] Найдено упоминаний в тексте: {text_mentions}")
-        
-        # Если есть упоминания в тексте, но их нет в entities, пытаемся найти через get_chat_member
-        for mention_username in text_mentions:
-            # Пропускаем, если уже зарегистрировали через entities
-            found_in_entities = False
-            for reg_user in registered_users:
-                if reg_user['username'].lower() == mention_username.lower():
-                    found_in_entities = True
-                    break
-            
-            if not found_in_entities:
-                # Пытаемся найти пользователя в группе по username
-                try:
-                    # В группах можно попробовать найти через поиск, но это ограничено
-                    # Пока просто сохраняем username для будущего сопоставления
-                    logger.info(f"[JOIN] Упоминание @{mention_username} найдено в тексте, но user_id неизвестен")
-                except Exception as e:
-                    logger.warning(f"[JOIN] Не удалось обработать упоминание @{mention_username}: {e}")
-        
-        # Регистрируем всех найденных пользователей
-        response_text = "✅ Зарегистрированы участники:\n"
-        for reg_user in registered_users:
-            log_request(reg_user['user_id'], reg_user['username'], '/join', chat_id)
-            response_text += f"• @{reg_user['username']}\n"
-        
-        if len(registered_users) == 1:
-            response_text = f"✅ Вы зарегистрированы как участник группы!\n\nТеперь вы будете учитываться в статистике /stats."
+        if not is_participant:
+            # Регистрируем пользователя
+            log_request(user_id, username, '/join', chat_id)
+            response_text = "✅ Вы добавлены к участию в боте!"
         else:
-            response_text += "\nТеперь вы будете учитываться в статистике /stats."
+            response_text = "ℹ️ Вы уже участвуете в боте"
         
-        bot.reply_to(message, response_text)
-        logger.info(f"✅ Зарегистрировано пользователей через /join: {len(registered_users)}")
+        # Получаем список участников группы (только для групповых чатов)
+        if chat_id < 0:  # Групповой чат
+            try:
+                # Получаем всех участников бота из stats
+                with db_lock:
+                    cursor.execute('''
+                        SELECT DISTINCT user_id, username 
+                        FROM stats 
+                        WHERE chat_id = %s
+                        ORDER BY username
+                    ''', (chat_id,))
+                    bot_participants = cursor.fetchall()
+                
+                bot_participant_ids = set()
+                bot_participants_dict = {}
+                for row in bot_participants:
+                    p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                    p_username = row.get('username') if isinstance(row, dict) else row[1]
+                    bot_participant_ids.add(p_user_id)
+                    bot_participants_dict[p_user_id] = p_username
+                
+                # Получаем список всех участников группы
+                # В Telegram Bot API нет прямого способа получить всех участников группы
+                # Используем альтернативный подход: собираем участников из сообщений
+                # Для этого можно использовать get_chat_administrators и другие методы
+                # Но проще всего - показать тех, кто есть в stats, и предложить добавить остальных
+                
+                # Получаем администраторов группы (они точно есть)
+                try:
+                    admins = bot.get_chat_administrators(chat_id)
+                    all_group_member_ids = set()
+                    all_group_members = {}
+                    
+                    for admin in admins:
+                        admin_user = admin.user
+                        all_group_member_ids.add(admin_user.id)
+                        all_group_members[admin_user.id] = {
+                            'username': admin_user.username or f"user_{admin_user.id}",
+                            'first_name': admin_user.first_name or '',
+                            'is_premium': getattr(admin_user, 'is_premium', False)
+                        }
+                    
+                    # Находим недобавленных участников
+                    not_added = []
+                    for member_id, member_info in all_group_members.items():
+                        if member_id not in bot_participant_ids:
+                            not_added.append({
+                                'user_id': member_id,
+                                'username': member_info['username'],
+                                'first_name': member_info['first_name'],
+                                'is_premium': member_info['is_premium']
+                            })
+                    
+                    # Формируем ответ
+                    if not_added or bot_participants:
+                        response_text += "\n\n"
+                        
+                        # Показываем участников бота
+                        if bot_participants:
+                            response_text += "✅ <b>Участники бота:</b>\n"
+                            for row in bot_participants:
+                                p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                                p_username = row.get('username') if isinstance(row, dict) else row[1]
+                                
+                                # Проверяем, есть ли у пользователя платный доступ
+                                has_premium = False
+                                try:
+                                    # Пытаемся получить информацию о пользователе
+                                    user_info = all_group_members.get(p_user_id, {})
+                                    has_premium = user_info.get('is_premium', False)
+                                except:
+                                    pass
+                                
+                                premium_mark = "⭐" if has_premium else ""
+                                display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
+                                response_text += f"• {display_name} {premium_mark}\n"
+                        
+                        # Показываем недобавленных участников
+                        if not_added:
+                            response_text += "\n❌ <b>Недобавленные участники:</b>\n"
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            for member in not_added[:20]:  # Ограничиваем до 20 кнопок
+                                display_name = member['username'] if member['username'].startswith('user_') else f"@{member['username']}"
+                                premium_mark = "⭐" if member['is_premium'] else ""
+                                button_text = f"{display_name} {premium_mark}".strip()
+                                if len(button_text) > 50:
+                                    button_text = button_text[:47] + "..."
+                                # Кнопка для добавления участника (пока просто показывает информацию)
+                                markup.add(InlineKeyboardButton(button_text, callback_data=f"join_add:{member['user_id']}"))
+                            
+                            bot.reply_to(message, response_text, parse_mode='HTML', reply_markup=markup)
+                            return
+                except Exception as e:
+                    logger.warning(f"[JOIN] Не удалось получить список администраторов: {e}")
+                    # Если не удалось получить администраторов, просто показываем участников бота
+                    if bot_participants:
+                        response_text += "\n\n✅ <b>Участники бота:</b>\n"
+                        for row in bot_participants:
+                            p_username = row.get('username') if isinstance(row, dict) else row[1]
+                            display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
+                            response_text += f"• {display_name}\n"
+        
+        bot.reply_to(message, response_text, parse_mode='HTML')
+        logger.info(f"✅ Команда /join обработана для пользователя {user_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /join: {e}", exc_info=True)
         try:
             bot.reply_to(message, "Произошла ошибка при обработке команды /join")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("join_add:"))
+def join_add_callback(call):
+    """Обработчик добавления участника через кнопку в /join"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        target_user_id = int(call.data.split(":")[1])
+        
+        # Проверяем, является ли вызывающий участником бота
+        if not is_bot_participant(chat_id, user_id):
+            bot.answer_callback_query(call.id, "❌ Вы не участвуете в боте. Используйте /join", show_alert=True)
+            return
+        
+        # Проверяем, является ли целевой пользователь уже участником
+        if is_bot_participant(chat_id, target_user_id):
+            bot.answer_callback_query(call.id, "✅ Этот пользователь уже участвует в боте")
+            return
+        
+        # Получаем информацию о пользователе
+        try:
+            member = bot.get_chat_member(chat_id, target_user_id)
+            target_username = member.user.username or f"user_{target_user_id}"
+        except:
+            target_username = f"user_{target_user_id}"
+        
+        # Добавляем пользователя
+        log_request(target_user_id, target_username, '/join', chat_id)
+        bot.answer_callback_query(call.id, f"✅ {target_username} добавлен к участию в боте")
+        
+        # Обновляем сообщение /join
+        # Можно вызвать join_command заново, но проще обновить текущее сообщение
+        try:
+            bot.edit_message_text(
+                f"✅ {target_username} добавлен к участию в боте!",
+                chat_id, call.message.message_id
+            )
+        except:
+            pass
+    except Exception as e:
+        logger.error(f"[JOIN_ADD] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка при добавлении участника", show_alert=True)
         except:
             pass
 
