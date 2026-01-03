@@ -2560,25 +2560,33 @@ def premiere_detail_handler(call):
             text += f"🌍 {countries}"
 
         text += f"\n{description}\n\n"
-        text += f"\n{description}\n\n"
         text += f"🎭 {genres}\n"
         
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"premiere_add:{kp_id}"))
+        # Проверяем, есть ли фильм в базе
+        with db_lock:
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            film_in_db = cursor.fetchone()
         
-        # Проверяем, нужно ли показывать кнопку уведомления
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Если фильма нет в базе, показываем кнопку "Добавить в базу"
+        if not film_in_db:
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"premiere_add:{kp_id}"))
+        
+        # Проверяем, нужно ли показывать кнопку "Уведомить о премьере"
+        # Показываем только если фильма нет в базе И дата премьеры в будущем
         from datetime import date as date_class
         today = date_class.today()
         show_notify_button = False
         date_for_callback = ''
         
-        if premiere_date:
+        if not film_in_db and premiere_date:
             is_future = premiere_date > today
             if is_future:
-                # Дата в будущем - показываем "Уведомить о выходе"
+                # Дата в будущем и фильма нет в базе - показываем "Уведомить о премьере"
                 show_notify_button = True
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-        else:
+        elif not film_in_db and not premiere_date:
             # Если дата не определена, но есть год, проверяем год
             year = data.get('year')
             if year:
@@ -2592,9 +2600,9 @@ def premiere_detail_handler(call):
                     pass
         
         if show_notify_button:
-            markup.add(InlineKeyboardButton("🔔 Уведомить о выходе", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
-        elif premiere_date and premiere_date <= today:
-            # Дата в прошлом - показываем старую кнопку "Напомнить" только если нет напоминания
+            markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
+        elif premiere_date and premiere_date <= today and not film_in_db:
+            # Дата в прошлом и фильма нет в базе - показываем старую кнопку "Напомнить" только если нет напоминания
             with db_lock:
                 cursor.execute('''
                     SELECT id FROM premiere_reminders 
@@ -7156,7 +7164,7 @@ def handle_add_film_callback(call):
                 )
             
             # Если это сериал, добавляем кнопки для сериалов
-            if is_series_from_info:
+            if is_series_final:
                 markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                 
                 # Проверяем, подписан ли уже пользователь
@@ -7171,7 +7179,7 @@ def handle_add_film_callback(call):
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         else:
             # Если фильм не в базе, но это сериал - показываем кнопки для сериалов
-            if is_series_from_info:
+            if is_series_final:
                 markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
                 markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
@@ -8995,31 +9003,26 @@ def _show_year_step(call, chat_id, user_id):
         logger.info(f"[RANDOM] Showing year step for user {user_id}")
         
         state = user_random_state.get(user_id, {})
-        selected_year = state.get('year')
+        selected_periods = state.get('periods', [])
         mode_description = {
             'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nИщем случайный фильм на Кинопоиске по заданным фильтрам.'
         }.get(state.get('mode'), '')
         
-        # Генерируем список годов от 1950 до текущего года
-        current_year = datetime.now().year
-        years = list(range(1950, current_year + 1))
-        years.reverse()  # От новых к старым
+        # Используем те же промежутки, что и в режиме "Рандом по своей базе"
+        available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
         
-        markup = InlineKeyboardMarkup(row_width=4)
+        markup = InlineKeyboardMarkup(row_width=1)
+        for period in available_periods:
+            label = f"✓ {period}" if period in selected_periods else period
+            markup.add(InlineKeyboardButton(label, callback_data=f"rand_year:{period}"))
         
-        # Группируем годы по декадам для удобства
-        decade_buttons = []
-        for year in years:
-            label = f"✓ {year}" if selected_year == year else str(year)
-            decade_buttons.append(InlineKeyboardButton(label, callback_data=f"rand_year:{year}"))
+        if selected_periods:
+            markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_year:done"))
+        else:
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
         
-        # Разбиваем на строки по 4 кнопки
-        for i in range(0, len(decade_buttons), 4):
-            markup.row(*decade_buttons[i:i+4])
-        
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
-        
-        text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите год</b>\n\n(можно выбрать один год или пропустить)"
+        selected = ', '.join(selected_periods) if selected_periods else 'ничего'
+        text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
         
         try:
             bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -9197,20 +9200,76 @@ def random_year_handler(call):
             bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
             return
         
-        if data == "skip":
-            logger.info(f"[RANDOM] Year skipped, moving to genre")
-            user_random_state[user_id]['year'] = None
-            user_random_state[user_id]['step'] = 'genre'
-            _show_genre_step_kinopoisk(call, chat_id, user_id)
+        mode = user_random_state[user_id].get('mode')
+        
+        # Для режима kinopoisk используем промежутки, как в режиме "Рандом по своей базе"
+        if mode == 'kinopoisk':
+            if data == "skip":
+                logger.info(f"[RANDOM] Periods skipped, moving to genre")
+                user_random_state[user_id]['periods'] = []
+                user_random_state[user_id]['step'] = 'genre'
+                _show_genre_step_kinopoisk(call, chat_id, user_id)
+            elif data == "done":
+                # Переход к следующему шагу
+                logger.info(f"[RANDOM] Periods confirmed, moving to genre")
+                user_random_state[user_id]['step'] = 'genre'
+                _show_genre_step_kinopoisk(call, chat_id, user_id)
+            else:
+                # Toggle промежутка
+                periods = user_random_state[user_id].get('periods', [])
+                if data in periods:
+                    periods.remove(data)
+                    logger.info(f"[RANDOM] Period removed: {data}")
+                else:
+                    periods.append(data)
+                    logger.info(f"[RANDOM] Period added: {data}")
+                
+                user_random_state[user_id]['periods'] = periods
+                
+                # Обновляем клавиатуру
+                state = user_random_state.get(user_id, {})
+                selected_periods = state.get('periods', [])
+                mode_description = {
+                    'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nИщем случайный фильм на Кинопоиске по заданным фильтрам.'
+                }.get(state.get('mode'), '')
+                
+                available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                for period in available_periods:
+                    label = f"✓ {period}" if period in selected_periods else period
+                    markup.add(InlineKeyboardButton(label, callback_data=f"rand_year:{period}"))
+                
+                if selected_periods:
+                    markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_year:done"))
+                else:
+                    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
+                
+                selected = ', '.join(selected_periods) if selected_periods else 'ничего'
+                text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
+                
+                try:
+                    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot.answer_callback_query(call.id)
+                except Exception as e:
+                    logger.error(f"[RANDOM] Error updating period keyboard: {e}", exc_info=True)
+                    bot.answer_callback_query(call.id, "Ошибка обновления")
         else:
-            # Сохраняем выбранный год
-            selected_year = int(data)
-            user_random_state[user_id]['year'] = selected_year
-            logger.info(f"[RANDOM] Year selected: {selected_year}")
-            
-            # Переходим к выбору жанра
-            user_random_state[user_id]['step'] = 'genre'
-            _show_genre_step_kinopoisk(call, chat_id, user_id)
+            # Старая логика для других режимов (если есть)
+            if data == "skip":
+                logger.info(f"[RANDOM] Year skipped, moving to genre")
+                user_random_state[user_id]['year'] = None
+                user_random_state[user_id]['step'] = 'genre'
+                _show_genre_step_kinopoisk(call, chat_id, user_id)
+            else:
+                # Сохраняем выбранный год
+                selected_year = int(data)
+                user_random_state[user_id]['year'] = selected_year
+                logger.info(f"[RANDOM] Year selected: {selected_year}")
+                
+                # Переходим к выбору жанра
+                user_random_state[user_id]['step'] = 'genre'
+                _show_genre_step_kinopoisk(call, chat_id, user_id)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_year_handler: {e}", exc_info=True)
         try:
@@ -9225,6 +9284,7 @@ def _show_genre_step_kinopoisk(call, chat_id, user_id):
         
         state = user_random_state.get(user_id, {})
         selected_genres = state.get('genres', [])
+        selected_periods = state.get('periods', [])
         
         # Список популярных жанров для выбора
         all_genres = [
@@ -9247,7 +9307,14 @@ def _show_genre_step_kinopoisk(call, chat_id, user_id):
             nav_buttons.append(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
         markup.row(*nav_buttons)
         
-        selected_text = f"\n\nВыбрано: {', '.join(selected_genres)}" if selected_genres else ""
+        # Формируем текст с выбранными фильтрами
+        filter_parts = []
+        if selected_periods:
+            filter_parts.append(f"Период: {', '.join(selected_periods)}")
+        if selected_genres:
+            filter_parts.append(f"Жанр: {', '.join(selected_genres)}")
+        
+        selected_text = f"\n\nВыбрано: {'; '.join(filter_parts)}" if filter_parts else ""
         mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nИщем случайный фильм на Кинопоиске по заданным фильтрам.'
         
         text = f"{mode_description}\n\n🎬 <b>Шаг 2/2: Выберите жанр</b>\n\n(можно выбрать несколько или пропустить){selected_text}"
@@ -9745,15 +9812,51 @@ def _random_final(call, chat_id, user_id):
         # Для режима "kinopoisk" используем поиск по кинопоиску
         if mode == 'kinopoisk':
             # Получаем фильтры из состояния
-            selected_year = state.get('year')
+            periods = state.get('periods', [])
             genres = state.get('genres', [])
             
             # Формируем параметры поиска
             search_params = {}
-            if selected_year:
-                # Используем выбранный год
-                search_params['yearFrom'] = selected_year
-                search_params['yearTo'] = selected_year
+            if periods:
+                # Определяем минимальный и максимальный год из выбранных промежутков
+                min_year = None
+                max_year = None
+                for p in periods:
+                    if p == "До 1980":
+                        if min_year is None or min_year > 1950:
+                            min_year = 1950
+                        if max_year is None or max_year < 1979:
+                            max_year = 1979
+                    elif p == "1980–1990":
+                        if min_year is None or min_year > 1980:
+                            min_year = 1980
+                        if max_year is None or max_year < 1990:
+                            max_year = 1990
+                    elif p == "1990–2000":
+                        if min_year is None or min_year > 1990:
+                            min_year = 1990
+                        if max_year is None or max_year < 2000:
+                            max_year = 2000
+                    elif p == "2000–2010":
+                        if min_year is None or min_year > 2000:
+                            min_year = 2000
+                        if max_year is None or max_year < 2010:
+                            max_year = 2010
+                    elif p == "2010–2020":
+                        if min_year is None or min_year > 2010:
+                            min_year = 2010
+                        if max_year is None or max_year < 2020:
+                            max_year = 2020
+                    elif p == "2020–сейчас":
+                        if min_year is None or min_year > 2020:
+                            min_year = 2020
+                        current_year = datetime.now().year
+                        if max_year is None or max_year < current_year:
+                            max_year = current_year
+                
+                if min_year is not None and max_year is not None:
+                    search_params['yearFrom'] = min_year
+                    search_params['yearTo'] = max_year
             
             if genres:
                 # Берем первый жанр для поиска (API не поддерживает несколько жанров одновременно)
@@ -9793,15 +9896,36 @@ def _random_final(call, chat_id, user_id):
                     data = response.json()
                     films = data.get('films', [])
                     
-                    # Фильтруем по исключенным kp_id, году и жанрам
+                    # Фильтруем по исключенным kp_id, промежуткам и жанрам
                     filtered_films = []
                     for film in films:
                         kp_id_film = str(film.get('filmId') or film.get('kinopoiskId', ''))
                         if kp_id_film and kp_id_film not in exclude_kp_ids:
-                            # Проверяем год, если указан
+                            # Проверяем год по промежуткам, если указаны
                             film_year = film.get('year')
-                            if selected_year and film_year != selected_year:
-                                continue
+                            if periods and film_year:
+                                year_matches = False
+                                for p in periods:
+                                    if p == "До 1980" and film_year < 1980:
+                                        year_matches = True
+                                        break
+                                    elif p == "1980–1990" and 1980 <= film_year <= 1990:
+                                        year_matches = True
+                                        break
+                                    elif p == "1990–2000" and 1990 <= film_year <= 2000:
+                                        year_matches = True
+                                        break
+                                    elif p == "2000–2010" and 2000 <= film_year <= 2010:
+                                        year_matches = True
+                                        break
+                                    elif p == "2010–2020" and 2010 <= film_year <= 2020:
+                                        year_matches = True
+                                        break
+                                    elif p == "2020–сейчас" and film_year >= 2020:
+                                        year_matches = True
+                                        break
+                                if not year_matches:
+                                    continue
                             
                             # Проверяем жанры, если указаны
                             if genres:
@@ -10581,12 +10705,24 @@ def show_premieres_page_new_message(chat_id, premieres, period, page=0):
         text = f"📅 <b>Премьеры {period_name}:</b>\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
     
-        # Сортируем премьеры по дате выхода
+        # Сортируем премьеры по дате выхода (сначала ближайшие, потом более поздние)
         def get_premiere_date(p):
             """Извлекает дату премьеры из данных"""
+            # Пробуем разные форматы дат
             if p.get('premiereRuDate'):
                 try:
-                    return datetime.strptime(p.get('premiereRuDate'), '%Y-%m-%d').date()
+                    date_str = p.get('premiereRuDate')
+                    if 'T' in str(date_str):
+                        date_str = str(date_str).split('T')[0]
+                    return datetime.strptime(date_str, '%Y-%m-%d').date()
+                except:
+                    pass
+            if p.get('premiereWorldDate'):
+                try:
+                    date_str = p.get('premiereWorldDate')
+                    if 'T' in str(date_str):
+                        date_str = str(date_str).split('T')[0]
+                    return datetime.strptime(date_str, '%Y-%m-%d').date()
                 except:
                     pass
             if p.get('year') and p.get('month'):
@@ -10595,6 +10731,7 @@ def show_premieres_page_new_message(chat_id, premieres, period, page=0):
                     return datetime(int(p.get('year')), int(p.get('month')), int(day)).date()
                 except:
                     pass
+            # Для фильмов без даты - ставим в конец
             return datetime(2099, 12, 31).date()
         
         premieres_sorted = sorted(premieres, key=get_premiere_date)
@@ -10663,13 +10800,24 @@ def show_premieres_page(call, premieres, period, page=0):
         text = f"📅 <b>Премьеры {period_name}:</b>\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
     
-        # Сортируем премьеры по дате выхода
+        # Сортируем премьеры по дате выхода (сначала ближайшие, потом более поздние)
         def get_premiere_date(p):
             """Извлекает дату премьеры из данных"""
             # Пробуем разные форматы дат
             if p.get('premiereRuDate'):
                 try:
-                    return datetime.strptime(p.get('premiereRuDate'), '%Y-%m-%d').date()
+                    date_str = p.get('premiereRuDate')
+                    if 'T' in str(date_str):
+                        date_str = str(date_str).split('T')[0]
+                    return datetime.strptime(date_str, '%Y-%m-%d').date()
+                except:
+                    pass
+            if p.get('premiereWorldDate'):
+                try:
+                    date_str = p.get('premiereWorldDate')
+                    if 'T' in str(date_str):
+                        date_str = str(date_str).split('T')[0]
+                    return datetime.strptime(date_str, '%Y-%m-%d').date()
                 except:
                     pass
             if p.get('year') and p.get('month'):
@@ -10678,7 +10826,8 @@ def show_premieres_page(call, premieres, period, page=0):
                     return datetime(int(p.get('year')), int(p.get('month')), int(day)).date()
                 except:
                     pass
-            return datetime(2099, 12, 31).date()  # Для сортировки - в конец
+            # Для фильмов без даты - ставим в конец
+            return datetime(2099, 12, 31).date()
         
         premieres_sorted = sorted(premieres, key=get_premiere_date)
         
