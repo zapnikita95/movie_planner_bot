@@ -63,6 +63,7 @@ commands = [
     BotCommand("ticket", "Работа с билетами в кино"),
     BotCommand("seasons", "Просмотр сезонов сериалов"),
     BotCommand("premieres", "Список премьер месяца"),
+    BotCommand("payment", "Оплата подписки"),
     BotCommand("help", "Помощь по командам")
 ]
 

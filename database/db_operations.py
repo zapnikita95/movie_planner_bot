@@ -483,3 +483,270 @@ def set_notification_setting(chat_id, key, value):
         """, (chat_id, key, str(value)))
         conn.commit()
 
+
+# Функции для работы с подписками
+def get_active_subscription(chat_id, user_id, subscription_type=None):
+    """Получает активную подписку для чата/пользователя"""
+    # Специальный доступ для создателя бота (@zap_nikita, user_id=301810276)
+    # Возвращаем виртуальную подписку "all" с lifetime периодом
+    if user_id == 301810276:
+        from datetime import datetime
+        import pytz
+        now = datetime.now(pytz.UTC)
+        # Возвращаем словарь с данными полной подписки
+        virtual_sub = {
+            'id': None,
+            'chat_id': chat_id,
+            'user_id': user_id,
+            'subscription_type': subscription_type or 'group',
+            'plan_type': 'all',
+            'period_type': 'lifetime',
+            'price': 0,
+            'activated_at': now,
+            'next_payment_date': None,
+            'expires_at': None,
+            'is_active': True,
+            'cancelled_at': None,
+            'telegram_username': 'zap_nikita',
+            'group_username': None,
+            'created_at': now
+        }
+        return virtual_sub
+    
+    with db_lock:
+        query = """
+            SELECT * FROM subscriptions 
+            WHERE chat_id = %s AND user_id = %s AND is_active = TRUE 
+            AND (expires_at IS NULL OR expires_at > NOW())
+        """
+        params = [chat_id, user_id]
+        if subscription_type:
+            query += " AND subscription_type = %s"
+            params.append(subscription_type)
+        query += " ORDER BY activated_at DESC LIMIT 1"
+        cursor.execute(query, params)
+        row = cursor.fetchone()
+        return row
+
+
+def get_active_subscription_by_username(telegram_username, subscription_type='personal'):
+    """Получает активную персональную подписку по username"""
+    # Специальный доступ для создателя бота (@zap_nikita)
+    username_clean = telegram_username.lstrip('@')
+    if username_clean == 'zap_nikita':
+        from datetime import datetime
+        import pytz
+        now = datetime.now(pytz.UTC)
+        # Возвращаем словарь с данными полной подписки
+        virtual_sub = {
+            'id': None,
+            'chat_id': None,
+            'user_id': 301810276,
+            'subscription_type': subscription_type,
+            'plan_type': 'all',
+            'period_type': 'lifetime',
+            'price': 0,
+            'activated_at': now,
+            'next_payment_date': None,
+            'expires_at': None,
+            'is_active': True,
+            'cancelled_at': None,
+            'telegram_username': 'zap_nikita',
+            'group_username': None,
+            'created_at': now
+        }
+        return virtual_sub
+    
+    with db_lock:
+        cursor.execute("""
+            SELECT * FROM subscriptions 
+            WHERE telegram_username = %s AND subscription_type = %s 
+            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY activated_at DESC LIMIT 1
+        """, (telegram_username, subscription_type))
+        return cursor.fetchone()
+
+
+def get_active_group_subscription(group_username):
+    """Получает активную групповую подписку по username группы"""
+    with db_lock:
+        cursor.execute("""
+            SELECT * FROM subscriptions 
+            WHERE group_username = %s AND subscription_type = 'group' 
+            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY activated_at DESC LIMIT 1
+        """, (group_username,))
+        return cursor.fetchone()
+
+
+def get_user_personal_subscriptions(user_id):
+    """Получает все активные персональные подписки пользователя"""
+    # Специальный доступ для создателя бота (@zap_nikita, user_id=301810276)
+    if user_id == 301810276:
+        from datetime import datetime
+        import pytz
+        now = datetime.now(pytz.UTC)
+        virtual_sub = {
+            'id': None,
+            'chat_id': None,
+            'user_id': user_id,
+            'subscription_type': 'personal',
+            'plan_type': 'all',
+            'period_type': 'lifetime',
+            'price': 0,
+            'activated_at': now,
+            'next_payment_date': None,
+            'expires_at': None,
+            'is_active': True,
+            'cancelled_at': None,
+            'telegram_username': 'zap_nikita',
+            'group_username': None,
+            'created_at': now
+        }
+        return [virtual_sub]
+    
+    with db_lock:
+        cursor.execute("""
+            SELECT * FROM subscriptions 
+            WHERE user_id = %s AND subscription_type = 'personal' 
+            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+        """, (user_id,))
+        return cursor.fetchall()
+
+
+def get_user_group_subscriptions(user_id):
+    """Получает все активные групповые подписки пользователя"""
+    # Специальный доступ для создателя бота (@zap_nikita, user_id=301810276)
+    # Для групповых подписок возвращаем пустой список, так как доступ проверяется через get_active_subscription
+    if user_id == 301810276:
+        return []
+    
+    with db_lock:
+        cursor.execute("""
+            SELECT * FROM subscriptions 
+            WHERE user_id = %s AND subscription_type = 'group' 
+            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+        """, (user_id,))
+        return cursor.fetchall()
+
+
+def create_subscription(chat_id, user_id, subscription_type, plan_type, period_type, price, 
+                       telegram_username=None, group_username=None):
+    """Создает новую подписку"""
+    from datetime import datetime, timedelta
+    import pytz
+    
+    now = datetime.now(pytz.UTC)
+    
+    # Вычисляем дату окончания и следующего платежа
+    expires_at = None
+    next_payment_date = None
+    
+    if period_type == 'month':
+        expires_at = now + timedelta(days=30)
+        next_payment_date = now + timedelta(days=30)
+    elif period_type == '3months':
+        expires_at = now + timedelta(days=90)
+        next_payment_date = now + timedelta(days=90)
+    elif period_type == 'year':
+        expires_at = now + timedelta(days=365)
+        next_payment_date = now + timedelta(days=365)
+    elif period_type == 'lifetime':
+        expires_at = None
+        next_payment_date = None
+    
+    with db_lock:
+        cursor.execute("""
+            INSERT INTO subscriptions 
+            (chat_id, user_id, subscription_type, plan_type, period_type, price, 
+             activated_at, next_payment_date, expires_at, telegram_username, group_username)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (chat_id, user_id, subscription_type, plan_type, period_type, price,
+              now, next_payment_date, expires_at, telegram_username, group_username))
+        subscription_id = cursor.fetchone()[0] if cursor.rowcount > 0 else None
+        
+        # Добавляем features в зависимости от plan_type
+        if plan_type == 'all':
+            features = ['notifications', 'recommendations', 'tickets']
+        elif plan_type == 'notifications':
+            features = ['notifications']
+        elif plan_type == 'recommendations':
+            features = ['recommendations']
+        elif plan_type == 'tickets':
+            features = ['tickets']
+        else:
+            features = []
+        
+        for feature in features:
+            cursor.execute("""
+                INSERT INTO subscription_features (subscription_id, feature_type)
+                VALUES (%s, %s)
+            """, (subscription_id, feature))
+        
+        conn.commit()
+        return subscription_id
+
+
+def cancel_subscription(subscription_id, user_id):
+    """Отменяет подписку"""
+    from datetime import datetime
+    import pytz
+    
+    with db_lock:
+        cursor.execute("""
+            UPDATE subscriptions 
+            SET is_active = FALSE, cancelled_at = %s
+            WHERE id = %s AND user_id = %s
+        """, (datetime.now(pytz.UTC), subscription_id, user_id))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def has_subscription_feature(chat_id, user_id, feature_type):
+    """Проверяет, есть ли у пользователя/чата доступ к функции"""
+    # Специальный доступ для создателя бота (@zap_nikita, user_id=301810276)
+    if user_id == 301810276:
+        return True
+    
+    # Проверяем персональную подписку
+    with db_lock:
+        cursor.execute("""
+            SELECT s.id FROM subscriptions s
+            JOIN subscription_features sf ON s.id = sf.subscription_id
+            WHERE s.chat_id = %s AND s.user_id = %s 
+            AND s.subscription_type = 'personal' AND s.is_active = TRUE
+            AND (s.expires_at IS NULL OR s.expires_at > NOW())
+            AND sf.feature_type = %s
+        """, (chat_id, user_id, feature_type))
+        if cursor.fetchone():
+            return True
+        
+        # Проверяем групповую подписку
+        cursor.execute("""
+            SELECT s.id FROM subscriptions s
+            JOIN subscription_features sf ON s.id = sf.subscription_id
+            WHERE s.chat_id = %s AND s.subscription_type = 'group' 
+            AND s.is_active = TRUE AND (s.expires_at IS NULL OR s.expires_at > NOW())
+            AND sf.feature_type = %s
+        """, (chat_id, feature_type))
+        return cursor.fetchone() is not None
+
+
+def check_user_in_group(bot, user_id, group_username):
+    """Проверяет, состоит ли пользователь и бот в группе"""
+    try:
+        # Получаем информацию о чате по username
+        chat = bot.get_chat(f"@{group_username}")
+        if chat.type not in ['group', 'supergroup']:
+            return False
+        
+        # Проверяем, является ли пользователь участником
+        try:
+            member = bot.get_chat_member(chat.id, user_id)
+            return member.status in ['member', 'administrator', 'creator']
+        except:
+            return False
+    except:
+        return False
+
