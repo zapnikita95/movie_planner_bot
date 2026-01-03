@@ -2496,7 +2496,25 @@ def premiere_detail_handler(call):
         poster_url = data.get('posterUrlPreview') or data.get('posterUrl')
         trailer_url = None
         
-        # Ищем трейлер
+        # Получаем трейлер через отдельный запрос к API
+        try:
+            videos_url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/videos"
+            videos_headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
+            videos_response = requests.get(videos_url, headers=videos_headers, timeout=15)
+            if videos_response.status_code == 200:
+                videos_data = videos_response.json()
+                items = videos_data.get('items', [])
+                if items:
+                    # Берем первый трейлер/тизер
+                    trailer_url = items[0].get('url')
+                    logger.info(f"[PREMIERES DETAIL] Найден трейлер для {kp_id}: {trailer_url}")
+            else:
+                logger.warning(f"[PREMIERES DETAIL] Не удалось получить трейлер для {kp_id}, статус: {videos_response.status_code}")
+        except Exception as e:
+            logger.error(f"[PREMIERES DETAIL] Ошибка получения трейлера: {e}", exc_info=True)
+        
+        # Если не получилось через отдельный запрос, пробуем из основного ответа
+        if not trailer_url:
         videos = data.get('videos', {}).get('trailers', [])
         if videos:
             trailer_url = videos[0].get('url')  # Первый трейлер
@@ -2531,7 +2549,7 @@ def premiere_detail_handler(call):
         if director_str != '—':
             text += f"🎥 Режиссёр: {director_str}\n"
         if countries != '—':
-            text += f"🌍 {countries}\n"
+        text += f"🌍 {countries}\n"
         text += f"\n{description}\n\n"
         text += f"🎭 {genres}\n"
         
@@ -2949,12 +2967,11 @@ def search_films(query, page=1, search_type='mixed'):
         if search_type != 'mixed' and items:
             filtered_items = []
             for item in items:
-                film_type = item.get('type') or item.get('typeRu') or ''
-                is_series = 'SERIES' in str(film_type).upper() or 'СЕРИАЛ' in str(film_type).upper() or item.get('isSeries', False)
+                film_type = item.get('type', '').upper()  # "FILM" или "TV_SERIES"
                 
-                if search_type == 'film' and not is_series:
+                if search_type == 'film' and film_type == 'FILM':
                     filtered_items.append(item)
-                elif search_type == 'series' and is_series:
+                elif search_type == 'series' and film_type == 'TV_SERIES':
                     filtered_items.append(item)
             items = filtered_items
             logger.info(f"[SEARCH] Найдено результатов после фильтрации: {len(items)}")
@@ -4264,7 +4281,7 @@ def get_plan_link_internal(message, state):
                 else:
                     # Проверяем, что это похоже на kp_id (обычно 4+ цифр)
                     if len(kp_id) >= 4:
-                        link = f"https://kinopoisk.ru/film/{kp_id}"
+                    link = f"https://kinopoisk.ru/film/{kp_id}"
                         logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
@@ -4306,12 +4323,12 @@ def get_plan_day_or_date_internal(message, state):
         logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
     
     if not plan_dt:
-        target_weekday = None
-        for phrase, wd in days_full.items():
-            if phrase in text:
-                target_weekday = wd
-                logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
-                break
+    target_weekday = None
+    for phrase, wd in days_full.items():
+        if phrase in text:
+            target_weekday = wd
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
+            break
     
     if target_weekday is not None:
         current_wd = now.weekday()
@@ -5090,13 +5107,15 @@ def main_text_handler(message):
                     rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
                     kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                     
-                    # Определяем тип (сериал или фильм)
-                    film_type = film.get('type') or film.get('typeRu') or ''
-                    is_series = 'SERIES' in str(film_type).upper() or 'СЕРИАЛ' in str(film_type).upper() or film.get('isSeries', False)
+                    # Определяем тип (сериал или фильм) по полю type из API
+                    film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
+                    is_series = film_type == 'TV_SERIES'
                     type_indicator = "📺" if is_series else "🎬"
                     
                     if kp_id:
                         button_text = f"{type_indicator} {title} ({year})"
+                        # Сохраняем тип в callback_data для правильного формирования ссылки
+                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
                         if len(button_text) > 50:
                             button_text = button_text[:47] + "..."
                         results_text += f"• <b>{title}</b> ({year})"
@@ -5848,13 +5867,13 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
             
             # Если страниц немного (<= 20), показываем все
             if total_pages <= 20:
-                buttons = []
-                for p in range(1, total_pages + 1):
-                    label = f"•{p}" if p == page else str(p)
-                    buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
-                # Разбиваем кнопки на строки по 10 штук
-                for i in range(0, len(buttons), 10):
-                    markup.row(*buttons[i:i+10])
+            buttons = []
+            for p in range(1, total_pages + 1):
+                label = f"•{p}" if p == page else str(p)
+                buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
+            # Разбиваем кнопки на строки по 10 штук
+            for i in range(0, len(buttons), 10):
+                markup.row(*buttons[i:i+10])
             else:
                 # Для большого количества страниц используем умную пагинацию
                 buttons = []
@@ -6846,11 +6865,11 @@ def handle_search(message):
             # Пробуем разные варианты ID
             kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
             
-            # Определяем тип (сериал или фильм)
-            film_type = film.get('type') or film.get('typeRu') or ''
-            is_series = 'SERIES' in str(film_type).upper() or 'СЕРИАЛ' in str(film_type).upper() or film.get('isSeries', False)
+            # Определяем тип (сериал или фильм) по полю type из API
+            film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
+            is_series = film_type == 'TV_SERIES'
             
-            logger.info(f"[SEARCH] Фильм: title={title}, year={year}, kp_id={kp_id}, is_series={is_series}")
+            logger.info(f"[SEARCH] Фильм: title={title}, year={year}, kp_id={kp_id}, type={film_type}, is_series={is_series}")
             
             if kp_id:
                 # Ограничиваем длину текста кнопки
@@ -6862,7 +6881,8 @@ def handle_search(message):
                 if rating != 'N/A':
                     results_text += f" ⭐ {rating}"
                 results_text += "\n"
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}"))
+                # Сохраняем тип в callback_data для правильного формирования ссылки
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
             else:
                 logger.warning(f"[SEARCH] Фильм без ID: {film}")
         
@@ -6925,39 +6945,63 @@ def handle_search_type_callback(call):
 def handle_add_film_callback(call):
     """Обработчик показа описания фильма из результатов поиска"""
     try:
-        kp_id = call.data.split("_")[-1]
+        # Парсим callback_data: add_film_{kp_id} или add_film_{kp_id}:{type}
+        parts = call.data.split("_")
+        if len(parts) >= 3:
+            # Извлекаем kp_id и тип (если есть)
+            data_part = "_".join(parts[2:])  # Все после "add_film_"
+            if ":" in data_part:
+                kp_id, film_type_from_callback = data_part.split(":", 1)
+                film_type_from_callback = film_type_from_callback.upper()
+            else:
+                kp_id = data_part
+                film_type_from_callback = None
+        else:
+            kp_id = parts[-1] if parts else None
+            film_type_from_callback = None
+        
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        logger.info(f"[SEARCH] Показ описания фильма kp_id={kp_id} от пользователя {user_id}")
+        logger.info(f"[SEARCH] Показ описания фильма kp_id={kp_id}, type={film_type_from_callback} от пользователя {user_id}")
         
         # Проверяем, добавлен ли уже фильм в базу, чтобы узнать тип
         film_in_db = False
         film_id = None
         is_series = False
+        
+        # Определяем тип из callback_data или из базы
+        if film_type_from_callback:
+            is_series = film_type_from_callback == 'TV_SERIES'
+        else:
+            # Если тип не передан, проверяем в базе
         with db_lock:
-            cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
             existing = cursor.fetchone()
             if existing:
                 film_in_db = True
                 film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
-                is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
+                    is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
         
         # Формируем правильную ссылку в зависимости от типа
         if is_series:
             link = f"https://www.kinopoisk.ru/series/{kp_id}/"
         else:
-            # Пробуем сначала как фильм
             link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         
         # Получаем информацию о фильме
         info = extract_movie_info(link)
-        if not info and not is_series:
-            # Если не получилось и не знаем тип, пробуем как сериал
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            info = extract_movie_info(link)
-            if info and info.get('is_series'):
-                is_series = True
+        if not info:
+            # Если не получилось и тип был неопределен, пробуем другой вариант
+            if not film_type_from_callback:
+                if is_series:
+                    link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                else:
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                info = extract_movie_info(link)
+                if info:
+                    is_series = info.get('is_series', False)
+        
         if not info:
             bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
@@ -6990,8 +7034,11 @@ def handle_add_film_callback(call):
         # Создаем кнопки
         markup = InlineKeyboardMarkup(row_width=1)
         
+        # Определяем тип для передачи в callback_data
+        film_type_str = 'TV_SERIES' if is_series_from_info else 'FILM'
+        
         # Всегда показываем кнопку "Добавить в базу" (если фильм уже в базе, она просто не добавит дубликат)
-        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}"))
+        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}:{film_type_str}"))
         
         # Если это сериал, показываем кнопки для сериалов даже если не в базе
         if is_series_from_info and not film_in_db:
@@ -7040,7 +7087,7 @@ def handle_add_film_callback(call):
                 
                 if is_subscribed:
                     markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                else:
+        else:
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
         # Отправляем описание
@@ -7065,12 +7112,26 @@ def handle_add_film_callback(call):
 def handle_confirm_add_film_callback(call):
     """Обработчик подтверждения добавления фильма в базу из результатов поиска"""
     try:
-        kp_id = call.data.split("_")[-1]
+        # Парсим callback_data: confirm_add_film_{kp_id} или confirm_add_film_{kp_id}:{type}
+        parts = call.data.split("_")
+        if len(parts) >= 4:
+            # Извлекаем kp_id и тип (если есть)
+            data_part = "_".join(parts[3:])  # Все после "confirm_add_film_"
+            if ":" in data_part:
+                kp_id, film_type_from_callback = data_part.split(":", 1)
+                film_type_from_callback = film_type_from_callback.upper()
+            else:
+                kp_id = data_part
+                film_type_from_callback = None
+        else:
+            kp_id = parts[-1] if parts else None
+            film_type_from_callback = None
+        
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         message_id = call.message.message_id
         
-        logger.info(f"[SEARCH] Подтверждение добавления фильма kp_id={kp_id} от пользователя {user_id}")
+        logger.info(f"[SEARCH] Подтверждение добавления фильма kp_id={kp_id}, type={film_type_from_callback} от пользователя {user_id}")
         
         # Проверяем, добавлен ли уже
         with db_lock:
@@ -7086,13 +7147,23 @@ def handle_confirm_add_film_callback(call):
                     logger.warning(f"[SEARCH] Не удалось удалить сообщение: {e}")
                 return
         
-        # Определяем тип фильма перед формированием ссылки
-        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        info = extract_movie_info(link)
-        if info and info.get('is_series'):
+        # Определяем правильную ссылку на основе типа из callback_data
+        if film_type_from_callback == 'TV_SERIES':
             link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            # Переполучаем информацию с правильной ссылкой
-            info = extract_movie_info(link)
+        else:
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # Получаем информацию о фильме
+        info = extract_movie_info(link)
+        if not info:
+            # Если не получилось и тип был неопределен, пробуем другой вариант
+            if not film_type_from_callback:
+                if link.endswith('/film/'):
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                else:
+                    link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                info = extract_movie_info(link)
+        
         if not info:
             bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
@@ -8612,35 +8683,35 @@ def random_mode_handler(call):
                             available_periods.append(period)
             else:
                 # Для остальных режимов - используем старую логику
-                base_query = """
-                    SELECT COUNT(DISTINCT m.id) 
-                    FROM movies m
-                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-                """
-                params = [chat_id]
+            base_query = """
+                SELECT COUNT(DISTINCT m.id) 
+                FROM movies m
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            """
+            params = [chat_id]
+            
+            for period in all_periods:
+                if period == "До 1980":
+                    condition = "m.year < 1980"
+                elif period == "1980–1990":
+                    condition = "(m.year >= 1980 AND m.year <= 1990)"
+                elif period == "1990–2000":
+                    condition = "(m.year >= 1990 AND m.year <= 2000)"
+                elif period == "2000–2010":
+                    condition = "(m.year >= 2000 AND m.year <= 2010)"
+                elif period == "2010–2020":
+                    condition = "(m.year >= 2010 AND m.year <= 2020)"
+                elif period == "2020–сейчас":
+                    condition = "m.year >= 2020"
                 
-                for period in all_periods:
-                    if period == "До 1980":
-                        condition = "m.year < 1980"
-                    elif period == "1980–1990":
-                        condition = "(m.year >= 1980 AND m.year <= 1990)"
-                    elif period == "1990–2000":
-                        condition = "(m.year >= 1990 AND m.year <= 2000)"
-                    elif period == "2000–2010":
-                        condition = "(m.year >= 2000 AND m.year <= 2010)"
-                    elif period == "2010–2020":
-                        condition = "(m.year >= 2010 AND m.year <= 2020)"
-                    elif period == "2020–сейчас":
-                        condition = "m.year >= 2020"
-                    
-                    query = f"{base_query} AND {condition}"
-                    cursor.execute(query, tuple(params))
-                    count_row = cursor.fetchone()
-                    count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
-                    
-                    if count > 0:
-                        available_periods.append(period)
+                query = f"{base_query} AND {condition}"
+                cursor.execute(query, tuple(params))
+                count_row = cursor.fetchone()
+                count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                
+                if count > 0:
+                    available_periods.append(period)
         
         user_random_state[user_id]['available_periods'] = available_periods
         
@@ -8848,36 +8919,36 @@ def _show_genre_step(call, chat_id, user_id):
                 cursor.execute(base_query, params)
             else:
                 # Для остальных режимов - используем старую логику
-                base_query = """
-                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-                    FROM movies m
-                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
-                """
-                params = [chat_id]
-                
-                # Добавляем фильтр по периодам, если они выбраны
-                if periods:
-                    period_conditions = []
-                    for p in periods:
-                        if p == "До 1980":
-                            period_conditions.append("m.year < 1980")
-                        elif p == "1980–1990":
-                            period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
-                        elif p == "1990–2000":
-                            period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
-                        elif p == "2000–2010":
-                            period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
-                        elif p == "2010–2020":
-                            period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
-                        elif p == "2020–сейчас":
-                            period_conditions.append("m.year >= 2020")
-                    if period_conditions:
-                        base_query += " AND (" + " OR ".join(period_conditions) + ")"
-                
-                cursor.execute(base_query, params)
-            
+        base_query = """
+            SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+            FROM movies m
+            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+        """
+        params = [chat_id]
+        
+        # Добавляем фильтр по периодам, если они выбраны
+        if periods:
+            period_conditions = []
+            for p in periods:
+                if p == "До 1980":
+                    period_conditions.append("m.year < 1980")
+                elif p == "1980–1990":
+                    period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
+                elif p == "1990–2000":
+                    period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
+                elif p == "2000–2010":
+                    period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
+                elif p == "2010–2020":
+                    period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
+                elif p == "2020–сейчас":
+                    period_conditions.append("m.year >= 2020")
+            if period_conditions:
+                base_query += " AND (" + " OR ".join(period_conditions) + ")"
+        
+            cursor.execute(base_query, params)
+                    
             rows = cursor.fetchall()
             genres = []
             for row in rows:
@@ -9707,9 +9778,9 @@ def _random_final(call, chat_id, user_id):
                     FROM movies m
                     WHERE m.chat_id = %s AND m.kp_id IS NOT NULL
                     AND EXISTS (
-                        SELECT 1 FROM ratings r 
-                        WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
-                        GROUP BY r.film_id, r.chat_id 
+                SELECT 1 FROM ratings r 
+                WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                GROUP BY r.film_id, r.chat_id 
                         HAVING AVG(r.rating) >= 9
                     )
                     ORDER BY RANDOM()
@@ -10373,14 +10444,14 @@ def show_premieres_page(call, premieres, period, page=0):
         
         # Используем edit_message_text вместо send_message, если это callback
         if call.message.message_id:
-            try:
-                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e:
+        try:
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception as e:
                 error_str = str(e)
                 # Игнорируем ошибку "message is not modified" и "there is no text in the message to edit"
                 if "message is not modified" not in error_str and "there is no text in the message to edit" not in error_str:
-                    logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
-                    # Если не получилось отредактировать, отправляем новое
+            logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
+            # Если не получилось отредактировать, отправляем новое
                     try:
                         bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                     except:
@@ -10390,7 +10461,7 @@ def show_premieres_page(call, premieres, period, page=0):
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
         if call.id:
-            bot.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
@@ -13208,10 +13279,10 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         logger.info(f"[PROCESS_PLAN] Использован parse_session_time: {plan_dt}")
     else:
         # Если parse_session_time не сработал, используем стандартную логику
-        # Обработка специальных случаев
-        day_lower = day_or_date.lower().strip()
-        
-        # Обработка "сегодня"
+    # Обработка специальных случаев
+    day_lower = day_or_date.lower().strip()
+    
+    # Обработка "сегодня"
     if 'сегодня' in day_lower:
         plan_date = now.date()
         if plan_type == 'home':
@@ -13374,12 +13445,12 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                 hour = 19 if plan_date.weekday() < 5 else 10
                             plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                     else:
-                        if plan_type == 'cinema':
-                            hour = 9
-                        else:  # home
-                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                            hour = 19 if plan_date.weekday() < 5 else 10
-                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                    if plan_type == 'cinema':
+                        hour = 9
+                    else:  # home
+                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                        hour = 19 if plan_date.weekday() < 5 else 10
+                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                 except ValueError:
                     logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
                     return False
@@ -13446,13 +13517,13 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                     hour = 19 if plan_date.weekday() < 5 else 10
                                 plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                         else:
-                            if plan_type == 'cinema':
-                                hour = 9
-                            else:  # home
-                                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                                hour = 19 if plan_date.weekday() < 5 else 10
-                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
+                        if plan_type == 'cinema':
+                            hour = 9
+                        else:  # home
+                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                            hour = 19 if plan_date.weekday() < 5 else 10
+                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
                     except ValueError as e:
                         logger.error(f"[PLAN] Некорректная дата: {day_num}.{month_num}.{year_str if year_str else 'N/A'}: {e}")
                         return False
@@ -13810,15 +13881,15 @@ def plan_handler(message):
                             day_or_date = f"{day_num}.{month_num} {hour}:{minute}"
                         logger.info(f"[PLAN] Найдена дата с временем: {day_or_date}")
                 else:
-                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                    if date_match:
-                        day_num = int(date_match.group(1))
-                        month_num = int(date_match.group(2))
-                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
-                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
-                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                if date_match:
+                    day_num = int(date_match.group(1))
+                    month_num = int(date_match.group(2))
+                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         # Проверяем, есть ли отдельно указанное время (если дата уже найдена, но время не включено)
         if day_or_date and plan_type == 'cinema':
