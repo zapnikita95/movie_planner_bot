@@ -312,10 +312,8 @@ def create_web_app(bot_instance):
                         # Не прерываем выполнение, просто логируем ошибку
                 else:
                     logger.warning(f"[YOOKASSA] Событие payment.succeeded, но статус платежа не succeeded: {payment_status}")
-            else:
-                logger.warning(f"[YOOKASSA] Платеж уже обработан ранее (статус: {payment_data.get('status')})")
-            
-            if event_json.get('event') == 'payment.canceled':
+            elif event_json.get('event') == 'payment.canceled':
+                # Обработка отмены платежа
                 payment_id = event_json.get('object', {}).get('id')
                 if payment_id:
                     logger.info(f"[YOOKASSA] Платеж отменен: {payment_id}")
@@ -323,10 +321,17 @@ def create_web_app(bot_instance):
                     payment_data = get_payment_by_yookassa_id(payment_id)
                     if payment_data:
                         update_payment_status(payment_data['payment_id'], 'canceled')
+                        logger.info(f"[YOOKASSA] Статус платежа {payment_data['payment_id']} обновлен на 'canceled'")
+                    else:
+                        logger.warning(f"[YOOKASSA] Платеж {payment_id} не найден в БД")
                 else:
                     logger.warning(f"[YOOKASSA] Платеж отменен, но payment_id отсутствует")
             else:
-                logger.info(f"[YOOKASSA] Неизвестное событие: {event_json.get('event')}")
+                # Для других событий (например, если платеж уже обработан)
+                if payment_data:
+                    logger.warning(f"[YOOKASSA] Платеж уже обработан ранее (статус: {payment_data.get('status')})")
+                else:
+                    logger.info(f"[YOOKASSA] Неизвестное событие: {event_json.get('event')}")
             
             logger.info(f"[YOOKASSA] Обработка завершена, возвращаем успешный ответ")
             return jsonify({'status': 'ok'}), 200
