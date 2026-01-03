@@ -5367,26 +5367,39 @@ def main_text_handler(message):
     
     # === user_cancel_subscription_state ===
     # Проверяем состояние отмены подписки (для групповых подписок требуется подтверждение)
-    if 'user_cancel_subscription_state' in globals() and user_id in globals().get('user_cancel_subscription_state', {}):
-        if text.upper().strip() == 'ДА, ОТМЕНИТЬ':
-            # Обработка подтверждения отмены подписки
-            user_cancel_subscription_state = globals().get('user_cancel_subscription_state', {})
-            state = user_cancel_subscription_state.get(user_id)
-            if state:
-                subscription_id = state.get('subscription_id')
-                subscription_type = state.get('subscription_type')
-                chat_id = state.get('chat_id', message.chat.id)
-                
-                if subscription_id:
-                    from database.db_operations import cancel_subscription
-                    if cancel_subscription(subscription_id, user_id):
-                        bot.reply_to(message, "✅ <b>Групповая подписка отменена</b>\n\nВаша групповая подписка была успешно отменена.", parse_mode='HTML')
-                        # Удаляем состояние
-                        del user_cancel_subscription_state[user_id]
-                    else:
-                        bot.reply_to(message, "❌ Ошибка отмены подписки. Попробуйте позже.", parse_mode='HTML')
-                        del user_cancel_subscription_state[user_id]
-            return
+    # Проверяем, что сообщение является реплаем на сообщение бота
+    if user_id in user_cancel_subscription_state:
+        logger.info(f"[PAYMENT CANCEL] Пользователь {user_id} в состоянии отмены подписки")
+        if (message.reply_to_message and 
+            message.reply_to_message.from_user and 
+            message.reply_to_message.from_user.id == BOT_ID):
+            logger.info(f"[PAYMENT CANCEL] Сообщение является реплаем на сообщение бота")
+            if text.upper().strip() == 'ДА, ОТМЕНИТЬ':
+                logger.info(f"[PAYMENT CANCEL] Получено подтверждение отмены от пользователя {user_id}")
+                # Обработка подтверждения отмены подписки
+                state = user_cancel_subscription_state.get(user_id)
+                if state:
+                    subscription_id = state.get('subscription_id')
+                    subscription_type = state.get('subscription_type')
+                    chat_id = state.get('chat_id', message.chat.id)
+                    
+                    logger.info(f"[PAYMENT CANCEL] Отменяем подписку {subscription_id}, тип: {subscription_type}, chat_id: {chat_id}")
+                    if subscription_id:
+                        from database.db_operations import cancel_subscription
+                        if cancel_subscription(subscription_id, user_id):
+                            bot.reply_to(message, "✅ <b>Групповая подписка отменена</b>\n\nВаша групповая подписка была успешно отменена.", parse_mode='HTML')
+                            # Удаляем состояние
+                            del user_cancel_subscription_state[user_id]
+                            logger.info(f"[PAYMENT] Групповая подписка {subscription_id} отменена пользователем {user_id}")
+                        else:
+                            bot.reply_to(message, "❌ Ошибка отмены подписки. Попробуйте позже.", parse_mode='HTML')
+                            del user_cancel_subscription_state[user_id]
+                            logger.error(f"[PAYMENT] Ошибка отмены подписки {subscription_id} пользователем {user_id}")
+                return
+            else:
+                logger.info(f"[PAYMENT CANCEL] Текст не совпадает: '{text.upper().strip()}' != 'ДА, ОТМЕНИТЬ'")
+        else:
+            logger.info(f"[PAYMENT CANCEL] Сообщение не является реплаем на сообщение бота. reply_to_message: {message.reply_to_message is not None}, from_user: {message.reply_to_message.from_user.id if message.reply_to_message and message.reply_to_message.from_user else None}, BOT_ID: {BOT_ID}")
     
     # === user_payment_state ===
     # Проверяем состояние оплаты - если пользователь вводит username для подписки,
@@ -7203,12 +7216,6 @@ def handle_add_film_callback(call):
         
         # Всегда показываем кнопку "Добавить в базу" (если фильм уже в базе, она просто не добавит дубликат)
         markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"confirm_add_film_{kp_id}:{film_type_str}"))
-        
-        # Если это сериал, показываем кнопки для сериалов только если это действительно сериал
-        if is_series_final:
-            if not film_in_db:
-                markup.add(InlineKeyboardButton("✅ Отметить сезоны/серии", callback_data=f"series_track:{kp_id}"))
-                markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
         if film_in_db:
             # Фильм уже в базе - показываем дополнительные кнопки планирования, фактов и оценки
@@ -13930,6 +13937,81 @@ def handle_payment_callback(call):
         # Общая проверка для групповых подписок (после обработки точных совпадений)
         if action == "active:group":
             # Проверка групповой подписки (общий случай, не current и не other)
+            if not is_private and chat_id < 0:
+                # В группе - показываем только текущую группу
+                try:
+                    chat = bot.get_chat(chat_id)
+                    group_username = chat.username
+                    group_title = chat.title
+                    
+                    # Получаем подписку для текущей группы
+                    sub = get_active_subscription(chat_id, user_id, 'group')
+                    
+                    if sub:
+                        expires_at = sub.get('expires_at')
+                        next_payment = sub.get('next_payment_date')
+                        price = sub.get('price', 0)
+                        activated = sub.get('activated_at')
+                        group_size = sub.get('group_size')
+                        subscription_id = sub.get('id')
+                        plan_type = sub.get('plan_type', 'all')
+                        period_type = sub.get('period_type', 'lifetime')
+                        
+                        text = f"👥 <b>Групповая подписка</b>\n\n"
+                        if plan_type == 'all':
+                            text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
+                        text += f"Группа: <b>{group_title}</b>\n"
+                        if group_username:
+                            text += f"@{group_username}\n"
+                        text += f"\n💰 Сумма платежа: <b>{price}₽</b>\n"
+                        if group_size:
+                            text += f"👥 Количество участников: <b>{group_size}</b>\n"
+                            if subscription_id and subscription_id > 0:
+                                members = get_subscription_members(subscription_id)
+                                text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                        if activated:
+                            text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                        if next_payment:
+                            text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                        if expires_at:
+                            text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                        else:
+                            text += f"⏰ Действует: <b>Навсегда</b>\n"
+                        
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        if subscription_id and subscription_id > 0:
+                            markup.add(InlineKeyboardButton("👥 Список участников", callback_data=f"payment:group_members:{subscription_id}"))
+                        
+                        if subscription_id and subscription_id > 0:
+                            markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
+                            markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
+                        elif subscription_id == 0 or subscription_id is None:
+                            markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:group"))
+                            markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:group"))
+                        
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                    else:
+                        text = f"👥 <b>Групповая подписка</b>\n\n"
+                        text += f"Группа: <b>{group_title}</b>\n"
+                        if group_username:
+                            text += f"@{group_username}\n"
+                        text += "\n❌ Активная подписка отсутствует, выберите тариф для подключения\n\n"
+                        text += "💬 <i>Если хотите посмотреть остальные группы, в которых вы состоите, напишите в личку боту.</i>"
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:group"))
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                    
+                    try:
+                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    return
+                except Exception as e:
+                    logger.error(f"[PAYMENT] Ошибка получения информации о группе {chat_id}: {e}")
+                    bot.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
+                    return
+            
             if is_private:
                 # В личке - показываем список групп для выбора
                 from database.db_operations import get_user_groups
@@ -14046,6 +14128,12 @@ def handle_payment_callback(call):
         if action.startswith("tariffs:group"):
             # Тарифы для групповых подписок - сначала выбор количества участников
             text = "👥 <b>Групповые тарифы</b>\n\n"
+            
+            # Если команда вызвана в группе, добавляем предупреждение
+            if not is_private and chat_id < 0:
+                text += "⚠️ <i>В группе доступны тарифы только для текущей группы.</i>\n\n"
+                text += "💬 <i>Если хотите посмотреть остальные группы, в которых вы состоите, напишите в личку боту.</i>\n\n"
+            
             text += "Выберите количество участников в группе:\n\n"
             text += "💡 <i>Стоимость зависит от количества участников</i>"
             
@@ -14106,7 +14194,72 @@ def handle_payment_callback(call):
                 elif group_size in ['5', '10']:
                     text += "💡 <i>У вас есть личная подписка - скидка 50% на группу</i>\n\n"
             
-            # Сначала нужно выбрать группу
+            # Если команда вызвана в группе, используем текущую группу
+            if not is_private and chat_id < 0:
+                # Это группа - используем текущую группу
+                try:
+                    chat = bot.get_chat(chat_id)
+                    group_username = chat.username
+                    group_title = chat.title
+                    
+                    # Сразу переходим к выбору тарифа для текущей группы
+                    user_payment_state[user_id] = {
+                        'subscription_type': 'group',
+                        'group_size': group_size,
+                        'group_chat_id': chat_id,
+                        'group_username': group_username,
+                        'group_title': group_title
+                    }
+                    
+                    # Показываем тарифы для текущей группы
+                    text = f"👥 <b>Групповые тарифы на {group_size} участников</b>\n\n"
+                    text += f"Группа: <b>{group_title}</b>\n"
+                    if group_username:
+                        text += f"@{group_username}\n"
+                    text += "\n"
+                    
+                    # Добавляем информацию о тарифах
+                    text += "💎 <b>Платные функции:</b>\n\n"
+                    text += f"🔔 Уведомления о сериалах: {prices['notifications']['month']}₽/мес\n"
+                    text += f"🎯 Персональные рекомендации: {prices['recommendations']['month']}₽/мес\n"
+                    text += f"🎫 Билеты в кино: {prices['tickets']['month']}₽/мес\n\n"
+                    text += f"📦 Все режимы:\n"
+                    text += f"• {prices['all']['month']}₽/мес\n"
+                    text += f"• {prices['all']['3months']}₽ за 3 месяца\n"
+                    text += f"• {prices['all']['year']}₽ за год\n"
+                    text += f"• {prices['all']['lifetime']}₽ навсегда\n\n"
+                    
+                    # Информация о скидках
+                    if personal_subs:
+                        if group_size == '2':
+                            text += "💡 <i>У вас есть личная подписка - скидка 20% на группу из 2 человек</i>\n\n"
+                        elif group_size in ['5', '10']:
+                            text += "💡 <i>У вас есть личная подписка - скидка 50% на группу</i>\n\n"
+                    
+                    text += "Выберите тариф:"
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton(f"🔔 Уведомления ({prices['notifications']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:notifications:month:{chat_id}"))
+                    markup.add(InlineKeyboardButton(f"🎯 Рекомендации ({prices['recommendations']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:recommendations:month:{chat_id}"))
+                    markup.add(InlineKeyboardButton(f"🎫 Билеты ({prices['tickets']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:tickets:month:{chat_id}"))
+                    markup.add(InlineKeyboardButton(f"📦 Все режимы - месяц ({prices['all']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:month:{chat_id}"))
+                    markup.add(InlineKeyboardButton(f"📦 Все режимы - 3 месяца ({prices['all']['3months']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:3months:{chat_id}"))
+                    markup.add(InlineKeyboardButton(f"📦 Все режимы - год ({prices['all']['year']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:year:{chat_id}"))
+                    markup.add(InlineKeyboardButton(f"📦 Все режимы - навсегда ({prices['all']['lifetime']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:lifetime:{chat_id}"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:group"))
+                    
+                    try:
+                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    return
+                except Exception as e:
+                    logger.error(f"[PAYMENT] Ошибка получения информации о группе {chat_id}: {e}")
+                    bot.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
+                    return
+            
+            # Если команда вызвана в личке, показываем список групп
             from database.db_operations import get_user_groups
             try:
                 user_groups = get_user_groups(user_id, bot)
