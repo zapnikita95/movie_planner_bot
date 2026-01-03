@@ -12931,9 +12931,37 @@ SUBSCRIPTION_PRICES = {
 }
 
 def calculate_discounted_price(user_id, subscription_type, plan_type, period_type, group_size=None):
-    """Вычисляет цену с учетом скидок"""
+    """Вычисляет цену с учетом скидок
+    
+    Логика скидок:
+    - Личная не пакетная подписка -> скидка только на не пакетные групповые подписки
+    - Личная пакетная подписка -> скидка только на пакетные групповые подписки
+    - Групповая не пакетная подписка -> скидка только на не пакетные подписки (личные или групповые)
+    - Групповая пакетная подписка -> скидка только на пакетные подписки (личные или групповые)
+    """
+    from database.db_operations import get_user_personal_subscriptions, get_user_group_subscriptions
+    
+    # Определяем, является ли plan_type пакетным
+    is_package = (plan_type == 'all')
+    
     if subscription_type == 'personal':
-        return SUBSCRIPTION_PRICES[subscription_type][plan_type].get(period_type, 0)
+        base_price = SUBSCRIPTION_PRICES[subscription_type][plan_type].get(period_type, 0)
+        
+        # Проверяем групповые подписки пользователя
+        group_subs = get_user_group_subscriptions(user_id)
+        if group_subs:
+            for sub in group_subs:
+                sub_plan_type = sub.get('plan_type')
+                sub_is_package = (sub_plan_type == 'all')
+                
+                # Скидка только если оба пакетные или оба не пакетные
+                if is_package == sub_is_package:
+                    # Применяем скидку (20% для группы из 2, 50% для групп из 5 и 10)
+                    # Но для личной подписки скидка не зависит от размера группы
+                    # Используем фиксированную скидку 20%
+                    return int(base_price * 0.8)
+        
+        return base_price
     
     # Для групповых подписок
     if not group_size:
@@ -12941,16 +12969,34 @@ def calculate_discounted_price(user_id, subscription_type, plan_type, period_typ
     
     base_price = SUBSCRIPTION_PRICES[subscription_type][group_size][plan_type].get(period_type, 0)
     
-    # Проверяем, есть ли у пользователя персональная подписка
-    from database.db_operations import get_user_personal_subscriptions
+    # Проверяем личные подписки пользователя
     personal_subs = get_user_personal_subscriptions(user_id)
     if personal_subs:
-        # Находим подписку с таким же plan_type или all
         for sub in personal_subs:
-            if sub.get('plan_type') == plan_type or sub.get('plan_type') == 'all':
+            sub_plan_type = sub.get('plan_type')
+            sub_is_package = (sub_plan_type == 'all')
+            
+            # Скидка только если оба пакетные или оба не пакетные
+            if is_package == sub_is_package:
                 if group_size == '2':
                     # Скидка 20% для группы из 2 человек
-                    return int(base_price * 0.2)
+                    return int(base_price * 0.8)
+                elif group_size in ['5', '10']:
+                    # Скидка 50% для групп из 5 и 10 человек
+                    return int(base_price * 0.5)
+    
+    # Проверяем другие групповые подписки пользователя
+    group_subs = get_user_group_subscriptions(user_id)
+    if group_subs:
+        for sub in group_subs:
+            sub_plan_type = sub.get('plan_type')
+            sub_is_package = (sub_plan_type == 'all')
+            
+            # Скидка только если оба пакетные или оба не пакетные
+            if is_package == sub_is_package:
+                if group_size == '2':
+                    # Скидка 20% для группы из 2 человек
+                    return int(base_price * 0.8)
                 elif group_size in ['5', '10']:
                     # Скидка 50% для групп из 5 и 10 человек
                     return int(base_price * 0.5)
