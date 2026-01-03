@@ -22,8 +22,8 @@ KP_TOKEN = os.getenv('KP_TOKEN')
 DATABASE_URL = os.getenv('DATABASE_URL')
 
 # Настройки ЮKassa (из переменных окружения)
-YOOKASSA_SHOP_ID = os.getenv('YOOKASSA_SHOP_ID')
-YOOKASSA_SECRET_KEY = os.getenv('YOOKASSA_SECRET_KEY')
+YOOKASSA_SHOP_ID = os.getenv('YOOKASSA_SHOP_ID', '').strip() if os.getenv('YOOKASSA_SHOP_ID') else None
+YOOKASSA_SECRET_KEY = os.getenv('YOOKASSA_SECRET_KEY', '').strip() if os.getenv('YOOKASSA_SECRET_KEY') else None
 
 # Проверка обязательных переменных для ЮKassa (если используются платежи)
 if YOOKASSA_SHOP_ID and not YOOKASSA_SECRET_KEY:

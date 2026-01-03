@@ -877,6 +877,47 @@ def get_active_group_users(chat_id):
         return users
 
 
+def get_user_groups(user_id, bot_instance=None):
+    """Получает список групп, где есть и пользователь, и бот"""
+    groups = []
+    with db_lock:
+        # Получаем группы из stats, где пользователь был активен
+        cursor.execute("""
+            SELECT DISTINCT chat_id, username
+            FROM stats 
+            WHERE user_id = %s AND chat_id < 0
+            ORDER BY chat_id
+        """, (user_id,))
+        
+        for row in cursor.fetchall():
+            chat_id = row[0] if isinstance(row, dict) else row[0]
+            username = row[1] if isinstance(row, dict) else row[1]
+            
+            if chat_id and chat_id < 0:  # Только группы (отрицательные ID)
+                # Проверяем, что бот состоит в группе
+                if bot_instance:
+                    try:
+                        chat = bot_instance.get_chat(chat_id)
+                        if chat.type in ['group', 'supergroup']:
+                            groups.append({
+                                'chat_id': chat_id,
+                                'username': chat.username or username,
+                                'title': chat.title
+                            })
+                    except Exception as e:
+                        logger.warning(f"Не удалось получить информацию о группе {chat_id}: {e}")
+                        continue
+                else:
+                    # Если бот не передан, возвращаем без проверки
+                    groups.append({
+                        'chat_id': chat_id,
+                        'username': username,
+                        'title': None
+                    })
+    
+    return groups
+
+
 def get_subscription_by_id(subscription_id):
     """Получает подписку по ID"""
     with db_lock:
