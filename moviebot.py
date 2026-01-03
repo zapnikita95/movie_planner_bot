@@ -10455,8 +10455,8 @@ def show_premieres_page(call, premieres, period, page=0):
                     logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
                 # Если не получилось отредактировать, отправляем новое
                 try:
-                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                    except:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                except:
                         pass
         else:
             # Если message_id нет, отправляем новое сообщение
