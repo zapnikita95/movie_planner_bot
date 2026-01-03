@@ -598,6 +598,24 @@ def get_active_group_subscription(group_username):
         return None
 
 
+def get_active_group_subscription_by_chat_id(chat_id):
+    """Получает активную групповую подписку по chat_id группы"""
+    with db_lock:
+        cursor.execute("""
+            SELECT * FROM subscriptions 
+            WHERE chat_id = %s AND subscription_type = 'group' 
+            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY activated_at DESC LIMIT 1
+        """, (chat_id,))
+        row = cursor.fetchone()
+        
+        # Если есть реальная подписка, возвращаем её
+        if row:
+            return row
+        
+        return None
+
+
 def get_user_personal_subscriptions(user_id):
     """Получает все активные персональные подписки пользователя"""
     # Специальный доступ для создателя бота (@zap_nikita, user_id=301810276)
