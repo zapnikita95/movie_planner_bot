@@ -13175,40 +13175,10 @@ def handle_payment_callback(call):
             from datetime import datetime
             sub = get_active_subscription(chat_id, user_id, 'group')
             
-            # Если подписки нет, но бот присутствует в группе, создаем виртуальную подписку
-            if not sub:
-                # Проверяем, есть ли активность в группе (бот присутствует)
-                try:
-                    # Пытаемся получить информацию о чате
-                    chat_info = bot.get_chat(chat_id)
-                    if chat_info.type in ['group', 'supergroup']:
-                        # Проверяем наличие активности в stats
-                        from database.db_operations import get_active_group_users
-                        active_users = get_active_group_users(chat_id)
-                        if active_users:
-                            # Создаем виртуальную подписку
-                            import pytz
-                            now = datetime.now(pytz.UTC)
-                            sub = {
-                                'id': -1,
-                                'chat_id': chat_id,
-                                'user_id': user_id,
-                                'subscription_type': 'group',
-                                'plan_type': 'all',
-                                'period_type': 'lifetime',
-                                'price': 0,
-                                'activated_at': now,
-                                'next_payment_date': None,
-                                'expires_at': None,
-                                'is_active': True,
-                                'cancelled_at': None,
-                                'telegram_username': None,
-                                'group_username': chat_info.username,
-                                'group_size': None,
-                                'created_at': now
-                            }
-                except Exception as e:
-                    logger.error(f"[PAYMENT] Ошибка получения информации о чате: {e}")
+            logger.info(f"[PAYMENT] Проверка подписки для группы {chat_id}, user_id={user_id}, sub={sub}")
+            
+            # Не создаем виртуальную подписку автоматически
+            # Если подписки нет, показываем сообщение об отсутствии подписки
             
             if sub:
                 expires_at = sub.get('expires_at')

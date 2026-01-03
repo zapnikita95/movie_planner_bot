@@ -532,41 +532,8 @@ def get_active_subscription(chat_id, user_id, subscription_type=None):
         if row:
             return row
         
-        # Если подписки нет, проверяем, есть ли активность в группе (бот присутствует)
-        # Проверяем наличие записей в stats для этого чата
-        cursor.execute("""
-            SELECT COUNT(*) FROM stats 
-            WHERE chat_id = %s
-            LIMIT 1
-        """, (chat_id,))
-        stats_count = cursor.fetchone()
-        has_activity = stats_count and (stats_count[0] if isinstance(stats_count, tuple) else stats_count.get('count', 0) if isinstance(stats_count, dict) else 0) > 0
-        
-        # Если есть активность в группе, возвращаем виртуальную полную подписку навсегда
-        if has_activity:
-            from datetime import datetime
-            import pytz
-            now = datetime.now(pytz.UTC)
-            virtual_sub = {
-                'id': -1,  # Виртуальная подписка
-                'chat_id': chat_id,
-                'user_id': user_id,
-                'subscription_type': subscription_type or 'group',
-                'plan_type': 'all',
-                'period_type': 'lifetime',
-                'price': 0,
-                'activated_at': now,
-                'next_payment_date': None,
-                'expires_at': None,
-                'is_active': True,
-                'cancelled_at': None,
-                'telegram_username': None,
-                'group_username': None,
-                'group_size': None,
-                'created_at': now
-            }
-            return virtual_sub
-        
+        # Если подписки нет, возвращаем None
+        # Не создаем виртуальную подписку автоматически - пользователь должен купить подписку
         return None
 
 
