@@ -14939,11 +14939,15 @@ def handle_episodes_page(call):
 def series_season_callback(call):
     """Обработчик для выбора сезона и отметки эпизодов"""
     try:
+        bot.answer_callback_query(call.id)
+        
         parts = call.data.split(":")
         kp_id = parts[1]
         season_num = parts[2]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
+        
+        logger.info(f"[SERIES SEASON] Выбор сезона: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}, season={season_num}")
         message_id = call.message.message_id
         
         # Используем функцию show_episodes_page для отображения эпизодов
