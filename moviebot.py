@@ -22961,21 +22961,36 @@ if IS_PRODUCTION:
         logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
         try:
             bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
-            logger.info(f"Webhook успешно установлен: {webhook_url}")
+            logger.info(f"✅ Webhook успешно установлен: {webhook_url}")
             logger.info(f"allowed_updates включает: {', '.join(allowed_updates)}")
             logger.info(f"✅ КРИТИЧНО: 'successful_payment' включен в allowed_updates для Stars платежей!")
+            
+            # Проверяем, что webhook действительно установлен
+            try:
+                webhook_info = bot.get_webhook_info()
+                logger.info(f"✅ Проверка webhook: URL={webhook_info.url}, pending_update_count={webhook_info.pending_update_count}")
+                if webhook_info.url != webhook_url:
+                    logger.warning(f"⚠️ Webhook URL не совпадает! Ожидалось: {webhook_url}, получено: {webhook_info.url}")
+            except Exception as check_error:
+                logger.error(f"❌ Ошибка при проверке webhook: {check_error}")
         except Exception as e:
-            logger.error(f"ОШИБКА при set_webhook: {e}")
+            logger.error(f"❌ ОШИБКА при set_webhook: {e}", exc_info=True)
     else:
         logger.warning("Webhook URL не определён! Установите RENDER_EXTERNAL_URL или RAILWAY_PUBLIC_DOMAIN")
 
     # КЛЮЧЕВОЕ: запускаем Flask сервер
     port = int(os.getenv('PORT', 10000))
-    logger.info(f"Запускаем Flask сервер на 0.0.0.0:{port}")
+    logger.info(f"🚀 Запускаем Flask сервер на 0.0.0.0:{port}")
+    logger.info(f"🌐 Webhook endpoint будет доступен по адресу: {webhook_url if webhook_url else 'НЕ УСТАНОВЛЕН'}")
+    logger.info(f"🔗 Health check endpoint: http://0.0.0.0:{port}/health")
     
     # Это важно — чтобы Render сразу увидел порт
     logger.info(f"Текущий хост: {socket.gethostname()}")
     
+    logger.info("✅ Flask сервер готов к запуску")
+    logger.info("=" * 80)
+    logger.info("🎯 БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ")
+    logger.info("=" * 80)
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 else:
     # Локальный запуск - используем polling (только если IS_PRODUCTION=False)
