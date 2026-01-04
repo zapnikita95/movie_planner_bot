@@ -37,6 +37,13 @@ def create_web_app(bot_instance):
                 logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")
                 logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
                 logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
+                
+                # Проверяем наличие web_app_data
+                if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
+                    logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
+                    logger.info(f"[WEBHOOK] web_app_data.data={update.message.web_app_data.data if hasattr(update.message.web_app_data, 'data') else 'НЕТ'}")
+                    logger.info(f"[WEBHOOK] web_app_data.button_text={update.message.web_app_data.button_text if hasattr(update.message.web_app_data, 'button_text') else 'НЕТ'}")
+                
                 # Проверяем, является ли сообщение командой
                 if update.message.text and update.message.text.startswith('/'):
                     logger.info(f"[WEBHOOK] ⚠️ Обнаружена команда: '{update.message.text}'")
