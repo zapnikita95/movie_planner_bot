@@ -7434,6 +7434,14 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
             'chat_id': chat_id
         }
         
+        # Проверяем длину текста (лимит Telegram: 4096 символов)
+        if len(text) > 4096:
+            logger.warning(f"[SHOW EPISODES PAGE] Текст слишком длинный ({len(text)} символов), обрезаю до 4096")
+            text = text[:4093] + "..."
+        
+        logger.info(f"[SHOW EPISODES PAGE] Формирую текст длиной {len(text)} символов")
+        logger.info(f"[SHOW EPISODES PAGE] Количество кнопок в разметке: {len(markup.keyboard) if markup and markup.keyboard else 0}")
+        
         if message_id:
             try:
                 logger.info(f"[SHOW EPISODES PAGE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
@@ -7452,23 +7460,50 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                         }
                         if reply_markup_json:
                             params['reply_markup'] = reply_markup_json
+                        logger.info(f"[SHOW EPISODES PAGE] Отправляю editMessageText через API call...")
                         result = bot.api_call('editMessageText', params)
                         if not result or not result.get('ok'):
                             raise Exception(f"API call failed: {result}")
+                        logger.info(f"[SHOW EPISODES PAGE] API call успешен")
                     except Exception as api_e:
                         logger.error(f"[SHOW EPISODES PAGE] Ошибка API call: {api_e}", exc_info=True)
                         # Пробуем обычный edit_message_text без message_thread_id
+                        logger.info(f"[SHOW EPISODES PAGE] Пробую edit_message_text без message_thread_id...")
                         bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
                 else:
-                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[SHOW EPISODES PAGE] Отправляю edit_message_text...")
+                    try:
+                        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                    except Exception as edit_e:
+                        error_str = str(edit_e).lower()
+                        logger.warning(f"[SHOW EPISODES PAGE] Ошибка edit_message_text: {edit_e}")
+                        # Проверяем, является ли это ошибкой "message is not modified"
+                        if "message is not modified" in error_str or "message_not_modified" in error_str or "bad request: message is not modified" in error_str:
+                            # Если текст не изменился — просто обновляем клавиатуру
+                            logger.info(f"[SHOW EPISODES PAGE] Текст не изменился, обновляю только клавиатуру...")
+                            try:
+                                bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
+                                logger.info(f"[SHOW EPISODES PAGE] Клавиатура обновлена успешно")
+                            except Exception as e2:
+                                logger.error(f"[SHOW EPISODES PAGE] Не удалось обновить markup: {e2}", exc_info=True)
+                        else:
+                            # Другая ошибка API
+                            logger.error(f"[SHOW EPISODES PAGE] КРИТИЧЕСКАЯ ошибка edit_message_text: {edit_e}", exc_info=True)
+                            raise
                 logger.info(f"[SHOW EPISODES PAGE] Сообщение обновлено успешно")
             except Exception as e:
                 logger.error(f"[SHOW EPISODES PAGE] Ошибка редактирования сообщения: {e}", exc_info=True)
                 # При ошибке отправляем новое сообщение
-                if message_thread_id:
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
-                else:
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                try:
+                    logger.info(f"[SHOW EPISODES PAGE] Пробую отправить новое сообщение вместо редактирования...")
+                    if message_thread_id:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                    else:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[SHOW EPISODES PAGE] Новое сообщение отправлено успешно")
+                except Exception as send_e:
+                    logger.error(f"[SHOW EPISODES PAGE] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
+                    raise
         else:
             logger.info(f"[SHOW EPISODES PAGE] Отправка нового сообщения")
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
@@ -15888,8 +15923,16 @@ def series_episode_callback(call):
             try:
                 show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
                 logger.info(f"[SERIES EPISODE] Сообщение с эпизодами обновлено успешно")
+                # Отвечаем на callback с информацией о статусе
+                status_text = "✅ Отмечено как просмотренный" if is_watched else "⬜ Отметка снята"
+                bot.answer_callback_query(call.id, status_text)
             except Exception as e:
                 logger.error(f"[SERIES EPISODE] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
+                # ВАЖНО: всегда отвечаем на callback, даже при ошибке
+                try:
+                    bot.answer_callback_query(call.id, "❌ Ошибка обновления", show_alert=True)
+                except:
+                    pass
             
             # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
