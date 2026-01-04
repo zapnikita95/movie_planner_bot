@@ -1754,11 +1754,18 @@ def dice_game_handler(call):
             # Используем send_dice из pyTelegramBotAPI
             # В pyTelegramBotAPI метод send_dice принимает chat_id, а emoji передается как именованный параметр
             # Если emoji не поддерживается, используем просто send_dice(chat_id)
+            logger.info(f"[DICE GAME] Попытка отправить кубик для chat_id={chat_id}, user_id={user_id}")
             try:
                 dice_msg = bot.send_dice(chat_id, emoji='🎲')
-            except TypeError:
+                logger.info(f"[DICE GAME] Кубик отправлен с emoji, message_id={dice_msg.message_id if dice_msg else None}")
+            except TypeError as e:
                 # Если emoji не поддерживается, используем стандартный кубик
+                logger.warning(f"[DICE GAME] emoji не поддерживается, используем стандартный кубик: {e}")
                 dice_msg = bot.send_dice(chat_id)
+                logger.info(f"[DICE GAME] Стандартный кубик отправлен, message_id={dice_msg.message_id if dice_msg else None}")
+            except Exception as e:
+                logger.error(f"[DICE GAME] Ошибка при отправке кубика: {e}", exc_info=True)
+                raise
             
             if dice_msg:
                 # Сохраняем message_id для получения значения позже
