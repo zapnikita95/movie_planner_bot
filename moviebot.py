@@ -19,7 +19,7 @@ from bot.utils.parsing import *
 
 # Импорты для обратной совместимости и обработчиков
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand, WebAppInfo
 import os
 import random
 import re
@@ -99,6 +99,9 @@ init_database()
 conn = get_db_connection()
 cursor = get_db_cursor()
 
+# URL веб-приложения для Mini App
+WEB_APP_URL = "https://shiny-youtiao-90006e.netlify.app/"
+
 # Создание бота
 bot = telebot.TeleBot(TOKEN)
 # Получаем ID бота для исключения из подсчета участников
@@ -109,6 +112,22 @@ try:
 except Exception as e:
     logger.warning(f"Не удалось получить ID бота: {e}")
     BOT_ID = None
+
+# Функция для настройки menu_button программно
+def setup_menu_button(chat_id=None):
+    """Настраивает menu_button для открытия Mini App"""
+    try:
+        bot.set_chat_menu_button(
+            chat_id=chat_id,  # None = для всех личных чатов по умолчанию
+            menu_button={
+                "type": "web_app",
+                "text": "🎬 Меню",
+                "web_app": {"url": WEB_APP_URL}
+            }
+        )
+        logger.info(f"✅ Menu button настроен для {'всех чатов' if chat_id is None else f'чата {chat_id}'}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при настройке menu button: {e}", exc_info=True)
 
 # Очищаем старые webhook, если были (с обработкой ошибок)
 try:
@@ -3763,8 +3782,16 @@ def send_welcome(message):
         """.strip()
 
     try:
-        bot.reply_to(message, welcome_text, parse_mode='HTML')
+        # Добавляем кнопку для открытия Mini App
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🎬 Открыть меню", web_app=WebAppInfo(url=WEB_APP_URL)))
+        
+        bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
         logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
+        
+        # Настраиваем menu_button для пользователя
+        if message.chat.type == 'private':
+            setup_menu_button(chat_id=message.chat.id)
     except Exception as e:
         logger.error(f"❌ Ошибка при отправке ответа на /start: {e}", exc_info=True)
 
@@ -8518,6 +8545,9 @@ def show_schedule(message):
                 # Кнопка с названием фильма ведет к описанию
                 cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
             
+            # Добавляем кнопку для открытия Mini App
+            cinema_markup.add(InlineKeyboardButton("🎬 Открыть расписание", web_app=WebAppInfo(url=WEB_APP_URL)))
+            
             cinema_text = "🎬 <b>Премьеры в кино:</b>\n\n"
             for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
                 ticket_emoji = "🎟️ " if has_ticket else ""
@@ -8534,6 +8564,9 @@ def show_schedule(message):
                     button_text = button_text[:27] + "..."
                 # Кнопка с названием фильма ведет к описанию
                 home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
+            
+            # Добавляем кнопку для открытия Mini App
+            home_markup.add(InlineKeyboardButton("🎬 Открыть расписание", web_app=WebAppInfo(url=WEB_APP_URL)))
             
             home_text = "🏠 <b>Просмотры дома:</b>\n\n"
             for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
@@ -20211,6 +20244,12 @@ else:
         logger.info("Старые webhook очищены")
     except Exception as e:
         logger.warning(f"Не удалось очистить webhook: {e}")
+    
+    # Настраиваем menu_button по умолчанию для всех личных чатов
+    try:
+        setup_menu_button(chat_id=None)
+    except Exception as e:
+        logger.warning(f"Не удалось настроить menu_button по умолчанию: {e}")
     
     # Запускаем polling независимо от того, как выполняется код
     # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
