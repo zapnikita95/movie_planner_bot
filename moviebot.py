@@ -15843,7 +15843,11 @@ def series_episode_callback(call):
                     current_page = state.get('page', 1)
             
             # Обновляем сообщение с эпизодами
-            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+            try:
+                show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+                logger.info(f"[SERIES EPISODE] Сообщение с эпизодами обновлено успешно")
+            except Exception as e:
+                logger.error(f"[SERIES EPISODE] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
             
             # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
@@ -16012,7 +16016,11 @@ def series_season_all_callback(call):
                 current_page = state.get('page', 1)
         
         # Обновляем сообщение с эпизодами
-        show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+        try:
+            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+            logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
+        except Exception as e:
+            logger.error(f"[SERIES SEASON ALL] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
         from datetime import datetime as dt
