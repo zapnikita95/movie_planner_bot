@@ -22467,6 +22467,7 @@ def got_payment(message):
         logger.info(f"[STARS SUCCESS] Платеж найден, статус={payment_data['status']}, продолжаем обработку...")
         
         # Обновляем статус платежа
+        logger.info(f"[STARS SUCCESS] Обновляем статус платежа на 'succeeded'...")
         try:
             from database.db_connection import get_db_connection
             conn = get_db_connection()
@@ -22478,12 +22479,26 @@ def got_payment(message):
             """, (payment_id,))
             conn.commit()
             cursor.close()
-            logger.info(f"[STARS] Статус платежа {payment_id} обновлен на 'succeeded'")
+            logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded'")
         except Exception as e:
-            logger.error(f"[STARS] Ошибка обновления статуса платежа: {e}", exc_info=True)
+            logger.error(f"[STARS SUCCESS] ❌ Ошибка обновления статуса платежа: {e}", exc_info=True)
         
         # Создаем или продлеваем подписку
+        logger.info(f"[STARS SUCCESS] Создаем/продлеваем подписку...")
+        logger.info(f"[STARS SUCCESS] subscription_type={payment_data['subscription_type']}")
+        logger.info(f"[STARS SUCCESS] plan_type={payment_data['plan_type']}")
+        logger.info(f"[STARS SUCCESS] period_type={payment_data['period_type']}")
+        logger.info(f"[STARS SUCCESS] group_size={payment_data.get('group_size')}")
         try:
+            logger.info(f"[STARS SUCCESS] Вызываем create_subscription с параметрами:")
+            logger.info(f"[STARS SUCCESS]   user_id={payment_data['user_id']}")
+            logger.info(f"[STARS SUCCESS]   chat_id={payment_data['chat_id']}")
+            logger.info(f"[STARS SUCCESS]   subscription_type={payment_data['subscription_type']}")
+            logger.info(f"[STARS SUCCESS]   plan_type={payment_data['plan_type']}")
+            logger.info(f"[STARS SUCCESS]   period_type={payment_data['period_type']}")
+            logger.info(f"[STARS SUCCESS]   group_size={payment_data['group_size']}")
+            logger.info(f"[STARS SUCCESS]   price={payment_data['amount']}")
+            
             subscription_id = create_subscription(
                 user_id=payment_data['user_id'],
                 chat_id=payment_data['chat_id'],
@@ -22494,7 +22509,7 @@ def got_payment(message):
                 price=payment_data['amount']
             )
             
-            logger.info(f"[STARS] Подписка создана/продлена: subscription_id={subscription_id}")
+            logger.info(f"[STARS SUCCESS] ✅ Подписка создана/продлена: subscription_id={subscription_id}")
             
             # Отправляем подтверждение пользователю
             text = "✅ <b>Оплата успешно завершена!</b>\n\n"
@@ -22502,18 +22517,24 @@ def got_payment(message):
             text += f"📋 Подписка активирована\n\n"
             text += "Спасибо за покупку! 🎉"
             
+            logger.info(f"[STARS SUCCESS] Отправляем подтверждение пользователю...")
             bot.reply_to(message, text, parse_mode='HTML')
+            logger.info(f"[STARS SUCCESS] ✅ Подтверждение отправлено")
+            logger.info(f"[STARS SUCCESS] ===== ОБРАБОТКА successful_payment ЗАВЕРШЕНА УСПЕШНО =====")
             
         except Exception as e:
-            logger.error(f"[STARS] Ошибка создания подписки: {e}", exc_info=True)
+            logger.error(f"[STARS SUCCESS] ❌ Ошибка создания подписки: {e}", exc_info=True)
+            logger.error(f"[STARS SUCCESS] payment_data={payment_data}")
             bot.reply_to(message, "❌ Ошибка активации подписки. Обратитесь к администратору.")
         
     except Exception as e:
-        logger.error(f"[STARS] Ошибка обработки successful_payment: {e}", exc_info=True)
+        logger.error(f"[STARS SUCCESS] ❌ КРИТИЧЕСКАЯ ОШИБКА обработки successful_payment: {e}", exc_info=True)
+        logger.error(f"[STARS SUCCESS] Тип ошибки: {type(e).__name__}")
+        logger.error(f"[STARS SUCCESS] Сообщение: {str(e)}")
         try:
             bot.reply_to(message, "❌ Произошла ошибка при обработке платежа. Обратитесь к администратору.")
-        except:
-            pass
+        except Exception as e2:
+            logger.error(f"[STARS SUCCESS] ❌ Не удалось отправить сообщение об ошибке: {e2}")
 
 # Flask app для webhook - используем приложение из web_app.py
 from web.web_app import create_web_app
