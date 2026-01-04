@@ -7831,9 +7831,14 @@ def series_subscribe_callback(call):
         
         # Получаем информацию о следующей серии и ставим уведомление
         logger.info(f"[SERIES SUBSCRIBE] Получение данных о сезонах для kp_id={kp_id}")
-        from api.kinopoisk_api import get_seasons_data
-        seasons = get_seasons_data(kp_id)
-        logger.info(f"[SERIES SUBSCRIBE] Получено сезонов: {len(seasons) if seasons else 0}")
+        seasons = None
+        try:
+            from api.kinopoisk_api import get_seasons_data
+            seasons = get_seasons_data(kp_id)
+            logger.info(f"[SERIES SUBSCRIBE] Получено сезонов: {len(seasons) if seasons else 0}")
+        except Exception as seasons_e:
+            logger.error(f"[SERIES SUBSCRIBE] Ошибка при получении данных о сезонах: {seasons_e}", exc_info=True)
+            seasons = None
         
         next_episode_date = None
         next_episode = None
@@ -7948,8 +7953,15 @@ def series_subscribe_callback(call):
                     
                     logger.info(f"[SERIES SUBSCRIBE] Получение информации о сериале через API: link={link}")
                     # Получаем информацию о сериале через API
-                    from api.kinopoisk_api import extract_movie_info
-                    info = extract_movie_info(link)
+                    info = None
+                    try:
+                        from api.kinopoisk_api import extract_movie_info
+                        info = extract_movie_info(link)
+                        logger.info(f"[SERIES SUBSCRIBE] Информация о сериале получена успешно")
+                    except Exception as api_e:
+                        logger.error(f"[SERIES SUBSCRIBE] Ошибка API при получении информации о сериале: {api_e}", exc_info=True)
+                        info = None
+                    
                     if info:
                         existing = (film_id, title, watched)
                         # Получаем message_thread_id из сообщения, если оно есть
@@ -8048,7 +8060,11 @@ def series_subscribe_callback(call):
             except Exception as send_e:
                 logger.error(f"[SERIES SUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
     except Exception as e:
-        logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА в хэндлере: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, "✅ Подписка добавлена, но произошла ошибка при обновлении карточки.")
+        except Exception as send_e:
+            logger.error(f"[SERIES SUBSCRIBE] Не удалось отправить сообщение об ошибке: {send_e}", exc_info=True)
     finally:
         # ВСЕГДА отвечаем на callback!
         try:
@@ -8115,8 +8131,15 @@ def series_unsubscribe_callback(call):
                     
                     logger.info(f"[SERIES UNSUBSCRIBE] Получение информации о сериале через API: link={link}")
                     # Получаем информацию о сериале через API
-                    from api.kinopoisk_api import extract_movie_info
-                    info = extract_movie_info(link)
+                    info = None
+                    try:
+                        from api.kinopoisk_api import extract_movie_info
+                        info = extract_movie_info(link)
+                        logger.info(f"[SERIES UNSUBSCRIBE] Информация о сериале получена успешно")
+                    except Exception as api_e:
+                        logger.error(f"[SERIES UNSUBSCRIBE] Ошибка API при получении информации о сериале: {api_e}", exc_info=True)
+                        info = None
+                    
                     if info:
                         existing = (film_id, title, watched)
                         # Получаем message_thread_id из сообщения, если оно есть
@@ -8153,8 +8176,14 @@ def series_unsubscribe_callback(call):
                         if row:
                             film_id = row.get('id') if isinstance(row, dict) else row[0]
                             
-                            from api.kinopoisk_api import extract_movie_info
-                            info = extract_movie_info(link)
+                            info = None
+                            try:
+                                from api.kinopoisk_api import extract_movie_info
+                                info = extract_movie_info(link)
+                            except Exception as api_e2:
+                                logger.error(f"[SERIES UNSUBSCRIBE] Ошибка API в fallback: {api_e2}", exc_info=True)
+                                info = None
+                            
                             if info:
                                 message_thread_id = None
                                 message_id = None
@@ -8210,7 +8239,11 @@ def series_unsubscribe_callback(call):
         
         logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
     except Exception as e:
-        logger.error(f"[SERIES UNSUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        logger.error(f"[SERIES UNSUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА в хэндлере: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, "🔕 Отписка выполнена, но произошла ошибка при обновлении карточки.")
+        except Exception as send_e:
+            logger.error(f"[SERIES UNSUBSCRIBE] Не удалось отправить сообщение об ошибке: {send_e}", exc_info=True)
     finally:
         # ВСЕГДА отвечаем на callback!
         try:
