@@ -58,17 +58,32 @@ commands = [
     BotCommand("settings", "Настройки")
 ]
 
-# Устанавливаем команды для групповых чатов
+# Устанавливаем команды для разных scope
 try:
+    # Для всех групповых чатов
     bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
-    logger.info("Команды установлены для групповых чатов")
+    logger.info("Команды установлены для всех групповых чатов")
 except Exception as e:
     logger.error(f"Ошибка при установке команд для групповых чатов: {e}")
 
-# Устанавливаем команды для личных сообщений
 try:
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
-    logger.info("Команды установлены для личных сообщений")
+    # Для всех администраторов в группах (чтобы команды показывались администраторам)
+    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllChatAdministrators())
+    logger.info("Команды установлены для администраторов групп")
 except Exception as e:
-    logger.error(f"Ошибка при установке команд для личных сообщений: {e}")
+    logger.error(f"Ошибка при установке команд для администраторов групп: {e}")
+
+try:
+    # Для всех личных чатов
+    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllPrivateChats())
+    logger.info("Команды установлены для всех личных чатов")
+except Exception as e:
+    logger.error(f"Ошибка при установке команд для личных чатов: {e}")
+
+try:
+    # Для дефолтного scope (личные чаты)
+    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
+    logger.info("Команды установлены для дефолтного scope")
+except Exception as e:
+    logger.error(f"Ошибка при установке команд для дефолтного scope: {e}")
 

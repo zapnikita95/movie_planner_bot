@@ -19,7 +19,7 @@ from bot.utils.parsing import *
 
 # Импорты для обратной совместимости и обработчиков
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand, WebAppInfo, ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand, ReplyKeyboardMarkup, KeyboardButton
 import os
 import random
 import re
@@ -58,7 +58,7 @@ import uuid
 from database.db_operations import (
     get_watched_emoji, get_watched_emojis, get_watched_custom_emoji_ids,
     is_watched_emoji, get_user_timezone, get_user_timezone_or_default,
-    set_user_timezone, get_watched_reactions, log_request
+    set_user_timezone, get_watched_reactions, log_request, get_admin_statistics
 )
 from api.kinopoisk_api import (
     extract_movie_info, get_facts, get_seasons, get_seasons_data,
@@ -99,9 +99,6 @@ init_database()
 conn = get_db_connection()
 cursor = get_db_cursor()
 
-# URL веб-приложения для Mini App
-WEB_APP_URL = "https://shiny-youtiao-90006e.netlify.app/"
-
 # Создание бота
 bot = telebot.TeleBot(TOKEN)
 # Получаем ID бота для исключения из подсчета участников
@@ -112,24 +109,6 @@ try:
 except Exception as e:
     logger.warning(f"Не удалось получить ID бота: {e}")
     BOT_ID = None
-
-# Функция для настройки menu_button программно
-def setup_menu_button(chat_id=None):
-    """Настраивает menu_button для открытия Mini App"""
-    try:
-        from telebot.types import MenuButtonWebApp
-        menu_button = MenuButtonWebApp(
-            type="web_app",
-            text="🎬 Меню",
-            web_app=telebot.types.WebAppInfo(url=WEB_APP_URL)
-        )
-        bot.set_chat_menu_button(
-            chat_id=chat_id,  # None = для всех личных чатов по умолчанию
-            menu_button=menu_button
-        )
-        logger.info(f"✅ Menu button настроен для {'всех чатов' if chat_id is None else f'чата {chat_id}'}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка при настройке menu button: {e}", exc_info=True)
 
 # Очищаем старые webhook, если были (с обработкой ошибок)
 try:
@@ -188,8 +167,35 @@ commands = [
     BotCommand("payment", "Оплата подписки"),
     BotCommand("help", "Помощь по командам")
 ]
-bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
-bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
+
+# Устанавливаем команды для разных scope
+try:
+    # Для всех групповых чатов
+    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
+    logger.info("Команды установлены для всех групповых чатов")
+except Exception as e:
+    logger.error(f"Ошибка при установке команд для групповых чатов: {e}")
+
+try:
+    # Для всех администраторов в группах (чтобы команды показывались администраторам)
+    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllChatAdministrators())
+    logger.info("Команды установлены для администраторов групп")
+except Exception as e:
+    logger.error(f"Ошибка при установке команд для администраторов групп: {e}")
+
+try:
+    # Для всех личных чатов
+    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllPrivateChats())
+    logger.info("Команды установлены для всех личных чатов")
+except Exception as e:
+    logger.error(f"Ошибка при установке команд для личных чатов: {e}")
+
+try:
+    # Для дефолтного scope (личные чаты)
+    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
+    logger.info("Команды установлены для дефолтного scope")
+except Exception as e:
+    logger.error(f"Ошибка при установке команд для дефолтного scope: {e}")
 
 # БД уже инициализирована через init_database()
 # Используем глобальные объекты из модуля database
@@ -3887,10 +3893,6 @@ def send_welcome(message):
         
         bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
         logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
-        
-        # Настраиваем menu_button для пользователя
-        if message.chat.type == 'private':
-            setup_menu_button(chat_id=message.chat.id)
     except Exception as e:
         logger.error(f"❌ Ошибка при отправке ответа на /start: {e}", exc_info=True)
 
@@ -7895,6 +7897,86 @@ def check_participation_and_notify(call, chat_id=None, user_id=None):
         return False
     return True
 
+@bot.message_handler(commands=['admin_stats'])
+def admin_stats_command(message):
+    """Команда для получения статистики бота (только для создателя)"""
+    # ID создателя бота
+    CREATOR_ID = 301810276
+    
+    if message.from_user.id != CREATOR_ID:
+        bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
+        return
+    
+    try:
+        logger.info(f"[HANDLER] /admin_stats вызван от {message.from_user.id}")
+        stats = get_admin_statistics()
+        
+        if 'error' in stats:
+            bot.reply_to(message, f"❌ Ошибка получения статистики: {stats['error']}")
+            return
+        
+        # Формируем сообщение со статистикой
+        text = "📊 <b>СТАТИСТИКА БОТА</b>\n\n"
+        
+        text += "👥 <b>Пользователи:</b>\n"
+        text += f"   • Активных за 30 дней: {stats.get('active_users_30d', 0)}\n"
+        text += f"   • Всего пользователей: {stats.get('total_users', 0)}\n"
+        text += f"   • Платных пользователей: {stats.get('paid_users', 0)}\n\n"
+        
+        text += "👥 <b>Группы:</b>\n"
+        text += f"   • Активных за 30 дней: {stats.get('active_groups_30d', 0)}\n"
+        text += f"   • Всего групп: {stats.get('total_groups', 0)}\n"
+        text += f"   • Платных групп: {stats.get('paid_groups', 0)}\n\n"
+        
+        text += "🌐 <b>Запросы к API Кинопоиска:</b>\n"
+        text += f"   • За день: {stats.get('kp_api_requests_day', 0)}\n"
+        text += f"   • За неделю: {stats.get('kp_api_requests_week', 0)}\n"
+        text += f"   • За месяц: {stats.get('kp_api_requests_month', 0)}\n"
+        text += f"   • Всего: {stats.get('kp_api_requests_total', 0)}\n\n"
+        
+        text += "📝 <b>Запросы пользователей:</b>\n"
+        text += f"   • За день: {stats.get('user_requests_day', 0)}\n"
+        text += f"   • За неделю: {stats.get('user_requests_week', 0)}\n"
+        text += f"   • За месяц: {stats.get('user_requests_month', 0)}\n\n"
+        
+        text += "🎬 <b>Контент:</b>\n"
+        text += f"   • Всего фильмов: {stats.get('total_movies', 0)}\n"
+        text += f"   • Всего планов: {stats.get('total_plans', 0)}\n"
+        text += f"   • Всего оценок: {stats.get('total_ratings', 0)}\n\n"
+        
+        # Топ команд за день
+        top_commands_day = stats.get('top_commands_day', [])
+        if top_commands_day:
+            text += "🔥 <b>Топ команд за день:</b>\n"
+            for i, cmd_row in enumerate(top_commands_day[:5], 1):
+                if isinstance(cmd_row, dict):
+                    cmd = cmd_row.get('command_or_action', '')
+                    count = cmd_row.get('count', 0)
+                else:
+                    cmd = cmd_row[0] if len(cmd_row) > 0 else ''
+                    count = cmd_row[1] if len(cmd_row) > 1 else 0
+                text += f"   {i}. {cmd}: {count}\n"
+            text += "\n"
+        
+        # Топ команд за неделю
+        top_commands_week = stats.get('top_commands_week', [])
+        if top_commands_week:
+            text += "📈 <b>Топ команд за неделю:</b>\n"
+            for i, cmd_row in enumerate(top_commands_week[:5], 1):
+                if isinstance(cmd_row, dict):
+                    cmd = cmd_row.get('command_or_action', '')
+                    count = cmd_row.get('count', 0)
+                else:
+                    cmd = cmd_row[0] if len(cmd_row) > 0 else ''
+                    count = cmd_row[1] if len(cmd_row) > 1 else 0
+                text += f"   {i}. {cmd}: {count}\n"
+        
+        bot.reply_to(message, text, parse_mode='HTML')
+        
+    except Exception as e:
+        logger.error(f"Ошибка в admin_stats_command: {e}", exc_info=True)
+        bot.reply_to(message, f"❌ Ошибка получения статистики: {e}")
+
 @bot.message_handler(commands=['join'])
 def join_command(message):
     logger.info(f"[HANDLER] /join вызван от {message.from_user.id}")
@@ -9028,8 +9110,6 @@ def show_schedule(message):
                 # Кнопка с названием фильма ведет к описанию
                 cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
             
-            # Добавляем кнопку для открытия Mini App
-            cinema_markup.add(InlineKeyboardButton("🎬 Открыть расписание", web_app=WebAppInfo(url=WEB_APP_URL)))
             # Кнопку "Назад" добавляем только если нет домашних планов
             if not home_plans:
                 cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
@@ -9052,8 +9132,6 @@ def show_schedule(message):
                 # Кнопка с названием фильма ведет к описанию
                 home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
             
-            # Добавляем кнопку для открытия Mini App
-            home_markup.add(InlineKeyboardButton("🎬 Открыть расписание", web_app=WebAppInfo(url=WEB_APP_URL)))
             # Кнопку "Назад" всегда добавляем в нижнее сообщение (домашние планы)
             home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
             
@@ -21431,12 +21509,6 @@ else:
         logger.info("Старые webhook очищены")
     except Exception as e:
         logger.warning(f"Не удалось очистить webhook: {e}")
-    
-    # Настраиваем menu_button по умолчанию для всех личных чатов
-    try:
-        setup_menu_button(chat_id=None)
-    except Exception as e:
-        logger.warning(f"Не удалось настроить menu_button по умолчанию: {e}")
     
     # Запускаем polling независимо от того, как выполняется код
     # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
