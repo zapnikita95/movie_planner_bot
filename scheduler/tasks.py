@@ -1241,3 +1241,149 @@ def check_subscription_payments():
         logger.error(f"[SUBSCRIPTION PAYMENT] Ошибка проверки подписок: {e}", exc_info=True)
 
 
+def process_recurring_payments():
+    """Выполняет безакцептные списания для подписок с payment_method_id"""
+    if not bot:
+        return
+    
+    try:
+        from yookassa import Configuration, Payment
+        from config.settings import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+        import uuid as uuid_module
+        from database.db_operations import renew_subscription, save_payment, update_payment_status, create_subscription
+        
+        Configuration.account_id = YOOKASSA_SHOP_ID
+        Configuration.secret_key = YOOKASSA_SECRET_KEY
+        
+        now = datetime.now(pytz.UTC)
+        
+        # Находим подписки, у которых next_payment_date сегодня и есть payment_method_id
+        with db_lock:
+            cursor.execute("""
+                SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
+                       next_payment_date, payment_method_id, telegram_username, group_username, group_size
+                FROM subscriptions
+                WHERE is_active = TRUE
+                AND next_payment_date IS NOT NULL
+                AND payment_method_id IS NOT NULL
+                AND DATE(next_payment_date AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
+            """, (now,))
+            subscriptions = cursor.fetchall()
+        
+        for sub in subscriptions:
+            try:
+                subscription_id = sub.get('id') if isinstance(sub, dict) else sub[0]
+                chat_id = sub.get('chat_id') if isinstance(sub, dict) else sub[1]
+                user_id = sub.get('user_id') if isinstance(sub, dict) else sub[2]
+                subscription_type = sub.get('subscription_type') if isinstance(sub, dict) else sub[3]
+                plan_type = sub.get('plan_type') if isinstance(sub, dict) else sub[4]
+                period_type = sub.get('period_type') if isinstance(sub, dict) else sub[5]
+                price = float(sub.get('price') if isinstance(sub, dict) else sub[6])
+                payment_method_id = sub.get('payment_method_id') if isinstance(sub, dict) else sub[8]
+                telegram_username = sub.get('telegram_username') if isinstance(sub, dict) else sub[9]
+                group_username = sub.get('group_username') if isinstance(sub, dict) else sub[10]
+                group_size = sub.get('group_size') if isinstance(sub, dict) else sub[11]
+                
+                logger.info(f"[RECURRING PAYMENT] Обработка подписки {subscription_id}, payment_method_id={payment_method_id}, сумма={price}")
+                
+                # Создаем безакцептный платеж
+                payment_id = str(uuid_module.uuid4())
+                
+                plan_names = {
+                    'notifications': 'Уведомления о сериалах',
+                    'recommendations': 'Персональные рекомендации',
+                    'tickets': 'Билеты в кино',
+                    'all': 'Все режимы'
+                }
+                plan_name = plan_names.get(plan_type, plan_type)
+                
+                period_names = {
+                    'month': 'месяц',
+                    '3months': '3 месяца',
+                    'year': 'год'
+                }
+                period_name = period_names.get(period_type, period_type)
+                
+                subscription_type_name = 'Личная подписка' if subscription_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+                description = f"{subscription_type_name}: {plan_name}, период: {period_name} (User ID: {user_id})"
+                
+                metadata = {
+                    "user_id": str(user_id),
+                    "chat_id": str(chat_id),
+                    "subscription_type": subscription_type,
+                    "plan_type": plan_type,
+                    "period_type": period_type,
+                    "payment_id": payment_id,
+                    "recurring": "true"
+                }
+                if group_size:
+                    metadata["group_size"] = str(group_size)
+                if telegram_username:
+                    metadata["telegram_username"] = telegram_username
+                if group_username:
+                    metadata["group_username"] = group_username
+                
+                # Создаем безакцептный платеж используя сохраненный payment_method_id
+                payment = Payment.create({
+                    "amount": {
+                        "value": f"{price:.2f}",
+                        "currency": "RUB"
+                    },
+                    "payment_method_id": payment_method_id,  # Используем сохраненный способ оплаты
+                    "capture": True,
+                    "description": description,
+                    "metadata": metadata
+                })
+                
+                logger.info(f"[RECURRING PAYMENT] Платеж создан: {payment.id}, статус: {payment.status}")
+                
+                # Сохраняем платеж в БД
+                save_payment(
+                    payment_id=payment_id,
+                    yookassa_payment_id=payment.id,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    subscription_type=subscription_type,
+                    plan_type=plan_type,
+                    period_type=period_type,
+                    group_size=group_size,
+                    amount=price,
+                    status=payment.status
+                )
+                
+                # Если платеж успешен, продлеваем подписку
+                if payment.status == 'succeeded':
+                    renew_subscription(subscription_id, period_type)
+                    update_payment_status(payment_id, 'succeeded', subscription_id)
+                    
+                    # Отправляем уведомление пользователю
+                    text = "✅ <b>Автоматическое списание выполнено</b>\n\n"
+                    text += f"Подписка продлена на {period_name}.\n"
+                    text += f"💰 Сумма: <b>{price}₽</b>\n\n"
+                    text += "Спасибо за использование нашего сервиса! 🎉"
+                    
+                    try:
+                        bot.send_message(chat_id, text, parse_mode='HTML')
+                        logger.info(f"[RECURRING PAYMENT] Уведомление отправлено для подписки {subscription_id}")
+                    except Exception as e:
+                        logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления: {e}")
+                else:
+                    logger.warning(f"[RECURRING PAYMENT] Платеж {payment.id} не успешен, статус: {payment.status}")
+                    # Отправляем уведомление об ошибке
+                    text = "⚠️ <b>Ошибка автоматического списания</b>\n\n"
+                    text += f"Не удалось списать оплату за подписку.\n"
+                    text += f"Статус: {payment.status}\n\n"
+                    text += "Пожалуйста, проверьте способ оплаты или обратитесь в поддержку."
+                    
+                    try:
+                        bot.send_message(chat_id, text, parse_mode='HTML')
+                    except Exception as e:
+                        logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления об ошибке: {e}")
+                
+            except Exception as e:
+                logger.error(f"[RECURRING PAYMENT] Ошибка обработки подписки {subscription_id}: {e}", exc_info=True)
+    
+    except Exception as e:
+        logger.error(f"[RECURRING PAYMENT] Ошибка обработки рекуррентных платежей: {e}", exc_info=True)
+
+

@@ -704,7 +704,7 @@ def renew_subscription(subscription_id, period_type):
 
 
 def create_subscription(chat_id, user_id, subscription_type, plan_type, period_type, price, 
-                       telegram_username=None, group_username=None, group_size=None):
+                       telegram_username=None, group_username=None, group_size=None, payment_method_id=None):
     """Создает новую подписку"""
     from datetime import datetime, timedelta
     from dateutil.relativedelta import relativedelta
@@ -736,11 +736,11 @@ def create_subscription(chat_id, user_id, subscription_type, plan_type, period_t
         cursor.execute("""
             INSERT INTO subscriptions 
             (chat_id, user_id, subscription_type, plan_type, period_type, price, 
-             activated_at, next_payment_date, expires_at, telegram_username, group_username, group_size)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             activated_at, next_payment_date, expires_at, telegram_username, group_username, group_size, payment_method_id)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (chat_id, user_id, subscription_type, plan_type, period_type, price,
-              now, next_payment_date, expires_at, telegram_username, group_username, group_size))
+              now, next_payment_date, expires_at, telegram_username, group_username, group_size, payment_method_id))
         subscription_id = cursor.fetchone()[0] if cursor.rowcount > 0 else None
         
         # Добавляем features в зависимости от plan_type
