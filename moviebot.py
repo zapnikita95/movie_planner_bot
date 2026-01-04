@@ -18563,15 +18563,15 @@ def handle_payment_callback(call):
                         'group_username': group_username
                     }
             
-            # Показываем выбор способа оплаты
-            # Конвертируем в звезды для кнопки оплаты звездами
-            stars_amount = rubles_to_stars(final_price)
-            
-            # Определяем chat_id для платежа
+            # Определяем chat_id для платежа (до использования)
             if sub_type == 'group' and group_chat_id:
                 payment_chat_id = group_chat_id
             else:
                 payment_chat_id = chat_id
+            
+            # Показываем выбор способа оплаты
+            # Конвертируем в звезды для кнопки оплаты звездами
+            stars_amount = rubles_to_stars(final_price)
             
             # Сохраняем данные платежа в состояние для оплаты (чтобы не превышать лимит callback_data в 64 байта)
             import uuid as uuid_module
