@@ -168,7 +168,7 @@ commands = [
     BotCommand("help", "Помощь по командам")
 ]
 
-# Устанавливаем команды для разных scope
+# Устанавливаем команды одинаково для личных чатов и групп
 try:
     # Для всех групповых чатов
     bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
@@ -177,25 +177,11 @@ except Exception as e:
     logger.error(f"Ошибка при установке команд для групповых чатов: {e}")
 
 try:
-    # Для всех администраторов в группах (чтобы команды показывались администраторам)
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllChatAdministrators())
-    logger.info("Команды установлены для администраторов групп")
-except Exception as e:
-    logger.error(f"Ошибка при установке команд для администраторов групп: {e}")
-
-try:
     # Для всех личных чатов
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllPrivateChats())
-    logger.info("Команды установлены для всех личных чатов")
+    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
+    logger.info("Команды установлены для личных чатов")
 except Exception as e:
     logger.error(f"Ошибка при установке команд для личных чатов: {e}")
-
-try:
-    # Для дефолтного scope (личные чаты)
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
-    logger.info("Команды установлены для дефолтного scope")
-except Exception as e:
-    logger.error(f"Ошибка при установке команд для дефолтного scope: {e}")
 
 # БД уже инициализирована через init_database()
 # Используем глобальные объекты из модуля database
@@ -3656,11 +3642,12 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     )
                     
                     # Если это сериал, добавляем кнопки для сериалов (заблокированные, если нет доступа)
-                    if is_series and user_id:
-                        if has_notifications_access(chat_id, user_id):
+                    if is_series:
+                        if user_id and has_notifications_access(chat_id, user_id):
                             markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
                             markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                         else:
+                            # Нет доступа или user_id не определен - показываем заблокированные кнопки
                             markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                             markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
@@ -3770,78 +3757,6 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
 
 # /start — приветственное сообщение
 # Логируем регистрацию обработчика
-logger.info("[WEB APP] Регистрируем обработчик web_app_data")
-
-@bot.message_handler(content_types='web_app_data', priority=1)
-def handle_web_app_data(message):
-    logger.info(f"[WEB APP] ===== ПОЛУЧЕНЫ ДАННЫЕ ОТ WEB APP =====")
-    logger.info(f"[WEB APP] message.web_app_data: {message.web_app_data}")
-    logger.info(f"[WEB APP] message.web_app_data.data: {message.web_app_data.data if hasattr(message, 'web_app_data') and message.web_app_data else 'НЕТ ДАННЫХ'}")
-    logger.info(f"[WEB APP] message.chat.id: {message.chat.id}")
-    logger.info(f"[WEB APP] message.from_user.id: {message.from_user.id}")
-    
-    try:
-        data = json.loads(message.web_app_data.data)
-        command = data.get('command')
-        
-        if not command:
-            logger.warning("[WEB APP] Нет команды в данных")
-            return
-        
-        logger.info(f"[WEB APP] Выполняем команду: /{command}")
-        
-        # Создаём фейковое сообщение для команды
-        fake_message = telebot.types.Message()
-        fake_message.text = f'/{command}'
-        fake_message.from_user = message.from_user
-        fake_message.chat = message.chat
-        fake_message.message_id = message.message_id  # Для реплаев
-        fake_message.date = message.date
-        
-        # Вызываем хэндлер команды
-        if command == 'random':
-            random_start(fake_message)
-        elif command == 'premieres':
-            premieres_command(fake_message)
-        elif command == 'list':
-            list_movies(fake_message)
-        elif command == 'schedule':
-            show_schedule(fake_message)
-        elif command == 'plan':
-            plan_handler(fake_message)
-        elif command == 'ticket':
-            ticket_command(fake_message)
-        elif command == 'seasons':
-            seasons_command(fake_message)
-        elif command == 'total':
-            total_stats(fake_message)
-        elif command == 'stats':
-            stats_command(fake_message)
-        elif command == 'rate':
-            rate_movie(fake_message)
-        elif command == 'settings':
-            settings_command(fake_message)
-        elif command == 'start':
-            send_welcome(fake_message)
-        elif command == 'help':
-            help_command(fake_message)
-        elif command == 'clean':
-            clean_command(fake_message)
-        elif command == 'search':
-            handle_search(fake_message)
-        elif command == 'join':
-            join_command(fake_message)
-        elif command == 'edit':
-            edit_command(fake_message)
-        elif command == 'payment':
-            payment_command(fake_message)
-        else:
-            bot.send_message(chat_id=message.chat.id, text=f"Неизвестная команда: {command}")
-    except json.JSONDecodeError:
-        logger.error("[WEB APP] Не удалось распарсить JSON")
-    except Exception as e:
-        logger.error(f"[WEB APP] Ошибка: {e}", exc_info=True)
-        bot.send_message(chat_id=message.chat.id, text="Произошла ошибка в Web App. Попробуйте заново.")
 
 @bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
@@ -3927,8 +3842,28 @@ def start_menu_callback(call):
             message.text = '/schedule'
             show_schedule(message)
         elif action == 'tickets':
-            message.text = '/ticket'
-            ticket_command(message)
+            # Проверяем доступ перед вызовом команды
+            if not has_tickets_access(chat_id, user_id):
+                # Показываем сообщение о необходимости подписки
+                text = "🎫 <b>Билеты в кино</b>\n\n"
+                text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+                text += "Используйте /payment для оформления подписки."
+                
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+                
+                bot.edit_message_text(
+                    text,
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                # Не удаляем сообщение для этого случая
+                return
+            else:
+                message.text = '/ticket'
+                ticket_command(message)
         elif action == 'tickets_locked':
             # Показываем сообщение о необходимости подписки
             text = "🎫 <b>Билеты в кино</b>\n\n"
@@ -3945,6 +3880,8 @@ def start_menu_callback(call):
                 reply_markup=markup,
                 parse_mode='HTML'
             )
+            # Не удаляем сообщение для этого случая
+            return
         elif action == 'payment':
             message.text = '/payment'
             payment_command(message)
@@ -3953,6 +3890,7 @@ def start_menu_callback(call):
             help_command(message)
         
         # Удаляем сообщение с меню после успешной отправки нового сообщения
+        # (только если не было return выше)
         try:
             bot.delete_message(chat_id, call.message.message_id)
         except:
@@ -8974,10 +8912,10 @@ def handle_confirm_add_film_callback(call):
                     else:
                         # Если film_id еще не определен, просто добавляем кнопку подписки
                         markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-            else:
-                # Нет доступа - заблокированные кнопки
-                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-                markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+                else:
+                    # Нет доступа - заблокированные кнопки
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
             
             # Отправляем новое сообщение
             msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
@@ -21592,11 +21530,24 @@ def got_payment(message):
         except:
             pass
 
-# Flask app для webhook
-from web.web_app import create_web_app
-app = create_web_app(bot)
+# Flask app для webhook (минимальный, только для обработки webhook от Telegram)
+app = Flask(__name__)
 
-logger.info("[DEBUG] Flask app создан")
+@app.route('/', methods=['POST'])
+def webhook():
+    """Обработчик webhook от Telegram"""
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return ''
+    else:
+        abort(403)
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({'status': 'ok'}), 200
 
 # Определяем, где запускается бот: на Render, Railway или локально
 try:
@@ -21636,8 +21587,7 @@ if IS_PRODUCTION:
             "message_reaction",
             "message_reaction_count",
             "chat_member",
-            "my_chat_member",
-            "web_app_data"
+            "my_chat_member"
         ]
         logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
         try:
