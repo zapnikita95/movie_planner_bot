@@ -8047,16 +8047,12 @@ def series_subscribe_callback(call):
                 logger.info(f"[SERIES SUBSCRIBE] Отправлено fallback сообщение")
             except Exception as send_e:
                 logger.error(f"[SERIES SUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
-        finally:
-            # ВСЕГДА отвечаем на callback!
-            try:
-                bot.answer_callback_query(call.id, text="✅ Подписка оформлена!")
-            except Exception as answer_e:
-                logger.error(f"[SERIES SUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+    finally:
+        # ВСЕГДА отвечаем на callback!
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка при подписке", show_alert=True)
+            bot.answer_callback_query(call.id, text="✅ Подписка оформлена!")
         except Exception as answer_e:
             logger.error(f"[SERIES SUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
@@ -8211,18 +8207,14 @@ def series_unsubscribe_callback(call):
                 logger.info(f"[SERIES UNSUBSCRIBE] Отправлено fallback сообщение")
             except Exception as send_e:
                 logger.error(f"[SERIES UNSUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
-        finally:
-            # ВСЕГДА отвечаем на callback!
-            try:
-                bot.answer_callback_query(call.id, text="✅ Отписка выполнена")
-            except Exception as answer_e:
-                logger.error(f"[SERIES UNSUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
         
         logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
     except Exception as e:
         logger.error(f"[SERIES UNSUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+    finally:
+        # ВСЕГДА отвечаем на callback!
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка при отписке", show_alert=True)
+            bot.answer_callback_query(call.id, text="✅ Отписка выполнена")
         except Exception as answer_e:
             logger.error(f"[SERIES UNSUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
@@ -8268,10 +8260,12 @@ def handle_add_emoji(call):
         logger.info(f"[ADD EMOJI] Эмодзи {emoji} добавлен в watched для чата {chat_id} пользователем {user_id}")
     except Exception as e:
         logger.error(f"[ADD EMOJI] Ошибка: {e}", exc_info=True)
+    finally:
+        # ВСЕГДА отвечаем на callback!
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка при добавлении", show_alert=True)
-        except:
-            pass
+            bot.answer_callback_query(call.id)
+        except Exception as answer_e:
+            logger.error(f"[ADD EMOJI] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_custom_emoji:"))
 def handle_add_custom_emoji(call):
@@ -11632,7 +11626,6 @@ def handle_rate_film_card_callback(call):
 def handle_rate_film_callback(call):
     """Обработчик кнопки 'Оценить'"""
     try:
-        bot.answer_callback_query(call.id)
         kp_id = call.data.split(":")[1]
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -11666,10 +11659,12 @@ def handle_rate_film_callback(call):
                 logger.info(f"[RATE FILM] Сообщение {msg.message_id} добавлено в rating_messages для film_id={film_id}")
     except Exception as e:
         logger.error(f"Ошибка в handle_rate_film_callback: {e}", exc_info=True)
+    finally:
+        # ВСЕГДА отвечаем на callback!
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except:
-            pass
+            bot.answer_callback_query(call.id)
+        except Exception as answer_e:
+            logger.error(f"[RATE FILM] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:"))
 def handle_show_facts(call):
@@ -11688,16 +11683,17 @@ def handle_show_facts(call):
             bot.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
     except Exception as e:
         logger.error(f"[SHOW FACTS] Ошибка: {e}", exc_info=True)
+    finally:
+        # ВСЕГДА отвечаем на callback!
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except:
-            pass
+            bot.answer_callback_query(call.id)
+        except Exception as answer_e:
+            logger.error(f"[SHOW FACTS] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("show_film_description:"))
 def handle_show_film_description_callback(call):
     """Обработчик показа описания фильма по kp_id"""
     try:
-        bot.answer_callback_query(call.id)
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
@@ -11762,10 +11758,12 @@ def handle_show_film_description_callback(call):
         logger.info(f"[FILM DESCRIPTION] Описание фильма {title} показано пользователю {user_id}")
     except Exception as e:
         logger.error(f"[FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
+    finally:
+        # ВСЕГДА отвечаем на callback!
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except:
-            pass
+            bot.answer_callback_query(call.id)
+        except Exception as answer_e:
+            logger.error(f"[FILM DESCRIPTION] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan_detail:"))
