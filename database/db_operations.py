@@ -741,7 +741,11 @@ def create_subscription(chat_id, user_id, subscription_type, plan_type, period_t
             RETURNING id
         """, (chat_id, user_id, subscription_type, plan_type, period_type, price,
               now, next_payment_date, expires_at, telegram_username, group_username, group_size, payment_method_id))
-        subscription_id = cursor.fetchone()[0] if cursor.rowcount > 0 else None
+        result = cursor.fetchone()
+        if result:
+            subscription_id = result.get('id') if isinstance(result, dict) else result[0]
+        else:
+            subscription_id = None
         
         # Добавляем features в зависимости от plan_type
         if plan_type == 'all':

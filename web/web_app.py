@@ -217,6 +217,26 @@ def create_web_app(bot_instance):
                             logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
                         else:
                             # Параметры не совпадают - создаем новую подписку
+                            try:
+                                subscription_id = create_subscription(
+                                    chat_id=chat_id,
+                                    user_id=user_id,
+                                    subscription_type=subscription_type,
+                                    plan_type=plan_type,
+                                    period_type=period_type,
+                                    price=amount,
+                                    telegram_username=telegram_username,
+                                    group_username=group_username,
+                                    group_size=group_size,
+                                    payment_method_id=payment_method_id
+                                )
+                                logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                            except Exception as sub_error:
+                                logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
+                                subscription_id = None
+                    else:
+                        # Нет активной подписки - создаем новую
+                        try:
                             subscription_id = create_subscription(
                                 chat_id=chat_id,
                                 user_id=user_id,
@@ -230,21 +250,9 @@ def create_web_app(bot_instance):
                                 payment_method_id=payment_method_id
                             )
                             logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
-                    else:
-                        # Нет активной подписки - создаем новую
-                        subscription_id = create_subscription(
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            subscription_type=subscription_type,
-                            plan_type=plan_type,
-                            period_type=period_type,
-                            price=amount,
-                            telegram_username=telegram_username,
-                            group_username=group_username,
-                            group_size=group_size,
-                            payment_method_id=payment_method_id
-                        )
-                        logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                        except Exception as sub_error:
+                            logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
+                            subscription_id = None
                     
                     # Сохраняем payment_method_id в платеж
                     if payment_method_id:
@@ -260,9 +268,12 @@ def create_web_app(bot_instance):
                             conn.commit()
                         logger.info(f"[YOOKASSA] payment_method_id {payment_method_id} сохранен в платеж {payment_data['payment_id']}")
                     
-                    # Обновляем платеж с subscription_id
+                    # Обновляем платеж с subscription_id (даже если subscription_id = None)
                     logger.info(f"[YOOKASSA] Обновляем статус платежа на 'succeeded' с subscription_id={subscription_id}")
-                    update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)
+                    try:
+                        update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)
+                    except Exception as update_error:
+                        logger.error(f"[YOOKASSA] Ошибка при обновлении статуса платежа: {update_error}", exc_info=True)
                     
                     # Отправляем подробное уведомление пользователю
                     try:
@@ -483,24 +494,33 @@ def create_web_app(bot_instance):
                         group_username = metadata.get('group_username')
                         
                         # Создаем подписку
-                        subscription_id = create_subscription(
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            subscription_type=subscription_type,
-                            plan_type=plan_type,
-                            period_type=period_type,
-                            price=amount,
-                            telegram_username=telegram_username,
-                            group_username=group_username,
-                            group_size=group_size,
-                            payment_method_id=payment_method_id
-                        )
-                        logger.info(f"[YOOKASSA] Создана подписка {subscription_id} для уже обработанного платежа")
+                        subscription_id = None
+                        try:
+                            subscription_id = create_subscription(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                subscription_type=subscription_type,
+                                plan_type=plan_type,
+                                period_type=period_type,
+                                price=amount,
+                                telegram_username=telegram_username,
+                                group_username=group_username,
+                                group_size=group_size,
+                                payment_method_id=payment_method_id
+                            )
+                            logger.info(f"[YOOKASSA] Создана подписка {subscription_id} для уже обработанного платежа")
+                            
+                            # Обновляем платеж с subscription_id
+                            update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)
+                        except Exception as sub_error:
+                            logger.error(f"[YOOKASSA] Ошибка при создании подписки: {sub_error}", exc_info=True)
+                            # Все равно обновляем статус платежа
+                            try:
+                                update_payment_status(payment_data['payment_id'], 'succeeded', None)
+                            except:
+                                pass
                         
-                        # Обновляем платеж с subscription_id
-                        update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)
-                        
-                        # Отправляем сообщение с благодарностью
+                        # Отправляем сообщение с благодарностью (всегда, даже если подписка не создана)
                         try:
                             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                             
