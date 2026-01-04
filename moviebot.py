@@ -6118,7 +6118,10 @@ def handle_keyboard_button(message):
 @bot.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
     """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
+    logger.info(f"[MAIN TEXT HANDLER] ===== НАЧАЛО ОБРАБОТКИ ТЕКСТОВОГО СООБЩЕНИЯ =====")
     logger.info(f"[MAIN TEXT HANDLER] Получено текстовое сообщение от {message.from_user.id}: '{message.text[:100] if message.text else ''}'")
+    logger.info(f"[MAIN TEXT HANDLER] message.content_type={getattr(message, 'content_type', 'N/A')}")
+    logger.info(f"[MAIN TEXT HANDLER] message.chat.id={message.chat.id}, message.chat.type={message.chat.type}")
     
     user_id = message.from_user.id
     chat_id = message.chat.id
