@@ -3796,6 +3796,50 @@ def start_menu_callback(call):
         except:
             pass
 
+# Обработчик кнопки "Назад" в расписании
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
+def schedule_back_callback(call):
+    """Обработчик кнопки возврата из расписания - удаляет оба сообщения с планами"""
+    try:
+        bot.answer_callback_query(call.id)
+        chat_id = call.message.chat.id
+        
+        # Получаем сохраненные message_id обоих сообщений
+        if hasattr(show_schedule, '_schedule_messages') and chat_id in show_schedule._schedule_messages:
+            messages = show_schedule._schedule_messages[chat_id]
+            cinema_message_id = messages.get('cinema_message_id')
+            home_message_id = messages.get('home_message_id')
+            
+            # Удаляем оба сообщения
+            if cinema_message_id:
+                try:
+                    bot.delete_message(chat_id, cinema_message_id)
+                except Exception as e:
+                    logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение с кино: {e}")
+            
+            if home_message_id:
+                try:
+                    bot.delete_message(chat_id, home_message_id)
+                except Exception as e:
+                    logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение с домом: {e}")
+            
+            # Удаляем из словаря
+            del show_schedule._schedule_messages[chat_id]
+        else:
+            # Если не нашли сохраненные сообщения, удаляем текущее
+            try:
+                bot.delete_message(chat_id, call.message.message_id)
+            except Exception as e:
+                logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение: {e}")
+        
+        logger.info(f"[SCHEDULE BACK] Пользователь {call.from_user.id} вернулся из расписания")
+    except Exception as e:
+        logger.error(f"[SCHEDULE BACK] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
+
 # Обработчик кнопки "Назад в меню"
 @bot.callback_query_handler(func=lambda call: call.data == "back_to_start_menu")
 def back_to_start_menu_callback(call):
@@ -8570,11 +8614,14 @@ def show_schedule(message):
         if not rows:
             # Если расписание пустое, показываем кнопки
             empty_markup = InlineKeyboardMarkup(row_width=1)
-            empty_markup.add(InlineKeyboardButton("🔍 Найти фильм", callback_data="start_menu:search"))
-            empty_markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
+            empty_markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
             empty_markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
             empty_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            bot.reply_to(message, "📅 Нет запланированных просмотров.\n\nВыберите действие:", reply_markup=empty_markup)
+            bot.reply_to(
+                message,
+                "В расписании нет фильмов, используйте /search, чтобы найти и добавить фильмы или сериалы, посмотрите, какие премьеры сейчас идут в кино, или просто пришлите ссылку на Кинопоиск на фильм или сериал",
+                reply_markup=empty_markup
+            )
             return
         
         # Разделяем на секции: сначала кино, потом дома
@@ -8639,6 +8686,9 @@ def show_schedule(message):
                     home_plans.append(plan_info)
         
         # Отправляем два отдельных сообщения: одно для кино, другое для дома
+        # Сохраняем message_id обоих сообщений для удаления при нажатии "Назад"
+        cinema_message_id = None
+        home_message_id = None
         
         # Сообщение 1: Премьеры в кино
         if cinema_plans:
@@ -8654,14 +8704,17 @@ def show_schedule(message):
             
             # Добавляем кнопку для открытия Mini App
             cinema_markup.add(InlineKeyboardButton("🎬 Открыть расписание", web_app=WebAppInfo(url=WEB_APP_URL)))
-            cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            # Кнопку "Назад" добавляем только если нет домашних планов
+            if not home_plans:
+                cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
             
             cinema_text = "🎬 <b>Премьеры в кино:</b>\n\n"
             for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
                 ticket_emoji = "🎟️ " if has_ticket else ""
                 cinema_text += f"{ticket_emoji}<b>{title}</b> — {date_str}\n"
             
-            bot.reply_to(message, cinema_text, reply_markup=cinema_markup, parse_mode='HTML')
+            cinema_msg = bot.reply_to(message, cinema_text, reply_markup=cinema_markup, parse_mode='HTML')
+            cinema_message_id = cinema_msg.message_id
         
         # Сообщение 2: Просмотры дома
         if home_plans:
@@ -8675,16 +8728,42 @@ def show_schedule(message):
             
             # Добавляем кнопку для открытия Mini App
             home_markup.add(InlineKeyboardButton("🎬 Открыть расписание", web_app=WebAppInfo(url=WEB_APP_URL)))
-            home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            # Кнопку "Назад" всегда добавляем в нижнее сообщение (домашние планы)
+            home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
             
             home_text = "🏠 <b>Просмотры дома:</b>\n\n"
             for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
                 home_text += f"<b>{title}</b> — {date_str}\n"
             
             if cinema_plans:
-                bot.send_message(chat_id, home_text, reply_markup=home_markup, parse_mode='HTML')
+                home_msg = bot.send_message(chat_id, home_text, reply_markup=home_markup, parse_mode='HTML')
             else:
-                bot.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
+                home_msg = bot.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
+            home_message_id = home_msg.message_id
+        
+        # Сохраняем message_id обоих сообщений для удаления при нажатии "Назад"
+        if cinema_message_id and home_message_id:
+            # Сохраняем оба message_id в словаре для обработчика
+            if not hasattr(show_schedule, '_schedule_messages'):
+                show_schedule._schedule_messages = {}
+            show_schedule._schedule_messages[chat_id] = {
+                'cinema_message_id': cinema_message_id,
+                'home_message_id': home_message_id
+            }
+        elif cinema_message_id:
+            if not hasattr(show_schedule, '_schedule_messages'):
+                show_schedule._schedule_messages = {}
+            show_schedule._schedule_messages[chat_id] = {
+                'cinema_message_id': cinema_message_id,
+                'home_message_id': None
+            }
+        elif home_message_id:
+            if not hasattr(show_schedule, '_schedule_messages'):
+                show_schedule._schedule_messages = {}
+            show_schedule._schedule_messages[chat_id] = {
+                'cinema_message_id': None,
+                'home_message_id': home_message_id
+            }
         
         logger.info(f"✅ Ответ на /schedule отправлен пользователю {user_id}")
     except Exception as e:
