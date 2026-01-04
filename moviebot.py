@@ -1610,6 +1610,11 @@ def dice_game_handler(call):
             bot.answer_callback_query(call.id, "Время игры истекло", show_alert=True)
             return
         
+        # Проверяем, не бросил ли уже пользователь кубик
+        if user_id in game_state.get('participants', {}) and 'dice_message_id' in game_state['participants'][user_id]:
+            bot.answer_callback_query(call.id, "Вы уже бросили кубик!", show_alert=True)
+            return
+        
         # Отправляем стикер игральной кости
         try:
             # Используем send_dice для отправки игральной кости
@@ -1619,23 +1624,12 @@ def dice_game_handler(call):
             game_state['dice_messages'][dice_msg.message_id] = user_id
             
             # Сохраняем информацию об участнике
-            if user_id not in game_state['participants']:
-                game_state['participants'][user_id] = {
-                    'username': call.from_user.username or call.from_user.first_name,
-                    'dice_message_id': dice_msg.message_id
-                }
-                
-                # Проверяем, все ли участники бросили кубик
-                # Получаем список участников из stats
-                with db_lock:
-                    cursor.execute('''
-                        SELECT DISTINCT user_id 
-                        FROM stats 
-                        WHERE chat_id = %s 
-                        AND timestamp >= %s
-                    ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat()))
-                    all_participants = [row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
-                
+            game_state['participants'][user_id] = {
+                'username': call.from_user.username or call.from_user.first_name,
+                'dice_message_id': dice_msg.message_id,
+                'user_id': user_id
+            }
+            
             # Не определяем победителя сразу - ждем, пока кубик остановится
             # Победитель будет определен в handle_dice_result
         except Exception as e:
@@ -1679,6 +1673,7 @@ def handle_dice_result(message):
         # Сохраняем значение кубика
         if user_id in game_state['participants']:
             game_state['participants'][user_id]['value'] = dice_value
+            game_state['last_dice_time'] = datetime.now(plans_tz)  # Обновляем время последнего броска
             
             # Проверяем, все ли участники бросили кубик
             with db_lock:
@@ -1693,8 +1688,13 @@ def handle_dice_result(message):
             # Проверяем, есть ли значения у всех участников
             participants_with_values = [uid for uid, p in game_state['participants'].items() if 'value' in p]
             
-            # Ждем 30 секунд после последнего броска или если все участники бросили
-            if len(participants_with_values) >= len(all_participants) or (datetime.now(plans_tz) - game_state['start_time']).total_seconds() > 300:
+            # Ждем 5 секунд после последнего броска (чтобы кубик успел остановиться) или если все участники бросили
+            # Также проверяем, что прошло достаточно времени с начала игры (минимум 5 секунд)
+            time_since_start = (datetime.now(plans_tz) - game_state['start_time']).total_seconds()
+            last_dice_time = game_state.get('last_dice_time', game_state['start_time'])
+            time_since_last_dice = (datetime.now(plans_tz) - last_dice_time).total_seconds()
+            
+            if (len(participants_with_values) >= len(all_participants) and time_since_last_dice >= 5) or time_since_start > 300:
                 # Определяем победителя
                 participants_with_values_dict = {uid: p['value'] for uid, p in game_state['participants'].items() if 'value' in p}
                 if participants_with_values_dict:
