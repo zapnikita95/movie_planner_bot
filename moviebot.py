@@ -15191,11 +15191,22 @@ def series_episode_callback(call):
                                     except:
                                         pass
                     
-                    # Если все серии просмотрены и сериал не выходит, помечаем сериал как просмотренный
+                    # Если все серии просмотрены и сериал не выходит, проверяем подписки и помечаем сериал как просмотренный
                     if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
-                        cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                        conn.commit()
-                        logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены")
+                        # Проверяем, есть ли активные подписки на уведомления для этого сериала
+                        cursor.execute('''
+                            SELECT subscribed FROM series_subscriptions 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND subscribed = TRUE
+                        ''', (chat_id, film_id, user_id))
+                        has_active_subscription = cursor.fetchone() is not None
+                        
+                        # Помечаем сериал как просмотренный только если нет активных подписок
+                        if not has_active_subscription:
+                            cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                            conn.commit()
+                            logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены, подписок нет")
+                        else:
+                            logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
             
             # Обновляем список эпизодов - используем текущую страницу из состояния или 1
             state = user_episodes_state.get(user_id, {})
@@ -15377,12 +15388,23 @@ def series_season_all_callback(call):
                             except:
                                 pass
             
-            # Если все серии просмотрены и сериал не выходит, помечаем сериал как просмотренный
+            # Если все серии просмотрены и сериал не выходит, проверяем подписки и помечаем сериал как просмотренный
             if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
                 with db_lock:
-                    cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                    conn.commit()
-                logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены")
+                    # Проверяем, есть ли активные подписки на уведомления для этого сериала
+                    cursor.execute('''
+                        SELECT subscribed FROM series_subscriptions 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND subscribed = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    has_active_subscription = cursor.fetchone() is not None
+                    
+                    # Помечаем сериал как просмотренный только если нет активных подписок
+                    if not has_active_subscription:
+                        cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        conn.commit()
+                        logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены, подписок нет")
+                    else:
+                        logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
         
         # Обновляем список эпизодов - используем текущую страницу из состояния или 1
         state = user_episodes_state.get(user_id, {})
