@@ -18,6 +18,26 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
+# Проверяем переменные окружения при старте приложения
+def check_environment_variables():
+    """Проверяет наличие необходимых переменных окружения"""
+    nalog_inn = os.getenv('NALOG_INN')
+    nalog_password = os.getenv('NALOG_PASSWORD')
+    
+    logger.info("=" * 80)
+    logger.info("[WEB APP] Проверка переменных окружения при старте:")
+    logger.info(f"[WEB APP] NALOG_INN: {'✅ установлен' if nalog_inn and nalog_inn.strip() else '❌ НЕ УСТАНОВЛЕН'}")
+    logger.info(f"[WEB APP] NALOG_PASSWORD: {'✅ установлен' if nalog_password and nalog_password.strip() else '❌ НЕ УСТАНОВЛЕН'}")
+    
+    if not nalog_inn or not nalog_password or not nalog_inn.strip() or not nalog_password.strip():
+        logger.warning("[WEB APP] ⚠️ NALOG_INN или NALOG_PASSWORD не настроены - создание чеков будет недоступно")
+    else:
+        logger.info("[WEB APP] ✅ Все переменные для создания чеков настроены")
+    logger.info("=" * 80)
+
+# Вызываем проверку при импорте модуля
+check_environment_variables()
+
 def create_web_app(bot_instance):
     """Создает Flask приложение с webhook обработчиками"""
     

@@ -30,8 +30,21 @@ def get_nalog_token() -> Optional[str]:
     INN = os.getenv('NALOG_INN')
     PASSWORD = os.getenv('NALOG_PASSWORD')
     
+    # Детальное логирование для отладки
+    logger.info(f"[NALOG] Проверка переменных окружения:")
+    logger.info(f"[NALOG] NALOG_INN присутствует: {INN is not None}, значение: {'***' if INN else 'None'}")
+    logger.info(f"[NALOG] NALOG_PASSWORD присутствует: {PASSWORD is not None}, значение: {'***' if PASSWORD else 'None'}")
+    
+    # Проверяем, что значения не пустые (после strip)
+    if INN:
+        INN = INN.strip()
+    if PASSWORD:
+        PASSWORD = PASSWORD.strip()
+    
     if not INN or not PASSWORD:
         logger.error("[NALOG] ❌ NALOG_INN или NALOG_PASSWORD не заданы в переменных окружения!")
+        logger.error(f"[NALOG] NALOG_INN: {'установлен (пусто после strip)' if INN is not None and not INN else 'НЕ УСТАНОВЛЕН'}")
+        logger.error(f"[NALOG] NALOG_PASSWORD: {'установлен (пусто после strip)' if PASSWORD is not None and not PASSWORD else 'НЕ УСТАНОВЛЕН'}")
         return None
     
     try:
