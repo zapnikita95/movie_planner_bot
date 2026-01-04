@@ -21428,7 +21428,7 @@ def handle_pay_stars_callback(call):
                 invoice_payload=invoice_payload,
                 provider_token="",  # Для Telegram Stars не нужен provider_token
                 currency="XTR",  # XTR - валюта Telegram Stars
-                prices=[telebot.types.LabeledPrice(label=description, amount=int(stars_amount))],
+                prices=[LabeledPrice(label=description, amount=int(stars_amount))],
                 start_parameter=full_payment_id[:16],  # Ограничение 64 символа
                 photo_url=None,
                 photo_size=None,
