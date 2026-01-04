@@ -14,6 +14,22 @@ cursor = get_db_cursor()
 
 logger = logging.getLogger(__name__)
 
+def log_kinopoisk_api_request(endpoint, method='GET', status_code=None, user_id=None, chat_id=None, kp_id=None):
+    """Логирует запрос к API Кинопоиска в БД"""
+    try:
+        with db_lock:
+            cursor.execute('''
+                INSERT INTO kinopoisk_api_logs (endpoint, method, status_code, user_id, chat_id, kp_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (endpoint, method, status_code, user_id, chat_id, kp_id))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Ошибка логирования запроса к API Кинопоиска: {e}", exc_info=True)
+        try:
+            conn.rollback()
+        except:
+            pass
+
 def extract_movie_info(link):
     match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
     if not match:
@@ -31,6 +47,7 @@ def extract_movie_info(link):
         # Основные данные (название, год, жанры, описание)
         url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
         response_main = requests.get(url_main, headers=headers, timeout=15)
+        log_kinopoisk_api_request(f"/api/v2.2/films/{kp_id}", 'GET', response_main.status_code, None, None, kp_id)
         if response_main.status_code != 200:
             logger.error(f"Основной запрос ошибка {response_main.status_code}")
             return None
@@ -46,6 +63,7 @@ def extract_movie_info(link):
         url_staff = f"https://kinopoiskapiunofficial.tech/api/v1/staff?filmId={kp_id}"
         logger.debug(f"Staff запрос URL: {url_staff}")
         response_staff = requests.get(url_staff, headers=headers, timeout=15)
+        log_kinopoisk_api_request(f"/api/v1/staff?filmId={kp_id}", 'GET', response_staff.status_code, None, None, kp_id)
         staff = []
         if response_staff.status_code == 200:
             staff = response_staff.json()
@@ -109,6 +127,7 @@ def get_facts(kp_id):
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/facts"
     try:
         response = requests.get(url, headers=headers, timeout=15)
+        log_kinopoisk_api_request(f"/api/v2.2/films/{kp_id}/facts", 'GET', response.status_code, None, None, kp_id)
         if response.status_code == 200:
             data = response.json()
             facts = data.get('items', [])
@@ -158,6 +177,7 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/seasons"
     try:
         response = requests.get(url, headers=headers, timeout=15)
+        log_kinopoisk_api_request(f"/api/v2.2/films/{kp_id}/seasons", 'GET', response.status_code, user_id, chat_id, kp_id)
         if response.status_code == 200:
             data = response.json()
             seasons = data.get('items', [])
@@ -605,6 +625,7 @@ def search_films(query, page=1):
     
     try:
         response = requests.get(url, params=params, headers=headers, timeout=15)
+        log_kinopoisk_api_request(f"/api/v2.1/films/search-by-keyword", 'GET', response.status_code, None, None, None)
         logger.info(f"[SEARCH] Статус ответа: {response.status_code}")
         logger.info(f"[SEARCH] URL запроса: {response.url}")
         

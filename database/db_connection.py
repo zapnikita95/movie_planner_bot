@@ -255,6 +255,20 @@ def init_database():
         )
     ''')
     
+    # Таблица для логирования запросов к API Кинопоиска
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS kinopoisk_api_logs (
+            id SERIAL PRIMARY KEY,
+            endpoint TEXT NOT NULL,
+            method TEXT NOT NULL,
+            status_code INTEGER,
+            timestamp TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            user_id BIGINT,
+            chat_id BIGINT,
+            kp_id TEXT
+        )
+    ''')
+    
     # Дефолтные настройки
     cursor.execute('INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, %s) ON CONFLICT DO NOTHING', 
                    (-1, "watched_emoji", DEFAULT_WATCHED_EMOJIS))
@@ -439,6 +453,9 @@ def init_database():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions (user_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions (is_active, expires_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscription_features_subscription_id ON subscription_features (subscription_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_timestamp ON kinopoisk_api_logs (timestamp)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_user_id ON kinopoisk_api_logs (user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_chat_id ON kinopoisk_api_logs (chat_id)')
         logger.info("Индексы созданы")
     except Exception as e:
         logger.error(f"Ошибка при создании индексов: {e}", exc_info=True)
