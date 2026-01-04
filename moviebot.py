@@ -7440,12 +7440,12 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         
         # Получаем эпизоды сезона
         try:
-        seasons_data = get_seasons_data(kp_id)
+            seasons_data = get_seasons_data(kp_id)
             if not seasons_data:
                 logger.error(f"[SHOW EPISODES PAGE] Не удалось получить данные о сезонах для kp_id={kp_id}")
                 return False
-        season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
-        if not season:
+            season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
+            if not season:
                 logger.error(f"[SHOW EPISODES PAGE] Сезон {season_num} не найден для kp_id={kp_id}")
                 return False
         except Exception as e:
@@ -23792,7 +23792,7 @@ if IS_PRODUCTION:
     # Запуск с автоматическим перезапуском при крашах
     while restart_count < max_restart_attempts and not shutdown_flag.is_set():
         try:
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+            app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
             # Если app.run() завершился без исключения (например, при остановке)
             break
         except KeyboardInterrupt:
@@ -23884,14 +23884,14 @@ else:
     restart_count = 0
     
     while restart_count < max_restart_attempts and not shutdown_flag.is_set():
-    try:
-        bot.infinity_polling()
+        try:
+            bot.infinity_polling()
             # Если infinity_polling() завершился без исключения
             break
-    except KeyboardInterrupt:
-        logger.info("Получен сигнал прерывания, останавливаем бота...")
+        except KeyboardInterrupt:
+            logger.info("Получен сигнал прерывания, останавливаем бота...")
             break
-    except Exception as e:
+        except Exception as e:
             restart_count += 1
             error_msg = str(e)
             logger.critical(
