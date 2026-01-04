@@ -7472,30 +7472,30 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         
         # Добавляем кнопки эпизодов
         try:
-        for ep in page_episodes:
-            ep_num = ep.get('episodeNumber', '')
-            
-            # Проверяем, просмотрен ли эпизод
+            for ep in page_episodes:
+                ep_num = ep.get('episodeNumber', '')
+                
+                # Проверяем, просмотрен ли эпизод
                 try:
-            with db_lock:
-                cursor.execute('''
-                    SELECT watched FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                    AND season_number = %s AND episode_number = %s
-                ''', (chat_id, film_id, user_id, season_num, ep_num))
-                watched_row = cursor.fetchone()
+                    with db_lock:
+                        cursor.execute('''
+                            SELECT watched FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                            AND season_number = %s AND episode_number = %s
+                        ''', (chat_id, film_id, user_id, season_num, ep_num))
+                        watched_row = cursor.fetchone()
                         is_watched = False
                         if watched_row:
                             if isinstance(watched_row, dict):
                                 is_watched = watched_row.get('watched', False)
                             else:
                                 is_watched = bool(watched_row[0]) if len(watched_row) > 0 else False
-            
-            mark = "✅" if is_watched else "⬜"
-            button_text = f"{mark} {ep_num}"
-            if len(button_text) > 20:
-                button_text = button_text[:17] + "..."
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}"))
+                    
+                    mark = "✅" if is_watched else "⬜"
+                    button_text = f"{mark} {ep_num}"
+                    if len(button_text) > 20:
+                        button_text = button_text[:17] + "..."
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}"))
                 except Exception as ep_e:
                     logger.error(f"[SHOW EPISODES PAGE] Ошибка при обработке эпизода {ep_num}: {ep_e}", exc_info=True)
                     # Добавляем эпизод без отметки в случае ошибки
@@ -7562,24 +7562,24 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         # Проверяем, все ли эпизоды просмотрены
         all_watched = True
         try:
-        with db_lock:
-            for ep in episodes:
-                ep_num = ep.get('episodeNumber', '')
-                cursor.execute('''
-                    SELECT watched FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                    AND season_number = %s AND episode_number = %s
-                ''', (chat_id, film_id, user_id, season_num, ep_num))
-                watched_row = cursor.fetchone()
+            with db_lock:
+                for ep in episodes:
+                    ep_num = ep.get('episodeNumber', '')
+                    cursor.execute('''
+                        SELECT watched FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                        AND season_number = %s AND episode_number = %s
+                    ''', (chat_id, film_id, user_id, season_num, ep_num))
+                    watched_row = cursor.fetchone()
                     is_watched = False
                     if watched_row:
                         if isinstance(watched_row, dict):
                             is_watched = watched_row.get('watched', False)
                         else:
                             is_watched = bool(watched_row[0]) if len(watched_row) > 0 else False
-                if not is_watched:
-                    all_watched = False
-                    break
+                    if not is_watched:
+                        all_watched = False
+                        break
         except Exception as e:
             logger.error(f"[SHOW EPISODES PAGE] Ошибка при проверке всех эпизодов: {e}", exc_info=True)
             all_watched = False  # В случае ошибки считаем, что не все просмотрены
@@ -7617,21 +7617,21 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 if message_thread_id:
                     # Используем API напрямую для поддержки тредов
                     try:
-                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
-                    params = {
-                        'chat_id': chat_id,
-                        'message_id': message_id,
-                        'text': text,
-                        'parse_mode': 'HTML',
-                        'message_thread_id': message_thread_id
-                    }
-                    if reply_markup_json:
-                        params['reply_markup'] = reply_markup_json
-                        logger.info(f"[SHOW EPISODES PAGE] Отправляю editMessageText через API call...")
-                        result = bot.api_call('editMessageText', params)
-                        if not result or not result.get('ok'):
-                            raise Exception(f"API call failed: {result}")
-                        logger.info(f"[SHOW EPISODES PAGE] API call успешен")
+                        reply_markup_json = json.dumps(markup.to_dict()) if markup else None
+                        params = {
+                            'chat_id': chat_id,
+                            'message_id': message_id,
+                            'text': text,
+                            'parse_mode': 'HTML',
+                            'message_thread_id': message_thread_id
+                        }
+                        if reply_markup_json:
+                            params['reply_markup'] = reply_markup_json
+                            logger.info(f"[SHOW EPISODES PAGE] Отправляю editMessageText через API call...")
+                            result = bot.api_call('editMessageText', params)
+                            if not result or not result.get('ok'):
+                                raise Exception(f"API call failed: {result}")
+                            logger.info(f"[SHOW EPISODES PAGE] API call успешен")
                     except Exception as api_e:
                         logger.error(f"[SHOW EPISODES PAGE] Ошибка API call: {api_e}", exc_info=True)
                         # Пробуем обычный edit_message_text без message_thread_id
@@ -7640,7 +7640,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 else:
                     logger.info(f"[SHOW EPISODES PAGE] Отправляю edit_message_text...")
                     try:
-                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as edit_e:
                         error_str = str(edit_e).lower()
                         logger.warning(f"[SHOW EPISODES PAGE] Ошибка edit_message_text: {edit_e}")
@@ -7663,10 +7663,10 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 # При ошибке отправляем новое сообщение
                 try:
                     logger.info(f"[SHOW EPISODES PAGE] Пробую отправить новое сообщение вместо редактирования...")
-                if message_thread_id:
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
-                else:
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    if message_thread_id:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                    else:
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                     logger.info(f"[SHOW EPISODES PAGE] Новое сообщение отправлено успешно")
                 except Exception as send_e:
                     logger.error(f"[SHOW EPISODES PAGE] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
@@ -10857,31 +10857,31 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         is_airing, _ = get_series_airing_status(kp_id)
                         
                         # Получаем просмотренные эпизоды
-                            with db_lock:
-                                cursor.execute('''
-                                    SELECT season_number, episode_number 
-                                    FROM series_tracking 
-                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                                ''', (chat_id, film_id, user_id))
-                                watched_rows = cursor.fetchall()
-                                watched_set = set()
-                                for w_row in watched_rows:
-                                    if isinstance(w_row, dict):
+                        with db_lock:
+                            cursor.execute('''
+                                SELECT season_number, episode_number 
+                                FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                            ''', (chat_id, film_id, user_id))
+                            watched_rows = cursor.fetchall()
+                            watched_set = set()
+                            for w_row in watched_rows:
+                                if isinstance(w_row, dict):
                                     watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                                    else:
+                                else:
                                     watched_set.add((str(w_row[0]), str(w_row[1])))
                         
                         # Подсчитываем эпизоды
                         total_episodes, watched_episodes = count_episodes_for_watch_check(
                             seasons_data, is_airing, watched_set, chat_id, film_id, user_id
                         )
-                            
-                            if total_episodes > 0 and watched_episodes == total_episodes:
-                                all_episodes_watched = True
-                                # Отмечаем сериал как просмотренный в БД
-                                with db_lock:
-                                    cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                                    conn.commit()
+                        
+                        if total_episodes > 0 and watched_episodes == total_episodes:
+                            all_episodes_watched = True
+                            # Отмечаем сериал как просмотренный в БД
+                            with db_lock:
+                                cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                                conn.commit()
                     
                     # Проверяем подписку
                     is_subscribed = False
@@ -10944,7 +10944,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             if message_thread_id:
                 bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
             else:
-        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
         logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}")
         
     except Exception as e:
@@ -15358,34 +15358,34 @@ def seasons_command(message):
             seasons_data = get_seasons_data(kp_id)
             if seasons_data:
                 # Получаем просмотренные эпизоды
-                    with db_lock:
-                        cursor.execute('''
-                            SELECT season_number, episode_number 
-                            FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                        ''', (chat_id, film_id, user_id))
-                        watched_rows = cursor.fetchall()
-                        watched_set = set()
-                        for w_row in watched_rows:
-                            if isinstance(w_row, dict):
+                with db_lock:
+                    cursor.execute('''
+                        SELECT season_number, episode_number 
+                        FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    watched_rows = cursor.fetchall()
+                    watched_set = set()
+                    for w_row in watched_rows:
+                        if isinstance(w_row, dict):
                             watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                            else:
+                        else:
                             watched_set.add((str(w_row[0]), str(w_row[1])))
                 
                 # Подсчитываем эпизоды
                 total_episodes, watched_episodes = count_episodes_for_watch_check(
                     seasons_data, is_airing, watched_set, chat_id, film_id, user_id
                 )
-                    
-                    if total_episodes > 0:
-                        if watched_episodes == total_episodes:
-                            all_episodes_watched = True
-                        elif watched_episodes > 0:
-                            has_some_watched = True
+                
+                if total_episodes > 0:
+                    if watched_episodes == total_episodes:
+                        all_episodes_watched = True
+                    elif watched_episodes > 0:
+                        has_some_watched = True
         
         # Если сериал помечен как просмотренный в БД, считаем его полностью просмотренным
         if watched_in_db:
-                            all_episodes_watched = True
+            all_episodes_watched = True
         
         # Классифицируем сериал
         series_info = {
@@ -15546,10 +15546,10 @@ def seasons_list_callback(call):
             # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
             is_subscribed = False
             if has_access:
-            with db_lock:
-                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                sub_row = cursor.fetchone()
-                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                with db_lock:
+                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                    sub_row = cursor.fetchone()
+                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
             
             # Проверяем статус выхода сериала (для всех, независимо от доступа)
             is_airing = False
@@ -15570,8 +15570,8 @@ def seasons_list_callback(call):
             all_episodes_watched = False
             has_some_watched = False
             if has_access:
-            seasons_data = get_seasons_data(kp_id)
-            if seasons_data:
+                seasons_data = get_seasons_data(kp_id)
+                if seasons_data:
                     # Получаем просмотренные эпизоды
                     with db_lock:
                         cursor.execute('''
@@ -15752,18 +15752,18 @@ def watched_series_list_callback(call):
             
             # Получаем просмотренные эпизоды из базы
             with db_lock:
-            cursor.execute('''
-                SELECT season_number, episode_number 
-                FROM series_tracking 
-                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-            ''', (chat_id, film_id, user_id))
-            watched_rows = cursor.fetchall()
-            watched_set = set()
-            for w_row in watched_rows:
-                if isinstance(w_row, dict):
-                    watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                else:
-                    watched_set.add((w_row[0], w_row[1]))
+                cursor.execute('''
+                    SELECT season_number, episode_number 
+                    FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id))
+                watched_rows = cursor.fetchall()
+                watched_set = set()
+                for w_row in watched_rows:
+                    if isinstance(w_row, dict):
+                        watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
+                    else:
+                        watched_set.add((w_row[0], w_row[1]))
             
             # Проверяем все эпизоды
             for season in seasons_data:
@@ -16272,24 +16272,24 @@ def series_episode_callback(call):
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
             if is_watched:
                 try:
-                seasons_data = get_seasons_data(kp_id)
-                if seasons_data:
-                    # Проверяем, выходит ли сериал
-                    is_airing, _ = get_series_airing_status(kp_id)
-                    
-                    # Получаем все просмотренные эпизоды
+                    seasons_data = get_seasons_data(kp_id)
+                    if seasons_data:
+                        # Проверяем, выходит ли сериал
+                        is_airing, _ = get_series_airing_status(kp_id)
+                        
+                        # Получаем все просмотренные эпизоды
                         with db_lock:
-                    cursor.execute('''
-                        SELECT season_number, episode_number 
-                        FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
-                    watched_rows = cursor.fetchall()
-                    watched_set = set()
-                    for w_row in watched_rows:
-                        if isinstance(w_row, dict):
+                            cursor.execute('''
+                                SELECT season_number, episode_number 
+                                FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                            ''', (chat_id, film_id, user_id))
+                            watched_rows = cursor.fetchall()
+                            watched_set = set()
+                            for w_row in watched_rows:
+                                if isinstance(w_row, dict):
                                     watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                        else:
+                                else:
                                     watched_set.add((str(w_row[0]), str(w_row[1])))
                         
                         # Подсчитываем эпизоды
@@ -16324,15 +16324,15 @@ def series_episode_callback(call):
             if 'is_watched' in locals():
                 status_text = "✅ Отмечено как просмотренный" if is_watched else "⬜ Отметка снята"
                 bot.answer_callback_query(call.id, status_text)
-                        else:
+            else:
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except Exception as answer_e:
             logger.error(f"[SERIES EPISODE] Ошибка при ответе на callback: {answer_e}", exc_info=True)
             # Пробуем еще раз без текста
             try:
                 bot.answer_callback_query(call.id)
-        except:
-            pass
+            except:
+                pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
 def series_season_all_callback(call):
@@ -16364,7 +16364,7 @@ def series_season_all_callback(call):
         
         # Получаем эпизоды сезона
         try:
-        seasons_data = get_seasons_data(kp_id)
+            seasons_data = get_seasons_data(kp_id)
         except Exception as e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при получении данных о сезонах: {e}", exc_info=True)
             # Не отвечаем здесь - сделаем это в finally блоке
@@ -16426,23 +16426,23 @@ def series_season_all_callback(call):
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
         try:
-        if seasons_data:
-            # Проверяем, выходит ли сериал
-            is_airing, _ = get_series_airing_status(kp_id)
-            
-            # Получаем все просмотренные эпизоды
-            with db_lock:
-                cursor.execute('''
-                    SELECT season_number, episode_number 
-                    FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                ''', (chat_id, film_id, user_id))
-                watched_rows = cursor.fetchall()
-                watched_set = set()
-                for w_row in watched_rows:
-                    if isinstance(w_row, dict):
+            if seasons_data:
+                # Проверяем, выходит ли сериал
+                is_airing, _ = get_series_airing_status(kp_id)
+                
+                # Получаем все просмотренные эпизоды
+                with db_lock:
+                    cursor.execute('''
+                        SELECT season_number, episode_number 
+                        FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    watched_rows = cursor.fetchall()
+                    watched_set = set()
+                    for w_row in watched_rows:
+                        if isinstance(w_row, dict):
                             watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                    else:
+                        else:
                             watched_set.add((str(w_row[0]), str(w_row[1])))
                 
                 # Подсчитываем эпизоды
@@ -16486,7 +16486,7 @@ def series_season_all_callback(call):
                 logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
             else:
                 logger.warning(f"[SERIES SEASON ALL] show_episodes_page вернула False")
-    except Exception as e:
+        except Exception as e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SERIES SEASON ALL] Критическая ошибка: {e}", exc_info=True)
@@ -16496,14 +16496,14 @@ def series_season_all_callback(call):
             if 'marked_count' in locals() and 'episodes' in locals():
                 bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
             else:
-            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except Exception as answer_e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при ответе на callback: {answer_e}", exc_info=True)
             # Пробуем еще раз без текста
             try:
                 bot.answer_callback_query(call.id)
-        except:
-            pass
+            except:
+                pass
 
 @bot.message_handler(commands=['help'])
 def help_command(message):
@@ -17363,7 +17363,7 @@ def handle_payment_callback(call):
                     members = get_subscription_members(subscription_id)
                     # Проверяем, является ли пользователь активным участником подписки
                     if members and user_id in members:
-                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                        markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             else:
@@ -19628,20 +19628,20 @@ def handle_payment_callback(call):
                 is_combined = state.get('is_combined', False)
             else:
                 # Парсим из callback_data
-            parts = action.split(":")
-            sub_type = parts[1]  # personal или group
-            
-            # Правильный парсинг: payment:pay:personal::tickets:month или payment:pay:group:2:all:month
-            if len(parts) >= 5:
-                # Есть group_size (для групп)
-                group_size_str = parts[2] if parts[2] else ''
-                group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
-                plan_type = parts[3] if parts[3] else ''
-                period_type = parts[4] if parts[4] else ''
-            else:
-                # Нет group_size (для личных)
-                group_size = None
-                plan_type = parts[2] if len(parts) > 2 and parts[2] else ''
+                parts = action.split(":")
+                sub_type = parts[1]  # personal или group
+                
+                # Правильный парсинг: payment:pay:personal::tickets:month или payment:pay:group:2:all:month
+                if len(parts) >= 5:
+                    # Есть group_size (для групп)
+                    group_size_str = parts[2] if parts[2] else ''
+                    group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                    plan_type = parts[3] if parts[3] else ''
+                    period_type = parts[4] if parts[4] else ''
+                else:
+                    # Нет group_size (для личных)
+                    group_size = None
+                    plan_type = parts[2] if len(parts) > 2 and parts[2] else ''
                 period_type = parts[3] if len(parts) > 3 and parts[3] else ''
             
             # Проверка на пустые значения
@@ -23373,7 +23373,7 @@ def process_pre_checkout_query(pre_checkout_query):
         if currency == 'XTR' and invoice_payload and invoice_payload.startswith('stars_'):
             # Это наш Stars платеж - отвечаем OK сразу
             # Хотя для Stars это не должно произойти, но на всякий случай
-        bot.answer_pre_checkout_query(query_id, ok=True)
+            bot.answer_pre_checkout_query(query_id, ok=True)
             logger.warning(f"[PRE CHECKOUT] ⚠️ Неожиданно получен pre_checkout для Stars! Ответили OK: id={query_id}")
         else:
             # Не наш платеж или обычный платеж - отклоняем или обрабатываем
@@ -23513,11 +23513,11 @@ def got_payment(message):
                 """, (telegram_payment_charge_id, payment_id))
                 logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded', charge_id сохранен")
             else:
-            cursor.execute("""
-                UPDATE payments 
-                SET status = 'succeeded'
-                WHERE payment_id = %s
-            """, (payment_id,))
+                cursor.execute("""
+                    UPDATE payments 
+                    SET status = 'succeeded'
+                    WHERE payment_id = %s
+                """, (payment_id,))
                 logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded' (charge_id отсутствует)")
             
             conn.commit()
