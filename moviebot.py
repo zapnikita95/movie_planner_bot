@@ -154,23 +154,14 @@ scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minut
 
 # Команды
 commands = [
-    BotCommand("start", "Приветствие и инструкция по использованию"),
+    BotCommand("start", "Главное меню"),
     BotCommand("list", "Список непросмотренных фильмов"),
-    BotCommand("random", "Рандомный фильм с фильтрами"),
-    BotCommand("search", "Поиск фильмов через Kinopoisk API"),
+    BotCommand("rate", "Оценить просмотренные фильмы"),
     BotCommand("plan", "Запланировать просмотр дома или в кино"),
-    BotCommand("schedule", "Список запланированных просмотров"),
+    BotCommand("ticket", "Работа с билетами в кино"),
     BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
     BotCommand("stats", "Детальная статистика группы и участников"),
-    BotCommand("rate", "Оценить просмотренные фильмы"),
-    BotCommand("settings", "Настройки: эмодзи, часовой пояс, загрузка голосов"),
-    BotCommand("clean", "Очистить базу данных (чат или данные о просмотрах)"),
-    BotCommand("edit", "Редактировать расписание и оценки"),
-    BotCommand("ticket", "Работа с билетами в кино"),
-    BotCommand("seasons", "Просмотр сезонов сериалов"),
-    BotCommand("premieres", "Список премьер месяца"),
-    BotCommand("payment", "Оплата подписки"),
-    BotCommand("help", "Помощь по командам")
+    BotCommand("settings", "Настройки")
 ]
 
 # Устанавливаем команды одинаково для личных чатов и групп
