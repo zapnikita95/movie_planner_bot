@@ -127,9 +127,23 @@ scheduler = BackgroundScheduler()
 scheduler.start()
 
 # Устанавливаем экземпляр бота и scheduler в модуле tasks
-from scheduler.tasks import set_bot_instance, set_scheduler_instance, hourly_stats, check_and_send_plan_notifications, clean_home_plans, start_cinema_votes, resolve_cinema_votes, check_subscription_payments, process_recurring_payments
+import scheduler.tasks as tasks_module
+set_bot_instance = tasks_module.set_bot_instance
+set_scheduler_instance = tasks_module.set_scheduler_instance
+hourly_stats = tasks_module.hourly_stats
+check_and_send_plan_notifications = tasks_module.check_and_send_plan_notifications
+clean_home_plans = tasks_module.clean_home_plans
+start_cinema_votes = tasks_module.start_cinema_votes
+resolve_cinema_votes = tasks_module.resolve_cinema_votes
+check_subscription_payments = tasks_module.check_subscription_payments
+
 set_bot_instance(bot)
 set_scheduler_instance(scheduler)
+
+# Импортируем process_recurring_payments, если она доступна
+process_recurring_payments = getattr(tasks_module, 'process_recurring_payments', None)
+if process_recurring_payments is None:
+    logger.warning("process_recurring_payments не найдена в scheduler.tasks")
 
 # Состояния импортируются из bot.states
 # Для обратной совместимости создаем алиасы
@@ -148,7 +162,10 @@ scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='
 scheduler.add_job(check_subscription_payments, 'cron', hour=9, minute=0, timezone=plans_tz, id='check_subscription_payments')
 
 # Обработка рекуррентных платежей (каждый день в 0:00 МСК)
-scheduler.add_job(process_recurring_payments, 'cron', hour=0, minute=0, timezone=plans_tz, id='process_recurring_payments')
+if process_recurring_payments:
+    scheduler.add_job(process_recurring_payments, 'cron', hour=0, minute=0, timezone=plans_tz, id='process_recurring_payments')
+else:
+    logger.warning("process_recurring_payments не доступна, задача не добавлена в планировщик")
 
 # Добавляем задачи очистки и голосования в scheduler
 scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
@@ -15845,14 +15862,15 @@ def has_recommendations_access(chat_id, user_id):
 
 def rubles_to_stars(rubles):
     """Конвертирует рубли в Telegram Stars
-    1 звезда = $0.99 = 80 рублей
+    80 рублей = 1 доллар = 50 звезд
+    Формула: 1 рубль = 50/80 = 0.625 звезды
     Округляет копейки до рублей и звезды до целых значений
     """
     # Округляем рубли до целых (убираем копейки)
     rubles_rounded = round(rubles)
     
-    # Конвертируем в звезды: 1 звезда = 80 рублей
-    stars = rubles_rounded / 80.0
+    # Конвертируем в звезды: 80 рублей = 50 звезд, значит 1 рубль = 50/80 = 0.625 звезды
+    stars = rubles_rounded * 50.0 / 80.0
     
     # Округляем звезды до целых значений (вверх)
     stars_rounded = int(round(stars))
