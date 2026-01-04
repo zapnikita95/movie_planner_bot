@@ -3357,6 +3357,29 @@ def premiere_add_to_db(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "random_event:close")
+def handle_random_event_close(call):
+    """Обработчик кнопки 'Закрыть' для случайных уведомлений"""
+    try:
+        bot.answer_callback_query(call.id)
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Удаляем сообщение
+        try:
+            bot.delete_message(chat_id, message_id)
+            logger.info(f"[RANDOM EVENTS] Сообщение {message_id} закрыто пользователем {call.from_user.id}")
+        except Exception as e:
+            logger.warning(f"[RANDOM EVENTS] Не удалось удалить сообщение {message_id}: {e}")
+            # Если не удалось удалить, просто отвечаем на callback
+            bot.answer_callback_query(call.id, "Сообщение закрыто")
+    except Exception as e:
+        logger.error(f"[RANDOM EVENTS] Ошибка при закрытии случайного события: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("reminder:"))
 def handle_reminder_callback(call):
     """Обработчик для управления регулярными напоминаниями"""
