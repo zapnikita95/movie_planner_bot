@@ -22510,9 +22510,31 @@ def got_payment(message):
             text += f"📋 Подписка активирована\n\n"
             text += "Спасибо за покупку! 🎉"
             
-            logger.info(f"[STARS SUCCESS] Отправляем подтверждение пользователю...")
-            bot.reply_to(message, text, parse_mode='HTML')
-            logger.info(f"[STARS SUCCESS] ✅ Подтверждение отправлено")
+            logger.info(f"[STARS SUCCESS] ===== НАЧАЛО ОТПРАВКИ ПОДТВЕРЖДЕНИЯ =====")
+            logger.info(f"[STARS SUCCESS] Текст сообщения: {text}")
+            logger.info(f"[STARS SUCCESS] chat_id={chat_id}, user_id={user_id}")
+            logger.info(f"[STARS SUCCESS] message.message_id={message.message_id}")
+            logger.info(f"[STARS SUCCESS] Вызываем bot.reply_to(message, text, parse_mode='HTML')...")
+            
+            try:
+                sent_message = bot.reply_to(message, text, parse_mode='HTML')
+                logger.info(f"[STARS SUCCESS] ✅✅✅ СООБЩЕНИЕ УСПЕШНО ОТПРАВЛЕНО! ✅✅✅")
+                logger.info(f"[STARS SUCCESS] sent_message.message_id={sent_message.message_id if sent_message else 'None'}")
+                logger.info(f"[STARS SUCCESS] sent_message.chat.id={sent_message.chat.id if sent_message and hasattr(sent_message, 'chat') else 'None'}")
+                logger.info(f"[STARS SUCCESS] ===== ОТПРАВКА ПОДТВЕРЖДЕНИЯ ЗАВЕРШЕНА УСПЕШНО =====")
+            except Exception as send_error:
+                logger.error(f"[STARS SUCCESS] ❌❌❌ ОШИБКА ОТПРАВКИ СООБЩЕНИЯ! ❌❌❌")
+                logger.error(f"[STARS SUCCESS] Тип ошибки: {type(send_error).__name__}")
+                logger.error(f"[STARS SUCCESS] Сообщение ошибки: {str(send_error)}")
+                logger.error(f"[STARS SUCCESS] Traceback:", exc_info=True)
+                # Пробуем отправить обычным способом
+                try:
+                    logger.info(f"[STARS SUCCESS] Пробуем отправить через bot.send_message...")
+                    sent_message = bot.send_message(chat_id, text, parse_mode='HTML')
+                    logger.info(f"[STARS SUCCESS] ✅ Сообщение отправлено через send_message: message_id={sent_message.message_id}")
+                except Exception as send_error2:
+                    logger.error(f"[STARS SUCCESS] ❌ Ошибка отправки через send_message: {send_error2}", exc_info=True)
+            
             logger.info(f"[STARS SUCCESS] ===== ОБРАБОТКА successful_payment ЗАВЕРШЕНА УСПЕШНО =====")
             
         except Exception as e:
