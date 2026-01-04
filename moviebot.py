@@ -3708,8 +3708,8 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                 has_access = has_notifications_access(chat_id, user_id)
                 if has_access:
                     seasons_text = get_seasons(info['kp_id'], chat_id, user_id)
-                if seasons_text:
-                    bot.send_message(chat_id, seasons_text, parse_mode='HTML')
+                    if seasons_text:
+                        bot.send_message(chat_id, seasons_text, parse_mode='HTML')
                     
                     # Предлагаем отметить сезоны/серии как просмотренные
                     markup = InlineKeyboardMarkup()
@@ -3729,7 +3729,6 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                             else:
                                 markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                         else:
-                            # Если film_id еще не определен, просто добавляем кнопку подписки
                             markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                     bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
                 else:
@@ -3834,41 +3833,6 @@ def handle_web_app_data(message):
         logger.error(f"[WEB APP] Ошибка: {e}", exc_info=True)
         bot.send_message(chat_id=message.chat.id, text="Произошла ошибка в Web App. Попробуйте заново.")
 
-def get_main_keyboard():
-    """Создает кастомную клавиатуру с основными командами"""
-    keyboard = ReplyKeyboardMarkup(
-        row_width=2,
-        resize_keyboard=True,
-        one_time_keyboard=False,
-        input_field_placeholder="Выберите команду или отправьте ссылку на фильм"
-    )
-    
-    # Первый ряд: Сериалы и Премьеры
-    keyboard.add(
-        KeyboardButton("📺 Сериалы"),
-        KeyboardButton("📅 Премьеры")
-    )
-    
-    # Второй ряд: Рандом и Поиск
-    keyboard.add(
-        KeyboardButton("🎲 Рандом"),
-        KeyboardButton("🔍 Поиск")
-    )
-    
-    # Третий ряд: Расписание и Оплата
-    keyboard.add(
-        KeyboardButton("🗓️ Расписание"),
-        KeyboardButton("💳 Оплата")
-    )
-    
-    # Четвертый ряд: Настройки и Помощь
-    keyboard.add(
-        KeyboardButton("⚙️ Настройки"),
-        KeyboardButton("❓ Помощь")
-    )
-    
-    return keyboard
-
 @bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
     logger.info(f"[HANDLER] {'/start' if message.text.startswith('/start') else '/menu'} вызван от {message.from_user.id}, chat_type={message.chat.type}, text='{message.text}'")
@@ -3902,30 +3866,17 @@ def send_welcome(message):
         """.strip()
 
     try:
-        # Создаём inline меню с кнопками (для совместимости)
-        inline_markup = InlineKeyboardMarkup(row_width=1)
-        inline_markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
-        inline_markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
-        inline_markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
-        inline_markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
-        inline_markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
-        inline_markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
-        inline_markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
+        # Создаём меню с кнопками
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
+        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
+        markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
+        markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+        markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
+        markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
-        # Получаем кастомную клавиатуру
-        reply_keyboard = get_main_keyboard()
-        
-        # Отправляем сообщение с inline кнопками
-        bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=inline_markup)
-        
-        # Отправляем отдельное сообщение с кастомной клавиатурой
-        bot.send_message(
-            message.chat.id,
-            "💡 <b>Используйте кнопки ниже для быстрого доступа к командам:</b>",
-            parse_mode='HTML',
-            reply_markup=reply_keyboard
-        )
-        
+        bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
         logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
         
         # Настраиваем menu_button для пользователя
@@ -3964,6 +3915,9 @@ def start_menu_callback(call):
         elif action == 'schedule':
             message.text = '/schedule'
             show_schedule(message)
+        elif action == 'tickets':
+            message.text = '/ticket'
+            ticket_command(message)
         elif action == 'payment':
             message.text = '/payment'
             payment_command(message)
@@ -4430,7 +4384,7 @@ def handle_reaction(reaction):
                     elif hasattr(r, 'emoji'):
                         new_emoji = r.emoji
                         break
-                        
+                
                 # Предлагаем добавить эмодзи (только если еще не предлагали)
                 if new_emoji or new_custom_emoji_id:
                     emoji_for_key = new_emoji if new_emoji else f"custom:{new_custom_emoji_id}"
@@ -4449,7 +4403,7 @@ def handle_reaction(reaction):
                         else:
                             markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_custom_emoji:{new_custom_emoji_id}"))
                             emoji_display = f"кастомное эмодзи (ID: {new_custom_emoji_id})"
-                            
+                        
                         bot.send_message(
                             chat_id,
                             f"💡 Хотите добавить {emoji_display} в список разрешённых для отметки о просмотре?",
@@ -5177,31 +5131,31 @@ def get_plan_day_or_date_internal(message, state):
                             if date_match:
                                 day_num = int(date_match.group(1))
                                 month_num = int(date_match.group(2))
-                                if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                                    try:
-                                        year = now.year
-                                        if date_match.group(3):
-                                            year_part = int(date_match.group(3))
-                                            if year_part < 100:
-                                                year = 2000 + year_part
-                                            else:
-                                                year = year_part
-                                        candidate = user_tz.localize(datetime(year, month_num, day_num))
-                                        if candidate < now:
-                                            year += 1
-                                        # Используем извлеченное время, если есть, иначе стандартное
-                                        if extracted_time:
-                                            hour, minute = extracted_time
-                                        elif plan_type == 'home':
-                                            hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
-                                            minute = 0
-                                        else:
-                                            hour = 9
-                                            minute = 0
-                                        plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
-                                        logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
-                                    except ValueError as e:
-                                        logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            try:
+                                year = now.year
+                                if date_match.group(3):
+                                    year_part = int(date_match.group(3))
+                                    if year_part < 100:
+                                        year = 2000 + year_part
+                                    else:
+                                        year = year_part
+                                candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                if candidate < now:
+                                    year += 1
+                                # Используем извлеченное время, если есть, иначе стандартное
+                                if extracted_time:
+                                    hour, minute = extracted_time
+                                elif plan_type == 'home':
+                                    hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
+                                    minute = 0
+                                else:
+                                    hour = 9
+                                    minute = 0
+                                plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
+                                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
+                            except ValueError as e:
+                                logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
     
     if not plan_dt:
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать дату из текста: '{text}'")
@@ -5797,7 +5751,7 @@ def handle_list_reply_internal(message):
             show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
 
 # ==================== ГЛАВНЫЙ ХЭНДЛЕР ДЛЯ ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ ====================
-@bot.message_handler(content_types=['text'], func=lambda m: m.text and m.text.strip() in ['📺 Сериалы', '📅 Премьеры', '🎲 Рандом', '🔍 Поиск', '🗓️ Расписание', '💳 Оплата', '⚙️ Настройки', '❓ Помощь'])
+@bot.message_handler(content_types=['text'], func=lambda m: m.text and m.text.strip() in ['📺 Сериалы', '📅 Премьеры', '🎲 Рандом', '🔍 Поиск', '🗓️ Расписание', '💳 Оплата', '⚙️ Настройки', '❓ Помощь', '🎫 Билеты'])
 def handle_keyboard_button(message):
     """Обработчик нажатий на кнопки кастомной клавиатуры"""
     try:
@@ -5806,6 +5760,12 @@ def handle_keyboard_button(message):
         user_id = message.from_user.id
         
         logger.info(f"[KEYBOARD] Нажата кнопка '{text}' от пользователя {user_id}")
+        
+        # Проверка доступа для билетов
+        if text == '🎫 Билеты':
+            if not has_tickets_access(chat_id, user_id):
+                bot.reply_to(message, "🔒 Для доступа к билетам требуется подписка. Используйте /payment для оформления.")
+                return
         
         # Создаем фейковое сообщение с командой
         fake_message = telebot.types.Message()
@@ -5830,6 +5790,9 @@ def handle_keyboard_button(message):
         elif text == '🗓️ Расписание':
             fake_message.text = '/schedule'
             show_schedule(fake_message)
+        elif text == '🎫 Билеты':
+            fake_message.text = '/ticket'
+            ticket_command(fake_message)
         elif text == '💳 Оплата':
             fake_message.text = '/payment'
             payment_command(fake_message)
@@ -5889,6 +5852,53 @@ def main_text_handler(message):
             # Обработка времени сеанса
             handle_edit_ticket_text_internal(message, state)
             return
+        
+        # Новый флоу для добавления билета на мероприятие
+        if state.get('type') == 'event':
+            if step == 'event_name':
+                # Получаем название мероприятия
+                event_name = text.strip()
+                if not event_name:
+                    bot.reply_to(message, "❌ Название мероприятия не может быть пустым. Попробуйте еще раз.")
+                    return
+                
+                state['event_name'] = event_name
+                state['step'] = 'event_datetime'
+                
+                bot.reply_to(
+                    message,
+                    f"✅ Название мероприятия: <b>{event_name}</b>\n\n"
+                    "Теперь укажите дату и время мероприятия в ответ на это сообщение.\n"
+                    "Формат: 15 января 19:30 или 17.01 15:20",
+                    parse_mode='HTML'
+                )
+                return
+            
+            elif step == 'event_datetime':
+                # Получаем дату и время
+                user_tz = get_user_timezone_or_default(user_id)
+                event_dt = parse_session_time(text, user_tz)
+                
+                if not event_dt:
+                    bot.reply_to(message, "❌ Не удалось распознать дату и время. Попробуйте в формате:\n• 15 января 19:30\n• 17.01 15:20")
+                    return
+                
+                state['event_datetime'] = event_dt
+                state['step'] = 'event_file'
+                
+                event_utc = event_dt.astimezone(pytz.utc)
+                state['event_datetime_utc'] = event_utc
+                
+                tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+                formatted_time = event_dt.strftime('%d.%m.%Y %H:%M')
+                
+                bot.reply_to(
+                    message,
+                    f"✅ Дата и время: <b>{formatted_time} {tz_name}</b>\n\n"
+                    "Теперь отправьте файл или картинку с билетом:",
+                    parse_mode='HTML'
+                )
+                return
     
     # === user_search_state ===
     if user_id in user_search_state:
@@ -8553,30 +8563,29 @@ def handle_add_film_callback(call):
             if is_series_final:
                 if has_notifications_access(chat_id, user_id):
                     markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                
-                # Проверяем, подписан ли уже пользователь
-                with db_lock:
-                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                    sub_row = cursor.fetchone()
-                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                
-                if is_subscribed:
-                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                else:
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-            else:
-                # Нет доступа - заблокированные кнопки
-                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-                markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
-        else:
-            # Если фильм не в базе, но это сериал - показываем кнопки для сериалов (заблокированные, если нет доступа)
-            if is_series_final:
-                if has_notifications_access(chat_id, user_id):
-                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    
+                    # Проверяем, подписан ли уже пользователь
+                    with db_lock:
+                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                        sub_row = cursor.fetchone()
+                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                    
+                    if is_subscribed:
+                        markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+            else:
+                # Если фильм не в базе, но это сериал - показываем кнопки для сериалов (заблокированные, если нет доступа)
+                if is_series_final:
+                    if has_notifications_access(chat_id, user_id):
+                        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
+                        markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
         # Сохраняем информацию о сообщении с результатами поиска для кнопки "Назад"
         search_results_msg_id = None
@@ -8828,8 +8837,6 @@ def handle_confirm_add_film_callback(call):
                         else:
                             markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                     else:
-                        # Если film_id еще не определен, просто добавляем кнопку подписки
-                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                         # Если film_id еще не определен, просто добавляем кнопку подписки
                         markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
             else:
@@ -9135,7 +9142,7 @@ def random_start(message):
                     markup.add(InlineKeyboardButton("🔒 По групповым оценкам (9-10)", callback_data="rand_mode_locked:group_votes"))
                 else:
                     # Заблокированная кнопка из-за недостаточного количества групповых оценок
-                markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
+                    markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
         
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         bot.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
@@ -10642,13 +10649,13 @@ def random_mode_handler(call):
                             available_periods.append(period)
             else:
                 # Для остальных режимов - используем старую логику
-            base_query = """
-                SELECT COUNT(DISTINCT m.id) 
-                FROM movies m
-                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-            """
-            params = [chat_id]
+                base_query = """
+                    SELECT COUNT(DISTINCT m.id) 
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                """
+                params = [chat_id]
             
             for period in all_periods:
                 if period == "До 1980":
@@ -10711,7 +10718,7 @@ def random_mode_locked_handler(call):
             )
         else:
             # Режим заблокирован по другим причинам (недостаточно оценок)
-        bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
+            bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_mode_locked_handler: {e}", exc_info=True)
 
@@ -10846,7 +10853,7 @@ def _show_year_step(call, chat_id, user_id):
         if selected_periods:
             markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_year:done"))
         else:
-        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
         
         selected = ', '.join(selected_periods) if selected_periods else 'ничего'
         text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
@@ -10941,14 +10948,14 @@ def _show_genre_step(call, chat_id, user_id):
                 cursor.execute(base_query, params)
             else:
                 # Для остальных режимов - используем старую логику
-        base_query = """
-            SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-            FROM movies m
-            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-            AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
-        """
-        params = [chat_id]
+                base_query = """
+                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                """
+                params = [chat_id]
         
         # Добавляем фильтр по периодам, если они выбраны
         if periods:
@@ -11083,14 +11090,14 @@ def random_year_handler(call):
                     bot.answer_callback_query(call.id, "Ошибка обновления")
         else:
             # Старая логика для других режимов (если есть)
-        if data == "skip":
-            logger.info(f"[RANDOM] Year skipped, moving to genre")
-            user_random_state[user_id]['year'] = None
-            user_random_state[user_id]['step'] = 'genre'
-            _show_genre_step_kinopoisk(call, chat_id, user_id)
-        else:
-            # Сохраняем выбранный год
-            selected_year = int(data)
+            if data == "skip":
+                logger.info(f"[RANDOM] Year skipped, moving to genre")
+                user_random_state[user_id]['year'] = None
+                user_random_state[user_id]['step'] = 'genre'
+                _show_genre_step_kinopoisk(call, chat_id, user_id)
+            else:
+                # Сохраняем выбранный год
+                selected_year = int(data)
             user_random_state[user_id]['year'] = selected_year
             logger.info(f"[RANDOM] Year selected: {selected_year}")
             
@@ -11752,7 +11759,7 @@ def _random_final(call, chat_id, user_id):
                                         year_matches = True
                                         break
                                 if not year_matches:
-                                continue
+                                    continue
                             
                             # Проверяем жанры, если указаны
                             if genres:
@@ -12736,7 +12743,7 @@ def show_premieres_page(call, premieres, period, page=0):
         # Используем edit_message_text вместо send_message, если это callback
         if call.message.message_id:
             try:
-        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e:
                 error_str = str(e)
                 # Игнорируем ошибку "message is not modified" и "there is no text in the message to edit"
@@ -12746,13 +12753,13 @@ def show_premieres_page(call, premieres, period, page=0):
                 try:
                     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 except:
-                        pass
+                    pass
         else:
             # Если message_id нет, отправляем новое сообщение
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
         if call.id:
-        bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
@@ -13670,13 +13677,51 @@ def handle_edit_plan_datetime_text(message):
 def ticket_callback_handler(call):
     """Обработчик callback для команды /ticket"""
     user_id = call.from_user.id
+    chat_id = call.message.chat.id
     action = call.data.split(":")[1]
+    
+    bot.answer_callback_query(call.id)
     
     if action == "cancel":
         if user_id in user_ticket_state:
             del user_ticket_state[user_id]
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
-        bot.answer_callback_query(call.id)
+    elif action == "add_new":
+        # Показываем выбор: добавить билет на фильм или на мероприятие
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("➕ Добавить фильм", callback_data="ticket_new"))
+        markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+        
+        bot.edit_message_text(
+            "🎫 <b>Добавление билета</b>\n\n"
+            "Выберите тип билета:",
+            chat_id,
+            call.message.message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+    elif action == "add_event":
+        # Начинаем флоу добавления билета на мероприятие
+        user_ticket_state[user_id] = {
+            'step': 'event_name',
+            'chat_id': chat_id,
+            'type': 'event'
+        }
+        
+        bot.edit_message_text(
+            "🎤 <b>Добавление билета на мероприятие</b>\n\n"
+            "Напишите название мероприятия в ответ на это сообщение:",
+            chat_id,
+            call.message.message_id,
+            parse_mode='HTML'
+        )
+    elif action == "done":
+        # Закрываем сообщение
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_session:"))
@@ -13750,15 +13795,15 @@ def ticket_session_callback(call):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
             if has_tickets_access(chat_id, user_id):
-            if not has_time:
-                # Если нет времени, добавляем обе кнопки
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-                bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
-            else:
-                # Если время есть, только кнопка добавления билетов
-                markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
-                bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
+                if not has_time:
+                    # Если нет времени, добавляем обе кнопки
+                    markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                    markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+                    bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
+                else:
+                    # Если время есть, только кнопка добавления билетов
+                    markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
+                    bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
             else:
                 if not has_time:
                     markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
@@ -13766,7 +13811,7 @@ def ticket_session_callback(call):
                     bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
                 else:
                     markup.add(InlineKeyboardButton("🔒 Добавить еще билет", callback_data=f"ticket_locked:{plan_id}"))
-                bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
+                    bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
         else:
             logger.warning(f"[TICKET SESSION] file_id в БД пустой")
             bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
@@ -13802,19 +13847,19 @@ def ticket_session_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"ticket_time:{plan_id}"))
         if has_tickets_access(chat_id, user_id):
-        if not has_time:
-            # Если нет времени, добавляем обе кнопки
-            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-            markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-        else:
-            # Если время есть, только кнопка указания времени (на случай изменения)
-            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            if not has_time:
+                # Если нет времени, добавляем обе кнопки
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+            else:
+                # Если время есть, только кнопка указания времени (на случай изменения)
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
         else:
             if not has_time:
                 markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
                 markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
             else:
-            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
         if not has_time:
@@ -13850,13 +13895,13 @@ def ticket_session_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
         if has_tickets_access(chat_id, user_id):
-        if not has_time:
-            # Если нет времени, добавляем обе кнопки
-            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-        else:
-            # Если время есть, только кнопка добавления билетов
-            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+            if not has_time:
+                # Если нет времени, добавляем обе кнопки
+                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            else:
+                # Если время есть, только кнопка добавления билетов
+                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
         else:
             if not has_time:
                 markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
@@ -14210,10 +14255,10 @@ def seasons_command(message):
         # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
         is_subscribed = False
         if has_access:
-        with db_lock:
-            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-            sub_row = cursor.fetchone()
-            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+            with db_lock:
+                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                sub_row = cursor.fetchone()
+                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
         
         button_text = title
         
@@ -14333,7 +14378,7 @@ def seasons_command(message):
         
         # Если нет доступа, кнопки заблокированы
         if has_access:
-        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
         else:
             markup.add(InlineKeyboardButton(f"🔒 {button_text}", callback_data=f"seasons_locked:{kp_id}"))
     
@@ -14346,7 +14391,7 @@ def seasons_command(message):
     
     # Сохраняем message_id для возможности вернуться назад
     if has_access:
-    msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
+        msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
     else:
         msg = bot.reply_to(
             message,
@@ -14881,7 +14926,7 @@ def series_season_callback(call):
         
         # Используем функцию show_episodes_page для отображения эпизодов
         if show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=message_id):
-        bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
         else:
             bot.answer_callback_query(call.id, "❌ Ошибка загрузки эпизодов", show_alert=True)
     except Exception as e:
@@ -14937,9 +14982,9 @@ def series_episode_callback(call):
             # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
             if is_watched:
-            from api.kinopoisk_api import get_seasons_data
+                from api.kinopoisk_api import get_seasons_data
                 from datetime import datetime as dt
-            seasons_data = get_seasons_data(kp_id)
+                seasons_data = get_seasons_data(kp_id)
                 if seasons_data:
                     now = dt.now()
                     # Проверяем, выходит ли сериал
@@ -15123,7 +15168,7 @@ def series_season_all_callback(call):
             
             # Получаем все просмотренные эпизоды
             with db_lock:
-            cursor.execute('''
+                cursor.execute('''
                     SELECT season_number, episode_number 
                     FROM series_tracking 
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
@@ -15143,7 +15188,7 @@ def series_season_all_callback(call):
             for season in seasons_data:
                 episodes = season.get('episodes', [])
                 season_num = season.get('number', '')
-        for ep in episodes:
+                for ep in episodes:
                     if not is_airing:
                         # Если сериал не выходит, считаем все эпизоды
                         total_episodes += 1
@@ -15159,7 +15204,7 @@ def series_season_all_callback(call):
                                 for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
                                     try:
                                         release_date = dt.strptime(release_str.split('T')[0], fmt)
-                break
+                                        break
                                     except:
                                         continue
                                 if release_date and release_date <= now:
@@ -15398,7 +15443,7 @@ def ticket_command(message):
             # Показываем список сеансов в кино
             show_cinema_sessions(chat_id, user_id, file_id)
         else:
-            # Нет файла - показываем список сеансов для выбора
+            # Нет файла - показываем список сеансов для выбора или сообщение об отсутствии билетов
             show_cinema_sessions(chat_id, user_id, None)
     
     except Exception as e:
@@ -19768,13 +19813,13 @@ def handle_settings_callback(call):
             
             # Проверяем доступ к настройкам напоминаний
             if has_notifications_access(chat_id, user_id):
-            markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+                markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
             
             # Проверяем доступ к импорту базы
             if has_recommendations_access(chat_id, user_id):
-            markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+                markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
             
@@ -20258,27 +20303,27 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         logger.info(f"[PROCESS_PLAN] Использован parse_session_time: {plan_dt}")
     else:
         # Если parse_session_time не сработал, используем стандартную логику
-    # Обработка специальных случаев
-    day_lower = day_or_date.lower().strip()
-    
-    # Обработка "сегодня"
-    if 'сегодня' in day_lower:
-        plan_date = now.date()
-        if plan_type == 'home':
-            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-            hour = 19 if now.weekday() < 5 else 10
-        else:
-            hour = 9
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
+        # Обработка специальных случаев
+        day_lower = day_or_date.lower().strip()
+        
+        # Обработка "сегодня"
+        if 'сегодня' in day_lower:
+            plan_date = now.date()
+            if plan_type == 'home':
+                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                hour = 19 if now.weekday() < 5 else 10
+            else:
+                hour = 9
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+            plan_dt = user_tz.localize(plan_dt)
             # Если время уже прошло, переносим на завтра
             # Но если время еще не прошло, оставляем на сегодня (чтобы попало в уведомление)
             if plan_dt < now:
-            plan_dt = plan_dt + timedelta(days=1)
-    
-    # Обработка "завтра" (для обоих режимов)
-    elif 'завтра' in day_lower:
-        plan_date = (now.date() + timedelta(days=1))
+                plan_dt = plan_dt + timedelta(days=1)
+        
+        # Обработка "завтра" (для обоих режимов)
+        elif 'завтра' in day_lower:
+            plan_date = (now.date() + timedelta(days=1))
             # Пробуем найти время в строке
             time_match = re.search(r'(\d{1,2})[: ](\d{2})', day_or_date)
             if time_match:
@@ -20299,92 +20344,92 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     plan_dt = user_tz.localize(plan_dt)
             else:
                 # Время не указано, используем стандартное
-        if plan_type == 'cinema':
-            hour = 9
-        else:  # home
-            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-            hour = 19 if plan_date.weekday() < 5 else 10
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
-    
-    # Обработка "следующая неделя" (для обоих режимов)
-    elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower or 'на следующей неделе' in day_lower:
-        if plan_type == 'cinema':
-            # Для кино - напоминание в четверг, день премьер
-            current_wd = now.weekday()
-            days_until_thursday = (3 - current_wd + 7) % 7
-            if days_until_thursday == 0:
-                # Если сегодня четверг, берем следующий четверг
-                days_until_thursday = 7
-            else:
-                # Добавляем еще неделю, чтобы получить четверг следующей недели
-                days_until_thursday += 7
-            plan_date = now.date() + timedelta(days=days_until_thursday)
-            hour = 9
-        else:  # home
-            # Для дома - суббота следующей недели в 10:00
-            current_wd = now.weekday()
-            days_until_next_saturday = (5 - current_wd + 7) % 7
-            if days_until_next_saturday == 0:
-                # Если сегодня суббота, берем следующую
-                days_until_next_saturday = 7
-            else:
-                # Иначе добавляем еще неделю, чтобы получить субботу следующей недели
-                days_until_next_saturday += 7
-            plan_date = now.date() + timedelta(days=days_until_next_saturday)
-            hour = 10
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
-    
-    # Обработка "в марте", "в апреле" и т.д. (для обоих режимов - напоминание 1 числа месяца)
-    elif re.search(r'в\s+([а-яё]+)', day_lower):
-        month_match = re.search(r'в\s+([а-яё]+)', day_lower)
-        if month_match:
-            month_str = month_match.group(1)
-            month = months_map.get(month_str)
-            if month:
-                year = now.year
-                # Проверяем, не прошел ли уже этот месяц
-                candidate_date = datetime(year, month, 1).date()
-                if candidate_date < now.date():
-                    # Месяц уже прошел, берем следующий год
-                    year += 1
-                plan_date = datetime(year, month, 1)
                 if plan_type == 'cinema':
                     hour = 9
                 else:  # home
                     # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
                     hour = 19 if plan_date.weekday() < 5 else 10
-                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-    
-    # Ищем день недели в расширенном словаре (для обоих режимов)
-    if not plan_dt:
-        target_weekday = None
-        # Сортируем фразы по длине (от длинных к коротким), чтобы сначала находить более специфичные варианты
-        sorted_phrases = sorted(days_full.items(), key=lambda x: len(x[0]), reverse=True)
-        for phrase, wd in sorted_phrases:
-            if phrase in day_lower:
-                target_weekday = wd
-                break
-    
-    if target_weekday is not None:
-        # Вычисляем ближайший указанный день (вперёд)
-        current_wd = now.weekday()
-        delta = (target_weekday - current_wd + 7) % 7
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+                plan_dt = user_tz.localize(plan_dt)
         
-        # Если сегодня указанный день недели
-        if delta == 0:
-            # Проверяем время: если до 20:00, можно планировать на сегодня
-            if now.hour < 20:
-                # Планируем на сегодня
-                plan_date = now.date()
+        # Обработка "следующая неделя" (для обоих режимов)
+        elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower or 'на следующей неделе' in day_lower:
+            if plan_type == 'cinema':
+                # Для кино - напоминание в четверг, день премьер
+                current_wd = now.weekday()
+                days_until_thursday = (3 - current_wd + 7) % 7
+                if days_until_thursday == 0:
+                    # Если сегодня четверг, берем следующий четверг
+                    days_until_thursday = 7
+                else:
+                    # Добавляем еще неделю, чтобы получить четверг следующей недели
+                    days_until_thursday += 7
+                plan_date = now.date() + timedelta(days=days_until_thursday)
+                hour = 9
+            else:  # home
+                # Для дома - суббота следующей недели в 10:00
+                current_wd = now.weekday()
+                days_until_next_saturday = (5 - current_wd + 7) % 7
+                if days_until_next_saturday == 0:
+                    # Если сегодня суббота, берем следующую
+                    days_until_next_saturday = 7
+                else:
+                    # Иначе добавляем еще неделю, чтобы получить субботу следующей недели
+                    days_until_next_saturday += 7
+                plan_date = now.date() + timedelta(days=days_until_next_saturday)
+                hour = 10
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+                plan_dt = user_tz.localize(plan_dt)
+        
+        # Обработка "в марте", "в апреле" и т.д. (для обоих режимов - напоминание 1 числа месяца)
+        elif re.search(r'в\s+([а-яё]+)', day_lower):
+            month_match = re.search(r'в\s+([а-яё]+)', day_lower)
+            if month_match:
+                month_str = month_match.group(1)
+                month = months_map.get(month_str)
+                if month:
+                    year = now.year
+                    # Проверяем, не прошел ли уже этот месяц
+                    candidate_date = datetime(year, month, 1).date()
+                    if candidate_date < now.date():
+                        # Месяц уже прошел, берем следующий год
+                        year += 1
+                    plan_date = datetime(year, month, 1)
+                    if plan_type == 'cinema':
+                        hour = 9
+                    else:  # home
+                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                        hour = 19 if plan_date.weekday() < 5 else 10
+                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+    
+        # Ищем день недели в расширенном словаре (для обоих режимов)
+        if not plan_dt:
+            target_weekday = None
+            # Сортируем фразы по длине (от длинных к коротким), чтобы сначала находить более специфичные варианты
+            sorted_phrases = sorted(days_full.items(), key=lambda x: len(x[0]), reverse=True)
+            for phrase, wd in sorted_phrases:
+                if phrase in day_lower:
+                    target_weekday = wd
+                    break
+        
+        if target_weekday is not None:
+            # Вычисляем ближайший указанный день (вперёд)
+            current_wd = now.weekday()
+            delta = (target_weekday - current_wd + 7) % 7
+            
+            # Если сегодня указанный день недели
+            if delta == 0:
+                # Проверяем время: если до 20:00, можно планировать на сегодня
+                if now.hour < 20:
+                    # Планируем на сегодня
+                    plan_date = now.date()
+                else:
+                    # Уже 20:00 или позже - переносим на следующую неделю
+                    delta = 7
+                    plan_date = now.date() + timedelta(days=delta)
             else:
-                # Уже 20:00 или позже - переносим на следующую неделю
-                delta = 7
                 plan_date = now.date() + timedelta(days=delta)
-        else:
-            plan_date = now.date() + timedelta(days=delta)
-        
+            
             # Пробуем найти время в строке
             time_match = re.search(r'(\d{1,2})[: ](\d{2})', day_or_date)
             if time_match:
@@ -20405,80 +20450,80 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     plan_dt = user_tz.localize(plan_dt)
             else:
                 # Время не указано, используем стандартное
-        if plan_type == 'home':
-            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-            hour = 19 if target_weekday < 5 else 10
-        else:  # cinema
-            hour = 9
-        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-        plan_dt = user_tz.localize(plan_dt)
-    
-    else:
-        # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
-        # Формат "15 января", "15 янв", "15 января 2025"
-        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?', day_lower)
-        if date_match:
-            day_num = int(date_match.group(1))
-            month_str = date_match.group(2)
-            year_str = date_match.group(3) if date_match.group(3) else None
-            month = months_map.get(month_str)
-            if month:
-                try:
-                    # Используем указанный год или текущий/следующий
-                    if year_str:
-                        year = int(year_str)
-                    else:
-                        year = now.year
-                    candidate_date = datetime(year, month, day_num).date()
-                    candidate_dt = user_tz.localize(datetime(year, month, day_num))
-                    
-                    # Проверяем, не является ли дата сегодняшней
-                    if candidate_date == now.date():
-                        # Если сегодня, проверяем время: если до 20:00, можно планировать на сегодня
-                        if now.hour < 20:
-                            plan_date = datetime(year, month, day_num)
+                if plan_type == 'home':
+                    # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                    hour = 19 if target_weekday < 5 else 10
+                else:  # cinema
+                    hour = 9
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+                plan_dt = user_tz.localize(plan_dt)
+        
+        else:
+            # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
+            # Формат "15 января", "15 янв", "15 января 2025"
+            date_match = re.search(r'(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?', day_lower)
+            if date_match:
+                day_num = int(date_match.group(1))
+                month_str = date_match.group(2)
+                year_str = date_match.group(3) if date_match.group(3) else None
+                month = months_map.get(month_str)
+                if month:
+                    try:
+                        # Используем указанный год или текущий/следующий
+                        if year_str:
+                            year = int(year_str)
                         else:
-                            # Уже 20:00 или позже - переносим на следующий год (или следующий месяц, если это возможно)
+                            year = now.year
+                        candidate_date = datetime(year, month, day_num).date()
+                        candidate_dt = user_tz.localize(datetime(year, month, day_num))
+                        
+                        # Проверяем, не является ли дата сегодняшней
+                        if candidate_date == now.date():
+                            # Если сегодня, проверяем время: если до 20:00, можно планировать на сегодня
+                            if now.hour < 20:
+                                plan_date = datetime(year, month, day_num)
+                            else:
+                                # Уже 20:00 или позже - переносим на следующий год (или следующий месяц, если это возможно)
+                                year += 1
+                                plan_date = datetime(year, month, day_num)
+                        elif candidate_dt < now:
+                            # Дата в прошлом - переносим на следующий год
                             year += 1
                             plan_date = datetime(year, month, day_num)
-                    elif candidate_dt < now:
-                        # Дата в прошлом - переносим на следующий год
-                        year += 1
-                        plan_date = datetime(year, month, day_num)
-                    else:
-                        plan_date = datetime(year, month, day_num)
-                    
-                    # Проверяем, есть ли время в исходной строке
-                    time_match = re.search(r'(\d{1,2})[: ](\d{1,2})', day_or_date)
-                    if time_match:
-                        hour = int(time_match.group(1))
-                        minute = int(time_match.group(2))
-                        if 0 <= hour <= 23 and 0 <= minute <= 59:
-                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=minute))
-                            logger.info(f"[PLAN] Найдена дата с временем (текстовый формат): {day_num} {month_str} {year if year_str else now.year} {hour}:{minute}")
                         else:
-                            # Некорректное время, используем значения по умолчанию
+                            plan_date = datetime(year, month, day_num)
+                        
+                        # Проверяем, есть ли время в исходной строке
+                        time_match = re.search(r'(\d{1,2})[: ](\d{1,2})', day_or_date)
+                        if time_match:
+                            hour = int(time_match.group(1))
+                            minute = int(time_match.group(2))
+                            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=minute))
+                                logger.info(f"[PLAN] Найдена дата с временем (текстовый формат): {day_num} {month_str} {year if year_str else now.year} {hour}:{minute}")
+                            else:
+                                # Некорректное время, используем значения по умолчанию
+                                if plan_type == 'cinema':
+                                    hour = 9
+                                else:  # home
+                                    hour = 19 if plan_date.weekday() < 5 else 10
+                                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                        else:
                             if plan_type == 'cinema':
                                 hour = 9
                             else:  # home
+                                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
                                 hour = 19 if plan_date.weekday() < 5 else 10
                             plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-                    else:
-                    if plan_type == 'cinema':
-                        hour = 9
-                    else:  # home
-                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                        hour = 19 if plan_date.weekday() < 5 else 10
-                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-                except ValueError:
-                    logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
+                    except ValueError:
+                        logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
+                        return False
+                else:
+                    logger.warning(f"[PLAN] Не распознан месяц: {month_str}")
                     return False
             else:
-                logger.warning(f"[PLAN] Не распознан месяц: {month_str}")
-                return False
-        else:
-            # Формат "15.01", "15/01", "15.01.25", "15.01.2025"
-            date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', day_lower)
+                # Формат "15.01", "15/01", "15.01.25", "15.01.2025"
+                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', day_lower)
             if date_match:
                 day_num = int(date_match.group(1))
                 month_num = int(date_match.group(2))
@@ -20960,8 +21005,8 @@ def plan_handler(message):
                             day_or_date = f"{day_num}.{month_num} {hour}:{minute}"
                         logger.info(f"[PLAN] Найдена дата с временем: {day_or_date}")
                 else:
-                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                    if date_match:
+                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                if date_match:
                     day_num = int(date_match.group(1))
                     month_num = int(date_match.group(2))
                     if 1 <= month_num <= 12 and 1 <= day_num <= 31:
