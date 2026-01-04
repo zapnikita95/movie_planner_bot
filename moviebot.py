@@ -1752,8 +1752,13 @@ def dice_game_handler(call):
         # Отправляем стикер игральной кости
         try:
             # Используем send_dice из pyTelegramBotAPI
-            # В pyTelegramBotAPI 4.x метод send_dice принимает chat_id и emoji
-            dice_msg = bot.send_dice(chat_id, emoji='🎲')
+            # В pyTelegramBotAPI метод send_dice принимает chat_id, а emoji передается как именованный параметр
+            # Если emoji не поддерживается, используем просто send_dice(chat_id)
+            try:
+                dice_msg = bot.send_dice(chat_id, emoji='🎲')
+            except TypeError:
+                # Если emoji не поддерживается, используем стандартный кубик
+                dice_msg = bot.send_dice(chat_id)
             
             if dice_msg:
                 # Сохраняем message_id для получения значения позже
