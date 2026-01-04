@@ -5797,6 +5797,62 @@ def handle_list_reply_internal(message):
             show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
 
 # ==================== ГЛАВНЫЙ ХЭНДЛЕР ДЛЯ ВСЕХ ТЕКСТОВЫХ СООБЩЕНИЙ ====================
+@bot.message_handler(content_types=['text'], func=lambda m: m.text and m.text.strip() in ['📺 Сериалы', '📅 Премьеры', '🎲 Рандом', '🔍 Поиск', '🗓️ Расписание', '💳 Оплата', '⚙️ Настройки', '❓ Помощь'])
+def handle_keyboard_button(message):
+    """Обработчик нажатий на кнопки кастомной клавиатуры"""
+    try:
+        text = message.text.strip()
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        
+        logger.info(f"[KEYBOARD] Нажата кнопка '{text}' от пользователя {user_id}")
+        
+        # Создаем фейковое сообщение с командой
+        fake_message = telebot.types.Message()
+        fake_message.from_user = message.from_user
+        fake_message.chat = message.chat
+        fake_message.message_id = message.message_id
+        fake_message.date = message.date
+        
+        # Определяем команду по тексту кнопки
+        if text == '📺 Сериалы':
+            fake_message.text = '/seasons'
+            seasons_command(fake_message)
+        elif text == '📅 Премьеры':
+            fake_message.text = '/premieres'
+            premieres_command(fake_message)
+        elif text == '🎲 Рандом':
+            fake_message.text = '/random'
+            random_start(fake_message)
+        elif text == '🔍 Поиск':
+            fake_message.text = '/search'
+            handle_search(fake_message)
+        elif text == '🗓️ Расписание':
+            fake_message.text = '/schedule'
+            show_schedule(fake_message)
+        elif text == '💳 Оплата':
+            fake_message.text = '/payment'
+            payment_command(fake_message)
+        elif text == '⚙️ Настройки':
+            fake_message.text = '/settings'
+            settings_command(fake_message)
+        elif text == '❓ Помощь':
+            fake_message.text = '/help'
+            help_command(fake_message)
+        
+        # Удаляем исходное сообщение с кнопкой (опционально)
+        try:
+            bot.delete_message(chat_id, message.message_id)
+        except:
+            pass
+            
+    except Exception as e:
+        logger.error(f"[KEYBOARD] Ошибка обработки кнопки: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке команды")
+        except:
+            pass
+
 @bot.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
     """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
