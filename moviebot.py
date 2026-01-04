@@ -20524,77 +20524,77 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
             else:
                 # Формат "15.01", "15/01", "15.01.25", "15.01.2025"
                 date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', day_lower)
-            if date_match:
-                day_num = int(date_match.group(1))
-                month_num = int(date_match.group(2))
-                year_str = date_match.group(3) if date_match.group(3) else None
-                
-                if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                    try:
-                        if year_str:
-                            # Если указан год
-                            if len(year_str) == 2:
-                                # Двузначный год: 25 -> 2025, 24 -> 2024
-                                year = 2000 + int(year_str)
-                            else:
-                                year = int(year_str)
-                        else:
-                            # Год не указан, используем текущий или следующий
-                            year = now.year
-                        
-                        candidate_date = datetime(year, month_num, day_num).date()
-                        candidate_dt = user_tz.localize(datetime(year, month_num, day_num))
-                        
-                        # Проверяем, не является ли дата сегодняшней
-                        if candidate_date == now.date():
-                            # Если сегодня, проверяем время: если до 20:00, можно планировать на сегодня
-                            if now.hour < 20:
-                                plan_date = datetime(year, month_num, day_num)
-                            else:
-                                # Уже 20:00 или позже - переносим на следующий год (или следующий месяц, если это возможно)
-                                if month_num == 12:
-                                    year += 1
-                                    month_num = 1
+                if date_match:
+                    day_num = int(date_match.group(1))
+                    month_num = int(date_match.group(2))
+                    year_str = date_match.group(3) if date_match.group(3) else None
+                    
+                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        try:
+                            if year_str:
+                                # Если указан год
+                                if len(year_str) == 2:
+                                    # Двузначный год: 25 -> 2025, 24 -> 2024
+                                    year = 2000 + int(year_str)
                                 else:
-                                    month_num += 1
-                                plan_date = datetime(year, month_num, day_num)
-                        elif candidate_dt < now:
-                            # Дата в прошлом - переносим на следующий год
-                            year += 1
-                            plan_date = datetime(year, month_num, day_num)
-                        else:
-                            plan_date = datetime(year, month_num, day_num)
-                        
-                        # Проверяем, есть ли время в исходной строке
-                        time_match = re.search(r'(\d{1,2})[: ](\d{1,2})', day_or_date)
-                        if time_match:
-                            hour = int(time_match.group(1))
-                            minute = int(time_match.group(2))
-                            if 0 <= hour <= 23 and 0 <= minute <= 59:
-                                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=minute))
-                                logger.info(f"[PLAN] Найдена дата с временем (числовой формат): {day_num}.{month_num}.{year} {hour}:{minute}")
+                                    year = int(year_str)
                             else:
-                                # Некорректное время, используем значения по умолчанию
+                                # Год не указан, используем текущий или следующий
+                                year = now.year
+                            
+                            candidate_date = datetime(year, month_num, day_num).date()
+                            candidate_dt = user_tz.localize(datetime(year, month_num, day_num))
+                            
+                            # Проверяем, не является ли дата сегодняшней
+                            if candidate_date == now.date():
+                                # Если сегодня, проверяем время: если до 20:00, можно планировать на сегодня
+                                if now.hour < 20:
+                                    plan_date = datetime(year, month_num, day_num)
+                                else:
+                                    # Уже 20:00 или позже - переносим на следующий год (или следующий месяц, если это возможно)
+                                    if month_num == 12:
+                                        year += 1
+                                        month_num = 1
+                                    else:
+                                        month_num += 1
+                                    plan_date = datetime(year, month_num, day_num)
+                            elif candidate_dt < now:
+                                # Дата в прошлом - переносим на следующий год
+                                year += 1
+                                plan_date = datetime(year, month_num, day_num)
+                            else:
+                                plan_date = datetime(year, month_num, day_num)
+                            
+                            # Проверяем, есть ли время в исходной строке
+                            time_match = re.search(r'(\d{1,2})[: ](\d{1,2})', day_or_date)
+                            if time_match:
+                                hour = int(time_match.group(1))
+                                minute = int(time_match.group(2))
+                                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=minute))
+                                    logger.info(f"[PLAN] Найдена дата с временем (числовой формат): {day_num}.{month_num}.{year} {hour}:{minute}")
+                                else:
+                                    # Некорректное время, используем значения по умолчанию
+                                    if plan_type == 'cinema':
+                                        hour = 9
+                                    else:  # home
+                                        hour = 19 if plan_date.weekday() < 5 else 10
+                                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                            else:
                                 if plan_type == 'cinema':
                                     hour = 9
                                 else:  # home
+                                    # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
                                     hour = 19 if plan_date.weekday() < 5 else 10
                                 plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-                        else:
-                        if plan_type == 'cinema':
-                            hour = 9
-                        else:  # home
-                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                            hour = 19 if plan_date.weekday() < 5 else 10
-                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
-                    except ValueError as e:
-                        logger.error(f"[PLAN] Некорректная дата: {day_num}.{month_num}.{year_str if year_str else 'N/A'}: {e}")
+                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
+                        except ValueError as e:
+                            logger.error(f"[PLAN] Некорректная дата: {day_num}.{month_num}.{year_str if year_str else 'N/A'}: {e}")
+                            return False
+                    else:
                         return False
                 else:
                     return False
-            else:
-                return False
     
     if plan_dt:
         # Извлекаем kp_id из ссылки для поиска
@@ -20730,7 +20730,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
                     markup = InlineKeyboardMarkup()
                     if has_tickets_access(chat_id, user_id):
-                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                        markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
                     else:
                         markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
         
@@ -21005,15 +21005,15 @@ def plan_handler(message):
                             day_or_date = f"{day_num}.{month_num} {hour}:{minute}"
                         logger.info(f"[PLAN] Найдена дата с временем: {day_or_date}")
                 else:
-                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                if date_match:
-                    day_num = int(date_match.group(1))
-                    month_num = int(date_match.group(2))
-                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
-                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
-                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         # Проверяем, есть ли отдельно указанное время (если дата уже найдена, но время не включено)
         if day_or_date and plan_type == 'cinema':
