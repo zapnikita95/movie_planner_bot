@@ -3759,12 +3759,6 @@ def start_menu_callback(call):
         message = call.message
         message.text = None  # Очищаем текст
         
-        # Удаляем сообщение с меню
-        try:
-            bot.delete_message(chat_id, call.message.message_id)
-        except:
-            pass
-        
         # Вызываем соответствующую команду
         if action == 'seasons':
             message.text = '/seasons'
@@ -3787,6 +3781,12 @@ def start_menu_callback(call):
         elif action == 'help':
             message.text = '/help'
             help_command(message)
+        
+        # Удаляем сообщение с меню после успешной отправки нового сообщения
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
         
         logger.info(f"[START MENU] Выбран раздел: {action} для пользователя {user_id}")
     except Exception as e:
