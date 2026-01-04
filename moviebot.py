@@ -7955,29 +7955,97 @@ def series_subscribe_callback(call):
                         
                         logger.info(f"[SERIES SUBSCRIBE] Вызываю show_film_info_with_buttons: message_id={message_id}, message_thread_id={message_thread_id}")
                         # Обновляем существующее сообщение с обновленной кнопкой
+                        # show_film_info_with_buttons теперь всегда добавляет строку о статусе подписки, что гарантирует изменение текста
                         show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
                         logger.info(f"[SERIES SUBSCRIBE] Сообщение обновлено успешно")
-                        bot.answer_callback_query(call.id, "✅ Подписка оформлена!")
                     else:
                         logger.warning(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
-                        bot.answer_callback_query(call.id, "✅ Подписка оформлена!")
         except telebot.apihelper.ApiTelegramException as e:
+            error_str = str(e).lower()
             logger.error(f"[SERIES SUBSCRIBE] Telegram API ошибка при обновлении сообщения: {e}", exc_info=True)
             logger.error(f"[SERIES SUBSCRIBE] error_code={getattr(e, 'error_code', 'N/A')}, result_json={getattr(e, 'result_json', {})}")
             
-            # Fallback: отправляем новое сообщение
+            # Проверяем, является ли это ошибкой "message is not modified"
+            if "message is not modified" in error_str or "message_not_modified" in error_str or "bad request: message is not modified" in error_str:
+                logger.info(f"[SERIES SUBSCRIBE] Telegram: 'message is not modified' — пробую только markup")
+                # Fallback: обновляем только клавиатуру через show_film_info_with_buttons
+                try:
+                    # Получаем информацию о сериале из базы
+                    with db_lock:
+                        cursor.execute("SELECT id, title, link, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                        row = cursor.fetchone()
+                        if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+                            title = row.get('title') if isinstance(row, dict) else row[1]
+                            link = row.get('link') if isinstance(row, dict) else row[2]
+                            watched = row.get('watched') if isinstance(row, dict) else row[3]
+                            
+                            from api.kinopoisk_api import extract_movie_info
+                            info = extract_movie_info(link)
+                            if info:
+                                existing = (film_id, title, watched)
+                                message_thread_id = None
+                                message_id = None
+                                if call.message:
+                                    message_id = call.message.message_id
+                                    if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                                        message_thread_id = call.message.message_thread_id
+                                
+                                # Формируем только клавиатуру и обновляем её
+                                # Получаем текущий текст сообщения
+                                current_text = call.message.text or call.message.caption or ""
+                                
+                                # Формируем новую клавиатуру через show_film_info_with_buttons, но только для получения markup
+                                # Вместо этого сформируем markup напрямую
+                                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                new_markup = InlineKeyboardMarkup(row_width=1)
+                                
+                                # Добавляем кнопки подписки
+                                new_markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+                                
+                                # Обновляем только клавиатуру
+                                if message_thread_id:
+                                    import json
+                                    reply_markup_json = json.dumps(new_markup.to_dict()) if new_markup else None
+                                    params = {
+                                        'chat_id': chat_id,
+                                        'message_id': message_id,
+                                        'message_thread_id': message_thread_id
+                                    }
+                                    if reply_markup_json:
+                                        params['reply_markup'] = reply_markup_json
+                                    bot.api_call('editMessageReplyMarkup', params)
+                                else:
+                                    bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=new_markup)
+                                logger.info(f"[SERIES SUBSCRIBE] Клавиатура обновлена успешно")
+                except Exception as e2:
+                    logger.error(f"[SERIES SUBSCRIBE] edit_reply_markup тоже упал: {e2}", exc_info=True)
+                    try:
+                        bot.send_message(chat_id, "✅ Вы подписались на уведомления о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
+                        logger.info(f"[SERIES SUBSCRIBE] Отправлено fallback сообщение")
+                    except Exception as send_e:
+                        logger.error(f"[SERIES SUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
+            else:
+                # Другая ошибка API - отправляем новое сообщение
+                logger.warning(f"[SERIES SUBSCRIBE] Другая ошибка Telegram API, отправляю новое сообщение")
+                try:
+                    bot.send_message(chat_id, "✅ Вы подписались на уведомления о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
+                    logger.info(f"[SERIES SUBSCRIBE] Отправлено fallback сообщение")
+                except Exception as send_e:
+                    logger.error(f"[SERIES SUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"[SERIES SUBSCRIBE] Неизвестная ошибка при обновлении сообщения: {e}", exc_info=True)
             try:
                 bot.send_message(chat_id, "✅ Вы подписались на уведомления о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
                 logger.info(f"[SERIES SUBSCRIBE] Отправлено fallback сообщение")
             except Exception as send_e:
                 logger.error(f"[SERIES SUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
-            
-            bot.answer_callback_query(call.id, "✅ Подписка оформлена!")
-            # Не прерываем выполнение - подписка уже оформлена
-        except Exception as e:
-            logger.error(f"[SERIES SUBSCRIBE] Неизвестная ошибка при обновлении сообщения: {e}", exc_info=True)
-            bot.answer_callback_query(call.id, "✅ Подписка оформлена!")
-            # Не прерываем выполнение - подписка уже оформлена
+        finally:
+            # ВСЕГДА отвечаем на callback!
+            try:
+                bot.answer_callback_query(call.id, text="✅ Подписка оформлена!")
+            except Exception as answer_e:
+                logger.error(f"[SERIES SUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
@@ -8058,30 +8126,90 @@ def series_unsubscribe_callback(call):
                         
                         logger.info(f"[SERIES UNSUBSCRIBE] Вызываю show_film_info_with_buttons: message_id={message_id}, message_thread_id={message_thread_id}")
                         # Обновляем существующее сообщение с обновленной кнопкой
+                        # show_film_info_with_buttons теперь всегда добавляет строку о статусе подписки, что гарантирует изменение текста
                         show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
                         logger.info(f"[SERIES UNSUBSCRIBE] Сообщение обновлено успешно")
-                        bot.answer_callback_query(call.id, "✅ Отписка выполнена")
                     else:
                         logger.warning(f"[SERIES UNSUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
-                        bot.answer_callback_query(call.id, "✅ Отписка выполнена")
                 else:
                     logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден в БД при обновлении сообщения: kp_id={kp_id}")
-                    bot.answer_callback_query(call.id, "✅ Отписка выполнена")
         except telebot.apihelper.ApiTelegramException as e:
+            error_str = str(e).lower()
             logger.error(f"[SERIES UNSUBSCRIBE] Telegram API ошибка при обновлении сообщения: {e}", exc_info=True)
             logger.error(f"[SERIES UNSUBSCRIBE] error_code={getattr(e, 'error_code', 'N/A')}, result_json={getattr(e, 'result_json', {})}")
             
-            # Fallback: отправляем новое сообщение
+            # Проверяем, является ли это ошибкой "message is not modified"
+            if "message is not modified" in error_str or "message_not_modified" in error_str or "bad request: message is not modified" in error_str:
+                logger.info(f"[SERIES UNSUBSCRIBE] Telegram: 'message is not modified' — пробую только markup")
+                # Fallback: обновляем только клавиатуру
+                try:
+                    # Получаем информацию о сериале из базы
+                    with db_lock:
+                        cursor.execute("SELECT id, title, link, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                        row = cursor.fetchone()
+                        if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+                            
+                            from api.kinopoisk_api import extract_movie_info
+                            info = extract_movie_info(link)
+                            if info:
+                                message_thread_id = None
+                                message_id = None
+                                if call.message:
+                                    message_id = call.message.message_id
+                                    if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                                        message_thread_id = call.message.message_thread_id
+                                
+                                # Формируем новую клавиатуру
+                                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                new_markup = InlineKeyboardMarkup(row_width=1)
+                                
+                                # Добавляем кнопки подписки
+                                new_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                                
+                                # Обновляем только клавиатуру
+                                if message_thread_id:
+                                    import json
+                                    reply_markup_json = json.dumps(new_markup.to_dict()) if new_markup else None
+                                    params = {
+                                        'chat_id': chat_id,
+                                        'message_id': message_id,
+                                        'message_thread_id': message_thread_id
+                                    }
+                                    if reply_markup_json:
+                                        params['reply_markup'] = reply_markup_json
+                                    bot.api_call('editMessageReplyMarkup', params)
+                                else:
+                                    bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=new_markup)
+                                logger.info(f"[SERIES UNSUBSCRIBE] Клавиатура обновлена успешно")
+                except Exception as e2:
+                    logger.error(f"[SERIES UNSUBSCRIBE] edit_reply_markup тоже упал: {e2}", exc_info=True)
+                    try:
+                        bot.send_message(chat_id, "🔕 Вы отписались от уведомлений о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
+                        logger.info(f"[SERIES UNSUBSCRIBE] Отправлено fallback сообщение")
+                    except Exception as send_e:
+                        logger.error(f"[SERIES UNSUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
+            else:
+                # Другая ошибка API - отправляем новое сообщение
+                logger.warning(f"[SERIES UNSUBSCRIBE] Другая ошибка Telegram API, отправляю новое сообщение")
+                try:
+                    bot.send_message(chat_id, "🔕 Вы отписались от уведомлений о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
+                    logger.info(f"[SERIES UNSUBSCRIBE] Отправлено fallback сообщение")
+                except Exception as send_e:
+                    logger.error(f"[SERIES UNSUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"[SERIES UNSUBSCRIBE] Неизвестная ошибка при обновлении сообщения: {e}", exc_info=True)
             try:
                 bot.send_message(chat_id, "🔕 Вы отписались от уведомлений о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
                 logger.info(f"[SERIES UNSUBSCRIBE] Отправлено fallback сообщение")
             except Exception as send_e:
                 logger.error(f"[SERIES UNSUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
-            
-            bot.answer_callback_query(call.id, "✅ Отписка выполнена")
-        except Exception as e:
-            logger.error(f"[SERIES UNSUBSCRIBE] Неизвестная ошибка при обновлении сообщения: {e}", exc_info=True)
-            bot.answer_callback_query(call.id, "✅ Отписка выполнена")
+        finally:
+            # ВСЕГДА отвечаем на callback!
+            try:
+                bot.answer_callback_query(call.id, text="✅ Отписка выполнена")
+            except Exception as answer_e:
+                logger.error(f"[SERIES UNSUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
         
         logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
     except Exception as e:
@@ -10966,6 +11094,12 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                             cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
                             sub_row = cursor.fetchone()
                             is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                    
+                    # Добавляем строку о статусе подписки в текст (чтобы текст всегда менялся)
+                    if is_subscribed:
+                        text += f"\n\n🔔 <b>Статус подписки: ✅ Подписан</b>"
+                    else:
+                        text += f"\n\n🔔 <b>Статус подписки: ❌ Не подписан</b>"
                     
                     # Показываем соответствующую кнопку
                     if all_episodes_watched:
