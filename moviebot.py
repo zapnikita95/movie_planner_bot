@@ -1419,6 +1419,7 @@ def choose_random_participant():
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
                 markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
                 
                 text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
                 text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
@@ -1501,6 +1502,7 @@ def start_dice_game():
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
                 markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
                 
                 text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
                 text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
@@ -1695,6 +1697,7 @@ def update_dice_game_message(chat_id, game_state, message_id):
         if remaining_count > 0 or len(participants_without_results) > 0:
             markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
         markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+        markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
         
         # Обновляем сообщение
         bot.edit_message_text(
@@ -19887,6 +19890,7 @@ def handle_settings_callback(call):
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
                 markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
                 
                 text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
                 text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
@@ -19897,6 +19901,7 @@ def handle_settings_callback(call):
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
                 markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
                 
                 text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
                 text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
