@@ -1257,7 +1257,7 @@ def check_weekend_schedule():
             if reminder_disabled_row:
                 is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
                 if is_disabled == 'true':
-                continue
+                    continue
             
             # Проверяем, есть ли планы на выходные (пт-сб-вс)
             # Суббота - проверяем планы с пятницы по воскресенье
