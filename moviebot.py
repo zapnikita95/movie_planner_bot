@@ -5661,7 +5661,8 @@ def handle_rating_internal(message, rating):
                 rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
                 
                 # Если все активные пользователи оценили, отмечаем фильм как просмотренный
-                if active_users and active_users.issubset(rated_users):
+                # (если фильм еще не был отмечен как просмотренный ранее)
+                if active_users and active_users.issubset(rated_users) and not is_watched_before:
                     cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                     conn.commit()
                     logger.info(f"[RATE] Все активные пользователи оценили фильм {film_id}, отмечен как просмотренный")
