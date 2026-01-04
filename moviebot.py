@@ -118,7 +118,11 @@ def setup_menu_button(chat_id=None):
     """Настраивает menu_button для открытия Mini App"""
     try:
         from telebot.types import MenuButtonWebApp
-        menu_button = MenuButtonWebApp(text="🎬 Меню", web_app=telebot.types.WebAppInfo(url=WEB_APP_URL))
+        menu_button = MenuButtonWebApp(
+            type="web_app",
+            text="🎬 Меню",
+            web_app=telebot.types.WebAppInfo(url=WEB_APP_URL)
+        )
         bot.set_chat_menu_button(
             chat_id=chat_id,  # None = для всех личных чатов по умолчанию
             menu_button=menu_button
@@ -3873,9 +3877,11 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
-        # Добавляем кнопку Билеты, если есть подписка
+        # Добавляем кнопку Билеты всегда, но под замочком если нет подписки
         if has_tickets_access(message.chat.id, message.from_user.id):
             markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
@@ -3921,6 +3927,22 @@ def start_menu_callback(call):
         elif action == 'tickets':
             message.text = '/ticket'
             ticket_command(message)
+        elif action == 'tickets_locked':
+            # Показываем сообщение о необходимости подписки
+            text = "🎫 <b>Билеты в кино</b>\n\n"
+            text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+            text += "Используйте /payment для оформления подписки."
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+            
+            bot.edit_message_text(
+                text,
+                chat_id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
         elif action == 'payment':
             message.text = '/payment'
             payment_command(message)
@@ -15578,6 +15600,10 @@ def has_tickets_access(chat_id, user_id):
     (требуется подписка 'tickets' или 'all')
     """
     from database.db_operations import get_active_subscription, get_active_group_subscription_by_chat_id
+    
+    # Для создателя (user_id 301810276) всегда разрешаем доступ
+    if user_id == 301810276:
+        return True
     
     # Проверяем личную подписку
     personal_sub = get_active_subscription(chat_id, user_id, 'personal')
