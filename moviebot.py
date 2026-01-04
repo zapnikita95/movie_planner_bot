@@ -22044,3 +22044,738 @@ def handle_pay_stars_callback(call):
         logger.info(f"[STARS CALLBACK] Начало обработки: user_id={user_id}, payment_id_short={payment_id_short}")
         
         # Получаем данные платежа из состояния
+        if user_id not in user_payment_state or 'payment_data' not in user_payment_state[user_id]:
+            logger.error(f"[STARS CALLBACK] Данные платежа не найдены в состоянии для user_id={user_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: данные платежа не найдены. Попробуйте заново.", show_alert=True)
+            return
+        
+        payment_data = user_payment_state[user_id]['payment_data']
+        full_payment_id = payment_data['payment_id']
+        
+        # Проверяем, что короткий ID совпадает
+        if not full_payment_id.startswith(payment_id_short):
+            logger.error(f"[STARS CALLBACK] Несоответствие payment_id: short={payment_id_short}, full={full_payment_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: неверный идентификатор платежа.", show_alert=True)
+            return
+        
+        stars_amount = payment_data['stars_amount']
+        sub_type = payment_data['sub_type']
+        plan_type = payment_data['plan_type']
+        period_type = payment_data['period_type']
+        final_price = payment_data['amount']
+        payment_chat_id = payment_data.get('chat_id', chat_id)
+        
+        # Формируем заголовок и описание для invoice
+        subscription_type_name = 'Личная подписка' if sub_type == 'personal' else 'Групповая подписка'
+        
+        period_names = {
+            'month': 'месяц',
+            '3months': '3 месяца',
+            'year': 'год',
+            'lifetime': 'навсегда'
+        }
+        period_name = period_names.get(period_type, period_type)
+        
+        plan_names = {
+            'notifications': 'Уведомления о сериалах',
+            'recommendations': 'Персональные рекомендации',
+            'tickets': 'Билеты в кино',
+            'all': 'Все режимы'
+        }
+        plan_name = plan_names.get(plan_type, plan_type)
+        
+        invoice_title = subscription_type_name
+        invoice_description = f"{plan_name}, период: {period_name}"
+        
+        # Сохраняем информацию о платеже в БД (без yookassa_payment_id)
+        from database.db_operations import save_payment
+        save_payment(
+            payment_id=full_payment_id,
+            yookassa_payment_id=None,  # Для Stars нет yookassa_payment_id
+            user_id=user_id,
+            chat_id=payment_chat_id,
+            subscription_type=sub_type,
+            plan_type=plan_type,
+            period_type=period_type,
+            group_size=payment_data.get('group_size'),
+            amount=final_price,
+            status='pending'
+        )
+        
+        logger.info(f"[STARS CALLBACK] ===== НАЧАЛО СОЗДАНИЯ INVOICE =====")
+        logger.info(f"[STARS CALLBACK] stars_amount={stars_amount}, payment_id={full_payment_id}")
+        logger.info(f"[STARS CALLBACK] sub_type={sub_type}, plan_type={plan_type}, period_type={period_type}")
+        logger.info(f"[STARS CALLBACK] invoice_title='{invoice_title}', invoice_description='{invoice_description}'")
+        
+        # Создаем invoice для оплаты звездами напрямую через Telegram API
+        try:
+            # Формируем invoice_payload с полным payment_id
+            invoice_payload = f"stars_{full_payment_id}"
+            logger.info(f"[STARS CALLBACK] invoice_payload сформирован: {invoice_payload}")
+            
+            # Создаем invoice
+            logger.info(f"[STARS CALLBACK] Вызываем bot.send_invoice с параметрами:")
+            logger.info(f"[STARS CALLBACK]   chat_id={chat_id}")
+            logger.info(f"[STARS CALLBACK]   currency=XTR")
+            logger.info(f"[STARS CALLBACK]   amount={int(stars_amount)} stars")
+            logger.info(f"[STARS CALLBACK]   invoice_payload={invoice_payload}")
+            
+            bot.send_invoice(
+                chat_id=chat_id,
+                title=invoice_title,
+                description=invoice_description,
+                invoice_payload=invoice_payload,
+                provider_token="",  # Для Telegram Stars не нужен provider_token
+                currency="XTR",  # XTR - валюта Telegram Stars
+                prices=[LabeledPrice(label=invoice_description, amount=int(stars_amount))],
+                start_parameter=full_payment_id[:16],  # Ограничение 64 символа
+                photo_url=None,
+                photo_size=None,
+                photo_width=None,
+                photo_height=None,
+                need_name=False,
+                need_phone_number=False,
+                need_email=False,
+                need_shipping_address=False,
+                send_phone_number_to_provider=False,
+                send_email_to_provider=False,
+                is_flexible=False
+            )
+            
+            logger.info(f"[STARS CALLBACK] ✅ Invoice отправлен успешно: payment_id={full_payment_id}")
+            logger.info(f"[STARS CALLBACK] ⚠️ ВАЖНО: Для Stars pre_checkout_query НЕ отправляется!")
+            logger.info(f"[STARS CALLBACK] ⚠️ Ожидаем только successful_payment с payload={invoice_payload}")
+            logger.info(f"[STARS CALLBACK] ===== КОНЕЦ СОЗДАНИЯ INVOICE =====")
+            
+        except Exception as e:
+            logger.error(f"[STARS CALLBACK] Ошибка создания invoice: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"[STARS CALLBACK] Ошибка обработки callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка. Попробуйте позже.", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("pay_yookassa:"))
+def handle_pay_yookassa_callback(call):
+    """Обработчик нажатия на кнопку оплаты через ЮKassa"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Извлекаем короткий payment_id из callback_data
+        payment_id_short = call.data.split(":")[1]
+        logger.info(f"[YOOKASSA CALLBACK] Начало обработки: user_id={user_id}, payment_id_short={payment_id_short}")
+        
+        # Получаем данные платежа из состояния
+        if user_id not in user_payment_state or 'payment_data' not in user_payment_state[user_id]:
+            logger.error(f"[YOOKASSA CALLBACK] Данные платежа не найдены в состоянии для user_id={user_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: данные платежа не найдены. Попробуйте заново.", show_alert=True)
+            return
+        
+        payment_data = user_payment_state[user_id]['payment_data']
+        full_payment_id = payment_data['payment_id']
+        
+        # Проверяем, что короткий ID совпадает
+        if not full_payment_id.startswith(payment_id_short):
+            logger.error(f"[YOOKASSA CALLBACK] Несоответствие payment_id: short={payment_id_short}, full={full_payment_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: неверный идентификатор платежа.", show_alert=True)
+            return
+        
+        # Проверяем доступность ЮKassa
+        if not YOOKASSA_AVAILABLE:
+            logger.error(f"[YOOKASSA CALLBACK] YooKassa библиотека не установлена!")
+            bot.answer_callback_query(call.id, "Ошибка: система оплаты недоступна. Обратитесь к администратору.", show_alert=True)
+            return
+        
+        if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+            logger.error(f"[YOOKASSA CALLBACK] YooKassa ключи не настроены!")
+            bot.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
+            return
+        
+        sub_type = payment_data['sub_type']
+        plan_type = payment_data['plan_type']
+        period_type = payment_data['period_type']
+        final_price = payment_data['amount']
+        group_size = payment_data.get('group_size')
+        payment_chat_id = payment_data.get('chat_id', chat_id)
+        group_chat_id = payment_data.get('group_chat_id')
+        group_username = payment_data.get('group_username')
+        is_private = chat_id > 0
+        
+        # Формируем описание платежа
+        period_names = {
+            'month': 'месяц',
+            '3months': '3 месяца',
+            'year': 'год',
+            'lifetime': 'навсегда'
+        }
+        period_name = period_names.get(period_type, period_type)
+        
+        plan_names = {
+            'notifications': 'Уведомления о сериалах',
+            'recommendations': 'Персональные рекомендации',
+            'tickets': 'Билеты в кино',
+            'all': 'Все режимы'
+        }
+        plan_name = plan_names.get(plan_type, plan_type)
+        
+        subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+        description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+        
+        # Инициализируем ЮKassa
+        from yookassa import Configuration, Payment
+        shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
+        secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
+        Configuration.account_id = shop_id
+        Configuration.secret_key = secret_key
+        
+        return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
+        
+        # Подготавливаем metadata для платежа
+        metadata = {
+            "user_id": str(user_id),
+            "chat_id": str(payment_chat_id),
+            "subscription_type": sub_type,
+            "plan_type": plan_type,
+            "period_type": period_type,
+            "payment_id": full_payment_id
+        }
+        
+        if sub_type == 'group':
+            metadata["group_size"] = str(group_size) if group_size else ""
+            if group_username:
+                metadata["group_username"] = group_username
+        else:
+            if is_private:
+                telegram_username = call.from_user.username
+                if telegram_username:
+                    metadata["telegram_username"] = telegram_username
+        
+        # Создаем платеж в ЮKassa
+        try:
+            payment = Payment.create({
+                "amount": {
+                    "value": f"{final_price:.2f}",
+                    "currency": "RUB"
+                },
+                "confirmation": {
+                    "type": "redirect",
+                    "return_url": return_url
+                },
+                "capture": True,
+                "description": description,
+                "metadata": metadata
+            })
+            
+            # Сохраняем информацию о платеже в БД
+            from database.db_operations import save_payment
+            payment_chat_id_for_db = payment_chat_id if sub_type == 'group' and group_chat_id else chat_id
+            save_payment(
+                payment_id=full_payment_id,
+                yookassa_payment_id=payment.id,
+                user_id=user_id,
+                chat_id=payment_chat_id_for_db,
+                subscription_type=sub_type,
+                plan_type=plan_type,
+                period_type=period_type,
+                group_size=group_size,
+                amount=final_price,
+                status='pending'
+            )
+            
+            # Получаем URL для оплаты
+            confirmation_url = payment.confirmation.confirmation_url
+            
+            # Отправляем сообщение с кнопкой для оплаты
+            text = f"💳 <b>Оплата подписки</b>\n\n"
+            text += f"📋 <b>Выбранный тариф:</b>\n"
+            if sub_type == 'personal':
+                text += f"👤 Личная подписка\n"
+            else:
+                text += f"👥 Групповая подписка (на {group_size} участников)\n"
+            text += f"{plan_name}\n"
+            text += f"⏰ Период: {period_name}\n"
+            text += f"💰 Сумма: <b>{final_price}₽</b>\n\n"
+            text += "Нажмите кнопку ниже для перехода к оплате:"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[YOOKASSA CALLBACK] Ошибка редактирования сообщения: {e}")
+                    bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+            
+            logger.info(f"[YOOKASSA CALLBACK] Платеж создан: payment_id={full_payment_id}, yookassa_id={payment.id}")
+            
+        except Exception as e:
+            logger.error(f"[YOOKASSA CALLBACK] Ошибка создания платежа в ЮKassa: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"[YOOKASSA CALLBACK] Ошибка обработки callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка. Попробуйте позже.", show_alert=True)
+        except:
+            pass
+
+# Обработчики для Telegram Stars платежей
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def process_pre_checkout_query(pre_checkout_query):
+    """Обработчик pre_checkout_query - ВАЖНО: для Stars (XTR) этот handler НЕ вызывается!
+    
+    Telegram не отправляет pre_checkout_query для платежей в Stars.
+    Этот handler нужен только для обычных платежей (карты, YooKassa и т.д.)
+    """
+    query_id = None
+    try:
+        query_id = pre_checkout_query.id
+        user_id = pre_checkout_query.from_user.id
+        currency = pre_checkout_query.currency
+        total_amount = pre_checkout_query.total_amount
+        invoice_payload = pre_checkout_query.invoice_payload
+        
+        logger.info(f"[PRE CHECKOUT] ===== ПОЛУЧЕН pre_checkout_query =====")
+        logger.info(f"[PRE CHECKOUT] user_id={user_id}, payload={invoice_payload}, currency={currency}, amount={total_amount}")
+        logger.info(f"[PRE CHECKOUT] ⚠️ ВНИМАНИЕ: Для Stars (XTR) этот handler НЕ вызывается!")
+        logger.info(f"[PRE CHECKOUT] Это обычный платеж (не Stars), обрабатываем...")
+        
+        # КРИТИЧНО: Отвечаем мгновенно, до любых проверок, чтобы избежать таймаута
+        # Проверяем только базовые условия для Stars платежей
+        if currency == 'XTR' and invoice_payload and invoice_payload.startswith('stars_'):
+            # Это наш Stars платеж - отвечаем OK сразу
+            # Хотя для Stars это не должно произойти, но на всякий случай
+            bot.answer_pre_checkout_query(query_id, ok=True)
+            logger.warning(f"[PRE CHECKOUT] ⚠️ Неожиданно получен pre_checkout для Stars! Ответили OK: id={query_id}")
+        else:
+            # Не наш платеж или обычный платеж - отклоняем или обрабатываем
+            error_msg = "Поддерживается только оплата звездами Telegram" if currency != 'XTR' else "Неверный идентификатор платежа"
+            bot.answer_pre_checkout_query(query_id, ok=False, error_message=error_msg)
+            logger.warning(f"[PRE CHECKOUT] Отклонен: currency={currency}, payload={invoice_payload}")
+        
+    except Exception as e:
+        logger.error(f"[PRE CHECKOUT] Ошибка обработки pre_checkout_query: {e}", exc_info=True)
+        # В случае ошибки все равно отвечаем, чтобы не было таймаута
+        try:
+            if query_id is None:
+                query_id = pre_checkout_query.id if hasattr(pre_checkout_query, 'id') else None
+            if query_id:
+                # Отвечаем OK даже при ошибке, чтобы не блокировать платеж
+                bot.answer_pre_checkout_query(query_id, ok=True)
+                logger.warning(f"[PRE CHECKOUT] Ответили OK при ошибке обработки: id={query_id}")
+        except Exception as e2:
+            logger.error(f"[PRE CHECKOUT] Критическая ошибка при отправке ответа: {e2}", exc_info=True)
+
+@bot.message_handler(content_types=['successful_payment'])
+def got_payment(message):
+    """Обработчик successful_payment для Telegram Stars - основной handler для Stars платежей"""
+    try:
+        logger.info(f"[STARS SUCCESS] ===== ПОЛУЧЕН successful_payment =====")
+        logger.info(f"[STARS SUCCESS] message_id={message.message_id}, date={message.date}")
+        logger.info(f"[STARS SUCCESS] from_user.id={message.from_user.id}, from_user.username={message.from_user.username}")
+        logger.info(f"[STARS SUCCESS] chat.id={message.chat.id}, chat.type={message.chat.type}")
+        
+        payment = message.successful_payment
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        logger.info(f"[STARS SUCCESS] payment.currency={payment.currency}")
+        logger.info(f"[STARS SUCCESS] payment.total_amount={payment.total_amount}")
+        logger.info(f"[STARS SUCCESS] payment.invoice_payload={payment.invoice_payload}")
+        logger.info(f"[STARS SUCCESS] payment.telegram_payment_charge_id={getattr(payment, 'telegram_payment_charge_id', 'N/A')}")
+        
+        # Проверяем, что это платеж через Stars (валюта XTR)
+        if payment.currency != 'XTR':
+            logger.warning(f"[STARS SUCCESS] ❌ Платеж не через Stars: currency={payment.currency}")
+            logger.warning(f"[STARS SUCCESS] Пропускаем обработку (это не Stars платеж)")
+            return
+        
+        logger.info(f"[STARS SUCCESS] ✅ Это Stars платеж (XTR), продолжаем обработку...")
+        
+        # Извлекаем payment_id из invoice_payload
+        invoice_payload = payment.invoice_payload
+        logger.info(f"[STARS SUCCESS] invoice_payload={invoice_payload}")
+        
+        if not invoice_payload or not invoice_payload.startswith('stars_'):
+            logger.error(f"[STARS SUCCESS] ❌ Неверный invoice_payload: {invoice_payload}")
+            logger.error(f"[STARS SUCCESS] Ожидался формат 'stars_<payment_id>'")
+            bot.reply_to(message, "❌ Ошибка: неверный идентификатор платежа")
+            return
+        
+        payment_id = invoice_payload.replace('stars_', '')
+        logger.info(f"[STARS SUCCESS] ✅ Извлечен payment_id: {payment_id}")
+        
+        # Получаем информацию о платеже из БД
+        logger.info(f"[STARS SUCCESS] Ищем платеж в БД по payment_id={payment_id}")
+        from database.db_operations import get_payment_by_id, update_payment_status, create_subscription
+        
+        # Ищем платеж по payment_id
+        payment_data = None
+        try:
+            logger.info(f"[STARS SUCCESS] Выполняем SQL запрос для поиска платежа...")
+            from database.db_connection import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status
+                FROM payments 
+                WHERE payment_id = %s
+            """, (payment_id,))
+            row = cursor.fetchone()
+            if row:
+                payment_data = {
+                    'payment_id': row[0],
+                    'user_id': row[1],
+                    'chat_id': row[2],
+                    'subscription_type': row[3],
+                    'plan_type': row[4],
+                    'period_type': row[5],
+                    'group_size': row[6],
+                    'amount': row[7],
+                    'status': row[8]
+                }
+                logger.info(f"[STARS SUCCESS] ✅ Платеж найден в БД: {payment_data}")
+            else:
+                logger.warning(f"[STARS SUCCESS] ⚠️ Платеж не найден в БД (row=None)")
+            cursor.close()
+        except Exception as e:
+            logger.error(f"[STARS SUCCESS] ❌ Ошибка получения платежа из БД: {e}", exc_info=True)
+        
+        if not payment_data:
+            logger.error(f"[STARS SUCCESS] ❌ Платеж {payment_id} не найден в БД")
+            logger.error(f"[STARS SUCCESS] Возможные причины:")
+            logger.error(f"[STARS SUCCESS]   1. Платеж не был сохранен при создании invoice")
+            logger.error(f"[STARS SUCCESS]   2. payment_id не совпадает")
+            logger.error(f"[STARS SUCCESS]   3. Проблема с БД")
+            bot.reply_to(message, "❌ Ошибка: платеж не найден в базе данных")
+            return
+        
+        # Проверяем, что платеж еще не обработан
+        logger.info(f"[STARS SUCCESS] Текущий статус платежа: {payment_data['status']}")
+        if payment_data['status'] == 'succeeded':
+            logger.warning(f"[STARS SUCCESS] ⚠️ Платеж {payment_id} уже обработан ранее")
+            bot.reply_to(message, "✅ Платеж уже был обработан ранее")
+            return
+        
+        logger.info(f"[STARS SUCCESS] Платеж найден, статус={payment_data['status']}, продолжаем обработку...")
+        
+        # Обновляем статус платежа
+        try:
+            from database.db_connection import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE payments 
+                SET status = 'succeeded'
+                WHERE payment_id = %s
+            """, (payment_id,))
+            conn.commit()
+            cursor.close()
+            logger.info(f"[STARS] Статус платежа {payment_id} обновлен на 'succeeded'")
+        except Exception as e:
+            logger.error(f"[STARS] Ошибка обновления статуса платежа: {e}", exc_info=True)
+        
+        # Создаем или продлеваем подписку
+        try:
+            subscription_id = create_subscription(
+                user_id=payment_data['user_id'],
+                chat_id=payment_data['chat_id'],
+                subscription_type=payment_data['subscription_type'],
+                plan_type=payment_data['plan_type'],
+                period_type=payment_data['period_type'],
+                group_size=payment_data['group_size'],
+                price=payment_data['amount']
+            )
+            
+            logger.info(f"[STARS] Подписка создана/продлена: subscription_id={subscription_id}")
+            
+            # Отправляем подтверждение пользователю
+            text = "✅ <b>Оплата успешно завершена!</b>\n\n"
+            text += f"💰 Оплачено: {payment.total_amount}⭐ ({payment_data['amount']}₽)\n"
+            text += f"📋 Подписка активирована\n\n"
+            text += "Спасибо за покупку! 🎉"
+            
+            bot.reply_to(message, text, parse_mode='HTML')
+            
+        except Exception as e:
+            logger.error(f"[STARS] Ошибка создания подписки: {e}", exc_info=True)
+            bot.reply_to(message, "❌ Ошибка активации подписки. Обратитесь к администратору.")
+        
+    except Exception as e:
+        logger.error(f"[STARS] Ошибка обработки successful_payment: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке платежа. Обратитесь к администратору.")
+        except:
+            pass
+
+# Flask app для webhook - используем приложение из web_app.py
+from web.web_app import create_web_app
+app = create_web_app(bot)
+logger.info("[DEBUG] Flask app создан из web_app.py")
+
+# Определяем, где запускается бот: на Render, Railway или локально
+try:
+    RENDER_EXTERNAL_URL = os.getenv('RENDER_EXTERNAL_URL')
+    RENDER_SERVICE_ID = os.getenv('RENDER_SERVICE_ID')
+    RENDER = os.getenv('RENDER')
+    RAILWAY_PUBLIC_DOMAIN = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+    PORT = os.getenv('PORT')
+    
+    IS_PRODUCTION = bool(RENDER_EXTERNAL_URL or RAILWAY_PUBLIC_DOMAIN or (RENDER and PORT))
+    logger.info(f"[DEBUG] IS_PRODUCTION={IS_PRODUCTION}")
+    logger.info(f"[DEBUG] RENDER_EXTERNAL_URL={RENDER_EXTERNAL_URL}")
+    logger.info(f"[DEBUG] RAILWAY_PUBLIC_DOMAIN={RAILWAY_PUBLIC_DOMAIN}")
+    logger.info(f"[DEBUG] PORT={PORT}")
+except Exception as e:
+    logger.error(f"[DEBUG] Ошибка определения окружения: {e}")
+    IS_PRODUCTION = False
+
+if IS_PRODUCTION:
+    # Production окружение - используем webhook
+    logger.info("Production окружение - используем webhook")
+    
+    # Определяем URL для webhook
+    webhook_url = None
+    if RENDER_EXTERNAL_URL:
+        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
+        logger.info(f"Используем RENDER_EXTERNAL_URL: {webhook_url}")
+    elif RAILWAY_PUBLIC_DOMAIN:
+        webhook_url = f"https://{RAILWAY_PUBLIC_DOMAIN}/webhook"
+        logger.info(f"Используем RAILWAY_PUBLIC_DOMAIN: {webhook_url}")
+    
+    if webhook_url:
+        allowed_updates = [
+            "message",
+            "edited_message",
+            "callback_query",
+            "message_reaction",
+            "message_reaction_count",
+            "chat_member",
+            "my_chat_member"
+        ]
+        logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
+        try:
+            bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
+            logger.info(f"Webhook успешно установлен: {webhook_url}")
+            logger.info(f"allowed_updates включает: {', '.join(allowed_updates)}")
+        except Exception as e:
+            logger.error(f"ОШИБКА при set_webhook: {e}")
+    else:
+        logger.warning("Webhook URL не определён! Установите RENDER_EXTERNAL_URL или RAILWAY_PUBLIC_DOMAIN")
+
+    # КЛЮЧЕВОЕ: запускаем Flask сервер
+    port = int(os.getenv('PORT', 10000))
+    logger.info(f"Запускаем Flask сервер на 0.0.0.0:{port}")
+    
+    # Это важно — чтобы Render сразу увидел порт
+    logger.info(f"Текущий хост: {socket.gethostname()}")
+    
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+else:
+    # Локальный запуск - используем polling (только если IS_PRODUCTION=False)
+    logger.info("Локальное окружение - будет использован polling")
+    try:
+        bot.remove_webhook()
+        logger.info("Старые webhook очищены")
+    except Exception as e:
+        logger.warning(f"Не удалось очистить webhook: {e}")
+    
+    # Запускаем polling независимо от того, как выполняется код
+    # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
+    logger.info("Локальный запуск: используется polling")
+    try:
+        bot.infinity_polling()
+    except KeyboardInterrupt:
+        logger.info("Получен сигнал прерывания, останавливаем бота...")
+    except Exception as e:
+        logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
+        raise
+
+
+# Админская команда /unsubscribe для отмены подписок
+@bot.message_handler(commands=['unsubscribe'])
+def unsubscribe_command(message):
+    """Админская команда для отмены подписок пользователей или групп"""
+    user_id = message.from_user.id
+    
+    # Проверяем, что это администратор
+    if user_id != 301810276:
+        bot.reply_to(message, "❌ Эта команда доступна только администратору.")
+        return
+    
+    try:
+        bot.reply_to(message, "Введите ID пользователя или ID группы для просмотра информации о подписке:")
+        
+        # Сохраняем состояние ожидания ID
+        if 'admin_unsubscribe_state' not in globals():
+            globals()['admin_unsubscribe_state'] = {}
+        globals()['admin_unsubscribe_state'][user_id] = {'waiting_for_id': True}
+        
+    except Exception as e:
+        logger.error(f"[UNSUBSCRIBE] Ошибка: {e}", exc_info=True)
+        bot.reply_to(message, "❌ Произошла ошибка.")
+
+
+# Обработчик текстовых сообщений для команды /unsubscribe
+@bot.message_handler(func=lambda m: m.text and not m.text.startswith('/') and 
+                     'admin_unsubscribe_state' in globals() and 
+                     m.from_user.id in globals().get('admin_unsubscribe_state', {}) and
+                     globals()['admin_unsubscribe_state'].get(m.from_user.id, {}).get('waiting_for_id', False))
+def handle_unsubscribe_id(message):
+    """Обрабатывает введенный ID пользователя или группы"""
+    user_id = message.from_user.id
+    
+    if user_id != 301810276:
+        return
+    
+    try:
+        input_text = message.text.strip()
+        
+        # Пытаемся определить, это user_id или chat_id (group_id)
+        try:
+            target_id = int(input_text)
+        except ValueError:
+            bot.reply_to(message, "❌ Неверный формат ID. Введите числовой ID.")
+            return
+        
+        # Ищем подписки по user_id или chat_id
+        from database.db_operations import get_active_subscription, get_active_group_subscription_by_chat_id
+        from database.db_connection import get_db_connection, db_lock
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        subscriptions = []
+        
+        # Проверяем как user_id
+        with db_lock:
+            cursor.execute("""
+                SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
+                       next_payment_date, group_size, payment_method_id
+                FROM subscriptions
+                WHERE is_active = TRUE AND (user_id = %s OR chat_id = %s)
+            """, (target_id, target_id))
+            rows = cursor.fetchall()
+            
+            for row in rows:
+                subscriptions.append({
+                    'id': row.get('id') if isinstance(row, dict) else row[0],
+                    'chat_id': row.get('chat_id') if isinstance(row, dict) else row[1],
+                    'user_id': row.get('user_id') if isinstance(row, dict) else row[2],
+                    'subscription_type': row.get('subscription_type') if isinstance(row, dict) else row[3],
+                    'plan_type': row.get('plan_type') if isinstance(row, dict) else row[4],
+                    'period_type': row.get('period_type') if isinstance(row, dict) else row[5],
+                    'price': float(row.get('price') if isinstance(row, dict) else row[6]),
+                    'next_payment_date': row.get('next_payment_date') if isinstance(row, dict) else row[7],
+                    'group_size': row.get('group_size') if isinstance(row, dict) else row[8],
+                    'payment_method_id': row.get('payment_method_id') if isinstance(row, dict) else (row[9] if len(row) > 9 else None)
+                })
+        
+        if not subscriptions:
+            bot.reply_to(message, f"❌ Активные подписки для ID {target_id} не найдены.")
+            # Удаляем состояние
+            if 'admin_unsubscribe_state' in globals() and user_id in globals()['admin_unsubscribe_state']:
+                del globals()['admin_unsubscribe_state'][user_id]
+            return
+        
+        # Показываем информацию о подписках
+        for sub in subscriptions:
+            plan_names = {
+                'notifications': '🔔 Уведомления о сериалах',
+                'recommendations': '🎯 Персональные рекомендации',
+                'tickets': '🎫 Билеты в кино',
+                'all': '📦 Все режимы'
+            }
+            period_names = {
+                'month': 'месяц',
+                '3months': '3 месяца',
+                'year': 'год',
+                'lifetime': 'навсегда'
+            }
+            
+            plan_name = plan_names.get(sub['plan_type'], sub['plan_type'])
+            period_name = period_names.get(sub['period_type'], sub['period_type'])
+            
+            text = f"📋 <b>Информация о подписке</b>\n\n"
+            text += f"ID подписки: <b>{sub['id']}</b>\n"
+            text += f"Тип: <b>{'Личная' if sub['subscription_type'] == 'personal' else 'Групповая'}</b>\n"
+            text += f"Пакет: <b>{plan_name}</b>\n"
+            text += f"Период: <b>{period_name}</b>\n"
+            text += f"Сумма: <b>{sub['price']}₽</b>\n"
+            
+            if sub['next_payment_date']:
+                next_payment = sub['next_payment_date']
+                if isinstance(next_payment, str):
+                    from datetime import datetime
+                    next_payment = datetime.fromisoformat(next_payment.replace('Z', '+00:00'))
+                text += f"Дата списания: <b>{next_payment.strftime('%d.%m.%Y')}</b>\n"
+            
+            if sub['subscription_type'] == 'group' and sub['group_size']:
+                # Получаем количество участников
+                cursor.execute("""
+                    SELECT COUNT(*) FROM subscription_members WHERE subscription_id = %s
+                """, (sub['id'],))
+                members_count = cursor.fetchone()[0] if cursor.rowcount > 0 else 0
+                text += f"Участников: <b>{members_count}</b> из {sub['group_size']}\n"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("❌ Отменить подписку", callback_data=f"admin_unsubscribe:{sub['id']}"))
+            markup.add(InlineKeyboardButton("❌ Выход", callback_data="admin_unsubscribe:exit"))
+            
+            bot.send_message(message.chat.id, text, parse_mode='HTML', reply_markup=markup)
+        
+        # Удаляем состояние
+        if 'admin_unsubscribe_state' in globals() and user_id in globals()['admin_unsubscribe_state']:
+            del globals()['admin_unsubscribe_state'][user_id]
+        
+    except Exception as e:
+        logger.error(f"[UNSUBSCRIBE] Ошибка обработки ID: {e}", exc_info=True)
+        bot.reply_to(message, "❌ Произошла ошибка при обработке ID.")
+
+
+# Обработчик callback для кнопок отмены подписки
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin_unsubscribe:"))
+def admin_unsubscribe_callback(call):
+    """Обработчик кнопок отмены подписки администратором"""
+    user_id = call.from_user.id
+    
+    if user_id != 301810276:
+        bot.answer_callback_query(call.id, "❌ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        action = call.data.split(":", 1)[1]
+        
+        if action == "exit":
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+            bot.answer_callback_query(call.id, "Сообщение закрыто")
+            return
+        
+        subscription_id = int(action)
+        
+        # Отменяем подписку
+        from database.db_operations import cancel_subscription
+        
+        if cancel_subscription(subscription_id, user_id):
+            bot.answer_callback_query(call.id, "✅ Подписка отменена", show_alert=True)
+            bot.edit_message_text(
+                "✅ <b>Подписка отменена</b>\n\nАвтоматические списания прекращены.",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode='HTML'
+            )
+            logger.info(f"[UNSUBSCRIBE] Администратор {user_id} отменил подписку {subscription_id}")
+        else:
+            bot.answer_callback_query(call.id, "❌ Ошибка отмены подписки", show_alert=True)
+    
+    except Exception as e:
+        logger.error(f"[UNSUBSCRIBE] Ошибка в callback: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            
