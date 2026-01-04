@@ -415,7 +415,7 @@ def get_seasons_data(kp_id):
 
 
 def get_similars(kp_id):
-    """Получает похожие фильмы"""
+    """Получает похожие фильмы с типом"""
     headers = {'X-API-KEY': KP_TOKEN}
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/similars"
     try:
@@ -423,7 +423,15 @@ def get_similars(kp_id):
         if response.status_code == 200:
             data = response.json()
             similars = data.get('items', [])
-            return [(s.get('filmId'), s.get('nameRu') or s.get('nameEn', 'Без названия')) for s in similars[:5]]
+            result = []
+            for s in similars[:10]:  # Берем больше, чтобы потом отфильтровать
+                film_id = s.get('filmId')
+                name = s.get('nameRu') or s.get('nameEn', 'Без названия')
+                film_type = s.get('type', '').upper()
+                is_series = film_type == 'TV_SERIES'
+                if film_id and name:
+                    result.append((film_id, name, is_series))
+            return result
         return []
     except Exception as e:
         logger.error(f"Ошибка get_similars: {e}", exc_info=True)

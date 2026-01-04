@@ -2743,8 +2743,23 @@ def get_seasons_data(kp_id):
         logger.error(f"Ошибка get_seasons_data: {e}", exc_info=True)
         return []
 
+def get_film_type(kp_id):
+    """Получает тип фильма (FILM или TV_SERIES)"""
+    headers = {'X-API-KEY': KP_TOKEN}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            film_type = data.get('type', '').upper()
+            return film_type == 'TV_SERIES'
+        return False
+    except Exception as e:
+        logger.error(f"Ошибка get_film_type: {e}", exc_info=True)
+        return False
+
 def get_similars(kp_id):
-    """Получает похожие фильмы"""
+    """Получает похожие фильмы с типом"""
     headers = {'X-API-KEY': KP_TOKEN}
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/similars"
     try:
@@ -2752,14 +2767,22 @@ def get_similars(kp_id):
         if response.status_code == 200:
             data = response.json()
             similars = data.get('items', [])
-            return [(s.get('filmId'), s.get('nameRu') or s.get('nameEn', 'Без названия')) for s in similars[:5]]
+            result = []
+            for s in similars[:10]:  # Берем больше, чтобы потом отфильтровать
+                film_id = s.get('filmId')
+                name = s.get('nameRu') or s.get('nameEn', 'Без названия')
+                film_type = s.get('type', '').upper()
+                is_series = film_type == 'TV_SERIES'
+                if film_id and name:
+                    result.append((film_id, name, is_series))
+            return result
         return []
     except Exception as e:
         logger.error(f"Ошибка get_similars: {e}", exc_info=True)
         return []
 
 def get_sequels(kp_id):
-    """Получает продолжения и приквелы"""
+    """Получает продолжения и приквелы с типом"""
     headers = {'X-API-KEY': KP_TOKEN}
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/sequels_and_prequels"
     try:
@@ -2767,7 +2790,15 @@ def get_sequels(kp_id):
         if response.status_code == 200:
             data = response.json()
             sequels = data.get('items', [])
-            return [(s.get('filmId'), s.get('nameRu') or s.get('nameEn', 'Без названия')) for s in sequels[:5]]
+            result = []
+            for s in sequels[:10]:  # Берем больше, чтобы потом отфильтровать
+                film_id = s.get('filmId')
+                name = s.get('nameRu') or s.get('nameEn', 'Без названия')
+                film_type = s.get('type', '').upper()
+                is_series = film_type == 'TV_SERIES'
+                if film_id and name:
+                    result.append((film_id, name, is_series))
+            return result
         return []
     except Exception as e:
         logger.error(f"Ошибка get_sequels: {e}", exc_info=True)
@@ -5844,25 +5875,74 @@ def handle_rating_internal(message, rating):
                 
                 # Если средняя оценка > 9, показываем похожие фильмы и продолжения
                 if avg and avg > 9 and kp_id:
+                    # Определяем тип текущего фильма
+                    is_current_series = get_film_type(kp_id)
+                    
                     similars = get_similars(kp_id)
                     sequels = get_sequels(kp_id)
                     
-                    if similars or sequels:
+                    # Фильтруем похожие и продолжения по типу (фильмы к фильмам, сериалы к сериалам)
+                    filtered_similars = []
+                    filtered_sequels = []
+                    
+                    # Сначала добавляем элементы того же типа
+                    for item in similars:
+                        if len(item) >= 3:
+                            fid, name, is_series = item[0], item[1], item[2]
+                            if is_series == is_current_series:
+                                filtered_similars.append((fid, name, is_series))
+                    
+                    # Затем добавляем элементы другого типа, если не хватает
+                    if len(filtered_similars) < 5:
+                        for item in similars:
+                            if len(item) >= 3:
+                                fid, name, is_series = item[0], item[1], item[2]
+                                if is_series != is_current_series and (fid, name, is_series) not in filtered_similars:
+                                    filtered_similars.append((fid, name, is_series))
+                    
+                    # То же самое для продолжений
+                    for item in sequels:
+                        if len(item) >= 3:
+                            fid, name, is_series = item[0], item[1], item[2]
+                            if is_series == is_current_series:
+                                filtered_sequels.append((fid, name, is_series))
+                    
+                    if len(filtered_sequels) < 5:
+                        for item in sequels:
+                            if len(item) >= 3:
+                                fid, name, is_series = item[0], item[1], item[2]
+                                if is_series != is_current_series and (fid, name, is_series) not in filtered_sequels:
+                                    filtered_sequels.append((fid, name, is_series))
+                    
+                    # Ограничиваем количество
+                    filtered_similars = filtered_similars[:5]
+                    filtered_sequels = filtered_sequels[:5]
+                    
+                    if filtered_similars or filtered_sequels:
                         markup = InlineKeyboardMarkup(row_width=1)
-                        if similars:
-                            for fid, name in similars:
-                                if len(name) > 50:
-                                    name = name[:47] + "..."
-                                markup.add(InlineKeyboardButton(f"🎬 {name}", callback_data=f"add_similar:{fid}"))
                         
-                        if sequels:
-                            for fid, name in sequels:
-                                if len(name) > 50:
-                                    name = name[:47] + "..."
-                                markup.add(InlineKeyboardButton(f"▶️ {name}", callback_data=f"add_similar:{fid}"))
+                        if filtered_similars:
+                            for item in filtered_similars:
+                                if len(item) >= 3:
+                                    fid, name, is_series = item[0], item[1], item[2]
+                                    if len(name) > 50:
+                                        name = name[:47] + "..."
+                                    emoji = "📺" if is_series else "🎬"
+                                    markup.add(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"add_similar:{fid}"))
+                        
+                        if filtered_sequels:
+                            for item in filtered_sequels:
+                                if len(item) >= 3:
+                                    fid, name, is_series = item[0], item[1], item[2]
+                                    if len(name) > 50:
+                                        name = name[:47] + "..."
+                                    emoji = "📺" if is_series else "🎬"
+                                    markup.add(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"add_similar:{fid}"))
                         
                         if markup.keyboard:
-                            bot.send_message(chat_id, "🎥 Фильм высоко оценён! Посмотреть похожие или продолжения?", reply_markup=markup)
+                            # Меняем текст в зависимости от типа
+                            message_text = "📺 Сериал высоко оценён! Посмотреть похожие или продолжения?" if is_current_series else "🎥 Фильм высоко оценён! Посмотреть похожие или продолжения?"
+                            bot.send_message(chat_id, message_text, reply_markup=markup)
         except Exception as e:
             logger.error(f"Ошибка при сохранении оценки: {e}", exc_info=True)
             bot.reply_to(message, "Произошла ошибка при сохранении оценки. Попробуйте позже.")
@@ -12375,10 +12455,14 @@ def _random_final(call, chat_id, user_id):
             # Убираем дубликаты по kp_id
             seen_kp_ids = set()
             unique_similars = []
-            for similar_kp_id, similar_title in all_similars:
-                if similar_kp_id not in seen_kp_ids:
-                    seen_kp_ids.add(similar_kp_id)
-                    unique_similars.append((similar_kp_id, similar_title))
+            for item in all_similars:
+                # Поддерживаем как старый формат (kp_id, title), так и новый (kp_id, title, is_series)
+                if len(item) >= 2:
+                    similar_kp_id = item[0]
+                    similar_title = item[1]
+                    if similar_kp_id not in seen_kp_ids:
+                        seen_kp_ids.add(similar_kp_id)
+                        unique_similars.append((similar_kp_id, similar_title))
             
             if not unique_similars:
                 bot.edit_message_text("😔 Не найдено похожих фильмов к вашим любимым.", chat_id, call.message.message_id)
@@ -12556,10 +12640,14 @@ def _random_final(call, chat_id, user_id):
             # Убираем дубликаты по kp_id
             seen_kp_ids = set()
             unique_similars = []
-            for similar_kp_id, similar_title in all_similars:
-                if similar_kp_id not in seen_kp_ids:
-                    seen_kp_ids.add(similar_kp_id)
-                    unique_similars.append((similar_kp_id, similar_title))
+            for item in all_similars:
+                # Поддерживаем как старый формат (kp_id, title), так и новый (kp_id, title, is_series)
+                if len(item) >= 2:
+                    similar_kp_id = item[0]
+                    similar_title = item[1]
+                    if similar_kp_id not in seen_kp_ids:
+                        seen_kp_ids.add(similar_kp_id)
+                        unique_similars.append((similar_kp_id, similar_title))
             
             if not unique_similars:
                 bot.edit_message_text("😔 Не найдено похожих фильмов к любимым группы.", chat_id, call.message.message_id)
@@ -12924,7 +13012,13 @@ def _random_final(call, chat_id, user_id):
                     filtered_similars = []
                     headers = {'X-API-KEY': KP_TOKEN}
                     
-                    for similar_kp_id, similar_title in similars:
+                    for item in similars:
+                        # Поддерживаем как старый формат (kp_id, title), так и новый (kp_id, title, is_series)
+                        if len(item) >= 2:
+                            similar_kp_id = item[0]
+                            similar_title = item[1]
+                        else:
+                            continue
                         try:
                             # Получаем информацию о фильме через API
                             url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{similar_kp_id}"
@@ -15921,6 +16015,26 @@ def series_season_all_callback(call):
         
         logger.info(f"[SERIES SEASON ALL] Отмечено эпизодов: {marked_count} из {len(episodes)}")
         bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
+        
+        # Обновляем текущее сообщение с эпизодами, чтобы показать все отмеченные галочки
+        # Получаем message_thread_id из сообщения, если оно есть
+        message_thread_id = None
+        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+            message_thread_id = call.message.message_thread_id
+        
+        # Используем функцию show_episodes_page для обновления сообщения
+        from api.kinopoisk_api import get_seasons_data
+        seasons_data = get_seasons_data(kp_id)
+        if seasons_data:
+            # Находим текущую страницу из состояния пользователя или используем 1
+            current_page = 1
+            if user_id in user_episodes_state:
+                state = user_episodes_state[user_id]
+                if state.get('kp_id') == kp_id and state.get('season_num') == season_num:
+                    current_page = state.get('page', 1)
+            
+            # Обновляем сообщение с эпизодами
+            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
         from api.kinopoisk_api import get_seasons_data
