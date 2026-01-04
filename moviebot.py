@@ -8042,6 +8042,53 @@ def handle_search_type_callback(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "search_series_from_seasons")
+def search_series_from_seasons_callback(call):
+    """Обработчик кнопки 'Найти сериалы' из раздела сериалов"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Устанавливаем тип поиска на 'series'
+        user_search_state[user_id] = {
+            'chat_id': chat_id,
+            'message_id': call.message.message_id,
+            'search_type': 'series'
+        }
+        
+        # Создаем кнопки для выбора типа поиска (но уже выбран сериал)
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+            InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+        )
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        
+        # Обновляем сообщение с указанием выбранного типа
+        try:
+            bot.edit_message_text(
+                "🔍 Укажите запрос для поиска 📺 сериалы в ответном сообщении, например: джон уик",
+                chat_id,
+                call.message.message_id,
+                reply_markup=markup
+            )
+        except:
+            # Если не удалось отредактировать, отправляем новое сообщение
+            bot.send_message(
+                chat_id,
+                "🔍 Укажите запрос для поиска 📺 сериалы в ответном сообщении, например: джон уик",
+                reply_markup=markup
+            )
+        
+        logger.info(f"[SEARCH] Пользователь {user_id} выбрал поиск сериалов из раздела сериалов")
+    except Exception as e:
+        logger.error(f"[SEARCH] Ошибка в search_series_from_seasons_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
 def handle_add_film_callback(call):
     """Обработчик показа описания фильма из результатов поиска"""
@@ -13774,7 +13821,14 @@ def seasons_command(message):
         series = cursor.fetchall()
     
     if not series:
-        bot.reply_to(message, "📺 Нет сериалов в базе.")
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🔍 Найти сериалы", callback_data="search_series_from_seasons"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        bot.reply_to(
+            message,
+            "📺 Нет сериалов в базе. Используйте /search, чтобы найти и добавить сериалы, или просто пришлите ссылку на Кинопоиск на сериал",
+            reply_markup=markup
+        )
         return
     
     markup = InlineKeyboardMarkup(row_width=1)
