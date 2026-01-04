@@ -21548,24 +21548,10 @@ def got_payment(message):
         except:
             pass
 
-# Flask app для webhook (минимальный, только для обработки webhook от Telegram)
-app = Flask(__name__)
-
-@app.route('/', methods=['POST'])
-def webhook():
-    """Обработчик webhook от Telegram"""
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return ''
-    else:
-        abort(403)
-
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({'status': 'ok'}), 200
+# Flask app для webhook - используем приложение из web_app.py
+from web.web_app import create_web_app
+app = create_web_app(bot)
+logger.info("[DEBUG] Flask app создан из web_app.py")
 
 # Определяем, где запускается бот: на Render, Railway или локально
 try:
