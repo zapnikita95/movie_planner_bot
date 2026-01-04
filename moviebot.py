@@ -7080,7 +7080,82 @@ def handle_rating(message):
                     avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
                     
                     avg_str = f"{avg:.1f}" if avg else "—"
-                    bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                    
+                    # Создаем кнопку "Вернуться к описанию"
+                    markup = InlineKeyboardMarkup()
+                    
+                    # Получаем kp_id для обновления сообщения
+                    cursor.execute("SELECT kp_id, title, link, watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                    movie_row = cursor.fetchone()
+                    kp_id = None
+                    title = None
+                    link = None
+                    watched = None
+                    if movie_row:
+                        kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+                        title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[1]
+                        link = movie_row.get('link') if isinstance(movie_row, dict) else movie_row[2]
+                        watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[3]
+                    
+                    if kp_id:
+                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"show_film_description:{kp_id}"))
+                    
+                    reply_msg = bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", reply_markup=markup if markup.keyboard else None)
+                    
+                    # Сохраняем message_id для удаления при возврате к описанию
+                    if kp_id and reply_msg:
+                        rating_messages[reply_msg.message_id] = film_id
+                    
+                    # Обновляем исходное сообщение с описанием фильма, если оно есть
+                    if message.reply_to_message and kp_id:
+                        try:
+                            # Ищем исходное сообщение с описанием фильма в цепочке реплаев
+                            original_msg = message.reply_to_message
+                            checked_ids = set()
+                            found_description_msg = None
+                            
+                            while original_msg and original_msg.message_id not in checked_ids:
+                                checked_ids.add(original_msg.message_id)
+                                
+                                # Проверяем, есть ли в сообщении ссылка на Кинопоиск с нужным kp_id
+                                msg_text = original_msg.text or original_msg.caption or ""
+                                if kp_id in msg_text or (link and link in msg_text):
+                                    found_description_msg = original_msg
+                                    break
+                                
+                                # Проверяем bot_messages
+                                if original_msg.message_id in bot_messages:
+                                    msg_link = bot_messages[original_msg.message_id]
+                                    if link and link in msg_link:
+                                        found_description_msg = original_msg
+                                        break
+                                
+                                # Переходим к родительскому сообщению
+                                original_msg = original_msg.reply_to_message if hasattr(original_msg, 'reply_to_message') else None
+                            
+                            # Если нашли сообщение с описанием, обновляем его
+                            if found_description_msg:
+                                try:
+                                    # Получаем информацию о фильме через API
+                                    from api.kinopoisk_api import extract_movie_info
+                                    if link:
+                                        info = extract_movie_info(link)
+                                        if info:
+                                            existing = (film_id, title, watched)
+                                            message_thread_id = None
+                                            if found_description_msg and hasattr(found_description_msg, 'message_thread_id') and found_description_msg.message_thread_id:
+                                                message_thread_id = found_description_msg.message_thread_id
+                                            
+                                            show_film_info_with_buttons(
+                                                chat_id, user_id, info, link, kp_id, existing,
+                                                message_id=found_description_msg.message_id,
+                                                message_thread_id=message_thread_id
+                                            )
+                                            logger.info(f"[HANDLE RATING] Обновлено сообщение с описанием фильма: kp_id={kp_id}, message_id={found_description_msg.message_id}")
+                                except Exception as update_e:
+                                    logger.error(f"[HANDLE RATING] Ошибка обновления сообщения с описанием: {update_e}", exc_info=True)
+                        except Exception as find_e:
+                            logger.warning(f"[HANDLE RATING] Не удалось найти/обновить исходное сообщение: {find_e}")
                 except Exception as db_error:
                     conn.rollback()
                     logger.error(f"Ошибка при сохранении оценки: {db_error}", exc_info=True)
@@ -7810,6 +7885,8 @@ def series_subscribe_callback(call):
             )
             bot.answer_callback_query(call.id, "✅ Подписка оформлена! Будем проверять новые серии")
         
+        logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
+        
         # Обновляем сообщение с описанием сериала, чтобы изменить кнопку
         try:
             # Получаем информацию о сериале из базы
@@ -7835,10 +7912,11 @@ def series_subscribe_callback(call):
                         # Обновляем существующее сообщение
                         message_id = call.message.message_id if call.message else None
                         show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
+                    else:
+                        logger.warning(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
         except Exception as e:
             logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
-        
-        logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
+            # Не прерываем выполнение - подписка уже оформлена
     except Exception as e:
         logger.error(f"[SERIES SUBSCRIBE] Ошибка: {e}", exc_info=True)
         try:
@@ -11031,7 +11109,76 @@ def handle_confirm_rating(call):
                 avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
                 
                 avg_str = f"{avg:.1f}" if avg else "—"
-                bot.reply_to(call.message, f"✅ Фильм *{title}* отмечен как просмотренный!\n\nСпасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", parse_mode='Markdown')
+                
+                # Получаем kp_id и link для обновления сообщения
+                cursor.execute("SELECT kp_id, link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                movie_info = cursor.fetchone()
+                kp_id = None
+                link = None
+                if movie_info:
+                    kp_id = movie_info.get('kp_id') if isinstance(movie_info, dict) else movie_info[0]
+                    link = movie_info.get('link') if isinstance(movie_info, dict) else movie_info[1]
+                
+                # Создаем кнопку "Вернуться к описанию"
+                markup = InlineKeyboardMarkup()
+                if kp_id:
+                    markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"show_film_description:{kp_id}"))
+                
+                reply_msg = bot.reply_to(call.message, f"✅ Фильм *{title}* отмечен как просмотренный!\n\nСпасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", parse_mode='Markdown', reply_markup=markup if markup.keyboard else None)
+                
+                # Сохраняем message_id для удаления при возврате к описанию
+                if kp_id and reply_msg:
+                    rating_messages[reply_msg.message_id] = film_id
+                
+                # Обновляем исходное сообщение с описанием фильма, если оно есть
+                if call.message.reply_to_message and kp_id and link:
+                    try:
+                        # Ищем исходное сообщение с описанием фильма
+                        original_msg = call.message.reply_to_message
+                        checked_ids = set()
+                        found_description_msg = None
+                        
+                        while original_msg and original_msg.message_id not in checked_ids:
+                            checked_ids.add(original_msg.message_id)
+                            
+                            # Проверяем, есть ли в сообщении ссылка на Кинопоиск с нужным kp_id
+                            msg_text = original_msg.text or original_msg.caption or ""
+                            if kp_id in msg_text or (link and link in msg_text):
+                                found_description_msg = original_msg
+                                break
+                            
+                            # Проверяем bot_messages
+                            if original_msg.message_id in bot_messages:
+                                msg_link = bot_messages[original_msg.message_id]
+                                if link and link in msg_link:
+                                    found_description_msg = original_msg
+                                    break
+                            
+                            # Переходим к родительскому сообщению
+                            original_msg = original_msg.reply_to_message if hasattr(original_msg, 'reply_to_message') else None
+                        
+                        # Если нашли сообщение с описанием, обновляем его
+                        if found_description_msg:
+                            try:
+                                # Получаем информацию о фильме через API
+                                from api.kinopoisk_api import extract_movie_info
+                                info = extract_movie_info(link)
+                                if info:
+                                    existing = (film_id, title, 1)  # watched = 1
+                                    message_thread_id = None
+                                    if found_description_msg and hasattr(found_description_msg, 'message_thread_id') and found_description_msg.message_thread_id:
+                                        message_thread_id = found_description_msg.message_thread_id
+                                    
+                                    show_film_info_with_buttons(
+                                        chat_id, user_id, info, link, kp_id, existing,
+                                        message_id=found_description_msg.message_id,
+                                        message_thread_id=message_thread_id
+                                    )
+                                    logger.info(f"[HANDLE CONFIRM RATING] Обновлено сообщение с описанием фильма: kp_id={kp_id}, message_id={found_description_msg.message_id}")
+                            except Exception as update_e:
+                                logger.error(f"[HANDLE CONFIRM RATING] Ошибка обновления сообщения с описанием: {update_e}", exc_info=True)
+                    except Exception as find_e:
+                        logger.warning(f"[HANDLE CONFIRM RATING] Не удалось найти/обновить исходное сообщение: {find_e}")
                 
                 # Удаляем из словаря
                 del rating_confirm_messages[message_id]
@@ -15178,7 +15325,15 @@ def seasons_command(message):
         except Exception as e:
             logger.warning(f"[SEASONS] Ошибка проверки статуса выхода для kp_id={kp_id}: {e}")
         
-        # Проверяем статус просмотра (только если есть доступ)
+        # Проверяем статус просмотра в БД (для всех, независимо от доступа)
+        watched_in_db = False
+        with db_lock:
+            cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            watched_row = cursor.fetchone()
+            if watched_row:
+                watched_in_db = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+        
+        # Проверяем статус просмотра эпизодов (только если есть доступ)
         all_episodes_watched = False
         has_some_watched = False
         if has_access:
@@ -15209,6 +15364,10 @@ def seasons_command(message):
                         all_episodes_watched = True
                     elif watched_episodes > 0:
                         has_some_watched = True
+        
+        # Если сериал помечен как просмотренный в БД, считаем его полностью просмотренным
+        if watched_in_db:
+            all_episodes_watched = True
         
         # Классифицируем сериал
         series_info = {
@@ -15349,6 +15508,9 @@ def seasons_list_callback(call):
         
         user_id = call.from_user.id
         
+        # Проверяем доступ к функциям уведомлений
+        has_access = has_notifications_access(chat_id, user_id)
+        
         for row in series:
             if isinstance(row, dict):
                 title = row.get('title')
@@ -15359,12 +15521,13 @@ def seasons_list_callback(call):
                 title = row[1]
                 kp_id = row[2]
             
-            # Проверяем, подписан ли пользователь на этот сериал
+            # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
             is_subscribed = False
-            with db_lock:
-                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                sub_row = cursor.fetchone()
-                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+            if has_access:
+                with db_lock:
+                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                    sub_row = cursor.fetchone()
+                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
             
             # Проверяем статус выхода сериала (для всех, независимо от доступа)
             is_airing = False
@@ -15373,36 +15536,49 @@ def seasons_list_callback(call):
             except Exception as e:
                 logger.warning(f"[SEASONS LIST] Ошибка проверки статуса выхода для kp_id={kp_id}: {e}")
             
-            # Проверяем статус просмотра
+            # Проверяем статус просмотра в БД (для всех, независимо от доступа)
+            watched_in_db = False
+            with db_lock:
+                cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                watched_row = cursor.fetchone()
+                if watched_row:
+                    watched_in_db = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+            
+            # Проверяем статус просмотра эпизодов (только если есть доступ)
             all_episodes_watched = False
             has_some_watched = False
-            seasons_data = get_seasons_data(kp_id)
-            if seasons_data:
-                # Получаем просмотренные эпизоды
-                with db_lock:
-                    cursor.execute('''
-                        SELECT season_number, episode_number 
-                        FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
-                    watched_rows = cursor.fetchall()
-                    watched_set = set()
-                    for w_row in watched_rows:
-                        if isinstance(w_row, dict):
-                            watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                        else:
-                            watched_set.add((str(w_row[0]), str(w_row[1])))
-                
-                # Подсчитываем эпизоды
-                total_episodes, watched_episodes = count_episodes_for_watch_check(
-                    seasons_data, is_airing, watched_set, chat_id, film_id, user_id
-                )
-                
-                if total_episodes > 0:
-                    if watched_episodes == total_episodes:
-                        all_episodes_watched = True
-                    elif watched_episodes > 0:
-                        has_some_watched = True
+            if has_access:
+                seasons_data = get_seasons_data(kp_id)
+                if seasons_data:
+                    # Получаем просмотренные эпизоды
+                    with db_lock:
+                        cursor.execute('''
+                            SELECT season_number, episode_number 
+                            FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id, user_id))
+                        watched_rows = cursor.fetchall()
+                        watched_set = set()
+                        for w_row in watched_rows:
+                            if isinstance(w_row, dict):
+                                watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
+                            else:
+                                watched_set.add((str(w_row[0]), str(w_row[1])))
+                    
+                    # Подсчитываем эпизоды
+                    total_episodes, watched_episodes = count_episodes_for_watch_check(
+                        seasons_data, is_airing, watched_set, chat_id, film_id, user_id
+                    )
+                    
+                    if total_episodes > 0:
+                        if watched_episodes == total_episodes:
+                            all_episodes_watched = True
+                        elif watched_episodes > 0:
+                            has_some_watched = True
+            
+            # Если сериал помечен как просмотренный в БД, считаем его полностью просмотренным
+            if watched_in_db:
+                all_episodes_watched = True
             
             # Классифицируем сериал
             series_info = {
