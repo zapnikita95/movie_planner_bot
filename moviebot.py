@@ -19,7 +19,7 @@ from bot.utils.parsing import *
 
 # Импорты для обратной совместимости и обработчиков
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand, ReplyKeyboardMarkup, KeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand, ReplyKeyboardMarkup, KeyboardButton, LabeledPrice
 import os
 import random
 import re
@@ -152,32 +152,39 @@ scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz,
 scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
 
-# Команды
-commands = [
-    BotCommand("start", "Главное меню"),
-    BotCommand("list", "Список непросмотренных фильмов"),
-    BotCommand("rate", "Оценить просмотренные фильмы"),
-    BotCommand("plan", "Запланировать просмотр дома или в кино"),
-    BotCommand("ticket", "Работа с билетами в кино"),
-    BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
-    BotCommand("stats", "Детальная статистика группы и участников"),
-    BotCommand("settings", "Настройки")
-]
-
-# Устанавливаем команды одинаково для личных чатов и групп
+# Импортируем функцию для установки команд из bot_init
 try:
-    # Для всех групповых чатов
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
-    logger.info("Команды установлены для всех групповых чатов")
-except Exception as e:
-    logger.error(f"Ошибка при установке команд для групповых чатов: {e}")
-
-try:
-    # Для всех личных чатов
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
-    logger.info("Команды установлены для личных чатов")
-except Exception as e:
-    logger.error(f"Ошибка при установке команд для личных чатов: {e}")
+    from bot.bot_init import setup_bot_commands
+    # Устанавливаем команды при запуске бота
+    setup_bot_commands(bot)
+except ImportError:
+    # Если модуль bot_init недоступен, устанавливаем команды напрямую
+    logger.warning("Модуль bot_init недоступен, устанавливаем команды напрямую")
+    commands = [
+        BotCommand("start", "Главное меню"),
+        BotCommand("list", "Список непросмотренных фильмов"),
+        BotCommand("rate", "Оценить просмотренные фильмы"),
+        BotCommand("plan", "Запланировать просмотр дома или в кино"),
+        BotCommand("ticket", "Работа с билетами в кино"),
+        BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
+        BotCommand("stats", "Детальная статистика группы и участников"),
+        BotCommand("settings", "Настройки")
+    ]
+    
+    # Устанавливаем команды для всех scope
+    scopes = [
+        (telebot.types.BotCommandScopeAllGroupChats(), "всех групповых чатов"),
+        (telebot.types.BotCommandScopeAllChatAdministrators(), "администраторов групп"),
+        (telebot.types.BotCommandScopeAllPrivateChats(), "всех личных чатов"),
+        (telebot.types.BotCommandScopeDefault(), "дефолтного scope")
+    ]
+    
+    for scope, description in scopes:
+        try:
+            bot.set_my_commands(commands, scope=scope)
+            logger.info(f"Команды установлены для {description}")
+        except Exception as e:
+            logger.error(f"Ошибка при установке команд для {description}: {e}")
 
 # БД уже инициализирована через init_database()
 # Используем глобальные объекты из модуля database
@@ -3795,9 +3802,14 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
         # Добавляем кнопку Билеты всегда, но под замочком если нет подписки
-        if has_tickets_access(message.chat.id, message.from_user.id):
-            markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
-        else:
+        try:
+            if has_tickets_access(message.chat.id, message.from_user.id):
+                markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
+        except Exception as e:
+            # В случае ошибки всегда показываем заблокированную версию
+            logger.warning(f"Ошибка при проверке доступа к билетам для user_id={message.from_user.id}: {e}")
             markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
@@ -3952,6 +3964,17 @@ def schedule_back_callback(call):
         markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+        # Добавляем кнопку Билеты всегда, но под замочком если нет подписки
+        user_id = call.from_user.id
+        try:
+            if has_tickets_access(chat_id, user_id):
+                markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
+        except Exception as e:
+            # В случае ошибки всегда показываем заблокированную версию
+            logger.warning(f"Ошибка при проверке доступа к билетам для user_id={user_id}: {e}")
+            markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
@@ -3994,6 +4017,17 @@ def back_to_start_menu_callback(call):
         markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+        # Добавляем кнопку Билеты всегда, но под замочком если нет подписки
+        user_id = call.from_user.id
+        try:
+            if has_tickets_access(chat_id, user_id):
+                markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
+        except Exception as e:
+            # В случае ошибки всегда показываем заблокированную версию
+            logger.warning(f"Ошибка при проверке доступа к билетам для user_id={user_id}: {e}")
+            markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
@@ -7221,8 +7255,6 @@ def series_subscribe_callback(call):
                         except:
                             pass
         
-        logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id}, film_id={film_id})")
-        
         if next_episode_date and next_episode:
             # Ставим уведомление на дату выхода следующей серии
             from datetime import timedelta
@@ -7267,24 +7299,56 @@ def series_subscribe_callback(call):
             )
             bot.answer_callback_query(call.id, "✅ Подписка оформлена! Будем проверять новые серии")
         
-        # Обновляем сообщение с кнопками, чтобы показать новое состояние подписки
+        logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id}, chat_id={chat_id})")
+        
+        # Обновляем сообщение с кнопкой подписки
         try:
             message_id = call.message.message_id
+            message_thread_id = None
+            if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                message_thread_id = call.message.message_thread_id
+            
+            # Получаем актуальные данные о сезонах для обновления сообщения
             from api.kinopoisk_api import get_seasons
             seasons_text = get_seasons(kp_id, chat_id, user_id)
             
             if seasons_text:
+                # Формируем обновленное сообщение с измененной кнопкой
                 full_text = f"📺 <b>{title}</b>\n\n{seasons_text}"
+                
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                # Теперь показываем кнопку "Отписаться", так как подписка активна
+                # Теперь показываем кнопку отписки, так как пользователь подписан
                 markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
                 
-                bot.edit_message_text(full_text, chat_id, message_id, parse_mode='HTML', reply_markup=markup)
-                logger.info(f"[SERIES SUBSCRIBE] Сообщение обновлено: кнопка изменена на 'Отписаться'")
+                # Добавляем кнопку "Назад", если она была в исходном сообщении
+                if call.message.reply_markup:
+                    for row in call.message.reply_markup.keyboard:
+                        for button in row:
+                            if button.callback_data == "seasons_list":
+                                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
+                                break
+                
+                # Обновляем сообщение
+                if message_thread_id:
+                    # Используем API напрямую для поддержки тредов
+                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
+                    params = {
+                        'chat_id': chat_id,
+                        'message_id': message_id,
+                        'text': full_text,
+                        'parse_mode': 'HTML',
+                        'message_thread_id': message_thread_id
+                    }
+                    if reply_markup_json:
+                        params['reply_markup'] = reply_markup_json
+                    bot.api_call('editMessageText', params)
+                else:
+                    bot.edit_message_text(full_text, chat_id, message_id, parse_mode='HTML', reply_markup=markup)
+                logger.info(f"[SERIES SUBSCRIBE] Сообщение обновлено: message_id={message_id}, message_thread_id={message_thread_id}")
         except Exception as e:
             logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
+            # Не прерываем выполнение, если не удалось обновить сообщение
     except Exception as e:
         logger.error(f"[SERIES SUBSCRIBE] Ошибка: {e}", exc_info=True)
         try:
@@ -14881,14 +14945,15 @@ def series_locked_callback(call):
 def series_track_callback(call):
     """Обработчик для отметки сезонов/серий как просмотренных"""
     try:
-        bot.answer_callback_query(call.id)
-        
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         message_id = call.message.message_id
         
         logger.info(f"[SERIES TRACK] Начало: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}")
+        
+        # Отвечаем на callback_query сразу для улучшения отзывчивости
+        bot.answer_callback_query(call.id)
         
         # Проверяем доступ к функциям уведомлений
         if not has_notifications_access(chat_id, user_id):
@@ -15013,7 +15078,6 @@ def series_track_callback(call):
                 bot.send_message(chat_id, text_msg, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
             else:
                 bot.send_message(chat_id, text_msg, reply_markup=markup, parse_mode='HTML')
-        bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
         try:
@@ -15040,7 +15104,7 @@ def handle_episodes_page(call):
         if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
             message_thread_id = call.message.message_thread_id
         
-        logger.info(f"[EPISODES PAGE] Переключение страницы: user_id={user_id}, kp_id={kp_id}, season={season_num}, page={page}, message_thread_id={message_thread_id}")
+        logger.info(f"[EPISODES PAGE] Переключение страницы: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}, season={season_num}, page={page}, message_thread_id={message_thread_id}")
         show_episodes_page(kp_id, season_num, chat_id, user_id, page, call.message.message_id, message_thread_id)
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка в handle_episodes_page: {e}", exc_info=True)
@@ -15773,17 +15837,20 @@ def has_recommendations_access(chat_id, user_id):
 
 def rubles_to_stars(rubles):
     """Конвертирует рубли в Telegram Stars
-    1 звезда = $0.99 = 80 рублей
-    Округляет копейки до рублей и звезды до целых значений
+    Курс: 50 звезд = $0.99 = 80 рублей
+    Значит: 1 рубль = 50/80 = 0.625 звезд
+    Округляет копейки до рублей и звезды до целых значений вверх
     """
+    import math
+    
     # Округляем рубли до целых (убираем копейки)
     rubles_rounded = round(rubles)
     
-    # Конвертируем в звезды: 1 звезда = 80 рублей
-    stars = rubles_rounded / 80.0
+    # Конвертируем в звезды: 50 звезд = 80 рублей, значит 1 рубль = 50/80 звезд
+    stars = rubles_rounded * (50.0 / 80.0)
     
-    # Округляем звезды до целых значений (вверх)
-    stars_rounded = int(round(stars))
+    # Округляем звезды до целых значений вверх (math.ceil)
+    stars_rounded = int(math.ceil(stars))
     
     # Минимум 1 звезда, если сумма больше 0
     if stars_rounded == 0 and rubles_rounded > 0:
@@ -18215,10 +18282,26 @@ def handle_payment_callback(call):
                 # Конвертируем в звезды для кнопки оплаты звездами
                 stars_amount = rubles_to_stars(final_price)
                 
+                # Сохраняем данные платежа в состояние для оплаты звездами
+                if user_id not in user_payment_state:
+                    user_payment_state[user_id] = {}
+                user_payment_state[user_id]['stars_payment'] = {
+                    'payment_id': payment_id,
+                    'sub_type': sub_type,
+                    'group_size': group_size,
+                    'plan_type': plan_type,
+                    'period_type': period_type,
+                    'amount': final_price,
+                    'stars_amount': stars_amount,
+                    'chat_id': payment_chat_id_for_db,
+                    'description': description
+                }
+                
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
-                # Добавляем кнопку оплаты звездами
-                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
+                # Добавляем кнопку оплаты звездами (используем короткий callback_data для экономии места)
+                payment_id_short = payment_id[:8]
+                callback_data_stars = f"pay_stars:{payment_id_short}"
                 markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                 
@@ -21410,7 +21493,7 @@ def handle_pay_stars_callback(call):
                 invoice_payload=invoice_payload,
                 provider_token="",  # Для Telegram Stars не нужен provider_token
                 currency="XTR",  # XTR - валюта Telegram Stars
-                prices=[LabeledPrice(label=description, amount=int(stars_amount))],
+                prices=[telebot.types.LabeledPrice(label=description, amount=int(stars_amount))],
                 start_parameter=full_payment_id[:16],  # Ограничение 64 символа
                 photo_url=None,
                 photo_size=None,
@@ -21645,10 +21728,6 @@ else:
         logger.info("Старые webhook очищены")
     except Exception as e:
         logger.warning(f"Не удалось очистить webhook: {e}")
-    
-    # Обновляем команды перед запуском
-    logger.info("Обновляю команды бота перед запуском...")
-    setup_bot_commands()
     
     # Запускаем polling независимо от того, как выполняется код
     # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
