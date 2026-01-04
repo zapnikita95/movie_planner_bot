@@ -127,48 +127,6 @@ def setup_menu_button(chat_id=None):
     except Exception as e:
         logger.error(f"❌ Ошибка при настройке menu button: {e}", exc_info=True)
 
-# Функция для установки команд бота
-def setup_bot_commands():
-    """Устанавливает команды бота для отображения в меню /"""
-    try:
-        from telebot.types import BotCommand, BotCommandScopeDefault, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
-        
-        # Список команд
-        commands = [
-            BotCommand("start", "Главное меню"),
-            BotCommand("list", "Список непросмотренных фильмов"),
-            BotCommand("rate", "Оценить просмотренные фильмы"),
-            BotCommand("plan", "Запланировать просмотр дома или в кино"),
-            BotCommand("ticket", "Работа с билетами в кино"),
-            BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
-            BotCommand("stats", "Детальная статистика группы и участников"),
-            BotCommand("settings", "Настройки")
-        ]
-        
-        # Устанавливаем команды для всех чатов (по умолчанию)
-        try:
-            bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-            logger.info("✅ Команды установлены для всех чатов (по умолчанию)")
-        except Exception as e:
-            logger.warning(f"⚠️ Не удалось установить команды по умолчанию: {e}")
-        
-        # Устанавливаем команды для групповых чатов
-        try:
-            bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
-            logger.info("✅ Команды установлены для групповых чатов")
-        except Exception as e:
-            logger.warning(f"⚠️ Не удалось установить команды для групповых чатов: {e}")
-        
-        # Устанавливаем команды для приватных чатов
-        try:
-            bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
-            logger.info("✅ Команды установлены для приватных чатов")
-        except Exception as e:
-            logger.warning(f"⚠️ Не удалось установить команды для приватных чатов: {e}")
-            
-    except Exception as e:
-        logger.error(f"❌ Ошибка при установке команд бота: {e}", exc_info=True)
-
 # Очищаем старые webhook, если были (с обработкой ошибок)
 try:
     bot.remove_webhook()
@@ -206,7 +164,28 @@ scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz,
 scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
 
-# Команды теперь устанавливаются через функцию setup_bot_commands() при запуске бота
+# Команды
+commands = [
+    BotCommand("start", "Приветствие и инструкция по использованию"),
+    BotCommand("list", "Список непросмотренных фильмов"),
+    BotCommand("random", "Рандомный фильм с фильтрами"),
+    BotCommand("search", "Поиск фильмов через Kinopoisk API"),
+    BotCommand("plan", "Запланировать просмотр дома или в кино"),
+    BotCommand("schedule", "Список запланированных просмотров"),
+    BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
+    BotCommand("stats", "Детальная статистика группы и участников"),
+    BotCommand("rate", "Оценить просмотренные фильмы"),
+    BotCommand("settings", "Настройки: эмодзи, часовой пояс, загрузка голосов"),
+    BotCommand("clean", "Очистить базу данных (чат или данные о просмотрах)"),
+    BotCommand("edit", "Редактировать расписание и оценки"),
+    BotCommand("ticket", "Работа с билетами в кино"),
+    BotCommand("seasons", "Просмотр сезонов сериалов"),
+    BotCommand("premieres", "Список премьер месяца"),
+    BotCommand("payment", "Оплата подписки"),
+    BotCommand("help", "Помощь по командам")
+]
+bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
+bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
 
 # БД уже инициализирована через init_database()
 # Используем глобальные объекты из модуля database
@@ -1278,7 +1257,7 @@ def check_weekend_schedule():
             if reminder_disabled_row:
                 is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
                 if is_disabled == 'true':
-                    continue
+                continue
             
             # Проверяем, есть ли планы на выходные (пт-сб-вс)
             # Суббота - проверяем планы с пятницы по воскресенье
@@ -1645,8 +1624,8 @@ def dice_game_handler(call):
             game_state['dice_messages'][dice_msg.message_id] = user_id
             
             # Сохраняем информацию об участнике
-            game_state['participants'][user_id] = {
-                'username': call.from_user.username or call.from_user.first_name,
+                game_state['participants'][user_id] = {
+                    'username': call.from_user.username or call.from_user.first_name,
                 'dice_message_id': dice_msg.message_id,
                 'user_id': user_id
             }
@@ -2801,9 +2780,9 @@ def premiere_detail_handler(call):
         
         # Если не получилось через отдельный запрос, пробуем из основного ответа
         if not trailer_url:
-            videos = data.get('videos', {}).get('trailers', [])
-            if videos:
-                trailer_url = videos[0].get('url')  # Первый трейлер
+        videos = data.get('videos', {}).get('trailers', [])
+        if videos:
+            trailer_url = videos[0].get('url')  # Первый трейлер
         
         description = data.get('description') or data.get('shortDescription') or "Нет описания"
         genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
@@ -2824,25 +2803,25 @@ def premiere_detail_handler(call):
             premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
         else:
             # Иначе получаем дату премьеры из основного ответа
-            for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-                date_value = data.get(date_field)
-                if date_value:
-                    try:
-                        if 'T' in str(date_value):
-                            premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                        else:
-                            premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                        premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                        break
-                    except:
-                        continue
+        for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+            date_value = data.get(date_field)
+            if date_value:
+                try:
+                    if 'T' in str(date_value):
+                        premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                    else:
+                        premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                    break
+                except:
+                    continue
         
         text = f"<b>{title}</b> ({year})\n\n"
         if premiere_date_str:
             if russia_release:
                 text += f"📅 Премьера в России: {premiere_date_str}\n"
             else:
-                text += f"📅 Премьера: {premiere_date_str}\n"
+            text += f"📅 Премьера: {premiere_date_str}\n"
         if director_str != '—':
             text += f"🎥 Режиссёр: {director_str}\n"
         if countries != '—':
@@ -3670,7 +3649,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     if is_series and user_id:
                         if has_notifications_access(chat_id, user_id):
                             markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                         else:
                             markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                             markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
@@ -3687,10 +3666,10 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     has_access = has_notifications_access(chat_id, user_id)
                     series_text = f"📺 <b>Сериал добавлен в базу!</b>\n\n"
                     if has_access:
-                        series_text += f"Вы можете:\n"
-                        series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
-                        series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
-                        series_text += f"Используйте команду /seasons для управления сериалами."
+                    series_text += f"Вы можете:\n"
+                    series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
+                    series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
+                    series_text += f"Используйте команду /seasons для управления сериалами."
                     else:
                         series_text += f"🔒 <b>Функционал доступен с подпиской на уведомления о сериалах</b>\n\n"
                         series_text += f"Используйте /payment для оформления подписки."
@@ -3698,7 +3677,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     series_markup = InlineKeyboardMarkup(row_width=1)
                     if has_access:
                         series_markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                        series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                     else:
                         series_markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                         series_markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
@@ -3750,7 +3729,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                             else:
                                 markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                         else:
-                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                     bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
                 else:
                     # Нет доступа - показываем заблокированные кнопки
@@ -3986,7 +3965,7 @@ def schedule_back_callback(call):
             
             # Удаляем из словаря
             del show_schedule._schedule_messages[chat_id]
-        else:
+    else:
             # Если не нашли сохраненные сообщения, удаляем текущее
             try:
                 bot.delete_message(chat_id, call.message.message_id)
@@ -4043,7 +4022,7 @@ def back_to_start_menu_callback(call):
 
 Выберите раздел из меню ниже ⬇
         """.strip()
-        
+
         # Создаём меню с кнопками
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
@@ -4364,8 +4343,8 @@ def handle_reaction(reaction):
     if not link:
         logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
         # Пробуем найти фильм в БД по последним добавленным фильмам в этом чате
-        try:
-            with db_lock:
+                try:
+                    with db_lock:
                 # Ищем последние фильмы в этом чате (за последний час)
                 cursor.execute("""
                     SELECT link FROM movies 
@@ -4390,47 +4369,47 @@ def handle_reaction(reaction):
         if user_id:
             try:
                 # Получаем первое новое эмодзи (обычное или кастомное)
-                new_emoji = None
+                        new_emoji = None
                 new_custom_emoji_id = None
-                for r in reaction.new_reaction:
-                    if hasattr(r, 'type') and r.type == 'emoji' and hasattr(r, 'emoji'):
-                        new_emoji = r.emoji
-                        break
+                        for r in reaction.new_reaction:
+                            if hasattr(r, 'type') and r.type == 'emoji' and hasattr(r, 'emoji'):
+                                new_emoji = r.emoji
+                                break
                     elif hasattr(r, 'type') and r.type == 'custom_emoji' and hasattr(r, 'custom_emoji_id'):
                         new_custom_emoji_id = str(r.custom_emoji_id)
-                        break
-                    elif hasattr(r, 'emoji'):
-                        new_emoji = r.emoji
-                        break
+                                break
+                            elif hasattr(r, 'emoji'):
+                                new_emoji = r.emoji
+                                break
                         
                 # Предлагаем добавить эмодзи (только если еще не предлагали)
                 if new_emoji or new_custom_emoji_id:
                     emoji_for_key = new_emoji if new_emoji else f"custom:{new_custom_emoji_id}"
                     emoji_suggestion_key = f"{chat_id}:{emoji_for_key}:{message_id}"
-                    if not hasattr(handle_reaction, '_emoji_suggestions'):
-                        handle_reaction._emoji_suggestions = set()
-                    
-                    if emoji_suggestion_key not in handle_reaction._emoji_suggestions:
-                        handle_reaction._emoji_suggestions.add(emoji_suggestion_key)
-                        
-                        # Предлагаем добавить эмодзи
-                        markup = InlineKeyboardMarkup()
+                            if not hasattr(handle_reaction, '_emoji_suggestions'):
+                                handle_reaction._emoji_suggestions = set()
+                            
+                            if emoji_suggestion_key not in handle_reaction._emoji_suggestions:
+                                handle_reaction._emoji_suggestions.add(emoji_suggestion_key)
+                                
+                                # Предлагаем добавить эмодзи
+                                markup = InlineKeyboardMarkup()
                         if new_emoji:
-                            markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_emoji:{new_emoji}"))
+                                markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_emoji:{new_emoji}"))
                             emoji_display = new_emoji
                         else:
                             markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_custom_emoji:{new_custom_emoji_id}"))
                             emoji_display = f"кастомное эмодзи (ID: {new_custom_emoji_id})"
-                            
-                        bot.send_message(
-                            chat_id,
+                                
+                                bot.send_message(
+                                    chat_id,
                             f"💡 Хотите добавить {emoji_display} в список разрешённых для отметки о просмотре?",
-                            reply_to_message_id=message_id,
-                            reply_markup=markup
-                        )
+                                    reply_to_message_id=message_id,
+                                    reply_markup=markup
+                                )
                         logger.info(f"[REACTION] Предложено добавить {emoji_display} для чата {chat_id} на сообщение {message_id}")
-            except Exception as e:
-                logger.error(f"[REACTION] Ошибка при предложении добавить эмодзи: {e}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"[REACTION] Ошибка при предложении добавить эмодзи: {e}", exc_info=True)
         
     # Если нет ссылки на фильм, не можем обработать
     if not link:
@@ -4950,7 +4929,7 @@ def get_plan_link_internal(message, state):
                 else:
                     # Проверяем, что это похоже на kp_id (обычно 4+ цифр)
                     if len(kp_id) >= 4:
-                        link = f"https://kinopoisk.ru/film/{kp_id}"
+                    link = f"https://kinopoisk.ru/film/{kp_id}"
                         logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
@@ -5003,12 +4982,12 @@ def get_plan_day_or_date_internal(message, state):
                 extracted_time = (hour, minute)
                 logger.info(f"[PLAN DAY/DATE INTERNAL] Найдено время в тексте: {hour}:{minute:02d}")
         
-        target_weekday = None
-        for phrase, wd in days_full.items():
-            if phrase in text:
-                target_weekday = wd
-                logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
-                break
+    target_weekday = None
+    for phrase, wd in days_full.items():
+        if phrase in text:
+            target_weekday = wd
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
+            break
     
     if target_weekday is not None:
         current_wd = now.weekday()
@@ -5108,10 +5087,10 @@ def get_plan_day_or_date_internal(message, state):
                                 if extracted_time:
                                     hour, minute = extracted_time
                                 elif plan_type == 'home':
-                                    hour = 19 if datetime(year, month, day).weekday() < 5 else 10
+                                hour = 19 if datetime(year, month, day).weekday() < 5 else 10
                                     minute = 0
-                                else:
-                                    hour = 9
+                            else:
+                                hour = 9
                                     minute = 0
                                 plan_dt = user_tz.localize(datetime(year, month, day, hour, minute))
                             logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата текстовым форматом: {plan_dt}")
@@ -5145,35 +5124,35 @@ def get_plan_day_or_date_internal(message, state):
                                     logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты с временем: {e}")
                         else:
                             # Парсинг "10.01" или "06.01" без времени
-                            date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                            if date_match:
-                                day_num = int(date_match.group(1))
-                                month_num = int(date_match.group(2))
-                                if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                                    try:
-                                        year = now.year
-                                        if date_match.group(3):
-                                            year_part = int(date_match.group(3))
-                                            if year_part < 100:
-                                                year = 2000 + year_part
-                                            else:
-                                                year = year_part
-                                        candidate = user_tz.localize(datetime(year, month_num, day_num))
-                                        if candidate < now:
-                                            year += 1
+                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                    if date_match:
+                        day_num = int(date_match.group(1))
+                        month_num = int(date_match.group(2))
+                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                            try:
+                                year = now.year
+                                if date_match.group(3):
+                                    year_part = int(date_match.group(3))
+                                    if year_part < 100:
+                                        year = 2000 + year_part
+                                    else:
+                                        year = year_part
+                                candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                if candidate < now:
+                                    year += 1
                                         # Используем извлеченное время, если есть, иначе стандартное
                                         if extracted_time:
                                             hour, minute = extracted_time
                                         elif plan_type == 'home':
-                                            hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
+                                    hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
                                             minute = 0
-                                        else:
-                                            hour = 9
+                                else:
+                                    hour = 9
                                             minute = 0
                                         plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
-                                        logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
-                                    except ValueError as e:
-                                        logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
+                                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
+                            except ValueError as e:
+                                logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
     
     if not plan_dt:
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать дату из текста: '{text}'")
@@ -5572,7 +5551,7 @@ def handle_rating_internal(message, rating):
         film_id = rating_messages.get(reply_msg_id)
         
         # Если не найдено, проверяем цепочку реплаев рекурсивно
-        if not film_id:
+            if not film_id:
             current_msg = message.reply_to_message
             checked_ids = set()  # Чтобы избежать циклов
             while current_msg and current_msg.message_id not in checked_ids:
@@ -5584,16 +5563,16 @@ def handle_rating_internal(message, rating):
                 # Проверяем bot_messages (сообщения с фильмами)
                 if current_msg.message_id in bot_messages:
                     reply_link = bot_messages[current_msg.message_id]
-                    if reply_link:
+                if reply_link:
                         # Извлекаем kp_id из ссылки для поиска
-                        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
-                        if match:
-                            kp_id = match.group(2)
-                            with db_lock:
-                                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                                row = cursor.fetchone()
-                                if row:
-                                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                    if match:
+                        kp_id = match.group(2)
+                        with db_lock:
+                            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                            row = cursor.fetchone()
+                            if row:
+                                film_id = row.get('id') if isinstance(row, dict) else row[0]
                                     break
                 # Переходим к родительскому сообщению
                 current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
@@ -6001,7 +5980,7 @@ def main_text_handler(message):
         
         # Обработка ответного сообщения для просмотра фильма
         handle_view_film_reply_internal(message, state)
-        return
+                    return
     
     # === user_plan_state ===
     if user_id in user_plan_state:
@@ -6471,7 +6450,7 @@ def handle_rating(message):
         film_id = rating_messages.get(reply_msg_id)
         
         # Если не найдено, проверяем цепочку реплаев рекурсивно
-        if not film_id:
+            if not film_id:
             current_msg = message.reply_to_message
             checked_ids = set()  # Чтобы избежать циклов
             while current_msg and current_msg.message_id not in checked_ids:
@@ -6483,16 +6462,16 @@ def handle_rating(message):
                 # Проверяем bot_messages (сообщения с фильмами)
                 if current_msg.message_id in bot_messages:
                     reply_link = bot_messages[current_msg.message_id]
-                    if reply_link:
-                        # Извлекаем kp_id из ссылки для поиска
-                        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
-                        if match:
-                            kp_id = match.group(2)
-                            with db_lock:
-                                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                                row = cursor.fetchone()
-                                if row:
-                                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                if reply_link:
+                    # Извлекаем kp_id из ссылки для поиска
+                    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                    if match:
+                        kp_id = match.group(2)
+                        with db_lock:
+                            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                            row = cursor.fetchone()
+                            if row:
+                                film_id = row.get('id') if isinstance(row, dict) else row[0]
                                     break
                 # Переходим к родительскому сообщению
                 current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
@@ -6698,13 +6677,13 @@ def show_list_page(chat_id, user_id, page=1, message_id=None):
             
             # Если страниц немного (<= 20), показываем все
             if total_pages <= 20:
-                buttons = []
-                for p in range(1, total_pages + 1):
-                    label = f"•{p}" if p == page else str(p)
-                    buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
-                # Разбиваем кнопки на строки по 10 штук
-                for i in range(0, len(buttons), 10):
-                    markup.row(*buttons[i:i+10])
+            buttons = []
+            for p in range(1, total_pages + 1):
+                label = f"•{p}" if p == page else str(p)
+                buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
+            # Разбиваем кнопки на строки по 10 штук
+            for i in range(0, len(buttons), 10):
+                markup.row(*buttons[i:i+10])
             else:
                 # Для большого количества страниц используем умную пагинацию
                 buttons = []
@@ -7048,10 +7027,10 @@ def handle_cancel_rating(call):
             return
         
         # Удаляем сообщение с подтверждением
-        try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
         
         # Удаляем из rating_confirm_messages
         rating_confirm_messages.pop(message_id, None)
@@ -8365,12 +8344,12 @@ def handle_add_film_callback(call):
             is_series = film_type_from_callback == 'TV_SERIES'
         else:
             # Если тип не передан, проверяем в базе
-            with db_lock:
+        with db_lock:
                 cursor.execute("SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                existing = cursor.fetchone()
-                if existing:
-                    film_in_db = True
-                    film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+            existing = cursor.fetchone()
+            if existing:
+                film_in_db = True
+                film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
                     is_series = existing.get('is_series') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
         
         # Формируем правильную ссылку в зависимости от типа
@@ -8469,17 +8448,17 @@ def handle_add_film_callback(call):
             if is_series_final:
                 if has_notifications_access(chat_id, user_id):
                     markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                    
-                    # Проверяем, подписан ли уже пользователь
-                    with db_lock:
-                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                        sub_row = cursor.fetchone()
-                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                    
-                    if is_subscribed:
-                        markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                    else:
-                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                
+                # Проверяем, подписан ли уже пользователь
+                with db_lock:
+                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                    sub_row = cursor.fetchone()
+                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                
+                if is_subscribed:
+                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+        else:
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
@@ -8733,15 +8712,15 @@ def handle_confirm_add_film_callback(call):
                     
                     # Проверяем, подписан ли уже пользователь (только если film_id определен)
                     if film_row:
-                        with db_lock:
-                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                            sub_row = cursor.fetchone()
-                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                        
-                        if is_subscribed:
-                            markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                        else:
-                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                with db_lock:
+                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                    sub_row = cursor.fetchone()
+                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                
+                if is_subscribed:
+                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                     else:
                         # Если film_id еще не определен, просто добавляем кнопку подписки
                         markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
@@ -8999,7 +8978,7 @@ def random_start(message):
         has_rec_access = has_recommendations_access(chat_id, user_id)
         
         if has_rec_access:
-            markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+        markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
         else:
             markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
         
@@ -9017,7 +8996,7 @@ def random_start(message):
                     markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
                 else:
                     # Заблокированная кнопка из-за недостаточного количества оценок
-                    markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
+                markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
             
             # Проверяем условие для group_votes: больше 20 групповых оценок, где хотя бы 20 фильмов оценили все участники группы
             # Сначала получаем общее количество уникальных пользователей в группе (исключаем импортированные оценки)
@@ -9048,7 +9027,7 @@ def random_start(message):
                     markup.add(InlineKeyboardButton("🔒 По групповым оценкам (9-10)", callback_data="rand_mode_locked:group_votes"))
                 else:
                     # Заблокированная кнопка из-за недостаточного количества групповых оценок
-                    markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
+                markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
         
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         bot.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
@@ -9414,13 +9393,13 @@ def settings_command(message):
         
         # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
         if has_notifications_access(chat_id, user_id):
-            markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+        markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
         else:
             markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
         
         # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
         if has_recommendations_access(chat_id, user_id):
-            markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+        markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
         else:
             markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
         
@@ -10555,13 +10534,13 @@ def random_mode_handler(call):
                             available_periods.append(period)
             else:
                 # Для остальных режимов - используем старую логику
-                base_query = """
-                    SELECT COUNT(DISTINCT m.id) 
-                    FROM movies m
-                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-                """
-                params = [chat_id]
+            base_query = """
+                SELECT COUNT(DISTINCT m.id) 
+                FROM movies m
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            """
+            params = [chat_id]
             
             for period in all_periods:
                 if period == "До 1980":
@@ -10624,7 +10603,7 @@ def random_mode_locked_handler(call):
             )
         else:
             # Режим заблокирован по другим причинам (недостаточно оценок)
-            bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
+        bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
     except Exception as e:
         logger.error(f"[RANDOM] ERROR in random_mode_locked_handler: {e}", exc_info=True)
 
@@ -10759,7 +10738,7 @@ def _show_year_step(call, chat_id, user_id):
         if selected_periods:
             markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_year:done"))
         else:
-            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
         
         selected = ', '.join(selected_periods) if selected_periods else 'ничего'
         text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
@@ -10854,14 +10833,14 @@ def _show_genre_step(call, chat_id, user_id):
                 cursor.execute(base_query, params)
             else:
                 # Для остальных режимов - используем старую логику
-                base_query = """
-                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-                    FROM movies m
-                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
-                """
-                params = [chat_id]
+        base_query = """
+            SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+            FROM movies m
+            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+        """
+        params = [chat_id]
         
         # Добавляем фильтр по периодам, если они выбраны
         if periods:
@@ -10996,16 +10975,16 @@ def random_year_handler(call):
                     bot.answer_callback_query(call.id, "Ошибка обновления")
         else:
             # Старая логика для других режимов (если есть)
-            if data == "skip":
-                logger.info(f"[RANDOM] Year skipped, moving to genre")
-                user_random_state[user_id]['year'] = None
-                user_random_state[user_id]['step'] = 'genre'
-                _show_genre_step_kinopoisk(call, chat_id, user_id)
-            else:
-                # Сохраняем выбранный год
-                selected_year = int(data)
-                user_random_state[user_id]['year'] = selected_year
-                logger.info(f"[RANDOM] Year selected: {selected_year}")
+        if data == "skip":
+            logger.info(f"[RANDOM] Year skipped, moving to genre")
+            user_random_state[user_id]['year'] = None
+            user_random_state[user_id]['step'] = 'genre'
+            _show_genre_step_kinopoisk(call, chat_id, user_id)
+        else:
+            # Сохраняем выбранный год
+            selected_year = int(data)
+            user_random_state[user_id]['year'] = selected_year
+            logger.info(f"[RANDOM] Year selected: {selected_year}")
             
             # Переходим к выбору жанра
             user_random_state[user_id]['step'] = 'genre'
@@ -11665,7 +11644,7 @@ def _random_final(call, chat_id, user_id):
                                         year_matches = True
                                         break
                                 if not year_matches:
-                                    continue
+                                continue
                             
                             # Проверяем жанры, если указаны
                             if genres:
@@ -12649,7 +12628,7 @@ def show_premieres_page(call, premieres, period, page=0):
         # Используем edit_message_text вместо send_message, если это callback
         if call.message.message_id:
             try:
-                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e:
                 error_str = str(e)
                 # Игнорируем ошибку "message is not modified" и "there is no text in the message to edit"
@@ -12659,13 +12638,13 @@ def show_premieres_page(call, premieres, period, page=0):
                 try:
                     bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 except:
-                    pass
+                        pass
         else:
             # Если message_id нет, отправляем новое сообщение
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
         if call.id:
-            bot.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
@@ -13663,15 +13642,15 @@ def ticket_session_callback(call):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
             if has_tickets_access(chat_id, user_id):
-                if not has_time:
-                    # Если нет времени, добавляем обе кнопки
-                    markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-                    markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-                    bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
-                else:
-                    # Если время есть, только кнопка добавления билетов
-                    markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
-                    bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
+            if not has_time:
+                # Если нет времени, добавляем обе кнопки
+                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+                bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
+            else:
+                # Если время есть, только кнопка добавления билетов
+                markup.add(InlineKeyboardButton("➕ Добавить еще билет", callback_data=f"ticket_add_more:{plan_id}"))
+                bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
             else:
                 if not has_time:
                     markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
@@ -13679,7 +13658,7 @@ def ticket_session_callback(call):
                     bot.send_message(chat_id, "💡 Что хотите сделать?", reply_markup=markup)
                 else:
                     markup.add(InlineKeyboardButton("🔒 Добавить еще билет", callback_data=f"ticket_locked:{plan_id}"))
-                    bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
+                bot.send_message(chat_id, "💡 Хотите добавить еще билеты к этому сеансу?", reply_markup=markup)
         else:
             logger.warning(f"[TICKET SESSION] file_id в БД пустой")
             bot.answer_callback_query(call.id, "Билеты не найдены", show_alert=True)
@@ -13715,19 +13694,19 @@ def ticket_session_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"ticket_time:{plan_id}"))
         if has_tickets_access(chat_id, user_id):
-            if not has_time:
-                # Если нет времени, добавляем обе кнопки
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-            else:
-                # Если время есть, только кнопка указания времени (на случай изменения)
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+        if not has_time:
+            # Если нет времени, добавляем обе кнопки
+            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+        else:
+            # Если время есть, только кнопка указания времени (на случай изменения)
+            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
         else:
             if not has_time:
                 markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
                 markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
             else:
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
         if not has_time:
@@ -13763,13 +13742,13 @@ def ticket_session_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
         if has_tickets_access(chat_id, user_id):
-            if not has_time:
-                # Если нет времени, добавляем обе кнопки
-                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
-                markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
-            else:
-                # Если время есть, только кнопка добавления билетов
-                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+        if not has_time:
+            # Если нет времени, добавляем обе кнопки
+            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
+            markup.add(InlineKeyboardButton("⏰ Указать точное время сеанса", callback_data=f"ticket_time:{plan_id}"))
+        else:
+            # Если время есть, только кнопка добавления билетов
+            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"ticket_add_more:{plan_id}"))
         else:
             if not has_time:
                 markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
@@ -14123,10 +14102,10 @@ def seasons_command(message):
         # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
         is_subscribed = False
         if has_access:
-            with db_lock:
-                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                sub_row = cursor.fetchone()
-                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+        with db_lock:
+            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+            sub_row = cursor.fetchone()
+            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
         
         button_text = title
         
@@ -14246,7 +14225,7 @@ def seasons_command(message):
         
         # Если нет доступа, кнопки заблокированы
         if has_access:
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
         else:
             markup.add(InlineKeyboardButton(f"🔒 {button_text}", callback_data=f"seasons_locked:{kp_id}"))
     
@@ -14259,7 +14238,7 @@ def seasons_command(message):
     
     # Сохраняем message_id для возможности вернуться назад
     if has_access:
-        msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
+    msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
     else:
         msg = bot.reply_to(
             message,
@@ -14794,7 +14773,7 @@ def series_season_callback(call):
         
         # Используем функцию show_episodes_page для отображения эпизодов
         if show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=message_id):
-            bot.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         else:
             bot.answer_callback_query(call.id, "❌ Ошибка загрузки эпизодов", show_alert=True)
     except Exception as e:
@@ -14850,9 +14829,9 @@ def series_episode_callback(call):
             # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
             if is_watched:
-                from api.kinopoisk_api import get_seasons_data
+            from api.kinopoisk_api import get_seasons_data
                 from datetime import datetime as dt
-                seasons_data = get_seasons_data(kp_id)
+            seasons_data = get_seasons_data(kp_id)
                 if seasons_data:
                     now = dt.now()
                     # Проверяем, выходит ли сериал
@@ -15036,7 +15015,7 @@ def series_season_all_callback(call):
             
             # Получаем все просмотренные эпизоды
             with db_lock:
-                cursor.execute('''
+            cursor.execute('''
                     SELECT season_number, episode_number 
                     FROM series_tracking 
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
@@ -15056,7 +15035,7 @@ def series_season_all_callback(call):
             for season in seasons_data:
                 episodes = season.get('episodes', [])
                 season_num = season.get('number', '')
-                for ep in episodes:
+        for ep in episodes:
                     if not is_airing:
                         # Если сериал не выходит, считаем все эпизоды
                         total_episodes += 1
@@ -15072,7 +15051,7 @@ def series_season_all_callback(call):
                                 for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
                                     try:
                                         release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                        break
+                break
                                     except:
                                         continue
                                 if release_date and release_date <= now:
@@ -15424,6 +15403,59 @@ def has_recommendations_access(chat_id, user_id):
                 return True
     
     return False
+
+def rubles_to_stars(rubles):
+    """Конвертирует рубли в Telegram Stars
+    1 звезда = $0.99 = 80 рублей
+    Округляет копейки до рублей и звезды до целых значений
+    """
+    # Округляем рубли до целых (убираем копейки)
+    rubles_rounded = round(rubles)
+    
+    # Конвертируем в звезды: 1 звезда = 80 рублей
+    stars = rubles_rounded / 80.0
+    
+    # Округляем звезды до целых значений (вверх)
+    stars_rounded = int(round(stars))
+    
+    # Минимум 1 звезда, если сумма больше 0
+    if stars_rounded == 0 and rubles_rounded > 0:
+        stars_rounded = 1
+    
+    return stars_rounded
+
+def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount, provider_token=None):
+    """Создает инвойс для оплаты через Telegram Stars
+    
+    Args:
+        bot: экземпляр TeleBot
+        chat_id: ID чата для отправки инвойса
+        title: название товара/услуги
+        description: описание товара/услуги
+        payload: уникальный идентификатор платежа
+        stars_amount: количество звезд
+        provider_token: не используется для Stars, но оставлен для совместимости
+    
+    Returns:
+        True если инвойс успешно отправлен, False в противном случае
+    """
+    try:
+        # Для Telegram Stars используем валюту XTR
+        # Согласно документации: https://core.telegram.org/bots/api#sendinvoice
+        bot.send_invoice(
+            chat_id=chat_id,
+            title=title,
+            description=description,
+            invoice_payload=payload,
+            provider_token=provider_token,  # Для Stars может быть None или пустая строка
+            currency='XTR',  # XTR - валюта Telegram Stars
+            prices=[telebot.types.LabeledPrice(label=title, amount=stars_amount)],  # amount в звездах
+            start_parameter=payload[:64] if len(payload) > 64 else payload  # start_parameter ограничен 64 символами
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[STARS] Ошибка создания инвойса через Stars: {e}", exc_info=True)
+        return False
 
 def calculate_discounted_price(user_id, subscription_type, plan_type, period_type, group_size=None):
     """Вычисляет цену с учетом скидок
@@ -17610,8 +17642,14 @@ def handle_payment_callback(call):
                 text += f"💰 Сумма: <b>{final_price}₽{period_suffix}</b>\n\n"
                 text += "Нажмите кнопку ниже для перехода к оплате:"
                 
+                # Конвертируем в звезды для кнопки оплаты звездами
+                stars_amount = rubles_to_stars(final_price)
+                
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+                # Добавляем кнопку оплаты звездами
+                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
+                markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
                 
                 if group_size:
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
@@ -17790,8 +17828,14 @@ def handle_payment_callback(call):
                 text += f"💰 Сумма: <b>{final_price}₽</b>\n\n"
                 text += "Нажмите кнопку ниже для перехода к оплате:"
                 
+                # Конвертируем в звезды для кнопки оплаты звездами
+                stars_amount = rubles_to_stars(final_price)
+                
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+                # Добавляем кнопку оплаты звездами
+                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
+                markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                 
                 try:
@@ -17804,6 +17848,119 @@ def handle_payment_callback(call):
             except Exception as e:
                 logger.error(f"[PAYMENT] Ошибка создания платежа в ЮKassa: {e}", exc_info=True)
                 bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+            return
+        
+        if action.startswith("pay_stars:"):
+            # Обработка нажатия на кнопку "Оплатить звездами Telegram"
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
+            
+            parts = action.split(":")
+            # Формат: payment:pay_stars:personal::tickets:month:payment_id
+            # или: payment:pay_stars:group:2:all:month:payment_id
+            if len(parts) < 6:
+                logger.error(f"[STARS] Ошибка парсинга callback_data: {action}, parts={parts}")
+                bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                return
+            
+            sub_type = parts[1]  # personal или group
+            group_size_str = parts[2] if parts[2] else ''
+            group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+            plan_type = parts[3] if parts[3] else ''
+            period_type = parts[4] if parts[4] else ''
+            payment_id = parts[5] if len(parts) > 5 else ''
+            
+            # Проверка на пустые значения
+            if not plan_type or not period_type:
+                logger.error(f"[STARS] Ошибка парсинга callback_data: {action}, parts={parts}")
+                bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                return
+            
+            # Вычисляем финальную цену с учетом скидок
+            if sub_type == 'personal':
+                final_price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period_type, 0)
+            else:  # group
+                final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
+            
+            if final_price <= 0:
+                bot.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
+                return
+            
+            # Конвертируем рубли в звезды
+            stars_amount = rubles_to_stars(final_price)
+            
+            # Формируем описание платежа
+            period_names = {
+                'month': 'месяц',
+                '3months': '3 месяца',
+                'year': 'год',
+                'lifetime': 'навсегда'
+            }
+            period_name = period_names.get(period_type, period_type)
+            
+            plan_names = {
+                'notifications': 'Уведомления о сериалах',
+                'recommendations': 'Персональные рекомендации',
+                'tickets': 'Билеты в кино',
+                'all': 'Все режимы'
+            }
+            plan_name = plan_names.get(plan_type, plan_type)
+            
+            subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+            title = f"{subscription_type_name}: {plan_name}"
+            description = f"Период: {period_name}\nСумма: {final_price}₽ ({stars_amount}⭐)"
+            
+            # Создаем уникальный payload для платежа
+            if not payment_id:
+                import uuid as uuid_module
+                payment_id = str(uuid_module.uuid4())
+            
+            # Для групповых подписок используем выбранный chat_id группы
+            if sub_type == 'group' and group_size:
+                # Получаем chat_id группы из состояния или используем текущий
+                state = user_payment_state.get(user_id, {})
+                payment_chat_id = state.get('chat_id', chat_id)
+            else:
+                payment_chat_id = chat_id
+            
+            # Сохраняем информацию о платеже в БД
+            from database.db_operations import save_payment
+            save_payment(
+                payment_id=payment_id,
+                yookassa_payment_id=None,  # Для Stars нет yookassa_payment_id
+                user_id=user_id,
+                chat_id=payment_chat_id,
+                subscription_type=sub_type,
+                plan_type=plan_type,
+                period_type=period_type,
+                group_size=group_size,
+                amount=final_price,
+                status='pending'
+            )
+            
+            # Создаем payload для инвойса (должен быть уникальным)
+            invoice_payload = f"stars_{payment_id}"
+            
+            # Отправляем инвойс через Telegram Stars
+            try:
+                success = create_stars_invoice(
+                    bot=bot,
+                    chat_id=call.message.chat.id,
+                    title=title,
+                    description=description,
+                    payload=invoice_payload,
+                    stars_amount=stars_amount
+                )
+                
+                if success:
+                    logger.info(f"[STARS] Инвойс отправлен: user_id={user_id}, payment_id={payment_id}, stars={stars_amount}, price={final_price}₽")
+                else:
+                    bot.answer_callback_query(call.id, "Ошибка создания инвойса. Попробуйте позже.", show_alert=True)
+            except Exception as e:
+                logger.error(f"[STARS] Ошибка создания инвойса через Stars: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка создания инвойса. Попробуйте позже.", show_alert=True)
             return
         
         if action.startswith("modify:"):
@@ -19503,13 +19660,13 @@ def handle_settings_callback(call):
             
             # Проверяем доступ к настройкам напоминаний
             if has_notifications_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+            markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
             
             # Проверяем доступ к импорту базы
             if has_recommendations_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+            markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
             
@@ -19993,27 +20150,27 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
         logger.info(f"[PROCESS_PLAN] Использован parse_session_time: {plan_dt}")
     else:
         # Если parse_session_time не сработал, используем стандартную логику
-        # Обработка специальных случаев
-        day_lower = day_or_date.lower().strip()
-        
-        # Обработка "сегодня"
-        if 'сегодня' in day_lower:
-            plan_date = now.date()
-            if plan_type == 'home':
-                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                hour = 19 if now.weekday() < 5 else 10
-            else:
-                hour = 9
-            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-            plan_dt = user_tz.localize(plan_dt)
+    # Обработка специальных случаев
+    day_lower = day_or_date.lower().strip()
+    
+    # Обработка "сегодня"
+    if 'сегодня' in day_lower:
+        plan_date = now.date()
+        if plan_type == 'home':
+            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+            hour = 19 if now.weekday() < 5 else 10
+        else:
+            hour = 9
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = user_tz.localize(plan_dt)
             # Если время уже прошло, переносим на завтра
             # Но если время еще не прошло, оставляем на сегодня (чтобы попало в уведомление)
             if plan_dt < now:
-                plan_dt = plan_dt + timedelta(days=1)
-        
-        # Обработка "завтра" (для обоих режимов)
-        elif 'завтра' in day_lower:
-            plan_date = (now.date() + timedelta(days=1))
+            plan_dt = plan_dt + timedelta(days=1)
+    
+    # Обработка "завтра" (для обоих режимов)
+    elif 'завтра' in day_lower:
+        plan_date = (now.date() + timedelta(days=1))
             # Пробуем найти время в строке
             time_match = re.search(r'(\d{1,2})[: ](\d{2})', day_or_date)
             if time_match:
@@ -20034,92 +20191,92 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     plan_dt = user_tz.localize(plan_dt)
             else:
                 # Время не указано, используем стандартное
+        if plan_type == 'cinema':
+            hour = 9
+        else:  # home
+            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+            hour = 19 if plan_date.weekday() < 5 else 10
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = user_tz.localize(plan_dt)
+    
+    # Обработка "следующая неделя" (для обоих режимов)
+    elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower or 'на следующей неделе' in day_lower:
+        if plan_type == 'cinema':
+            # Для кино - напоминание в четверг, день премьер
+            current_wd = now.weekday()
+            days_until_thursday = (3 - current_wd + 7) % 7
+            if days_until_thursday == 0:
+                # Если сегодня четверг, берем следующий четверг
+                days_until_thursday = 7
+            else:
+                # Добавляем еще неделю, чтобы получить четверг следующей недели
+                days_until_thursday += 7
+            plan_date = now.date() + timedelta(days=days_until_thursday)
+            hour = 9
+        else:  # home
+            # Для дома - суббота следующей недели в 10:00
+            current_wd = now.weekday()
+            days_until_next_saturday = (5 - current_wd + 7) % 7
+            if days_until_next_saturday == 0:
+                # Если сегодня суббота, берем следующую
+                days_until_next_saturday = 7
+            else:
+                # Иначе добавляем еще неделю, чтобы получить субботу следующей недели
+                days_until_next_saturday += 7
+            plan_date = now.date() + timedelta(days=days_until_next_saturday)
+            hour = 10
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = user_tz.localize(plan_dt)
+    
+    # Обработка "в марте", "в апреле" и т.д. (для обоих режимов - напоминание 1 числа месяца)
+    elif re.search(r'в\s+([а-яё]+)', day_lower):
+        month_match = re.search(r'в\s+([а-яё]+)', day_lower)
+        if month_match:
+            month_str = month_match.group(1)
+            month = months_map.get(month_str)
+            if month:
+                year = now.year
+                # Проверяем, не прошел ли уже этот месяц
+                candidate_date = datetime(year, month, 1).date()
+                if candidate_date < now.date():
+                    # Месяц уже прошел, берем следующий год
+                    year += 1
+                plan_date = datetime(year, month, 1)
                 if plan_type == 'cinema':
                     hour = 9
                 else:  # home
                     # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
                     hour = 19 if plan_date.weekday() < 5 else 10
-                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-                plan_dt = user_tz.localize(plan_dt)
+                plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+    
+    # Ищем день недели в расширенном словаре (для обоих режимов)
+    if not plan_dt:
+        target_weekday = None
+        # Сортируем фразы по длине (от длинных к коротким), чтобы сначала находить более специфичные варианты
+        sorted_phrases = sorted(days_full.items(), key=lambda x: len(x[0]), reverse=True)
+        for phrase, wd in sorted_phrases:
+            if phrase in day_lower:
+                target_weekday = wd
+                break
+    
+    if target_weekday is not None:
+        # Вычисляем ближайший указанный день (вперёд)
+        current_wd = now.weekday()
+        delta = (target_weekday - current_wd + 7) % 7
         
-        # Обработка "следующая неделя" (для обоих режимов)
-        elif 'следующая неделя' in day_lower or 'след неделя' in day_lower or 'след. неделя' in day_lower or 'на следующей неделе' in day_lower:
-            if plan_type == 'cinema':
-                # Для кино - напоминание в четверг, день премьер
-                current_wd = now.weekday()
-                days_until_thursday = (3 - current_wd + 7) % 7
-                if days_until_thursday == 0:
-                    # Если сегодня четверг, берем следующий четверг
-                    days_until_thursday = 7
-                else:
-                    # Добавляем еще неделю, чтобы получить четверг следующей недели
-                    days_until_thursday += 7
-                plan_date = now.date() + timedelta(days=days_until_thursday)
-                hour = 9
-            else:  # home
-                # Для дома - суббота следующей недели в 10:00
-                current_wd = now.weekday()
-                days_until_next_saturday = (5 - current_wd + 7) % 7
-                if days_until_next_saturday == 0:
-                    # Если сегодня суббота, берем следующую
-                    days_until_next_saturday = 7
-                else:
-                    # Иначе добавляем еще неделю, чтобы получить субботу следующей недели
-                    days_until_next_saturday += 7
-                plan_date = now.date() + timedelta(days=days_until_next_saturday)
-                hour = 10
-            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-            plan_dt = user_tz.localize(plan_dt)
-        
-        # Обработка "в марте", "в апреле" и т.д. (для обоих режимов - напоминание 1 числа месяца)
-        elif re.search(r'в\s+([а-яё]+)', day_lower):
-            month_match = re.search(r'в\s+([а-яё]+)', day_lower)
-            if month_match:
-                month_str = month_match.group(1)
-                month = months_map.get(month_str)
-                if month:
-                    year = now.year
-                    # Проверяем, не прошел ли уже этот месяц
-                    candidate_date = datetime(year, month, 1).date()
-                    if candidate_date < now.date():
-                        # Месяц уже прошел, берем следующий год
-                        year += 1
-                    plan_date = datetime(year, month, 1)
-                    if plan_type == 'cinema':
-                        hour = 9
-                    else:  # home
-                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                        hour = 19 if plan_date.weekday() < 5 else 10
-                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
-        
-        # Ищем день недели в расширенном словаре (для обоих режимов)
-        if not plan_dt:
-            target_weekday = None
-            # Сортируем фразы по длине (от длинных к коротким), чтобы сначала находить более специфичные варианты
-            sorted_phrases = sorted(days_full.items(), key=lambda x: len(x[0]), reverse=True)
-            for phrase, wd in sorted_phrases:
-                if phrase in day_lower:
-                    target_weekday = wd
-                    break
-        
-        if target_weekday is not None:
-            # Вычисляем ближайший указанный день (вперёд)
-            current_wd = now.weekday()
-            delta = (target_weekday - current_wd + 7) % 7
-            
-            # Если сегодня указанный день недели
-            if delta == 0:
-                # Проверяем время: если до 20:00, можно планировать на сегодня
-                if now.hour < 20:
-                    # Планируем на сегодня
-                    plan_date = now.date()
-                else:
-                    # Уже 20:00 или позже - переносим на следующую неделю
-                    delta = 7
-                    plan_date = now.date() + timedelta(days=delta)
+        # Если сегодня указанный день недели
+        if delta == 0:
+            # Проверяем время: если до 20:00, можно планировать на сегодня
+            if now.hour < 20:
+                # Планируем на сегодня
+                plan_date = now.date()
             else:
+                # Уже 20:00 или позже - переносим на следующую неделю
+                delta = 7
                 plan_date = now.date() + timedelta(days=delta)
-            
+        else:
+            plan_date = now.date() + timedelta(days=delta)
+        
             # Пробуем найти время в строке
             time_match = re.search(r'(\d{1,2})[: ](\d{2})', day_or_date)
             if time_match:
@@ -20140,18 +20297,18 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     plan_dt = user_tz.localize(plan_dt)
             else:
                 # Время не указано, используем стандартное
-                if plan_type == 'home':
-                    # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                    hour = 19 if target_weekday < 5 else 10
-                else:  # cinema
-                    hour = 9
-                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
-                plan_dt = user_tz.localize(plan_dt)
-        
-        else:
-            # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
-            # Формат "15 января", "15 янв", "15 января 2025"
-            date_match = re.search(r'(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?', day_lower)
+        if plan_type == 'home':
+            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+            hour = 19 if target_weekday < 5 else 10
+        else:  # cinema
+            hour = 9
+        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour))
+        plan_dt = user_tz.localize(plan_dt)
+    
+    else:
+        # Если день недели не найден — пытаемся распарсить дату (для обоих режимов)
+        # Формат "15 января", "15 янв", "15 января 2025"
+        date_match = re.search(r'(\d{1,2})\s+([а-яё]+)(?:\s+(\d{4}))?', day_lower)
         if date_match:
             day_num = int(date_match.group(1))
             month_str = date_match.group(2)
@@ -20199,12 +20356,12 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                 hour = 19 if plan_date.weekday() < 5 else 10
                             plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                     else:
-                        if plan_type == 'cinema':
-                            hour = 9
-                        else:  # home
-                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                            hour = 19 if plan_date.weekday() < 5 else 10
-                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                    if plan_type == 'cinema':
+                        hour = 9
+                    else:  # home
+                        # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                        hour = 19 if plan_date.weekday() < 5 else 10
+                    plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                 except ValueError:
                     logger.error(f"[PLAN] Некорректная дата: {day_num} {month_str}")
                     return False
@@ -20271,12 +20428,12 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                                     hour = 19 if plan_date.weekday() < 5 else 10
                                 plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                         else:
-                            if plan_type == 'cinema':
-                                hour = 9
-                            else:  # home
-                                # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
-                                hour = 19 if plan_date.weekday() < 5 else 10
-                            plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
+                        if plan_type == 'cinema':
+                            hour = 9
+                        else:  # home
+                            # Будние дни (понедельник-пятница, 0-4) — 19:00, выходные (суббота-воскресенье, 5-6) — 10:00
+                            hour = 19 if plan_date.weekday() < 5 else 10
+                        plan_dt = user_tz.localize(plan_date.replace(hour=hour, minute=0))
                         logger.info(f"[PLAN] Найдена дата (числовой формат): {day_num}.{month_num}.{year}")
                     except ValueError as e:
                         logger.error(f"[PLAN] Некорректная дата: {day_num}.{month_num}.{year_str if year_str else 'N/A'}: {e}")
@@ -20420,7 +20577,7 @@ def process_plan(user_id, chat_id, link, plan_type, day_or_date, message_date_ut
                     plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
                     markup = InlineKeyboardMarkup()
                     if has_tickets_access(chat_id, user_id):
-                        markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                    markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
                     else:
                         markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
         
@@ -20695,15 +20852,15 @@ def plan_handler(message):
                             day_or_date = f"{day_num}.{month_num} {hour}:{minute}"
                         logger.info(f"[PLAN] Найдена дата с временем: {day_or_date}")
                 else:
-                    date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
-                    if date_match:
-                        day_num = int(date_match.group(1))
-                        month_num = int(date_match.group(2))
-                        if 1 <= month_num <= 12 and 1 <= day_num <= 31:
-                            month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
-                                         'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-                            day_or_date = f"{day_num} {month_names[month_num - 1]}"
-                            logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
+                date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                if date_match:
+                    day_num = int(date_match.group(1))
+                    month_num = int(date_match.group(2))
+                    if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                        month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
+                                     'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+                        day_or_date = f"{day_num} {month_names[month_num - 1]}"
+                        logger.info(f"[PLAN] Найдена дата (числовой формат): {day_or_date}")
         
         # Проверяем, есть ли отдельно указанное время (если дата уже найдена, но время не включено)
         if day_or_date and plan_type == 'cinema':
@@ -20822,6 +20979,142 @@ def handle_plan_day_or_date(message):
         except:
             pass
 
+# Обработчики для Telegram Stars платежей
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def checkout(pre_checkout_query):
+    """Обработчик pre_checkout_query для Telegram Stars"""
+    try:
+        logger.info(f"[STARS] pre_checkout_query получен: id={pre_checkout_query.id}, user_id={pre_checkout_query.from_user.id}")
+        
+        # Всегда подтверждаем запрос
+        bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
+        logger.info(f"[STARS] pre_checkout_query подтвержден: id={pre_checkout_query.id}")
+    except Exception as e:
+        logger.error(f"[STARS] Ошибка обработки pre_checkout_query: {e}", exc_info=True)
+        try:
+            bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message="Ошибка обработки платежа")
+        except:
+            pass
+
+@bot.message_handler(content_types=['successful_payment'])
+def got_payment(message):
+    """Обработчик successful_payment для Telegram Stars"""
+    try:
+        payment = message.successful_payment
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        logger.info(f"[STARS] successful_payment получен: user_id={user_id}, chat_id={chat_id}, currency={payment.currency}, total_amount={payment.total_amount}")
+        
+        # Проверяем, что это платеж через Stars (валюта XTR)
+        if payment.currency != 'XTR':
+            logger.warning(f"[STARS] Платеж не через Stars: currency={payment.currency}")
+            return
+        
+        # Извлекаем payment_id из invoice_payload
+        invoice_payload = payment.invoice_payload
+        if not invoice_payload or not invoice_payload.startswith('stars_'):
+            logger.error(f"[STARS] Неверный invoice_payload: {invoice_payload}")
+            bot.reply_to(message, "❌ Ошибка: неверный идентификатор платежа")
+            return
+        
+        payment_id = invoice_payload.replace('stars_', '')
+        logger.info(f"[STARS] Извлечен payment_id: {payment_id}")
+        
+        # Получаем информацию о платеже из БД
+        from database.db_operations import get_payment_by_id, update_payment_status, create_subscription
+        
+        # Ищем платеж по payment_id
+        payment_data = None
+        try:
+            # Пробуем найти платеж в БД
+            # Нужно добавить функцию get_payment_by_id в db_operations
+            # Пока используем существующую логику
+            from database.db_connection import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status
+                FROM payments 
+                WHERE payment_id = %s
+            """, (payment_id,))
+            row = cursor.fetchone()
+            if row:
+                payment_data = {
+                    'payment_id': row[0],
+                    'user_id': row[1],
+                    'chat_id': row[2],
+                    'subscription_type': row[3],
+                    'plan_type': row[4],
+                    'period_type': row[5],
+                    'group_size': row[6],
+                    'amount': row[7],
+                    'status': row[8]
+                }
+            cursor.close()
+        except Exception as e:
+            logger.error(f"[STARS] Ошибка получения платежа из БД: {e}", exc_info=True)
+        
+        if not payment_data:
+            logger.error(f"[STARS] Платеж {payment_id} не найден в БД")
+            bot.reply_to(message, "❌ Ошибка: платеж не найден в базе данных")
+            return
+        
+        # Проверяем, что платеж еще не обработан
+        if payment_data['status'] == 'succeeded':
+            logger.warning(f"[STARS] Платеж {payment_id} уже обработан")
+            bot.reply_to(message, "✅ Платеж уже был обработан ранее")
+            return
+        
+        # Обновляем статус платежа
+        try:
+            from database.db_connection import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE payments 
+                SET status = 'succeeded'
+                WHERE payment_id = %s
+            """, (payment_id,))
+            conn.commit()
+            cursor.close()
+            logger.info(f"[STARS] Статус платежа {payment_id} обновлен на 'succeeded'")
+        except Exception as e:
+            logger.error(f"[STARS] Ошибка обновления статуса платежа: {e}", exc_info=True)
+        
+        # Создаем или продлеваем подписку
+        try:
+            subscription_id = create_subscription(
+                user_id=payment_data['user_id'],
+                chat_id=payment_data['chat_id'],
+                subscription_type=payment_data['subscription_type'],
+                plan_type=payment_data['plan_type'],
+                period_type=payment_data['period_type'],
+                group_size=payment_data['group_size'],
+                price=payment_data['amount']
+            )
+            
+            logger.info(f"[STARS] Подписка создана/продлена: subscription_id={subscription_id}")
+            
+            # Отправляем подтверждение пользователю
+            text = "✅ <b>Оплата успешно завершена!</b>\n\n"
+            text += f"💰 Оплачено: {payment.total_amount}⭐ ({payment_data['amount']}₽)\n"
+            text += f"📋 Подписка активирована\n\n"
+            text += "Спасибо за покупку! 🎉"
+            
+            bot.reply_to(message, text, parse_mode='HTML')
+            
+        except Exception as e:
+            logger.error(f"[STARS] Ошибка создания подписки: {e}", exc_info=True)
+            bot.reply_to(message, "❌ Ошибка активации подписки. Обратитесь к администратору.")
+        
+    except Exception as e:
+        logger.error(f"[STARS] Ошибка обработки successful_payment: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке платежа. Обратитесь к администратору.")
+        except:
+            pass
+
 # Flask app для webhook
 from web.web_app import create_web_app
 app = create_web_app(bot)
@@ -20879,12 +21172,6 @@ if IS_PRODUCTION:
     else:
         logger.warning("Webhook URL не определён! Установите RENDER_EXTERNAL_URL или RAILWAY_PUBLIC_DOMAIN")
 
-    # Устанавливаем команды бота
-    try:
-        setup_bot_commands()
-    except Exception as e:
-        logger.warning(f"Не удалось установить команды бота: {e}")
-
     # КЛЮЧЕВОЕ: запускаем Flask сервер
     port = int(os.getenv('PORT', 10000))
     logger.info(f"Запускаем Flask сервер на 0.0.0.0:{port}")
@@ -20907,12 +21194,6 @@ else:
         setup_menu_button(chat_id=None)
     except Exception as e:
         logger.warning(f"Не удалось настроить menu_button по умолчанию: {e}")
-    
-    # Устанавливаем команды бота
-    try:
-        setup_bot_commands()
-    except Exception as e:
-        logger.warning(f"Не удалось установить команды бота: {e}")
     
     # Запускаем polling независимо от того, как выполняется код
     # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
