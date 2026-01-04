@@ -7309,18 +7309,22 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 # Проверяем, просмотрен ли эпизод
                 try:
                     with db_lock:
-                        cursor.execute('''
-                            SELECT watched FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                            AND season_number = %s AND episode_number = %s
-                        ''', (chat_id, film_id, user_id, season_num, ep_num))
-                        watched_row = cursor.fetchone()
-                        is_watched = False
-                        if watched_row:
-                            if isinstance(watched_row, dict):
-                                is_watched = watched_row.get('watched', False)
-                            else:
-                                is_watched = bool(watched_row[0]) if len(watched_row) > 0 else False
+                        try:
+                            cursor.execute('''
+                                SELECT watched FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                                AND season_number = %s AND episode_number = %s
+                            ''', (chat_id, film_id, user_id, season_num, ep_num))
+                            watched_row = cursor.fetchone()
+                            is_watched = False
+                            if watched_row:
+                                if isinstance(watched_row, dict):
+                                    is_watched = watched_row.get('watched', False)
+                                else:
+                                    is_watched = bool(watched_row[0]) if len(watched_row) > 0 else False
+                        except Exception as db_e:
+                            logger.error(f"[SHOW EPISODES PAGE] Ошибка БД при проверке эпизода {ep_num}: {db_e}", exc_info=True)
+                            is_watched = False  # В случае ошибки БД считаем непросмотренным
                     
                     mark = "✅" if is_watched else "⬜"
                     button_text = f"{mark} {ep_num}"
@@ -16117,11 +16121,23 @@ def series_season_all_callback(call):
                 current_page = state.get('page', 1)
         
         # Обновляем сообщение с эпизодами
+        success = False
         try:
-            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
-            logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
+            success = show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+            if success:
+                logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
         except Exception as e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
+        finally:
+            # ВАЖНО: всегда отвечаем на callback, чтобы кнопка не висела
+            try:
+                if not success:
+                    bot.answer_callback_query(call.id, "❌ Ошибка обновления", show_alert=True)
+            except:
+                try:
+                    bot.answer_callback_query(call.id)
+                except:
+                    pass
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
         try:
