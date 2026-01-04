@@ -7270,7 +7270,6 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
             logger.info(f"[SHOW EPISODES PAGE] Сериал найден: film_id={film_id}, title='{title}'")
         
         # Получаем эпизоды сезона
-        from api.kinopoisk_api import get_seasons_data
         try:
             seasons_data = get_seasons_data(kp_id)
             if not seasons_data:
@@ -7511,7 +7510,13 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         logger.info(f"[SHOW EPISODES PAGE] Завершено успешно")
         return True
     except Exception as e:
-        logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
+        logger.error(f"[SHOW EPISODES PAGE] КРИТИЧЕСКАЯ ошибка: {e}", exc_info=True)
+        # Fallback: Отправь уведомление пользователю
+        try:
+            if chat_id and user_id:
+                bot.send_message(chat_id, "❌ Ошибка при обновлении списка эпизодов. Попробуйте позже.")
+        except:
+            pass
         return False
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_rating:"))
@@ -15789,11 +15794,15 @@ def handle_episodes_page(call):
             message_thread_id = call.message.message_thread_id
         
         logger.info(f"[EPISODES PAGE] Переключение страницы: user_id={user_id}, kp_id={kp_id}, season={season_num}, page={page}, message_thread_id={message_thread_id}")
-        show_episodes_page(kp_id, season_num, chat_id, user_id, page, call.message.message_id, message_thread_id)
+        success = show_episodes_page(kp_id, season_num, chat_id, user_id, page, call.message.message_id, message_thread_id)
+        if not success:
+            bot.answer_callback_query(call.id, "❌ Ошибка переключения страницы", show_alert=True)
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка в handle_episodes_page: {e}", exc_info=True)
+    finally:
+        # Всегда отвечаем на callback
         try:
-            bot.answer_callback_query(call.id, "Ошибка переключения страницы")
+            bot.answer_callback_query(call.id)
         except:
             pass
 
@@ -15920,19 +15929,27 @@ def series_episode_callback(call):
                     current_page = state.get('page', 1)
             
             # Обновляем сообщение с эпизодами
+            success = False
             try:
-                show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
-                logger.info(f"[SERIES EPISODE] Сообщение с эпизодами обновлено успешно")
-                # Отвечаем на callback с информацией о статусе
-                status_text = "✅ Отмечено как просмотренный" if is_watched else "⬜ Отметка снята"
-                bot.answer_callback_query(call.id, status_text)
+                success = show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+                if success:
+                    logger.info(f"[SERIES EPISODE] Сообщение с эпизодами обновлено успешно")
             except Exception as e:
                 logger.error(f"[SERIES EPISODE] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
-                # ВАЖНО: всегда отвечаем на callback, даже при ошибке
+            finally:
+                # ВАЖНО: всегда отвечаем на callback, чтобы кнопка не висела
                 try:
-                    bot.answer_callback_query(call.id, "❌ Ошибка обновления", show_alert=True)
+                    if success:
+                        status_text = "✅ Отмечено как просмотренный" if is_watched else "⬜ Отметка снята"
+                        bot.answer_callback_query(call.id, status_text)
+                    else:
+                        bot.answer_callback_query(call.id, "❌ Ошибка обновления", show_alert=True)
                 except:
-                    pass
+                    # Если даже answer_callback_query не работает, пробуем без параметров
+                    try:
+                        bot.answer_callback_query(call.id)
+                    except:
+                        pass
             
             # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
@@ -22641,9 +22658,19 @@ def got_payment(message):
                     if not user_name:
                         user_name = message.from_user.username or f"user_{user_id}"
                 
-                logger.info(f"[STARS SUCCESS] Создание чека: amount={payment_data['amount']}, description={description}, user_name={user_name}")
+                # ВАЖНО: payment_data['amount'] - это сумма в РУБЛЯХ (не в звездах!)
+                # stars_amount хранится отдельно в payment.total_amount (в звездах)
+                amount_rub = float(payment_data['amount'])  # Сумма в рублях из БД
+                stars_paid = payment.total_amount  # Количество звезд, которые заплатил пользователь
+                
+                logger.info(f"[STARS SUCCESS] Создание чека:")
+                logger.info(f"[STARS SUCCESS]   amount_rub={amount_rub}₽ (из БД)")
+                logger.info(f"[STARS SUCCESS]   stars_paid={stars_paid}⭐ (заплачено пользователем)")
+                logger.info(f"[STARS SUCCESS]   description={description}")
+                logger.info(f"[STARS SUCCESS]   user_name={user_name}")
+                
                 check_url, pdf_url = create_check(
-                    amount_rub=float(payment_data['amount']),
+                    amount_rub=amount_rub,  # Сумма в РУБЛЯХ (не в звездах!)
                     description=description,
                     user_name=user_name
                 )
