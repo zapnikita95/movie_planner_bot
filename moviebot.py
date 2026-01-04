@@ -22385,7 +22385,7 @@ def process_pre_checkout_query(pre_checkout_query):
         except Exception as e2:
             logger.error(f"[PRE CHECKOUT] Критическая ошибка при отправке ответа: {e2}", exc_info=True)
 
-@bot.message_handler(content_types=['successful_payment'], priority=10)
+@bot.message_handler(content_types=['successful_payment'])
 def got_payment(message):
     """Обработчик successful_payment для Telegram Stars - основной handler для Stars платежей"""
     try:
@@ -22633,9 +22633,8 @@ if IS_PRODUCTION:
             "message_reaction_count",   # Счетчики реакций
             "chat_boost",               # Усиления чата
             "removed_chat_boost",       # Удаленные усиления
-            "web_app_data"              # Данные из Web App
-            # Примечание: successful_payment - это content_type внутри message, не отдельный тип update
-            # Но message уже включен, поэтому successful_payment будет приходить
+            "web_app_data",             # Данные из Web App
+            "successful_payment"        # КРИТИЧНО! Для Telegram Stars и карт (хотя это content_type внутри message, но Telegram требует явно указать)
         ]
         logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
         try:
