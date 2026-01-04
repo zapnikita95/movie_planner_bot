@@ -3873,6 +3873,9 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+        # Добавляем кнопку Билеты, если есть подписка
+        if has_tickets_access(message.chat.id, message.from_user.id):
+            markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
