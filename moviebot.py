@@ -16023,23 +16023,18 @@ def series_season_all_callback(call):
             message_thread_id = call.message.message_thread_id
         
         # Используем функцию show_episodes_page для обновления сообщения
-        from api.kinopoisk_api import get_seasons_data
-        seasons_data = get_seasons_data(kp_id)
-        if seasons_data:
-            # Находим текущую страницу из состояния пользователя или используем 1
-            current_page = 1
-            if user_id in user_episodes_state:
-                state = user_episodes_state[user_id]
-                if state.get('kp_id') == kp_id and state.get('season_num') == season_num:
-                    current_page = state.get('page', 1)
-            
-            # Обновляем сообщение с эпизодами
-            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+        # Находим текущую страницу из состояния пользователя или используем 1
+        current_page = 1
+        if user_id in user_episodes_state:
+            state = user_episodes_state[user_id]
+            if str(state.get('kp_id')) == str(kp_id) and str(state.get('season_num')) == str(season_num):
+                current_page = state.get('page', 1)
+        
+        # Обновляем сообщение с эпизодами
+        show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
-        from api.kinopoisk_api import get_seasons_data
         from datetime import datetime as dt
-        seasons_data = get_seasons_data(kp_id)
         if seasons_data:
             now = dt.now()
             # Проверяем, выходит ли сериал
@@ -22320,8 +22315,8 @@ def handle_pay_yookassa_callback(call):
 
 # Обработчики для Telegram Stars платежей
 @bot.pre_checkout_query_handler(func=lambda query: True)
-def checkout(pre_checkout_query):
-    """Обработчик pre_checkout_query для Telegram Stars"""
+def process_pre_checkout_query(pre_checkout_query):
+    """Обработчик pre_checkout_query для Telegram Stars - отвечает мгновенно"""
     query_id = None
     try:
         query_id = pre_checkout_query.id
@@ -22330,33 +22325,33 @@ def checkout(pre_checkout_query):
         total_amount = pre_checkout_query.total_amount
         invoice_payload = pre_checkout_query.invoice_payload
         
-        logger.info(f"[STARS] pre_checkout_query получен: id={query_id}, user_id={user_id}, currency={currency}, total_amount={total_amount}, payload={invoice_payload}")
+        logger.info(f"[PRE CHECKOUT] Получен pre_checkout_query от user_id={user_id}, payload={invoice_payload}, currency={currency}, amount={total_amount}")
         
-        # Проверяем, что это платеж через Stars (XTR)
-        if currency != 'XTR':
-            logger.warning(f"[STARS] pre_checkout_query не для Stars: currency={currency}")
-            bot.answer_pre_checkout_query(query_id, ok=False, error_message="Поддерживается только оплата звездами")
-            return
-        
-        # Проверяем, что payload начинается с 'stars_'
-        if not invoice_payload or not invoice_payload.startswith('stars_'):
-            logger.warning(f"[STARS] pre_checkout_query с неверным payload: {invoice_payload}")
-            bot.answer_pre_checkout_query(query_id, ok=False, error_message="Неверный идентификатор платежа")
-            return
-        
-        # Всегда подтверждаем запрос быстро (в течение 10 секунд)
-        bot.answer_pre_checkout_query(query_id, ok=True)
-        logger.info(f"[STARS] pre_checkout_query подтвержден: id={query_id}")
+        # КРИТИЧНО: Отвечаем мгновенно, до любых проверок, чтобы избежать таймаута
+        # Проверяем только базовые условия для Stars платежей
+        if currency == 'XTR' and invoice_payload and invoice_payload.startswith('stars_'):
+            # Это наш Stars платеж - отвечаем OK сразу
+            bot.answer_pre_checkout_query(query_id, ok=True)
+            logger.info(f"[PRE CHECKOUT] Ответили OK для Stars платежа: id={query_id}, payload={invoice_payload}")
+        else:
+            # Не наш платеж - отклоняем
+            error_msg = "Поддерживается только оплата звездами Telegram" if currency != 'XTR' else "Неверный идентификатор платежа"
+            bot.answer_pre_checkout_query(query_id, ok=False, error_message=error_msg)
+            logger.warning(f"[PRE CHECKOUT] Отклонен: currency={currency}, payload={invoice_payload}")
         
     except Exception as e:
-        logger.error(f"[STARS] Ошибка обработки pre_checkout_query: {e}", exc_info=True)
+        logger.error(f"[PRE CHECKOUT] Ошибка обработки pre_checkout_query: {e}", exc_info=True)
+        # В случае ошибки все равно отвечаем, чтобы не было таймаута
         try:
             if query_id is None:
                 query_id = pre_checkout_query.id if hasattr(pre_checkout_query, 'id') else None
             if query_id:
-                bot.answer_pre_checkout_query(query_id, ok=False, error_message="Ошибка обработки платежа")
+                # Отвечаем OK даже при ошибке, чтобы не блокировать платеж
+                # Лучше обработать платеж и проверить его позже, чем получить таймаут
+                bot.answer_pre_checkout_query(query_id, ok=True)
+                logger.warning(f"[PRE CHECKOUT] Ответили OK при ошибке обработки: id={query_id}")
         except Exception as e2:
-            logger.error(f"[STARS] Ошибка при отправке ответа на pre_checkout_query: {e2}", exc_info=True)
+            logger.error(f"[PRE CHECKOUT] Критическая ошибка при отправке ответа: {e2}", exc_info=True)
 
 @bot.message_handler(content_types=['successful_payment'])
 def got_payment(message):
