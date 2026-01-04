@@ -3601,6 +3601,12 @@ def handle_web_app_data(message):
             clean_command(fake_message)
         elif command == 'search':
             handle_search(fake_message)
+        elif command == 'join':
+            join_command(fake_message)
+        elif command == 'edit':
+            edit_command(fake_message)
+        elif command == 'payment':
+            payment_command(fake_message)
         else:
             bot.send_message(chat_id=message.chat.id, text=f"Неизвестная команда: {command}")
     except json.JSONDecodeError:
