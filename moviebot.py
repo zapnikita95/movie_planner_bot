@@ -1636,41 +1636,8 @@ def dice_game_handler(call):
                     ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat()))
                     all_participants = [row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
                 
-                # Ждем, пока все участники бросят кубик, или через 5 минут определяем победителя
-                if len(game_state['participants']) >= len(all_participants) or (datetime.now(plans_tz) - game_state['start_time']).total_seconds() > 300:
-                    # Определяем победителя
-                    max_value = max(p['value'] for p in game_state['participants'].values())
-                    winners = [uid for uid, p in game_state['participants'].items() if p['value'] == max_value]
-                    
-                    if len(winners) == 1:
-                        # Есть победитель
-                        winner_id = winners[0]
-                        winner_info = game_state['participants'][winner_id]
-                        winner_name = winner_info.get('username', 'участник')
-                        
-                        # Отправляем сообщение победителю
-                        markup = InlineKeyboardMarkup(row_width=1)
-                        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
-                        mention = f"@{winner_name}" if winner_name.startswith('@') else f"<a href='tg://user?id={winner_id}'>@{winner_name}</a>"
-                        bot.send_message(
-                            chat_id,
-                            f"🎉 Победитель: <b>{mention}</b>! Выбери фильм на выходные!",
-                            reply_markup=markup,
-                            parse_mode='HTML'
-                        )
-                        
-                        # Удаляем состояние игры
-                        del dice_game_state[chat_id]
-                    else:
-                        # Ничья - перекидываем
-                        bot.send_message(
-                            chat_id,
-                            f"🤝 Ничья! У {len(winners)} участников выпало {max_value}. Перекидываем кубик!",
-                            parse_mode='HTML'
-                        )
-                        # Сбрасываем результаты для перекидывания
-                        game_state['participants'] = {}
-                        game_state['start_time'] = datetime.now(plans_tz)
+            # Не определяем победителя сразу - ждем, пока кубик остановится
+            # Победитель будет определен в handle_dice_result
         except Exception as e:
             logger.error(f"[RANDOM EVENTS] Ошибка при отправке кубика: {e}")
             bot.answer_callback_query(call.id, "Ошибка при отправке кубика", show_alert=True)
@@ -1740,13 +1707,28 @@ def handle_dice_result(message):
                         winner_info = game_state['participants'][winner_id]
                         winner_name = winner_info.get('username', 'участник')
                         
+                        # Формируем имя пользователя для отображения
+                        if winner_name and winner_name.startswith('@'):
+                            user_display = winner_name
+                        elif winner_name:
+                            try:
+                                user_info = bot.get_chat_member(chat_id, winner_id)
+                                user_display = user_info.user.first_name or winner_name
+                            except:
+                                user_display = winner_name
+                        else:
+                            try:
+                                user_info = bot.get_chat_member(chat_id, winner_id)
+                                user_display = user_info.user.first_name or "участник"
+                            except:
+                                user_display = "участник"
+                        
                         # Отправляем сообщение победителю
                         markup = InlineKeyboardMarkup(row_width=1)
                         markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
-                        mention = f"@{winner_name}" if winner_name and not winner_name.startswith('@') else (winner_name if winner_name else f"<a href='tg://user?id={winner_id}'>участник</a>")
                         bot.send_message(
                             chat_id,
-                            f"🎉 Победитель: <b>{mention}</b>! Выбери фильм на выходные!",
+                            f"<b>{user_display}</b> выбросил больше на костях. Можете выбрать фильм для вашей компании!",
                             reply_markup=markup,
                             parse_mode='HTML'
                         )
@@ -14297,12 +14279,14 @@ def show_seasons_callback(call):
             )
             return
         
+        # Отвечаем на callback_query сразу для улучшения отзывчивости
+        bot.answer_callback_query(call.id)
+        
         # Получаем актуальные данные о сезонах
         from api.kinopoisk_api import get_seasons
         seasons_text = get_seasons(kp_id, chat_id, user_id)
         
         if seasons_text:
-            bot.answer_callback_query(call.id)
             
             # Добавляем кнопки для работы с сериалом
             with db_lock:
@@ -14442,12 +14426,12 @@ def seasons_list_callback(call):
                     if total_episodes > 0 and watched_episodes == total_episodes:
                         all_episodes_watched = True
             
-            # Добавляем колокольчик, если подписан
-            if is_subscribed:
-                button_text = f"🔔 {button_text}"
-            # Добавляем галочку, если все серии просмотрены и есть активная подписка
-            if all_episodes_watched and is_subscribed:
+            # Добавляем галочку, если все серии просмотрены (независимо от подписки)
+            if all_episodes_watched:
                 button_text = f"✅ {button_text}"
+            # Добавляем колокольчик, если подписан (но не перекрываем галочку)
+            elif is_subscribed:
+                button_text = f"🔔 {button_text}"
             
             if len(button_text) > 30:
                 button_text = button_text[:27] + "..."
@@ -14874,32 +14858,32 @@ def series_episode_callback(call):
                     for season in seasons_data:
                         episodes = season.get('episodes', [])
                         season_num = season.get('number', '')
-            for ep in episodes:
-                if not is_airing:
-                    # Если сериал не выходит, считаем все эпизоды
-                    total_episodes += 1
-                    ep_num = str(ep.get('episodeNumber', ''))
-                    if (season_num, ep_num) in watched_set:
-                        watched_episodes += 1
-                else:
-                    # Если сериал выходит, считаем только вышедшие эпизоды
-                    release_str = ep.get('releaseDate', '')
-                    if release_str and release_str != '—':
-                        try:
-                            release_date = None
-                            for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                try:
-                                    release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                    break
-                                except:
-                                    continue
-                            if release_date and release_date <= now:
+                        for ep in episodes:
+                            if not is_airing:
+                                # Если сериал не выходит, считаем все эпизоды
                                 total_episodes += 1
                                 ep_num = str(ep.get('episodeNumber', ''))
                                 if (season_num, ep_num) in watched_set:
                                     watched_episodes += 1
-                        except:
-                            pass
+                            else:
+                                # Если сериал выходит, считаем только вышедшие эпизоды
+                                release_str = ep.get('releaseDate', '')
+                                if release_str and release_str != '—':
+                                    try:
+                                        release_date = None
+                                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                            try:
+                                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                                break
+                                            except:
+                                                continue
+                                        if release_date and release_date <= now:
+                                            total_episodes += 1
+                                            ep_num = str(ep.get('episodeNumber', ''))
+                                            if (season_num, ep_num) in watched_set:
+                                                watched_episodes += 1
+                                    except:
+                                        pass
                     
                     # Если все серии просмотрены и сериал не выходит, помечаем сериал как просмотренный
                     if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
@@ -14914,20 +14898,44 @@ def series_episode_callback(call):
             # Используем функцию show_episodes_page для отображения эпизодов
             show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id)
             
-            # Отвечаем на callback_query после успешного обновления
-            bot.answer_callback_query(call.id, status)
-            
-            # Обновляем главное сообщение со списком сезонов (если оно существует)
-            # Ищем последнее сообщение с сезонами для этого сериала
+            # Отвечаем на callback_query с информацией о статусе (уже ответили выше, но можно обновить)
             try:
+                bot.answer_callback_query(call.id, status)
+            except:
+                pass  # Уже ответили выше
+            
+            # Обновляем главное сообщение со списком сезонов, если оно существует
+            # Пытаемся найти и обновить сообщение с сезонами для этого сериала
+            try:
+                # Используем локальную функцию get_seasons для получения обновленного текста
                 from api.kinopoisk_api import get_seasons
                 seasons_text = get_seasons(kp_id, chat_id, user_id)
                 if seasons_text:
-                    # Пытаемся найти и обновить главное сообщение
-                    # Для этого нужно сохранять message_id главного сообщения, но пока просто обновим при возврате
-                    pass
-            except:
-                pass
+                    # Получаем информацию о сериале для формирования полного текста
+                    cursor.execute("SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                    title_row = cursor.fetchone()
+                    if title_row:
+                        title = title_row.get('title') if isinstance(title_row, dict) else title_row[0]
+                        full_text = f"📺 <b>{title}</b>\n\n{seasons_text}"
+                        
+                        # Проверяем, подписан ли пользователь
+                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                        sub_row = cursor.fetchone()
+                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                        
+                        markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                        if is_subscribed:
+                            markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                        else:
+                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
+                        
+                        # Пытаемся обновить сообщение с сезонами (может быть в другом потоке)
+                        # Для этого нужно найти message_id, но пока просто пропускаем
+                        # Обновление произойдет при следующем открытии сериала
+            except Exception as e:
+                logger.error(f"[SERIES EPISODE] Ошибка при обновлении главного сообщения: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SERIES EPISODE] Ошибка: {e}", exc_info=True)
         try:
