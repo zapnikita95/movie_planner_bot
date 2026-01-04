@@ -3832,6 +3832,31 @@ def schedule_back_callback(call):
             except Exception as e:
                 logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение: {e}")
         
+        # Показываем главное меню после удаления сообщений
+        welcome_text = """
+🎬 <b>Главное меню</b>
+
+💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
+
+Выберите раздел из меню ниже ⬇
+        """.strip()
+        
+        # Создаём меню с кнопками
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
+        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
+        markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
+        markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+        markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
+        markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
+        
+        # Отправляем главное меню
+        try:
+            bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"[SCHEDULE BACK] Ошибка при отправке главного меню: {e}")
+        
         logger.info(f"[SCHEDULE BACK] Пользователь {call.from_user.id} вернулся из расписания")
     except Exception as e:
         logger.error(f"[SCHEDULE BACK] Ошибка: {e}", exc_info=True)
@@ -14934,7 +14959,20 @@ movie-planner-bot@yandex.com"""
     
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-    bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
+    # Переключаемся на HTML, так как Markdown может вызывать ошибки парсинга
+    text_html = text.replace('*', '').replace('_', '')
+    # Добавляем базовое форматирование
+    text_html = text_html.replace('🎬 Помощь по командам бота:', '<b>🎬 Помощь по командам бота:</b>')
+    text_html = text_html.replace('Как использовать бота:', '<b>Как использовать бота:</b>')
+    text_html = text_html.replace('Сценарии работы с ботом:', '<b>Сценарии работы с ботом:</b>')
+    text_html = text_html.replace('1) Добавление фильмов', '<b>1) Добавление фильмов</b>')
+    text_html = text_html.replace('2) Сериалы', '<b>2) Сериалы</b>')
+    text_html = text_html.replace('3) Планирование премьер', '<b>3) Планирование премьер</b>')
+    text_html = text_html.replace('4) Поиск', '<b>4) Поиск</b>')
+    text_html = text_html.replace('5) Планирование походов в кино', '<b>5) Планирование походов в кино</b>')
+    text_html = text_html.replace('Приятного просмотра!', '<b>Приятного просмотра!</b>')
+    text_html = text_html.replace('Если у вас возникли сложности с ботом или оплатой, напишите нам:', '<b>Если у вас возникли сложности с ботом или оплатой, напишите нам:</b>')
+    bot.reply_to(message, text_html, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['premieres'])
 def premieres_command(message):
@@ -18577,7 +18615,20 @@ movie-planner-bot@yandex.com"""
     
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-    bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
+    # Переключаемся на HTML, так как Markdown может вызывать ошибки парсинга
+    text_html = text.replace('*', '').replace('_', '')
+    # Добавляем базовое форматирование
+    text_html = text_html.replace('🎬 Помощь по командам бота:', '<b>🎬 Помощь по командам бота:</b>')
+    text_html = text_html.replace('Как использовать бота:', '<b>Как использовать бота:</b>')
+    text_html = text_html.replace('Сценарии работы с ботом:', '<b>Сценарии работы с ботом:</b>')
+    text_html = text_html.replace('1) Добавление фильмов', '<b>1) Добавление фильмов</b>')
+    text_html = text_html.replace('2) Сериалы', '<b>2) Сериалы</b>')
+    text_html = text_html.replace('3) Планирование премьер', '<b>3) Планирование премьер</b>')
+    text_html = text_html.replace('4) Поиск', '<b>4) Поиск</b>')
+    text_html = text_html.replace('5) Планирование походов в кино', '<b>5) Планирование походов в кино</b>')
+    text_html = text_html.replace('Приятного просмотра!', '<b>Приятного просмотра!</b>')
+    text_html = text_html.replace('Если у вас возникли сложности с ботом или оплатой, напишите нам:', '<b>Если у вас возникли сложности с ботом или оплатой, напишите нам:</b>')
+    bot.reply_to(message, text_html, reply_markup=markup, parse_mode='HTML')
 
 @bot.message_handler(commands=['premieres'])
 def premieres_command(message):
