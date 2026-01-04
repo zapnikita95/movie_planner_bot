@@ -15924,13 +15924,11 @@ def series_episode_callback(call):
                             logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены, подписок нет")
                         else:
                             logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
+            except Exception as inner_e:
+                logger.error(f"[SERIES EPISODE] Ошибка при проверке всех эпизодов: {inner_e}", exc_info=True)
             
     except Exception as e:
-        logger.error(f"[SERIES EPISODE] Ошибка: {e}", exc_info=True)
-        try:
-            bot.answer_callback_query(call.id, "❌ Ошибка при обновлении", show_alert=True)
-        except:
-            pass
+        logger.error(f"[SERIES EPISODE] Критическая ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
