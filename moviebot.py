@@ -4073,16 +4073,46 @@ def send_welcome(message):
 
     # Разные приветствия для личных сообщений и групп
     if message.chat.type == 'private':
-        welcome_text = """
-🎬 <b>Главное меню</b>
+        # Проверяем личную подписку
+        from database.db_operations import get_active_subscription
+        sub = get_active_subscription(message.chat.id, message.from_user.id, 'personal')
+        subscription_info = ""
+        if sub:
+            plan_type = sub.get('plan_type', 'all')
+            plan_names = {
+                'notifications': 'Уведомления о сериалах',
+                'recommendations': 'Рекомендации',
+                'tickets': 'Билеты',
+                'all': 'Все режимы'
+            }
+            plan_name = plan_names.get(plan_type, plan_type)
+            subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+        
+        welcome_text = f"""
+🎬 <b>Главное меню</b>{subscription_info}
 
 💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
 
 Выберите раздел из меню ниже ⬇
         """.strip()
     else:
-        welcome_text = """
-🎬 <b>Добро пожаловать в MovieBot — ваш групповой планировщик кино!</b>
+        # Проверяем групповую подписку
+        from database.db_operations import get_active_group_subscription_by_chat_id
+        group_sub = get_active_group_subscription_by_chat_id(message.chat.id)
+        subscription_info = ""
+        if group_sub:
+            plan_type = group_sub.get('plan_type', 'all')
+            plan_names = {
+                'notifications': 'Уведомления о сериалах',
+                'recommendations': 'Рекомендации',
+                'tickets': 'Билеты',
+                'all': 'Все режимы'
+            }
+            plan_name = plan_names.get(plan_type, plan_type)
+            subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
+        
+        welcome_text = f"""
+🎬 <b>Добро пожаловать в MovieBot — ваш групповой планировщик кино!</b>{subscription_info}
 
 <b>Что умеет этот бот:</b>
 • Собирает фильмы и сериалы в общую базу группы
@@ -16747,9 +16777,17 @@ def handle_payment_callback(call):
                     plan_type = sub.get('plan_type', 'all')
                     period_type = sub.get('period_type', 'lifetime')
                     
+                    # Определяем название подписки
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    
                     text = f"👤 <b>Личная подписка</b>\n\n"
-                    if plan_type == 'all':
-                        text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
+                    text += f"📋 <b>Название подписки:</b> {plan_name}\n\n"
                     text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
                     if activated:
                         text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
@@ -16809,9 +16847,17 @@ def handle_payment_callback(call):
                     plan_type = sub.get('plan_type', 'all')
                     period_type = sub.get('period_type', 'lifetime')
                     
+                    # Определяем название подписки
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    
                     text = f"👤 <b>Личная подписка</b>\n\n"
-                    if plan_type == 'all':
-                        text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
+                    text += f"📋 <b>Название подписки:</b> {plan_name}\n\n"
                     text += f"Пользователь: <b>@{call.from_user.username or f'user_{user_id}'}</b>\n"
                     text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
                     if activated:
@@ -16981,9 +17027,13 @@ def handle_payment_callback(call):
                     
                     markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
                 
-                # Показываем кнопку "Отписаться" только для реальных подписок (id > 0)
+                # Показываем кнопку "Отписаться" только для реальных подписок (id > 0) и только для активных участников
                 if subscription_id and subscription_id > 0:
-                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                    from database.db_operations import get_subscription_members
+                    members = get_subscription_members(subscription_id)
+                    # Проверяем, является ли пользователь активным участником подписки
+                    if members and user_id in members:
+                        markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             else:

@@ -328,6 +328,13 @@ def init_database():
     except Exception as e:
         logger.debug(f"Миграция subscriptions.payment_method_id: {e}")
     
+    # Миграция: добавление telegram_payment_charge_id для возврата звезд
+    try:
+        cursor.execute('ALTER TABLE payments ADD COLUMN IF NOT EXISTS telegram_payment_charge_id TEXT')
+        logger.info("Миграция: payments.telegram_payment_charge_id добавлен")
+    except Exception as e:
+        logger.debug(f"Миграция payments.telegram_payment_charge_id: {e}")
+    
     try:
         cursor.execute('ALTER TABLE settings ALTER COLUMN chat_id TYPE BIGINT')
         logger.info("Миграция: settings.chat_id изменён на BIGINT")
