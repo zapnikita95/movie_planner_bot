@@ -2502,6 +2502,66 @@ def get_series_airing_status(kp_id):
         logger.warning(f"[GET_SERIES_AIRING_STATUS] Ошибка: {e}")
         return False, None
 
+def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id):
+    """
+    Подсчитывает общее количество эпизодов и просмотренных для проверки "все просмотрены"
+    
+    Args:
+        seasons_data: данные о сезонах из API
+        is_airing: выходит ли сериал (есть ли будущие эпизоды)
+        watched_set: set из (season_number, episode_number) просмотренных эпизодов
+        chat_id, film_id, user_id: для логирования
+    
+    Returns:
+        (total_episodes, watched_episodes) - количество эпизодов для проверки и просмотренных
+    """
+    from datetime import datetime as dt
+    now = dt.now()
+    
+    total_episodes = 0
+    watched_episodes = 0
+    
+    for season in seasons_data:
+        episodes = season.get('episodes', [])
+        season_num = str(season.get('number', ''))
+        for ep in episodes:
+            ep_num = str(ep.get('episodeNumber', ''))
+            release_str = ep.get('releaseDate', '')
+            
+            should_count = False
+            
+            if is_airing:
+                # Для выходящих сериалов считаем только вышедшие эпизоды
+                if release_str and release_str != '—':
+                    try:
+                        release_date = None
+                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                            try:
+                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                break
+                            except:
+                                continue
+                        # Считаем только вышедшие эпизоды
+                        if release_date and release_date <= now:
+                            should_count = True
+                    except:
+                        pass
+                else:
+                    # Если дата не указана - считаем как вышедший (для старых сериалов)
+                    should_count = True
+            else:
+                # Для завершённых сериалов считаем все эпизоды
+                should_count = True
+            
+            if should_count:
+                total_episodes += 1
+                if (season_num, ep_num) in watched_set:
+                    watched_episodes += 1
+    
+    logger.info(f"[COUNT EPISODES] chat_id={chat_id}, film_id={film_id}, user_id={user_id}, is_airing={is_airing}, total={total_episodes}, watched={watched_episodes}, all_watched={total_episodes > 0 and watched_episodes == total_episodes}")
+    
+    return total_episodes, watched_episodes
+
 def get_seasons(kp_id, chat_id=None, user_id=None):
     """Получает информацию о сезонах сериала с отметками просмотренных"""
     headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
@@ -10655,115 +10715,38 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             if is_series and user_id:
                 if has_notifications_access(chat_id, user_id):
                     # Проверяем, все ли серии просмотрены
-                    from api.kinopoisk_api import get_seasons_data
-                    from datetime import datetime as dt
                     seasons_data = get_seasons_data(kp_id)
                     all_episodes_watched = False
                     if seasons_data and film_id:
-                        now = dt.now()
                         # Проверяем, выходит ли сериал
-                        is_airing = False
-                        for season in seasons_data:
-                            episodes = season.get('episodes', [])
-                            for ep in episodes:
-                                release_str = ep.get('releaseDate', '')
-                                if release_str and release_str != '—':
-                                    try:
-                                        release_date = None
-                                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                            try:
-                                                release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                                break
-                                            except:
-                                                continue
-                                        if release_date and release_date > now:
-                                            is_airing = True
-                                            break
-                                    except:
-                                        pass
-                            if is_airing:
-                                break
+                        is_airing, _ = get_series_airing_status(kp_id)
                         
-                        # Если сериал не выходит, проверяем, все ли серии просмотрены
-                        if not is_airing:
-                            total_episodes = 0
-                            watched_episodes = 0
+                        # Получаем просмотренные эпизоды
+                        with db_lock:
+                            cursor.execute('''
+                                SELECT season_number, episode_number 
+                                FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                            ''', (chat_id, film_id, user_id))
+                            watched_rows = cursor.fetchall()
+                            watched_set = set()
+                            for w_row in watched_rows:
+                                if isinstance(w_row, dict):
+                                    watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
+                                else:
+                                    watched_set.add((str(w_row[0]), str(w_row[1])))
+                        
+                        # Подсчитываем эпизоды
+                        total_episodes, watched_episodes = count_episodes_for_watch_check(
+                            seasons_data, is_airing, watched_set, chat_id, film_id, user_id
+                        )
+                        
+                        if total_episodes > 0 and watched_episodes == total_episodes:
+                            all_episodes_watched = True
+                            # Отмечаем сериал как просмотренный в БД
                             with db_lock:
-                                cursor.execute('''
-                                    SELECT season_number, episode_number 
-                                    FROM series_tracking 
-                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                                ''', (chat_id, film_id, user_id))
-                                watched_rows = cursor.fetchall()
-                                watched_set = set()
-                                for w_row in watched_rows:
-                                    if isinstance(w_row, dict):
-                                        watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                                    else:
-                                        watched_set.add((w_row[0], w_row[1]))
-                                
-                                for season in seasons_data:
-                                    episodes = season.get('episodes', [])
-                                    season_num = season.get('number', '')
-                                    for ep in episodes:
-                                        total_episodes += 1
-                                        ep_num = str(ep.get('episodeNumber', ''))
-                                        if (season_num, ep_num) in watched_set:
-                                            watched_episodes += 1
-                            
-                            if total_episodes > 0 and watched_episodes == total_episodes:
-                                all_episodes_watched = True
-                                # Отмечаем сериал как просмотренный в БД
-                                with db_lock:
-                                    cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                                    conn.commit()
-                        else:
-                            # Если сериал выходит, проверяем, все ли вышедшие серии просмотрены
-                            total_episodes = 0
-                            watched_episodes = 0
-                            with db_lock:
-                                cursor.execute('''
-                                    SELECT season_number, episode_number 
-                                    FROM series_tracking 
-                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                                ''', (chat_id, film_id, user_id))
-                                watched_rows = cursor.fetchall()
-                                watched_set = set()
-                                for w_row in watched_rows:
-                                    if isinstance(w_row, dict):
-                                        watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                                    else:
-                                        watched_set.add((w_row[0], w_row[1]))
-                                
-                                for season in seasons_data:
-                                    episodes = season.get('episodes', [])
-                                    season_num = season.get('number', '')
-                                    for ep in episodes:
-                                        release_str = ep.get('releaseDate', '')
-                                        if release_str and release_str != '—':
-                                            try:
-                                                release_date = None
-                                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                                    try:
-                                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                                        break
-                                                    except:
-                                                        continue
-                                                # Считаем только вышедшие эпизоды
-                                                if release_date and release_date <= now:
-                                                    total_episodes += 1
-                                                    ep_num = str(ep.get('episodeNumber', ''))
-                                                    if (season_num, ep_num) in watched_set:
-                                                        watched_episodes += 1
-                                            except:
-                                                pass
-                            
-                            if total_episodes > 0 and watched_episodes == total_episodes:
-                                all_episodes_watched = True
-                                # Отмечаем сериал как просмотренный в БД
-                                with db_lock:
-                                    cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                                    conn.commit()
+                                cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                                conn.commit()
                     
                     # Проверяем подписку
                     is_subscribed = False
@@ -15096,112 +15079,36 @@ def seasons_command(message):
         all_episodes_watched = False
         has_some_watched = False
         if has_access:
-            from api.kinopoisk_api import get_seasons_data
-            from datetime import datetime as dt
             seasons_data = get_seasons_data(kp_id)
             if seasons_data:
-                now = dt.now()
-                # Проверяем, выходит ли сериал (есть ли будущие эпизоды)
-                is_airing = False
-                for season in seasons_data:
-                    episodes = season.get('episodes', [])
-                    for ep in episodes:
-                        release_str = ep.get('releaseDate', '')
-                        if release_str and release_str != '—':
-                            try:
-                                release_date = None
-                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                    try:
-                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                        break
-                                    except:
-                                        continue
-                                if release_date and release_date > now:
-                                    is_airing = True
-                                    break
-                            except:
-                                pass
-                    if is_airing:
-                        break
+                # Проверяем, выходит ли сериал
+                is_airing, _ = get_series_airing_status(kp_id)
                 
-                # Если сериал не выходит, проверяем, все ли серии просмотрены
-                if not is_airing:
-                    total_episodes = 0
-                    watched_episodes = 0
-                    with db_lock:
-                        cursor.execute('''
-                            SELECT season_number, episode_number 
-                            FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                        ''', (chat_id, film_id, user_id))
-                        watched_rows = cursor.fetchall()
-                        watched_set = set()
-                        for w_row in watched_rows:
-                            if isinstance(w_row, dict):
-                                watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                            else:
-                                watched_set.add((w_row[0], w_row[1]))
-                        
-                        for season in seasons_data:
-                            episodes = season.get('episodes', [])
-                            season_num = season.get('number', '')
-                            for ep in episodes:
-                                total_episodes += 1
-                                ep_num = str(ep.get('episodeNumber', ''))
-                                if (season_num, ep_num) in watched_set:
-                                    watched_episodes += 1
-                    
-                    if total_episodes > 0:
-                        if watched_episodes == total_episodes:
-                            all_episodes_watched = True
-                        elif watched_episodes > 0:
-                            has_some_watched = True
-                else:
-                    # Если сериал выходит, проверяем, все ли вышедшие серии просмотрены
-                    total_episodes = 0
-                    watched_episodes = 0
-                    with db_lock:
-                        cursor.execute('''
-                            SELECT season_number, episode_number 
-                            FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                        ''', (chat_id, film_id, user_id))
-                        watched_rows = cursor.fetchall()
-                        watched_set = set()
-                        for w_row in watched_rows:
-                            if isinstance(w_row, dict):
-                                watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                            else:
-                                watched_set.add((w_row[0], w_row[1]))
-                        
-                        for season in seasons_data:
-                            episodes = season.get('episodes', [])
-                            season_num = season.get('number', '')
-                            for ep in episodes:
-                                release_str = ep.get('releaseDate', '')
-                                if release_str and release_str != '—':
-                                    try:
-                                        release_date = None
-                                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                            try:
-                                                release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                                break
-                                            except:
-                                                continue
-                                        # Считаем только вышедшие эпизоды
-                                        if release_date and release_date <= now:
-                                            total_episodes += 1
-                                            ep_num = str(ep.get('episodeNumber', ''))
-                                            if (season_num, ep_num) in watched_set:
-                                                watched_episodes += 1
-                                    except:
-                                        pass
-                    
-                    if total_episodes > 0:
-                        if watched_episodes == total_episodes:
-                            all_episodes_watched = True
-                        elif watched_episodes > 0:
-                            has_some_watched = True
+                # Получаем просмотренные эпизоды
+                with db_lock:
+                    cursor.execute('''
+                        SELECT season_number, episode_number 
+                        FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    watched_rows = cursor.fetchall()
+                    watched_set = set()
+                    for w_row in watched_rows:
+                        if isinstance(w_row, dict):
+                            watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
+                        else:
+                            watched_set.add((str(w_row[0]), str(w_row[1])))
+                
+                # Подсчитываем эпизоды
+                total_episodes, watched_episodes = count_episodes_for_watch_check(
+                    seasons_data, is_airing, watched_set, chat_id, film_id, user_id
+                )
+                
+                if total_episodes > 0:
+                    if watched_episodes == total_episodes:
+                        all_episodes_watched = True
+                    elif watched_episodes > 0:
+                        has_some_watched = True
         
         # Классифицируем сериал
         series_info = {
@@ -15357,66 +15264,36 @@ def seasons_list_callback(call):
             # Проверяем статус просмотра
             all_episodes_watched = False
             has_some_watched = False
-            from api.kinopoisk_api import get_seasons_data
-            from datetime import datetime as dt
             seasons_data = get_seasons_data(kp_id)
             if seasons_data:
-                now = dt.now()
-                # Проверяем, выходит ли сериал (есть ли будущие эпизоды)
-                is_airing = False
-                for season in seasons_data:
-                    episodes = season.get('episodes', [])
-                    for ep in episodes:
-                        release_str = ep.get('releaseDate', '')
-                        if release_str and release_str != '—':
-                            try:
-                                release_date = None
-                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                    try:
-                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                        break
-                                    except:
-                                        continue
-                                if release_date and release_date > now:
-                                    is_airing = True
-                                    break
-                            except:
-                                pass
-                    if is_airing:
-                        break
+                # Проверяем, выходит ли сериал
+                is_airing, _ = get_series_airing_status(kp_id)
                 
-                # Если сериал не выходит, проверяем, все ли серии просмотрены
-                if not is_airing:
-                    total_episodes = 0
-                    watched_episodes = 0
-                    with db_lock:
-                        cursor.execute('''
-                            SELECT season_number, episode_number 
-                            FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                        ''', (chat_id, film_id, user_id))
-                        watched_rows = cursor.fetchall()
-                        watched_set = set()
-                        for w_row in watched_rows:
-                            if isinstance(w_row, dict):
-                                watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                            else:
-                                watched_set.add((w_row[0], w_row[1]))
-                        
-                        for season in seasons_data:
-                            episodes = season.get('episodes', [])
-                            season_num = season.get('number', '')
-                            for ep in episodes:
-                                total_episodes += 1
-                                ep_num = str(ep.get('episodeNumber', ''))
-                                if (season_num, ep_num) in watched_set:
-                                    watched_episodes += 1
-                    
-                    if total_episodes > 0:
-                        if watched_episodes == total_episodes:
-                            all_episodes_watched = True
-                        elif watched_episodes > 0:
-                            has_some_watched = True
+                # Получаем просмотренные эпизоды
+                with db_lock:
+                    cursor.execute('''
+                        SELECT season_number, episode_number 
+                        FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    watched_rows = cursor.fetchall()
+                    watched_set = set()
+                    for w_row in watched_rows:
+                        if isinstance(w_row, dict):
+                            watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
+                        else:
+                            watched_set.add((str(w_row[0]), str(w_row[1])))
+                
+                # Подсчитываем эпизоды
+                total_episodes, watched_episodes = count_episodes_for_watch_check(
+                    seasons_data, is_airing, watched_set, chat_id, film_id, user_id
+                )
+                
+                if total_episodes > 0:
+                    if watched_episodes == total_episodes:
+                        all_episodes_watched = True
+                    elif watched_episodes > 0:
+                        has_some_watched = True
             
             # Классифицируем сериал
             series_info = {
@@ -16068,60 +15945,30 @@ def series_episode_callback(call):
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
             if is_watched:
                 try:
-                    from datetime import datetime as dt
                     seasons_data = get_seasons_data(kp_id)
                     if seasons_data:
-                        now = dt.now()
                         # Проверяем, выходит ли сериал
                         is_airing, _ = get_series_airing_status(kp_id)
                         
                         # Получаем все просмотренные эпизоды
-                        cursor.execute('''
-                            SELECT season_number, episode_number 
-                            FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                        ''', (chat_id, film_id, user_id))
-                        watched_rows = cursor.fetchall()
-                        watched_set = set()
-                        for w_row in watched_rows:
-                            if isinstance(w_row, dict):
-                                watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                            else:
-                                watched_set.add((w_row[0], w_row[1]))
-                        
-                        # Подсчитываем общее количество эпизодов и просмотренных
-                        total_episodes = 0
-                        watched_episodes = 0
-                        
-                        for season in seasons_data:
-                            episodes = season.get('episodes', [])
-                            season_num = season.get('number', '')
-                            for ep in episodes:
-                                if not is_airing:
-                                    # Если сериал не выходит, считаем все эпизоды
-                                    total_episodes += 1
-                                    ep_num = str(ep.get('episodeNumber', ''))
-                                    if (season_num, ep_num) in watched_set:
-                                        watched_episodes += 1
+                        with db_lock:
+                            cursor.execute('''
+                                SELECT season_number, episode_number 
+                                FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                            ''', (chat_id, film_id, user_id))
+                            watched_rows = cursor.fetchall()
+                            watched_set = set()
+                            for w_row in watched_rows:
+                                if isinstance(w_row, dict):
+                                    watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
                                 else:
-                                    # Если сериал выходит, считаем только вышедшие эпизоды
-                                    release_str = ep.get('releaseDate', '')
-                                    if release_str and release_str != '—':
-                                        try:
-                                            release_date = None
-                                            for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                                try:
-                                                    release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                                    break
-                                                except:
-                                                    continue
-                                            if release_date and release_date <= now:
-                                                total_episodes += 1
-                                                ep_num = str(ep.get('episodeNumber', ''))
-                                                if (season_num, ep_num) in watched_set:
-                                                    watched_episodes += 1
-                                        except:
-                                            pass
+                                    watched_set.add((str(w_row[0]), str(w_row[1])))
+                        
+                        # Подсчитываем эпизоды
+                        total_episodes, watched_episodes = count_episodes_for_watch_check(
+                            seasons_data, is_airing, watched_set, chat_id, film_id, user_id
+                        )
                         
                         # Если все серии просмотрены и сериал не выходит, проверяем подписки и помечаем сериал как просмотренный
                         if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
@@ -16252,9 +16099,7 @@ def series_season_all_callback(call):
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
         try:
-            from datetime import datetime as dt
             if seasons_data:
-                now = dt.now()
                 # Проверяем, выходит ли сериал
                 is_airing, _ = get_series_airing_status(kp_id)
                 
@@ -16269,43 +16114,14 @@ def series_season_all_callback(call):
                     watched_set = set()
                     for w_row in watched_rows:
                         if isinstance(w_row, dict):
-                            watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
+                            watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
                         else:
-                            watched_set.add((w_row[0], w_row[1]))
+                            watched_set.add((str(w_row[0]), str(w_row[1])))
                 
-                # Подсчитываем общее количество эпизодов и просмотренных
-                total_episodes = 0
-                watched_episodes = 0
-                
-                for season in seasons_data:
-                    episodes = season.get('episodes', [])
-                    season_num = season.get('number', '')
-                    for ep in episodes:
-                        if not is_airing:
-                            # Если сериал не выходит, считаем все эпизоды
-                            total_episodes += 1
-                            ep_num = str(ep.get('episodeNumber', ''))
-                            if (season_num, ep_num) in watched_set:
-                                watched_episodes += 1
-                        else:
-                            # Если сериал выходит, считаем только вышедшие эпизоды
-                            release_str = ep.get('releaseDate', '')
-                            if release_str and release_str != '—':
-                                try:
-                                    release_date = None
-                                    for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                        try:
-                                            release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                            break
-                                        except:
-                                            continue
-                                    if release_date and release_date <= now:
-                                        total_episodes += 1
-                                        ep_num = str(ep.get('episodeNumber', ''))
-                                        if (season_num, ep_num) in watched_set:
-                                            watched_episodes += 1
-                                except:
-                                    pass
+                # Подсчитываем эпизоды
+                total_episodes, watched_episodes = count_episodes_for_watch_check(
+                    seasons_data, is_airing, watched_set, chat_id, film_id, user_id
+                )
                 
                 # Если все серии просмотрены и сериал не выходит, проверяем подписки и помечаем сериал как просмотренный
                 if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
