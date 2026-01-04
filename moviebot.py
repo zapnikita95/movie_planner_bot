@@ -22614,16 +22614,27 @@ if IS_PRODUCTION:
     
     if webhook_url:
         allowed_updates = [
-            "message",
-            "edited_message",
-            "callback_query",
-            "message_reaction",
-            "message_reaction_count",
-            "chat_member",
-            "my_chat_member",
-            "web_app_data",
-            "pre_checkout_query",      # Для обычных платежей (карты, YooKassa)
-            "successful_payment"        # КРИТИЧНО! Для Telegram Stars платежей
+            "message",                  # Основные сообщения (включая text, photo, document, dice, successful_payment и т.д.)
+            "edited_message",           # Отредактированные сообщения
+            "channel_post",             # Сообщения в каналах
+            "edited_channel_post",      # Отредактированные сообщения в каналах
+            "inline_query",             # Inline запросы (если используются)
+            "chosen_inline_result",     # Выбранные inline результаты
+            "callback_query",           # Callback кнопки
+            "shipping_query",           # Запросы доставки (для платежей)
+            "pre_checkout_query",       # Для обычных платежей (карты, YooKassa)
+            "poll",                     # Опросы
+            "poll_answer",              # Ответы на опросы
+            "my_chat_member",           # Изменения статуса бота в чате
+            "chat_member",              # Изменения статуса участников
+            "chat_join_request",        # Запросы на вступление в чат
+            "message_reaction",         # Реакции на сообщения
+            "message_reaction_count",   # Счетчики реакций
+            "chat_boost",               # Усиления чата
+            "removed_chat_boost",       # Удаленные усиления
+            "web_app_data"              # Данные из Web App
+            # Примечание: successful_payment - это content_type внутри message, не отдельный тип update
+            # Но message уже включен, поэтому successful_payment будет приходить
         ]
         logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
         try:
