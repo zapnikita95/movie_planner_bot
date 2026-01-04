@@ -3963,12 +3963,22 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
 
 @bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
-    logger.info(f"[HANDLER] {'/start' if message.text.startswith('/start') else '/menu'} вызван от {message.from_user.id}, chat_type={message.chat.type}, text='{message.text}'")
-    username = message.from_user.username or f"user_{message.from_user.id}"
-    log_request(message.from_user.id, username, '/start', message.chat.id)
-    logger.info(f"Команда /start от пользователя {message.from_user.id}")
-    
-    emoji = get_watched_emoji(message.chat.id)  # Берёт актуальный эмодзи из настроек
+    try:
+        message_text = message.text or ""
+        command_type = '/start' if message_text.startswith('/start') else '/menu'
+        logger.info(f"[HANDLER] {command_type} вызван от {message.from_user.id}, chat_type={message.chat.type}, text='{message_text}'")
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/start', message.chat.id)
+        logger.info(f"Команда /start от пользователя {message.from_user.id}")
+        
+        emoji = get_watched_emoji(message.chat.id)  # Берёт актуальный эмодзи из настроек
+    except Exception as e:
+        logger.error(f"[SEND_WELCOME] Ошибка в начале функции: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка. Попробуйте еще раз.")
+        except:
+            pass
+        return
 
     # Разные приветствия для личных сообщений и групп
     if message.chat.type == 'private':
@@ -4002,7 +4012,13 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
         # Добавляем кнопку Билеты всегда, но под замочком если нет подписки
-        if has_tickets_access(message.chat.id, message.from_user.id):
+        try:
+            has_tickets = has_tickets_access(message.chat.id, message.from_user.id)
+        except Exception as e:
+            logger.error(f"[SEND_WELCOME] Ошибка при проверке доступа к билетам: {e}", exc_info=True)
+            has_tickets = False
+        
+        if has_tickets:
             markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
         else:
             markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
@@ -4014,6 +4030,10 @@ def send_welcome(message):
         logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
     except Exception as e:
         logger.error(f"❌ Ошибка при отправке ответа на /start: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при загрузке меню. Попробуйте еще раз.")
+        except:
+            pass
 
 # Обработчик callback для меню /start
 @bot.callback_query_handler(func=lambda call: call.data.startswith("start_menu:"))
@@ -15055,9 +15075,11 @@ def watched_series_list_callback(call):
 def series_locked_callback(call):
     """Обработчик заблокированных кнопок сериалов"""
     try:
+        logger.info(f"[SERIES_LOCKED] Обработка callback: {call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
+        
         # Определяем, какая кнопка была нажата (по тексту сообщения или по callback_data)
-        callback_data = call.data
-        message_text = call.message.text or ""
+        callback_data = call.data or ""
+        message_text = (call.message.text or "") if call.message else ""
         
         # Определяем тип функционала по тексту кнопки или сообщения
         if "Отметить" in message_text or "сезоны" in message_text.lower() or "серии" in message_text.lower():
@@ -15073,8 +15095,13 @@ def series_locked_callback(call):
             message, 
             show_alert=True
         )
+        logger.info(f"[SERIES_LOCKED] ✅ Callback обработан успешно")
     except Exception as e:
-        logger.error(f"[SERIES] ERROR in series_locked_callback: {e}", exc_info=True)
+        logger.error(f"[SERIES_LOCKED] ERROR in series_locked_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
 def series_track_callback(call):
