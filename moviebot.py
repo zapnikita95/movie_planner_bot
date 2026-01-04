@@ -17849,17 +17849,30 @@ def handle_payment_callback(call):
                 markup.add(InlineKeyboardButton("◀️ Отмена", callback_data="payment:active:group:current"))
             else:
                 # Можно расширить без выбора участников
-                text = f"📈 <b>Расширение подписки</b>\n\n"
-                text += f"Текущий размер: <b>{current_size}</b> участников\n"
-                text += f"Новый размер: <b>{new_size}</b> участников\n\n"
-                text += f"💰 Доплата: <b>{diff}₽</b>\n\n"
-                text += "Для завершения оплаты свяжитесь с администратором."
+                # Проверяем, нужно ли предложить добавить участников
+                from database.db_operations import get_subscription_members
+                existing_members = get_subscription_members(subscription_id)
+                members_count = len(existing_members) if existing_members else 0
                 
                 # Обновляем подписку
                 update_subscription_group_size(subscription_id, new_size, diff)
                 
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                text = f"📈 <b>Расширение подписки</b>\n\n"
+                text += f"Текущий размер: <b>{current_size}</b> участников\n"
+                text += f"Новый размер: <b>{new_size}</b> участников\n"
+                text += f"✅ Участников в подписке: <b>{members_count}</b>\n\n"
+                text += f"💰 Доплата: <b>{diff}₽</b>\n\n"
+                
+                # Если участников меньше, чем новый размер, предлагаем добавить
+                if members_count < new_size:
+                    text += f"💡 <b>Можно добавить еще {new_size - members_count} участников в подписку.</b>\n\n"
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("👥 Добавить участников", callback_data=f"payment:select_members:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                else:
+                    text += "Для завершения оплаты свяжитесь с администратором."
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
             try:
                 bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -18185,18 +18198,26 @@ def handle_payment_callback(call):
             update_subscription_group_size(subscription_id, new_size, diff_price)
             
             members = get_subscription_members(subscription_id)
+            members_count = len(members) if members else 0
             
             text = f"✅ <b>Подписка расширена</b>\n\n"
             text += f"Новый размер: <b>{new_size}</b> участников\n"
-            text += f"Участников в подписке: <b>{len(members)}</b>\n\n"
+            text += f"✅ Участников в подписке: <b>{members_count}</b>\n\n"
             text += f"💰 Доплата: <b>{diff_price}₽</b>\n\n"
-            text += "Для завершения оплаты свяжитесь с администратором."
+            
+            # Если участников меньше, чем новый размер, предлагаем добавить
+            if members_count < new_size:
+                text += f"💡 <b>Можно добавить еще {new_size - members_count} участников в подписку.</b>\n\n"
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("👥 Добавить участников", callback_data=f"payment:select_members:{subscription_id}"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+            else:
+                text += "Для завершения оплаты свяжитесь с администратором."
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
             if user_id in user_payment_state:
                 del user_payment_state[user_id]
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
             try:
                 bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -18382,7 +18403,7 @@ def handle_payment_callback(call):
                     markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:group"))
                     markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:group"))
                 
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
             else:
                 text = f"👥 <b>Групповая подписка</b>\n\n"
                 text += f"Группа: <b>{group_title}</b>\n"
@@ -18391,7 +18412,7 @@ def handle_payment_callback(call):
                 text += "\n❌ Активная подписка отсутствует, выберите тариф для подключения"
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:group"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
             
             try:
                 bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -18478,7 +18499,7 @@ def handle_payment_callback(call):
                             markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:group"))
                             markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:group"))
                         
-                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                         
                         # Добавляем сообщение о других группах
                         text += "\n\n💬 <i>Если хотите посмотреть остальные группы, в которых вы состоите, напишите в личку боту.</i>"
@@ -18491,7 +18512,7 @@ def handle_payment_callback(call):
                         text += "💬 <i>Если хотите посмотреть остальные группы, в которых вы состоите, напишите в личку боту.</i>"
                         markup = InlineKeyboardMarkup(row_width=1)
                         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:group"))
-                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     
                     try:
                         bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
