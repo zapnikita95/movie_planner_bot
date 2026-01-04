@@ -296,6 +296,53 @@ def create_web_app(bot_instance):
                     except Exception as update_error:
                         logger.error(f"[YOOKASSA] Ошибка при обновлении статуса платежа: {update_error}", exc_info=True)
                     
+                    # Создаем чек от самозанятого
+                    check_url = None
+                    pdf_url = None
+                    try:
+                        from services.nalog_service import create_check
+                        
+                        # Формируем описание подписки
+                        subscription_type_name = 'Личная подписка' if subscription_type == 'personal' else 'Групповая подписка'
+                        period_names = {
+                            'month': 'месяц',
+                            '3months': '3 месяца',
+                            'year': 'год',
+                            'lifetime': 'навсегда'
+                        }
+                        period_name = period_names.get(period_type, period_type)
+                        
+                        plan_names = {
+                            'notifications': 'Уведомления о сериалах',
+                            'recommendations': 'Персональные рекомендации',
+                            'tickets': 'Билеты в кино',
+                            'all': 'Все режимы'
+                        }
+                        plan_name = plan_names.get(plan_type, plan_type)
+                        
+                        description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+                        
+                        # Получаем имя пользователя из metadata или БД
+                        user_name = metadata.get('telegram_username')
+                        if not user_name:
+                            # Пытаемся получить из БД или используем дефолтное
+                            user_name = f"user_{user_id}"
+                        
+                        logger.info(f"[YOOKASSA] Создание чека: amount={amount}, description={description}, user_name={user_name}")
+                        check_url, pdf_url = create_check(
+                            amount_rub=float(amount),
+                            description=description,
+                            user_name=user_name
+                        )
+                        
+                        if check_url:
+                            logger.info(f"[YOOKASSA] ✅ Чек успешно создан: check_url={check_url}")
+                        else:
+                            logger.warning(f"[YOOKASSA] ⚠️ Не удалось создать чек (возможно, не настроены NALOG_INN/NALOG_PASSWORD)")
+                    except Exception as check_error:
+                        logger.error(f"[YOOKASSA] ❌ Ошибка создания чека: {check_error}", exc_info=True)
+                        # Продолжаем выполнение даже если чек не создан
+                    
                     # Отправляем подробное уведомление пользователю
                     try:
                         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -339,7 +386,16 @@ def create_web_app(bot_instance):
                             text += "• Добавление билетов на сеансы и мероприятия\n"
                             text += "• Настраиваемые уведомления с билетами перед мероприятием\n"
                             
-                            text += "\n\nСпасибо за покупку! 🎉"
+                            text += "\n"
+                            
+                            # Добавляем информацию о чеке, если он был создан
+                            if check_url:
+                                text += f"\n📄 <b>Чек от самозанятого:</b>\n"
+                                text += f"{check_url}\n"
+                                if pdf_url:
+                                    text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
+                            
+                            text += "\nСпасибо за покупку! 🎉"
                             
                             # Отправляем сообщение для личной подписки
                             logger.info(f"[YOOKASSA] ===== НАЧАЛО ОТПРАВКИ УВЕДОМЛЕНИЯ =====")
@@ -429,7 +485,16 @@ def create_web_app(bot_instance):
                             if group_size:
                                 group_text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b> из {group_size}"
                             
-                            group_text += "\n\nСпасибо за покупку! 🎉"
+                            group_text += "\n"
+                            
+                            # Добавляем информацию о чеке, если он был создан
+                            if check_url:
+                                group_text += f"\n📄 <b>Чек от самозанятого:</b>\n"
+                                group_text += f"{check_url}\n"
+                                if pdf_url:
+                                    group_text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
+                            
+                            group_text += "\nСпасибо за покупку! 🎉"
                             
                             # Если есть ограничение по количеству участников и активных пользователей больше
                             if group_size and active_count > group_size and members_count < group_size:
@@ -461,6 +526,17 @@ def create_web_app(bot_instance):
                             
                             if group_size:
                                 private_text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b> из {group_size}"
+                            
+                            private_text += "\n"
+                            
+                            # Добавляем информацию о чеке, если он был создан
+                            if check_url:
+                                private_text += f"\n📄 <b>Чек от самозанятого:</b>\n"
+                                private_text += f"{check_url}\n"
+                                if pdf_url:
+                                    private_text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
+                            
+                            private_text += "\nСпасибо за покупку! 🎉"
                             
                             try:
                                 result = bot_instance.send_message(user_id, private_text, parse_mode='HTML')
@@ -640,7 +716,16 @@ def create_web_app(bot_instance):
                                 if group_size:
                                     group_text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b> из {group_size}"
                                 
-                                group_text += "\n\nСпасибо за покупку! 🎉"
+                                group_text += "\n"
+                                
+                                # Добавляем информацию о чеке, если он был создан
+                                if check_url:
+                                    group_text += f"\n📄 <b>Чек от самозанятого:</b>\n"
+                                    group_text += f"{check_url}\n"
+                                    if pdf_url:
+                                        group_text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
+                                
+                                group_text += "\nСпасибо за покупку! 🎉"
                                 
                                 bot_instance.send_message(chat_id, group_text, parse_mode='HTML')
                                 
@@ -652,7 +737,16 @@ def create_web_app(bot_instance):
                                 if group_size:
                                     private_text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b> из {group_size}"
                                 
-                                private_text += "\n\nСпасибо за покупку! 🎉"
+                                private_text += "\n"
+                                
+                                # Добавляем информацию о чеке, если он был создан
+                                if check_url:
+                                    private_text += f"\n📄 <b>Чек от самозанятого:</b>\n"
+                                    private_text += f"{check_url}\n"
+                                    if pdf_url:
+                                        private_text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
+                                
+                                private_text += "\nСпасибо за покупку! 🎉"
                                 
                                 bot_instance.send_message(user_id, private_text, parse_mode='HTML')
                                 logger.info(f"[YOOKASSA] ✅ Сообщения отправлены для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
@@ -760,7 +854,16 @@ def create_web_app(bot_instance):
                                     if group_size:
                                         group_text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b> из {group_size}"
                                     
-                                    group_text += "\n\nСпасибо за покупку! 🎉"
+                                    group_text += "\n"
+                                    
+                                    # Добавляем информацию о чеке, если он был создан
+                                    if check_url:
+                                        group_text += f"\n📄 <b>Чек от самозанятого:</b>\n"
+                                        group_text += f"{check_url}\n"
+                                        if pdf_url:
+                                            group_text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
+                                    
+                                    group_text += "\nСпасибо за покупку! 🎉"
                                     
                                     bot_instance.send_message(chat_id, group_text, parse_mode='HTML')
                                     

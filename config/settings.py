@@ -25,6 +25,10 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 YOOKASSA_SHOP_ID = os.getenv('YOOKASSA_SHOP_ID', '').strip() if os.getenv('YOOKASSA_SHOP_ID') else None
 YOOKASSA_SECRET_KEY = os.getenv('YOOKASSA_SECRET_KEY', '').strip() if os.getenv('YOOKASSA_SECRET_KEY') else None
 
+# Настройки nalog.ru (самозанятый)
+NALOG_INN = os.getenv('NALOG_INN', '').strip() if os.getenv('NALOG_INN') else None
+NALOG_PASSWORD = os.getenv('NALOG_PASSWORD', '').strip() if os.getenv('NALOG_PASSWORD') else None
+
 # Проверка обязательных переменных для ЮKassa (если используются платежи)
 if YOOKASSA_SHOP_ID and not YOOKASSA_SECRET_KEY:
     logger.warning("YOOKASSA_SHOP_ID задан, но YOOKASSA_SECRET_KEY отсутствует!")

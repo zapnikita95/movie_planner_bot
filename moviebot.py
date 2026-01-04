@@ -22608,10 +22608,67 @@ def got_payment(message):
             
             logger.info(f"[STARS SUCCESS] ✅ Подписка создана/продлена: subscription_id={subscription_id}")
             
+            # Создаем чек от самозанятого
+            check_url = None
+            pdf_url = None
+            try:
+                from services.nalog_service import create_check
+                
+                # Формируем описание подписки
+                subscription_type_name = 'Личная подписка' if payment_data['subscription_type'] == 'personal' else 'Групповая подписка'
+                period_names = {
+                    'month': 'месяц',
+                    '3months': '3 месяца',
+                    'year': 'год',
+                    'lifetime': 'навсегда'
+                }
+                period_name = period_names.get(payment_data['period_type'], payment_data['period_type'])
+                
+                plan_names = {
+                    'notifications': 'Уведомления о сериалах',
+                    'recommendations': 'Персональные рекомендации',
+                    'tickets': 'Билеты в кино',
+                    'all': 'Все режимы'
+                }
+                plan_name = plan_names.get(payment_data['plan_type'], payment_data['plan_type'])
+                
+                description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+                
+                # Получаем имя пользователя
+                user_name = None
+                if message.from_user:
+                    user_name = message.from_user.full_name or f"{message.from_user.first_name or ''} {message.from_user.last_name or ''}".strip()
+                    if not user_name:
+                        user_name = message.from_user.username or f"user_{user_id}"
+                
+                logger.info(f"[STARS SUCCESS] Создание чека: amount={payment_data['amount']}, description={description}, user_name={user_name}")
+                check_url, pdf_url = create_check(
+                    amount_rub=float(payment_data['amount']),
+                    description=description,
+                    user_name=user_name
+                )
+                
+                if check_url:
+                    logger.info(f"[STARS SUCCESS] ✅ Чек успешно создан: check_url={check_url}")
+                else:
+                    logger.warning(f"[STARS SUCCESS] ⚠️ Не удалось создать чек (возможно, не настроены NALOG_INN/NALOG_PASSWORD)")
+            except Exception as check_error:
+                logger.error(f"[STARS SUCCESS] ❌ Ошибка создания чека: {check_error}", exc_info=True)
+                # Продолжаем выполнение даже если чек не создан
+            
             # Отправляем подтверждение пользователю
             text = "✅ <b>Оплата успешно завершена!</b>\n\n"
             text += f"💰 Оплачено: {payment.total_amount}⭐ ({payment_data['amount']}₽)\n"
             text += f"📋 Подписка активирована\n\n"
+            
+            # Добавляем информацию о чеке, если он был создан
+            if check_url:
+                text += f"📄 <b>Чек от самозанятого:</b>\n"
+                text += f"{check_url}\n"
+                if pdf_url:
+                    text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
+                text += "\n"
+            
             text += "Спасибо за покупку! 🎉"
             
             logger.info(f"[STARS SUCCESS] ===== НАЧАЛО ОТПРАВКИ ПОДТВЕРЖДЕНИЯ =====")
