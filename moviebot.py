@@ -6919,6 +6919,7 @@ def handle_noop(call):
 def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=None):
     """Показывает страницу эпизодов сезона с пагинацией"""
     try:
+        logger.info(f"[SHOW EPISODES PAGE] Начало: kp_id={kp_id}, season={season_num}, chat_id={chat_id}, user_id={user_id}, page={page}, message_id={message_id}")
         EPISODES_PER_PAGE = 20
         
         # Получаем film_id
@@ -6926,10 +6927,12 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             row = cursor.fetchone()
             if not row:
+                logger.warning(f"[SHOW EPISODES PAGE] Сериал не найден: chat_id={chat_id}, kp_id={kp_id}")
                 return None
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
             title = row.get('title') if isinstance(row, dict) else row[1]
+            logger.info(f"[SHOW EPISODES PAGE] Сериал найден: film_id={film_id}, title='{title}'")
         
         # Получаем эпизоды сезона
         from api.kinopoisk_api import get_seasons_data
@@ -7044,6 +7047,8 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                     all_watched = False
                     break
         
+        logger.info(f"[SHOW EPISODES PAGE] Все эпизоды просмотрены: {all_watched}, страница {page}/{total_pages}")
+        
         # Добавляем кнопку "Все просмотрены" если не все просмотрены
         if not all_watched:
             markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
@@ -7062,13 +7067,17 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         
         if message_id:
             try:
+                logger.info(f"[SHOW EPISODES PAGE] Обновление сообщения: message_id={message_id}")
                 bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"[SHOW EPISODES PAGE] Сообщение обновлено успешно")
             except Exception as e:
-                logger.error(f"[EPISODES PAGE] Ошибка редактирования сообщения: {e}", exc_info=True)
+                logger.error(f"[SHOW EPISODES PAGE] Ошибка редактирования сообщения: {e}", exc_info=True)
                 bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         else:
+            logger.info(f"[SHOW EPISODES PAGE] Отправка нового сообщения")
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
+        logger.info(f"[SHOW EPISODES PAGE] Завершено успешно")
         return True
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
@@ -14943,6 +14952,9 @@ def series_season_callback(call):
 def series_episode_callback(call):
     """Обработчик для отметки эпизода как просмотренного"""
     try:
+        # Немедленный ответ для улучшения отзывчивости
+        bot.answer_callback_query(call.id)
+        
         parts = call.data.split(":")
         kp_id = parts[1]
         season_num = parts[2]
@@ -14951,16 +14963,30 @@ def series_episode_callback(call):
         user_id = call.from_user.id
         message_id = call.message.message_id
         
+        logger.info(f"[SERIES EPISODE] Начало обработки: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}, season={season_num}, episode={ep_num}")
+        
         # Получаем film_id
         with db_lock:
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             row = cursor.fetchone()
             if not row:
+                logger.warning(f"[SERIES EPISODE] Сериал не найден: chat_id={chat_id}, kp_id={kp_id}")
                 bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
                 return
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
             title = row.get('title') if isinstance(row, dict) else row[1]
+            
+            # Получаем текущий статус перед переключением
+            cursor.execute('''
+                SELECT watched FROM series_tracking 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                AND season_number = %s AND episode_number = %s
+            ''', (chat_id, film_id, user_id, season_num, ep_num))
+            old_watched_row = cursor.fetchone()
+            old_is_watched = old_watched_row and (old_watched_row.get('watched') if isinstance(old_watched_row, dict) else old_watched_row[0])
+            
+            logger.info(f"[SERIES EPISODE] Текущий статус: watched={old_is_watched}, сериал='{title}', сезон={season_num}, эпизод={ep_num}")
             
             # Переключаем статус просмотра
             cursor.execute('''
@@ -14970,6 +14996,8 @@ def series_episode_callback(call):
                 DO UPDATE SET watched = NOT series_tracking.watched, watched_date = CASE WHEN NOT series_tracking.watched THEN NOW() ELSE series_tracking.watched_date END
             ''', (chat_id, film_id, kp_id, user_id, season_num, ep_num))
             conn.commit()
+            
+            logger.info(f"[SERIES EPISODE] Статус переключен в БД: chat_id={chat_id}, film_id={film_id}, season={season_num}, episode={ep_num}")
             
             # Получаем новый статус
             cursor.execute('''
@@ -14981,6 +15009,7 @@ def series_episode_callback(call):
             is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
             
             status = "✅ отмечен как просмотренный" if is_watched else "⬜ снята отметка о просмотре"
+            logger.info(f"[SERIES EPISODE] Новый статус: watched={is_watched}, статус='{status}'")
             
             # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
@@ -15052,13 +15081,9 @@ def series_episode_callback(call):
             current_page = state.get('page', 1) if state.get('kp_id') == kp_id and state.get('season_num') == str(season_num) else 1
             
             # Используем функцию show_episodes_page для отображения эпизодов
+            logger.info(f"[SERIES EPISODE] Обновление интерфейса: kp_id={kp_id}, season={season_num}, page={current_page}, message_id={message_id}")
             show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id)
-            
-            # Отвечаем на callback_query с информацией о статусе (уже ответили выше, но можно обновить)
-            try:
-                bot.answer_callback_query(call.id, status)
-            except:
-                pass  # Уже ответили выше
+            logger.info(f"[SERIES EPISODE] Интерфейс обновлен успешно")
             
             # Обновляем главное сообщение со списком сезонов, если оно существует
             # Пытаемся найти и обновить сообщение с сезонами для этого сериала
@@ -15107,6 +15132,8 @@ def series_episode_callback(call):
 def series_season_all_callback(call):
     """Обработчик для отметки всех эпизодов сезона как просмотренных"""
     try:
+        bot.answer_callback_query(call.id)
+        
         parts = call.data.split(":")
         kp_id = parts[1]
         season_num = parts[2]
@@ -15114,16 +15141,20 @@ def series_season_all_callback(call):
         user_id = call.from_user.id
         message_id = call.message.message_id
         
+        logger.info(f"[SERIES SEASON ALL] Начало обработки: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}, season={season_num}")
+        
         # Получаем film_id
         with db_lock:
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             row = cursor.fetchone()
             if not row:
+                logger.warning(f"[SERIES SEASON ALL] Сериал не найден: chat_id={chat_id}, kp_id={kp_id}")
                 bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
                 return
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
             title = row.get('title') if isinstance(row, dict) else row[1]
+            logger.info(f"[SERIES SEASON ALL] Сериал найден: film_id={film_id}, title='{title}'")
         
         # Получаем эпизоды сезона
         from api.kinopoisk_api import get_seasons_data
@@ -15134,6 +15165,7 @@ def series_season_all_callback(call):
             return
         
         episodes = season.get('episodes', [])
+        logger.info(f"[SERIES SEASON ALL] Найдено эпизодов в сезоне: {len(episodes)}")
         
         # Отмечаем все эпизоды как просмотренные
         marked_count = 0
@@ -15158,6 +15190,7 @@ def series_season_all_callback(call):
                     marked_count += 1
             conn.commit()
         
+        logger.info(f"[SERIES SEASON ALL] Отмечено эпизодов: {marked_count} из {len(episodes)}")
         bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
