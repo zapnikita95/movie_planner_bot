@@ -3707,7 +3707,7 @@ def send_welcome(message):
         welcome_text = """
 🎬 <b>Главное меню</b>
 
-💌 Чтобы добавить в базу фильм, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
+💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
 
 Выберите раздел из меню ниже ⬇
         """.strip()
@@ -3731,7 +3731,7 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
         markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
         markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
-        markup.add(InlineKeyboardButton("🔍 Поиск фильмов", callback_data="start_menu:search"))
+        markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
@@ -3809,7 +3809,7 @@ def back_to_start_menu_callback(call):
         welcome_text = """
 🎬 <b>Главное меню</b>
 
-💌 Чтобы добавить в базу фильм, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
+💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
 
 Выберите раздел из меню ниже ⬇
         """.strip()
@@ -3819,7 +3819,7 @@ def back_to_start_menu_callback(call):
         markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
         markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
         markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
-        markup.add(InlineKeyboardButton("🔍 Поиск фильмов", callback_data="start_menu:search"))
+        markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
