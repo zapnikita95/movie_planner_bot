@@ -77,10 +77,15 @@ from bot.utils.parsing import (
 )
 
 # Настройка логирования
+# Настройка логирования с выводом в stdout для Railway
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # Явно указываем stdout для Railway
+    ],
+    force=True  # Перезаписываем существующую конфигурацию
 )
 logger = logging.getLogger(__name__)
 
