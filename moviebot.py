@@ -3796,6 +3796,55 @@ def start_menu_callback(call):
         except:
             pass
 
+# Обработчик кнопки "Назад в меню"
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_start_menu")
+def back_to_start_menu_callback(call):
+    """Обработчик кнопки возврата в главное меню"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Создаем сообщение с главным меню
+        welcome_text = """
+🎬 <b>Главное меню</b>
+
+💌 Чтобы добавить в базу фильм, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
+
+Выберите раздел из меню ниже ⬇
+        """.strip()
+        
+        # Создаём меню с кнопками
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
+        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
+        markup.add(InlineKeyboardButton("🔍 Поиск фильмов", callback_data="start_menu:search"))
+        markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+        markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
+        markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
+        
+        # Редактируем сообщение или отправляем новое
+        try:
+            bot.edit_message_text(
+                welcome_text,
+                chat_id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        except:
+            # Если не удалось отредактировать, отправляем новое сообщение
+            bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='HTML')
+        
+        logger.info(f"[BACK TO MENU] Пользователь {user_id} вернулся в главное меню")
+    except Exception as e:
+        logger.error(f"[BACK TO MENU] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
+
 # Реакции + сбор оценок
 rating_messages = {}  # message_id: film_id (связь сообщения о просмотренном фильме с film_id)
 rating_confirm_messages = {}  # message_id: {'chat_id': int, 'film_id': int, 'user_id': int, 'rating': int, 'title': str}
@@ -7872,6 +7921,7 @@ def handle_search(message):
                 InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
                 InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
             )
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             reply_msg = bot.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
             # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
             user_search_state[message.from_user.id] = {'chat_id': message.chat.id, 'message_id': reply_msg.message_id, 'search_type': 'mixed'}
@@ -7928,6 +7978,9 @@ def handle_search(message):
             if total_pages > 1:
                 pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
             markup.row(*pagination_row)
+        
+        # Добавляем кнопку "Назад в меню"
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
         # Добавляем пояснение про эмодзи
         results_text += "\n\n🎬 - фильм\n📺 - сериал"
@@ -8473,6 +8526,7 @@ def show_schedule(message):
             empty_markup.add(InlineKeyboardButton("🔍 Найти фильм", callback_data="start_menu:search"))
             empty_markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
             empty_markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+            empty_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             bot.reply_to(message, "📅 Нет запланированных просмотров.\n\nВыберите действие:", reply_markup=empty_markup)
             return
         
@@ -8553,6 +8607,7 @@ def show_schedule(message):
             
             # Добавляем кнопку для открытия Mini App
             cinema_markup.add(InlineKeyboardButton("🎬 Открыть расписание", web_app=WebAppInfo(url=WEB_APP_URL)))
+            cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             cinema_text = "🎬 <b>Премьеры в кино:</b>\n\n"
             for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
@@ -8573,6 +8628,7 @@ def show_schedule(message):
             
             # Добавляем кнопку для открытия Mini App
             home_markup.add(InlineKeyboardButton("🎬 Открыть расписание", web_app=WebAppInfo(url=WEB_APP_URL)))
+            home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             home_text = "🏠 <b>Просмотры дома:</b>\n\n"
             for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
@@ -8670,6 +8726,7 @@ def random_start(message):
                     # Заблокированная кнопка из-за недостаточного количества групповых оценок
                     markup.add(InlineKeyboardButton("🔒 Откроется от 20 групповых оценок", callback_data="rand_mode_locked:group_votes"))
         
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         bot.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
         logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
     except Exception as e:
@@ -13866,6 +13923,9 @@ def seasons_command(message):
     if has_access:
         markup.add(InlineKeyboardButton("✅ Просмотренные сериалы", callback_data="watched_series_list"))
     
+    # Добавляем кнопку "Назад в меню"
+    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+    
     # Сохраняем message_id для возможности вернуться назад
     if has_access:
         msg = bot.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
@@ -14739,7 +14799,9 @@ def help_command(message):
 @zap_nikita
 movie-planner-bot@yandex.com"""
     
-    bot.reply_to(message, text, parse_mode='Markdown')
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+    bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(commands=['premieres'])
 def premieres_command(message):
@@ -14756,6 +14818,7 @@ def premieres_command(message):
     markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
     markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
     markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
     
     bot.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
 
@@ -15098,6 +15161,7 @@ def payment_command(message):
         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
         if has_real_subscription:
             markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
         text = "💳 <b>Оплата подписки</b>\n\n"
         text += "Выберите действие:"
@@ -18378,7 +18442,9 @@ def help_command(message):
 @zap_nikita
 movie-planner-bot@yandex.com"""
     
-    bot.reply_to(message, text, parse_mode='Markdown')
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+    bot.reply_to(message, text, reply_markup=markup, parse_mode='Markdown')
 
 @bot.message_handler(commands=['premieres'])
 def premieres_command(message):
@@ -18395,6 +18461,7 @@ def premieres_command(message):
     markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
     markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
     markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
     
     bot.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
 
