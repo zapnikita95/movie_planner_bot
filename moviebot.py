@@ -3591,7 +3591,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                             else:
                                 markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                         else:
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
+                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{info['kp_id']}"))
                     bot.send_message(chat_id, "📺 Что хотите сделать с сериалом?", reply_markup=markup)
                 else:
                     # Нет доступа - показываем заблокированные кнопки
