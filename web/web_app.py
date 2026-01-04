@@ -1100,8 +1100,54 @@ def create_web_app(bot_instance):
     
     @app.route('/health', methods=['GET'])
     def health():
+        """Улучшенный health check endpoint с проверкой всех компонентов"""
         logger.info("[HEALTH] Health check запрос получен")
-        return jsonify({'status': 'ok', 'bot': 'running'}), 200
+        
+        try:
+            # Пытаемся получить статус от watchdog, если он доступен
+            try:
+                from utils.watchdog import get_watchdog
+                watchdog = get_watchdog()
+                health_status = watchdog.get_health_status()
+                
+                # Определяем общий статус
+                overall_status = health_status.get('overall', 'unknown')
+                components = health_status.get('components', {})
+                
+                # Формируем ответ
+                response = {
+                    'status': 'ok' if overall_status == 'healthy' else 'degraded',
+                    'overall': overall_status,
+                    'components': components,
+                    'last_check': health_status.get('last_check'),
+                    'crash_count': health_status.get('crash_count', 0),
+                    'last_crash': health_status.get('last_crash')
+                }
+                
+                # HTTP статус код зависит от состояния
+                http_status = 200 if overall_status == 'healthy' else 503
+                
+                logger.info(f"[HEALTH] Статус: {overall_status}, компоненты: {list(components.keys())}")
+                return jsonify(response), http_status
+                
+            except ImportError:
+                # Watchdog не доступен - возвращаем базовый статус
+                logger.warning("[HEALTH] Watchdog не доступен, возвращаем базовый статус")
+                return jsonify({'status': 'ok', 'bot': 'running', 'watchdog': 'not_available'}), 200
+            except Exception as e:
+                logger.error(f"[HEALTH] Ошибка при получении статуса от watchdog: {e}", exc_info=True)
+                return jsonify({
+                    'status': 'error',
+                    'error': str(e),
+                    'bot': 'running'
+                }), 503
+                
+        except Exception as e:
+            logger.error(f"[HEALTH] Критическая ошибка в health check: {e}", exc_info=True)
+            return jsonify({
+                'status': 'error',
+                'error': str(e)
+            }), 503
     
     @app.route('/yookassa/webhook', methods=['POST', 'GET'])
     def yookassa_webhook():

@@ -38,6 +38,8 @@ from flask import Flask, request, abort, jsonify
 import socket
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import signal
+import atexit
 try:
     from yookassa import Configuration, Payment
     YOOKASSA_AVAILABLE = True
@@ -139,6 +141,19 @@ check_subscription_payments = tasks_module.check_subscription_payments
 
 set_bot_instance(bot)
 set_scheduler_instance(scheduler)
+
+# Инициализация Watchdog для мониторинга критических компонентов
+try:
+    from utils.watchdog import get_watchdog
+    watchdog = get_watchdog(check_interval=60)  # Проверка каждую минуту
+    watchdog.register_scheduler(scheduler)
+    watchdog.register_database(conn)
+    watchdog.register_bot(bot)
+    watchdog.start()
+    logger.info("[INIT] ✅ Watchdog инициализирован и запущен")
+except Exception as e:
+    logger.error(f"[INIT] ❌ Ошибка инициализации Watchdog: {e}", exc_info=True)
+    watchdog = None
 
 # Импортируем process_recurring_payments, если она доступна
 process_recurring_payments = getattr(tasks_module, 'process_recurring_payments', None)
@@ -4111,7 +4126,7 @@ def send_welcome(message):
 💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
 
 Выберите раздел из меню ниже ⬇
-    """.strip()
+        """.strip()
 
     try:
         # Создаём меню с кнопками
@@ -6040,8 +6055,8 @@ def handle_rating_internal(message, rating):
                             for item in filtered_similars:
                                 if len(item) >= 3:
                                     fid, name, is_series = item[0], item[1], item[2]
-                                    if len(name) > 50:
-                                        name = name[:47] + "..."
+                                if len(name) > 50:
+                                    name = name[:47] + "..."
                                     emoji = "📺" if is_series else "🎬"
                                     markup.add(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"add_similar:{fid}"))
                         
@@ -6049,8 +6064,8 @@ def handle_rating_internal(message, rating):
                             for item in filtered_sequels:
                                 if len(item) >= 3:
                                     fid, name, is_series = item[0], item[1], item[2]
-                                    if len(name) > 50:
-                                        name = name[:47] + "..."
+                                if len(name) > 50:
+                                    name = name[:47] + "..."
                                     emoji = "📺" if is_series else "🎬"
                                     markup.add(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"add_similar:{fid}"))
                         
@@ -7425,12 +7440,12 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         
         # Получаем эпизоды сезона
         try:
-            seasons_data = get_seasons_data(kp_id)
+        seasons_data = get_seasons_data(kp_id)
             if not seasons_data:
                 logger.error(f"[SHOW EPISODES PAGE] Не удалось получить данные о сезонах для kp_id={kp_id}")
                 return False
-            season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
-            if not season:
+        season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
+        if not season:
                 logger.error(f"[SHOW EPISODES PAGE] Сезон {season_num} не найден для kp_id={kp_id}")
                 return False
         except Exception as e:
@@ -7457,30 +7472,30 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         
         # Добавляем кнопки эпизодов
         try:
-            for ep in page_episodes:
-                ep_num = ep.get('episodeNumber', '')
-                
-                # Проверяем, просмотрен ли эпизод
+        for ep in page_episodes:
+            ep_num = ep.get('episodeNumber', '')
+            
+            # Проверяем, просмотрен ли эпизод
                 try:
-                    with db_lock:
-                        cursor.execute('''
-                            SELECT watched FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                            AND season_number = %s AND episode_number = %s
-                        ''', (chat_id, film_id, user_id, season_num, ep_num))
-                        watched_row = cursor.fetchone()
+            with db_lock:
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                watched_row = cursor.fetchone()
                         is_watched = False
                         if watched_row:
                             if isinstance(watched_row, dict):
                                 is_watched = watched_row.get('watched', False)
                             else:
                                 is_watched = bool(watched_row[0]) if len(watched_row) > 0 else False
-                    
-                    mark = "✅" if is_watched else "⬜"
-                    button_text = f"{mark} {ep_num}"
-                    if len(button_text) > 20:
-                        button_text = button_text[:17] + "..."
-                    markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}"))
+            
+            mark = "✅" if is_watched else "⬜"
+            button_text = f"{mark} {ep_num}"
+            if len(button_text) > 20:
+                button_text = button_text[:17] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}"))
                 except Exception as ep_e:
                     logger.error(f"[SHOW EPISODES PAGE] Ошибка при обработке эпизода {ep_num}: {ep_e}", exc_info=True)
                     # Добавляем эпизод без отметки в случае ошибки
@@ -7547,24 +7562,24 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         # Проверяем, все ли эпизоды просмотрены
         all_watched = True
         try:
-            with db_lock:
-                for ep in episodes:
-                    ep_num = ep.get('episodeNumber', '')
-                    cursor.execute('''
-                        SELECT watched FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                        AND season_number = %s AND episode_number = %s
-                    ''', (chat_id, film_id, user_id, season_num, ep_num))
-                    watched_row = cursor.fetchone()
+        with db_lock:
+            for ep in episodes:
+                ep_num = ep.get('episodeNumber', '')
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                watched_row = cursor.fetchone()
                     is_watched = False
                     if watched_row:
                         if isinstance(watched_row, dict):
                             is_watched = watched_row.get('watched', False)
                         else:
                             is_watched = bool(watched_row[0]) if len(watched_row) > 0 else False
-                    if not is_watched:
-                        all_watched = False
-                        break
+                if not is_watched:
+                    all_watched = False
+                    break
         except Exception as e:
             logger.error(f"[SHOW EPISODES PAGE] Ошибка при проверке всех эпизодов: {e}", exc_info=True)
             all_watched = False  # В случае ошибки считаем, что не все просмотрены
@@ -7602,16 +7617,16 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 if message_thread_id:
                     # Используем API напрямую для поддержки тредов
                     try:
-                        reply_markup_json = json.dumps(markup.to_dict()) if markup else None
-                        params = {
-                            'chat_id': chat_id,
-                            'message_id': message_id,
-                            'text': text,
-                            'parse_mode': 'HTML',
-                            'message_thread_id': message_thread_id
-                        }
-                        if reply_markup_json:
-                            params['reply_markup'] = reply_markup_json
+                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
+                    params = {
+                        'chat_id': chat_id,
+                        'message_id': message_id,
+                        'text': text,
+                        'parse_mode': 'HTML',
+                        'message_thread_id': message_thread_id
+                    }
+                    if reply_markup_json:
+                        params['reply_markup'] = reply_markup_json
                         logger.info(f"[SHOW EPISODES PAGE] Отправляю editMessageText через API call...")
                         result = bot.api_call('editMessageText', params)
                         if not result or not result.get('ok'):
@@ -7625,7 +7640,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 else:
                     logger.info(f"[SHOW EPISODES PAGE] Отправляю edit_message_text...")
                     try:
-                        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as edit_e:
                         error_str = str(edit_e).lower()
                         logger.warning(f"[SHOW EPISODES PAGE] Ошибка edit_message_text: {edit_e}")
@@ -7648,10 +7663,10 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 # При ошибке отправляем новое сообщение
                 try:
                     logger.info(f"[SHOW EPISODES PAGE] Пробую отправить новое сообщение вместо редактирования...")
-                    if message_thread_id:
-                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
-                    else:
-                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                if message_thread_id:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                else:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                     logger.info(f"[SHOW EPISODES PAGE] Новое сообщение отправлено успешно")
                 except Exception as send_e:
                     logger.error(f"[SHOW EPISODES PAGE] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
@@ -10842,31 +10857,31 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         is_airing, _ = get_series_airing_status(kp_id)
                         
                         # Получаем просмотренные эпизоды
-                        with db_lock:
-                            cursor.execute('''
-                                SELECT season_number, episode_number 
-                                FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                            ''', (chat_id, film_id, user_id))
-                            watched_rows = cursor.fetchall()
-                            watched_set = set()
-                            for w_row in watched_rows:
-                                if isinstance(w_row, dict):
+                            with db_lock:
+                                cursor.execute('''
+                                    SELECT season_number, episode_number 
+                                    FROM series_tracking 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                ''', (chat_id, film_id, user_id))
+                                watched_rows = cursor.fetchall()
+                                watched_set = set()
+                                for w_row in watched_rows:
+                                    if isinstance(w_row, dict):
                                     watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                                else:
+                                    else:
                                     watched_set.add((str(w_row[0]), str(w_row[1])))
                         
                         # Подсчитываем эпизоды
                         total_episodes, watched_episodes = count_episodes_for_watch_check(
                             seasons_data, is_airing, watched_set, chat_id, film_id, user_id
                         )
-                        
-                        if total_episodes > 0 and watched_episodes == total_episodes:
-                            all_episodes_watched = True
-                            # Отмечаем сериал как просмотренный в БД
-                            with db_lock:
-                                cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                                conn.commit()
+                            
+                            if total_episodes > 0 and watched_episodes == total_episodes:
+                                all_episodes_watched = True
+                                # Отмечаем сериал как просмотренный в БД
+                                with db_lock:
+                                    cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                                    conn.commit()
                     
                     # Проверяем подписку
                     is_subscribed = False
@@ -10929,8 +10944,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             if message_thread_id:
                 bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
             else:
-                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-            logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}")
+        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+        logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}")
         
     except Exception as e:
         logger.error(f"[SHOW FILM INFO] Ошибка: {e}", exc_info=True)
@@ -12913,9 +12928,9 @@ def _random_final(call, chat_id, user_id):
                 if len(item) >= 2:
                     similar_kp_id = item[0]
                     similar_title = item[1]
-                    if similar_kp_id not in seen_kp_ids:
-                        seen_kp_ids.add(similar_kp_id)
-                        unique_similars.append((similar_kp_id, similar_title))
+                if similar_kp_id not in seen_kp_ids:
+                    seen_kp_ids.add(similar_kp_id)
+                    unique_similars.append((similar_kp_id, similar_title))
             
             if not unique_similars:
                 bot.edit_message_text("😔 Не найдено похожих фильмов к вашим любимым.", chat_id, call.message.message_id)
@@ -13098,9 +13113,9 @@ def _random_final(call, chat_id, user_id):
                 if len(item) >= 2:
                     similar_kp_id = item[0]
                     similar_title = item[1]
-                    if similar_kp_id not in seen_kp_ids:
-                        seen_kp_ids.add(similar_kp_id)
-                        unique_similars.append((similar_kp_id, similar_title))
+                if similar_kp_id not in seen_kp_ids:
+                    seen_kp_ids.add(similar_kp_id)
+                    unique_similars.append((similar_kp_id, similar_title))
             
             if not unique_similars:
                 bot.edit_message_text("😔 Не найдено похожих фильмов к любимым группы.", chat_id, call.message.message_id)
@@ -15343,34 +15358,34 @@ def seasons_command(message):
             seasons_data = get_seasons_data(kp_id)
             if seasons_data:
                 # Получаем просмотренные эпизоды
-                with db_lock:
-                    cursor.execute('''
-                        SELECT season_number, episode_number 
-                        FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
-                    watched_rows = cursor.fetchall()
-                    watched_set = set()
-                    for w_row in watched_rows:
-                        if isinstance(w_row, dict):
+                    with db_lock:
+                        cursor.execute('''
+                            SELECT season_number, episode_number 
+                            FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id, user_id))
+                        watched_rows = cursor.fetchall()
+                        watched_set = set()
+                        for w_row in watched_rows:
+                            if isinstance(w_row, dict):
                             watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                        else:
+                            else:
                             watched_set.add((str(w_row[0]), str(w_row[1])))
                 
                 # Подсчитываем эпизоды
                 total_episodes, watched_episodes = count_episodes_for_watch_check(
                     seasons_data, is_airing, watched_set, chat_id, film_id, user_id
                 )
-                
-                if total_episodes > 0:
-                    if watched_episodes == total_episodes:
-                        all_episodes_watched = True
-                    elif watched_episodes > 0:
-                        has_some_watched = True
+                    
+                    if total_episodes > 0:
+                        if watched_episodes == total_episodes:
+                            all_episodes_watched = True
+                        elif watched_episodes > 0:
+                            has_some_watched = True
         
         # Если сериал помечен как просмотренный в БД, считаем его полностью просмотренным
         if watched_in_db:
-            all_episodes_watched = True
+                            all_episodes_watched = True
         
         # Классифицируем сериал
         series_info = {
@@ -15531,10 +15546,10 @@ def seasons_list_callback(call):
             # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
             is_subscribed = False
             if has_access:
-                with db_lock:
-                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                    sub_row = cursor.fetchone()
-                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+            with db_lock:
+                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                sub_row = cursor.fetchone()
+                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
             
             # Проверяем статус выхода сериала (для всех, независимо от доступа)
             is_airing = False
@@ -15555,8 +15570,8 @@ def seasons_list_callback(call):
             all_episodes_watched = False
             has_some_watched = False
             if has_access:
-                seasons_data = get_seasons_data(kp_id)
-                if seasons_data:
+            seasons_data = get_seasons_data(kp_id)
+            if seasons_data:
                     # Получаем просмотренные эпизоды
                     with db_lock:
                         cursor.execute('''
@@ -15737,12 +15752,12 @@ def watched_series_list_callback(call):
             
             # Получаем просмотренные эпизоды из базы
             with db_lock:
-                cursor.execute('''
-                    SELECT season_number, episode_number 
-                    FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                ''', (chat_id, film_id, user_id))
-                watched_rows = cursor.fetchall()
+            cursor.execute('''
+                SELECT season_number, episode_number 
+                FROM series_tracking 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+            ''', (chat_id, film_id, user_id))
+            watched_rows = cursor.fetchall()
             watched_set = set()
             for w_row in watched_rows:
                 if isinstance(w_row, dict):
@@ -16257,47 +16272,47 @@ def series_episode_callback(call):
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
             if is_watched:
                 try:
-                    seasons_data = get_seasons_data(kp_id)
-                    if seasons_data:
-                        # Проверяем, выходит ли сериал
-                        is_airing, _ = get_series_airing_status(kp_id)
-                        
-                        # Получаем все просмотренные эпизоды
+                seasons_data = get_seasons_data(kp_id)
+                if seasons_data:
+                    # Проверяем, выходит ли сериал
+                    is_airing, _ = get_series_airing_status(kp_id)
+                    
+                    # Получаем все просмотренные эпизоды
                         with db_lock:
-                            cursor.execute('''
-                                SELECT season_number, episode_number 
-                                FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                            ''', (chat_id, film_id, user_id))
-                            watched_rows = cursor.fetchall()
-                            watched_set = set()
-                            for w_row in watched_rows:
-                                if isinstance(w_row, dict):
+                    cursor.execute('''
+                        SELECT season_number, episode_number 
+                        FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    watched_rows = cursor.fetchall()
+                    watched_set = set()
+                    for w_row in watched_rows:
+                        if isinstance(w_row, dict):
                                     watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                                else:
+                        else:
                                     watched_set.add((str(w_row[0]), str(w_row[1])))
                         
                         # Подсчитываем эпизоды
                         total_episodes, watched_episodes = count_episodes_for_watch_check(
                             seasons_data, is_airing, watched_set, chat_id, film_id, user_id
                         )
+                    
+                    # Если все серии просмотрены и сериал не выходит, проверяем подписки и помечаем сериал как просмотренный
+                    if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
+                        # Проверяем, есть ли активные подписки на уведомления для этого сериала
+                        cursor.execute('''
+                            SELECT subscribed FROM series_subscriptions 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND subscribed = TRUE
+                        ''', (chat_id, film_id, user_id))
+                        has_active_subscription = cursor.fetchone() is not None
                         
-                        # Если все серии просмотрены и сериал не выходит, проверяем подписки и помечаем сериал как просмотренный
-                        if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
-                            # Проверяем, есть ли активные подписки на уведомления для этого сериала
-                            cursor.execute('''
-                                SELECT subscribed FROM series_subscriptions 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND subscribed = TRUE
-                            ''', (chat_id, film_id, user_id))
-                            has_active_subscription = cursor.fetchone() is not None
-                            
-                            # Помечаем сериал как просмотренный только если нет активных подписок
-                            if not has_active_subscription:
-                                cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                                conn.commit()
-                                logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены, подписок нет")
-                            else:
-                                logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
+                        # Помечаем сериал как просмотренный только если нет активных подписок
+                        if not has_active_subscription:
+                            cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                            conn.commit()
+                            logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены, подписок нет")
+                        else:
+                            logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
                 except Exception as inner_e:
                     logger.error(f"[SERIES EPISODE] Ошибка при проверке всех эпизодов: {inner_e}", exc_info=True)
             
@@ -16309,15 +16324,15 @@ def series_episode_callback(call):
             if 'is_watched' in locals():
                 status_text = "✅ Отмечено как просмотренный" if is_watched else "⬜ Отметка снята"
                 bot.answer_callback_query(call.id, status_text)
-            else:
+                        else:
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except Exception as answer_e:
             logger.error(f"[SERIES EPISODE] Ошибка при ответе на callback: {answer_e}", exc_info=True)
             # Пробуем еще раз без текста
             try:
                 bot.answer_callback_query(call.id)
-            except:
-                pass
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
 def series_season_all_callback(call):
@@ -16349,7 +16364,7 @@ def series_season_all_callback(call):
         
         # Получаем эпизоды сезона
         try:
-            seasons_data = get_seasons_data(kp_id)
+        seasons_data = get_seasons_data(kp_id)
         except Exception as e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при получении данных о сезонах: {e}", exc_info=True)
             # Не отвечаем здесь - сделаем это в finally блоке
@@ -16411,47 +16426,47 @@ def series_season_all_callback(call):
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
         try:
-            if seasons_data:
-                # Проверяем, выходит ли сериал
-                is_airing, _ = get_series_airing_status(kp_id)
-                
-                # Получаем все просмотренные эпизоды
-                with db_lock:
-                    cursor.execute('''
-                        SELECT season_number, episode_number 
-                        FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
-                    watched_rows = cursor.fetchall()
-                    watched_set = set()
-                    for w_row in watched_rows:
-                        if isinstance(w_row, dict):
+        if seasons_data:
+            # Проверяем, выходит ли сериал
+            is_airing, _ = get_series_airing_status(kp_id)
+            
+            # Получаем все просмотренные эпизоды
+            with db_lock:
+                cursor.execute('''
+                    SELECT season_number, episode_number 
+                    FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id))
+                watched_rows = cursor.fetchall()
+                watched_set = set()
+                for w_row in watched_rows:
+                    if isinstance(w_row, dict):
                             watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                        else:
+                    else:
                             watched_set.add((str(w_row[0]), str(w_row[1])))
                 
                 # Подсчитываем эпизоды
                 total_episodes, watched_episodes = count_episodes_for_watch_check(
                     seasons_data, is_airing, watched_set, chat_id, film_id, user_id
                 )
-                
-                # Если все серии просмотрены и сериал не выходит, проверяем подписки и помечаем сериал как просмотренный
-                if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
-                    with db_lock:
-                        # Проверяем, есть ли активные подписки на уведомления для этого сериала
-                        cursor.execute('''
-                            SELECT subscribed FROM series_subscriptions 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND subscribed = TRUE
-                        ''', (chat_id, film_id, user_id))
-                        has_active_subscription = cursor.fetchone() is not None
-                        
-                        # Помечаем сериал как просмотренный только если нет активных подписок
-                        if not has_active_subscription:
-                            cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                            conn.commit()
-                            logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены, подписок нет")
-                        else:
-                            logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
+            
+            # Если все серии просмотрены и сериал не выходит, проверяем подписки и помечаем сериал как просмотренный
+            if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
+                with db_lock:
+                    # Проверяем, есть ли активные подписки на уведомления для этого сериала
+                    cursor.execute('''
+                        SELECT subscribed FROM series_subscriptions 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND subscribed = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    has_active_subscription = cursor.fetchone() is not None
+                    
+                    # Помечаем сериал как просмотренный только если нет активных подписок
+                    if not has_active_subscription:
+                        cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        conn.commit()
+                        logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены, подписок нет")
+                    else:
+                        logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
         except Exception as inner_e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при проверке всех эпизодов: {inner_e}", exc_info=True)
         
@@ -16471,7 +16486,7 @@ def series_season_all_callback(call):
                 logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
             else:
                 logger.warning(f"[SERIES SEASON ALL] show_episodes_page вернула False")
-        except Exception as e:
+    except Exception as e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SERIES SEASON ALL] Критическая ошибка: {e}", exc_info=True)
@@ -16481,14 +16496,14 @@ def series_season_all_callback(call):
             if 'marked_count' in locals() and 'episodes' in locals():
                 bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
             else:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except Exception as answer_e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при ответе на callback: {answer_e}", exc_info=True)
             # Пробуем еще раз без текста
             try:
                 bot.answer_callback_query(call.id)
-            except:
-                pass
+        except:
+            pass
 
 @bot.message_handler(commands=['help'])
 def help_command(message):
@@ -17348,7 +17363,7 @@ def handle_payment_callback(call):
                     members = get_subscription_members(subscription_id)
                     # Проверяем, является ли пользователь активным участником подписки
                     if members and user_id in members:
-                        markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             else:
@@ -18224,12 +18239,13 @@ def handle_payment_callback(call):
             # Проверяем существующие подписки
             from database.db_operations import get_user_personal_subscriptions
             from datetime import datetime
+            import pytz
             existing_subs = get_user_personal_subscriptions(user_id)
             
             # Фильтруем только активные подписки и убираем дубликаты по plan_type
             active_subs = []
             seen_plan_types = set()
-            now = datetime.now()
+            now = datetime.now(pytz.UTC)  # Используем UTC для сравнения с датами из БД
             
             for sub in existing_subs:
                 expires_at = sub.get('expires_at')
@@ -18239,12 +18255,20 @@ def handle_payment_callback(call):
                 is_active = False
                 if expires_at:
                     if isinstance(expires_at, datetime):
+                        # Если expires_at без timezone, добавляем UTC
+                        if expires_at.tzinfo is None:
+                            expires_at = pytz.UTC.localize(expires_at)
+                        # Если now без timezone, добавляем UTC
+                        if now.tzinfo is None:
+                            now = pytz.UTC.localize(now)
                         is_active = expires_at > now
                     else:
                         # Если expires_at - это строка или другой тип, пытаемся преобразовать
                         try:
                             if isinstance(expires_at, str):
                                 expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                if expires_dt.tzinfo is None:
+                                    expires_dt = pytz.UTC.localize(expires_dt)
                                 is_active = expires_dt > now
                             else:
                                 is_active = True  # Если не можем проверить, считаем активной
@@ -18286,9 +18310,14 @@ def handle_payment_callback(call):
                 text += "Вы не можете добавить дополнительные подписки к пакетной."
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
             else:
-                markup.add(InlineKeyboardButton("🔔 Уведомления (100₽/мес)", callback_data="payment:subscribe:personal:notifications:month"))
-                markup.add(InlineKeyboardButton("🎯 Рекомендации (100₽/мес)", callback_data="payment:subscribe:personal:recommendations:month"))
-                markup.add(InlineKeyboardButton("🎫 Билеты (150₽/мес)", callback_data="payment:subscribe:personal:tickets:month"))
+                # Показываем только те тарифы, которых у пользователя НЕТ
+                if 'notifications' not in existing_plan_types:
+                    markup.add(InlineKeyboardButton("🔔 Уведомления (100₽/мес)", callback_data="payment:subscribe:personal:notifications:month"))
+                if 'recommendations' not in existing_plan_types:
+                    markup.add(InlineKeyboardButton("🎯 Рекомендации (100₽/мес)", callback_data="payment:subscribe:personal:recommendations:month"))
+                if 'tickets' not in existing_plan_types:
+                    markup.add(InlineKeyboardButton("🎫 Билеты (150₽/мес)", callback_data="payment:subscribe:personal:tickets:month"))
+                # "Все режимы" всегда показываем, так как это замена текущих подписок
                 markup.add(InlineKeyboardButton("📦 Все режимы - месяц (249₽/мес)", callback_data="payment:subscribe:personal:all:month"))
                 markup.add(InlineKeyboardButton("📦 Все режимы - 3 месяца (599₽)", callback_data="payment:subscribe:personal:all:3months"))
                 markup.add(InlineKeyboardButton("📦 Все режимы - год (1799₽)", callback_data="payment:subscribe:personal:all:year"))
@@ -18425,12 +18454,29 @@ def handle_payment_callback(call):
                         elif group_size in ['5', '10']:
                             text += "💡 <i>У вас есть личная подписка - скидка 50% на группу</i>\n\n"
                     
+                    # Проверяем активные групповые подписки для этой группы
+                    from database.db_operations import get_active_group_subscription_by_chat_id
+                    from datetime import datetime
+                    import pytz
+                    group_sub = get_active_group_subscription_by_chat_id(chat_id)
+                    existing_group_plan_types = []
+                    
+                    if group_sub:
+                        group_plan_type = group_sub.get('plan_type')
+                        if group_plan_type:
+                            existing_group_plan_types.append(group_plan_type)
+                    
                     text += "Выберите тариф:"
                     
                     markup = InlineKeyboardMarkup(row_width=1)
-                    markup.add(InlineKeyboardButton(f"🔔 Уведомления ({prices['notifications']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:notifications:month:{chat_id}"))
-                    markup.add(InlineKeyboardButton(f"🎯 Рекомендации ({prices['recommendations']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:recommendations:month:{chat_id}"))
-                    markup.add(InlineKeyboardButton(f"🎫 Билеты ({prices['tickets']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:tickets:month:{chat_id}"))
+                    # Показываем только те тарифы, которых у группы НЕТ
+                    if 'notifications' not in existing_group_plan_types:
+                        markup.add(InlineKeyboardButton(f"🔔 Уведомления ({prices['notifications']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:notifications:month:{chat_id}"))
+                    if 'recommendations' not in existing_group_plan_types:
+                        markup.add(InlineKeyboardButton(f"🎯 Рекомендации ({prices['recommendations']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:recommendations:month:{chat_id}"))
+                    if 'tickets' not in existing_group_plan_types:
+                        markup.add(InlineKeyboardButton(f"🎫 Билеты ({prices['tickets']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:tickets:month:{chat_id}"))
+                    # "Все режимы" всегда показываем, так как это замена текущих подписок
                     markup.add(InlineKeyboardButton(f"📦 Все режимы - месяц ({prices['all']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:month:{chat_id}"))
                     markup.add(InlineKeyboardButton(f"📦 Все режимы - 3 месяца ({prices['all']['3months']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:3months:{chat_id}"))
                     markup.add(InlineKeyboardButton(f"📦 Все режимы - год ({prices['all']['year']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:year:{chat_id}"))
@@ -18837,13 +18883,13 @@ def handle_payment_callback(call):
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("✅ Подтвердить", callback_data="payment:confirm"))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                
-                try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                return
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
         
         if action.startswith("subscribe:"):
             # Обработка подписки
@@ -19582,37 +19628,37 @@ def handle_payment_callback(call):
                 is_combined = state.get('is_combined', False)
             else:
                 # Парсим из callback_data
-                parts = action.split(":")
-                sub_type = parts[1]  # personal или group
-                
-                # Правильный парсинг: payment:pay:personal::tickets:month или payment:pay:group:2:all:month
-                if len(parts) >= 5:
-                    # Есть group_size (для групп)
-                    group_size_str = parts[2] if parts[2] else ''
-                    group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
-                    plan_type = parts[3] if parts[3] else ''
-                    period_type = parts[4] if parts[4] else ''
-                else:
-                    # Нет group_size (для личных)
-                    group_size = None
-                    plan_type = parts[2] if len(parts) > 2 and parts[2] else ''
-                    period_type = parts[3] if len(parts) > 3 and parts[3] else ''
-                
-                # Проверка на пустые значения
-                if not plan_type or not period_type:
-                    logger.error(f"[PAYMENT] Ошибка парсинга callback_data: {action}, parts={parts}")
-                    bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
-                    return
-                
-                # Вычисляем финальную цену с учетом скидок
-                if sub_type == 'personal':
-                    final_price = calculate_discounted_price(user_id, 'personal', plan_type, period_type)
-                else:  # group
-                    final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
-                
-                if final_price <= 0:
-                    bot.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
-                    return
+            parts = action.split(":")
+            sub_type = parts[1]  # personal или group
+            
+            # Правильный парсинг: payment:pay:personal::tickets:month или payment:pay:group:2:all:month
+            if len(parts) >= 5:
+                # Есть group_size (для групп)
+                group_size_str = parts[2] if parts[2] else ''
+                group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                plan_type = parts[3] if parts[3] else ''
+                period_type = parts[4] if parts[4] else ''
+            else:
+                # Нет group_size (для личных)
+                group_size = None
+                plan_type = parts[2] if len(parts) > 2 and parts[2] else ''
+                period_type = parts[3] if len(parts) > 3 and parts[3] else ''
+            
+            # Проверка на пустые значения
+            if not plan_type or not period_type:
+                logger.error(f"[PAYMENT] Ошибка парсинга callback_data: {action}, parts={parts}")
+                bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                return
+            
+            # Вычисляем финальную цену с учетом скидок
+            if sub_type == 'personal':
+                final_price = calculate_discounted_price(user_id, 'personal', plan_type, period_type)
+            else:  # group
+                final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
+            
+            if final_price <= 0:
+                bot.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
+                return
                 
                 is_combined = False
             
@@ -19894,7 +19940,7 @@ def handle_payment_callback(call):
             return
         
         if action.startswith("modify:"):
-            # Изменение подписки - показываем тарифы
+            # Изменение подписки - сразу переходим к тарифам нужного типа
             subscription_id = action.split(":")[1]
             try:
                 bot.answer_callback_query(call.id)
@@ -19907,24 +19953,21 @@ def handle_payment_callback(call):
             
             if sub:
                 subscription_type = sub.get('subscription_type', 'personal')
+                # Сохраняем информацию о том, что пришли из "Изменить подписку"
+                user_payment_state[user_id] = user_payment_state.get(user_id, {})
+                user_payment_state[user_id]['from_active'] = True
+                user_payment_state[user_id]['modify_subscription_id'] = subscription_id
+                
                 if subscription_type == 'personal':
-                    # Перенаправляем на тарифы для личных подписок
-                    text = "💰 <b>Тарифы</b>\n\n"
-                    text += "Выберите тип подписки:"
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    markup.add(InlineKeyboardButton("👤 Личные", callback_data="payment:tariffs:personal"))
-                    markup.add(InlineKeyboardButton("👥 Групповые", callback_data="payment:tariffs:group"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                    # Сразу переходим к тарифам для личных подписок
+                    action = "tariffs:personal"
+                    # Продолжаем выполнение ниже - обработается как tariffs:personal
                 else:
-                    # Для групповых подписок
-                    text = "💰 <b>Тарифы</b>\n\n"
-                    text += "Выберите тип подписки:"
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    markup.add(InlineKeyboardButton("👤 Личные", callback_data="payment:tariffs:personal"))
-                    markup.add(InlineKeyboardButton("👥 Групповые", callback_data="payment:tariffs:group"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                    # Для групповых подписок - переходим к групповым тарифам
+                    action = "tariffs:group"
+                    # Продолжаем выполнение ниже - обработается как tariffs:group
             else:
-                # Если подписка не найдена, просто показываем тарифы
+                # Если подписка не найдена, просто показываем выбор типа подписки
                 text = "💰 <b>Тарифы</b>\n\n"
                 text += "Выберите тип подписки:"
                 markup = InlineKeyboardMarkup(row_width=1)
@@ -23330,7 +23373,7 @@ def process_pre_checkout_query(pre_checkout_query):
         if currency == 'XTR' and invoice_payload and invoice_payload.startswith('stars_'):
             # Это наш Stars платеж - отвечаем OK сразу
             # Хотя для Stars это не должно произойти, но на всякий случай
-            bot.answer_pre_checkout_query(query_id, ok=True)
+        bot.answer_pre_checkout_query(query_id, ok=True)
             logger.warning(f"[PRE CHECKOUT] ⚠️ Неожиданно получен pre_checkout для Stars! Ответили OK: id={query_id}")
         else:
             # Не наш платеж или обычный платеж - отклоняем или обрабатываем
@@ -23470,11 +23513,11 @@ def got_payment(message):
                 """, (telegram_payment_charge_id, payment_id))
                 logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded', charge_id сохранен")
             else:
-                cursor.execute("""
-                    UPDATE payments 
-                    SET status = 'succeeded'
-                    WHERE payment_id = %s
-                """, (payment_id,))
+            cursor.execute("""
+                UPDATE payments 
+                SET status = 'succeeded'
+                WHERE payment_id = %s
+            """, (payment_id,))
                 logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded' (charge_id отсутствует)")
             
             conn.commit()
@@ -23697,11 +23740,46 @@ if IS_PRODUCTION:
     else:
         logger.warning("Webhook URL не определён! Установите RENDER_EXTERNAL_URL или RAILWAY_PUBLIC_DOMAIN")
 
-    # КЛЮЧЕВОЕ: запускаем Flask сервер
+    # Флаг для graceful shutdown
+    shutdown_flag = threading.Event()
+    
+    def signal_handler(signum, frame):
+        """Обработчик сигналов для graceful shutdown"""
+        logger.info(f"[SHUTDOWN] Получен сигнал {signum}, начинаем graceful shutdown...")
+        shutdown_flag.set()
+        if watchdog:
+            watchdog.stop()
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+        logger.info("[SHUTDOWN] ✅ Graceful shutdown завершен")
+        sys.exit(0)
+    
+    # Регистрируем обработчики сигналов
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Регистрируем функцию очистки при выходе
+    def cleanup():
+        """Очистка ресурсов при выходе"""
+        logger.info("[CLEANUP] Выполняется очистка ресурсов...")
+        if watchdog:
+            watchdog.stop()
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+        logger.info("[CLEANUP] ✅ Очистка завершена")
+    
+    atexit.register(cleanup)
+    
+    # КЛЮЧЕВОЕ: запускаем Flask сервер с автоматическим перезапуском при крашах
     port = int(os.getenv('PORT', 10000))
+    max_restart_attempts = int(os.getenv('MAX_RESTART_ATTEMPTS', '10'))  # Максимум 10 попыток
+    restart_delay = int(os.getenv('RESTART_DELAY', '5'))  # Задержка 5 секунд между перезапусками
+    restart_count = 0
+    
     logger.info(f"🚀 Запускаем Flask сервер на 0.0.0.0:{port}")
     logger.info(f"🌐 Webhook endpoint будет доступен по адресу: {webhook_url if webhook_url else 'НЕ УСТАНОВЛЕН'}")
     logger.info(f"🔗 Health check endpoint: http://0.0.0.0:{port}/health")
+    logger.info(f"🔄 Автоматический перезапуск: максимум {max_restart_attempts} попыток, задержка {restart_delay} сек")
     
     # Это важно — чтобы Render сразу увидел порт
     logger.info(f"Текущий хост: {socket.gethostname()}")
@@ -23710,7 +23788,53 @@ if IS_PRODUCTION:
     logger.info("=" * 80)
     logger.info("🎯 БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ")
     logger.info("=" * 80)
+    
+    # Запуск с автоматическим перезапуском при крашах
+    while restart_count < max_restart_attempts and not shutdown_flag.is_set():
+        try:
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+            # Если app.run() завершился без исключения (например, при остановке)
+            break
+        except KeyboardInterrupt:
+            logger.info("[SHUTDOWN] Получен KeyboardInterrupt, останавливаем бота...")
+            break
+        except Exception as e:
+            restart_count += 1
+            error_msg = str(e)
+            logger.critical(
+                f"[CRASH] 💥 КРИТИЧЕСКИЙ КРАШ Flask приложения! "
+                f"Попытка перезапуска {restart_count}/{max_restart_attempts}\n"
+                f"Ошибка: {error_msg}",
+                exc_info=True
+            )
+            
+            # Записываем краш в watchdog
+            if watchdog:
+                watchdog.record_crash(e)
+            
+            if restart_count >= max_restart_attempts:
+                logger.critical(
+                    f"[CRASH] ❌ Достигнут лимит попыток перезапуска ({max_restart_attempts}). "
+                    f"Бот остановлен. Требуется ручное вмешательство."
+                )
+                break
+            
+            logger.info(f"[RESTART] ⏳ Ожидание {restart_delay} секунд перед перезапуском...")
+            time.sleep(restart_delay)
+            
+            # Проверяем состояние компонентов перед перезапуском
+            if watchdog:
+                logger.info("[RESTART] Проверка состояния компонентов перед перезапуском...")
+                results = watchdog.check_all()
+                failed = [name for name, status in results.items() if not status]
+                if failed:
+                    logger.warning(f"[RESTART] ⚠️ Проблемы с компонентами: {', '.join(failed)}")
+            
+            logger.info(f"[RESTART] 🔄 Перезапуск Flask приложения (попытка {restart_count + 1})...")
+    
+    if restart_count >= max_restart_attempts:
+        logger.critical("[FATAL] ❌ Бот не может быть перезапущен. Требуется ручное вмешательство.")
+        sys.exit(1)
 else:
     # Локальный запуск - используем polling (только если IS_PRODUCTION=False)
     logger.info("Локальное окружение - будет использован polling")
@@ -23723,13 +23847,87 @@ else:
     # Запускаем polling независимо от того, как выполняется код
     # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
     logger.info("Локальный запуск: используется polling")
+    
+    # Флаг для graceful shutdown
+    shutdown_flag = threading.Event()
+    
+    def signal_handler(signum, frame):
+        """Обработчик сигналов для graceful shutdown"""
+        logger.info(f"[SHUTDOWN] Получен сигнал {signum}, начинаем graceful shutdown...")
+        shutdown_flag.set()
+        if watchdog:
+            watchdog.stop()
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+        logger.info("[SHUTDOWN] ✅ Graceful shutdown завершен")
+        sys.exit(0)
+    
+    # Регистрируем обработчики сигналов
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    # Регистрируем функцию очистки при выходе
+    def cleanup():
+        """Очистка ресурсов при выходе"""
+        logger.info("[CLEANUP] Выполняется очистка ресурсов...")
+        if watchdog:
+            watchdog.stop()
+        if scheduler.running:
+            scheduler.shutdown(wait=False)
+        logger.info("[CLEANUP] ✅ Очистка завершена")
+    
+    atexit.register(cleanup)
+    
+    # Polling с автоматическим перезапуском при крашах
+    max_restart_attempts = int(os.getenv('MAX_RESTART_ATTEMPTS', '10'))
+    restart_delay = int(os.getenv('RESTART_DELAY', '5'))
+    restart_count = 0
+    
+    while restart_count < max_restart_attempts and not shutdown_flag.is_set():
     try:
         bot.infinity_polling()
+            # Если infinity_polling() завершился без исключения
+            break
     except KeyboardInterrupt:
         logger.info("Получен сигнал прерывания, останавливаем бота...")
+            break
     except Exception as e:
-        logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
-        raise
+            restart_count += 1
+            error_msg = str(e)
+            logger.critical(
+                f"[CRASH] 💥 КРИТИЧЕСКИЙ КРАШ при polling! "
+                f"Попытка перезапуска {restart_count}/{max_restart_attempts}\n"
+                f"Ошибка: {error_msg}",
+                exc_info=True
+            )
+            
+            # Записываем краш в watchdog
+            if watchdog:
+                watchdog.record_crash(e)
+            
+            if restart_count >= max_restart_attempts:
+                logger.critical(
+                    f"[CRASH] ❌ Достигнут лимит попыток перезапуска ({max_restart_attempts}). "
+                    f"Бот остановлен. Требуется ручное вмешательство."
+                )
+                break
+            
+            logger.info(f"[RESTART] ⏳ Ожидание {restart_delay} секунд перед перезапуском...")
+            time.sleep(restart_delay)
+            
+            # Проверяем состояние компонентов перед перезапуском
+            if watchdog:
+                logger.info("[RESTART] Проверка состояния компонентов перед перезапуском...")
+                results = watchdog.check_all()
+                failed = [name for name, status in results.items() if not status]
+                if failed:
+                    logger.warning(f"[RESTART] ⚠️ Проблемы с компонентами: {', '.join(failed)}")
+            
+            logger.info(f"[RESTART] 🔄 Перезапуск polling (попытка {restart_count + 1})...")
+    
+    if restart_count >= max_restart_attempts:
+        logger.critical("[FATAL] ❌ Бот не может быть перезапущен. Требуется ручное вмешательство.")
+        sys.exit(1)
 
 
 # Админская команда /unsubscribe для отмены подписок
