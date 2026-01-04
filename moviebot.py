@@ -20010,6 +20010,7 @@ def handle_payment_callback(call):
                     # Для групповых подписок - переходим к групповым тарифам
                     action = "tariffs:group"
                     # Продолжаем выполнение ниже - обработается как tariffs:group
+                # Не делаем return здесь - продолжаем выполнение для обработки tariffs:personal или tariffs:group
             else:
                 # Если подписка не найдена, просто показываем выбор типа подписки
                 text = "💰 <b>Тарифы</b>\n\n"
@@ -20018,13 +20019,13 @@ def handle_payment_callback(call):
                 markup.add(InlineKeyboardButton("👤 Личные", callback_data="payment:tariffs:personal"))
                 markup.add(InlineKeyboardButton("👥 Групповые", callback_data="payment:tariffs:group"))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-            
-            try:
-                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e:
-                if "message is not modified" not in str(e):
-                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-            return
+                
+                try:
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
         
         if action == "cancel":
             # Отмена подписки
