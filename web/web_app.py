@@ -342,12 +342,20 @@ def create_web_app(bot_instance):
                             text += "\n\nСпасибо за покупку! 🎉"
                             
                             # Отправляем сообщение для личной подписки
+                            logger.info(f"[YOOKASSA] ===== НАЧАЛО ОТПРАВКИ УВЕДОМЛЕНИЯ =====")
                             logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в chat_id={target_chat_id}, user_id={user_id}")
+                            logger.info(f"[YOOKASSA] Текст сообщения (первые 500 символов): {text[:500]}")
                             try:
                                 result = bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
-                                logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено для пользователя {user_id}, chat_id {target_chat_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
+                                logger.info(f"[YOOKASSA] ✅✅✅ УВЕДОМЛЕНИЕ УСПЕШНО ОТПРАВЛЕНО! ✅✅✅")
+                                logger.info(f"[YOOKASSA] message_id={result.message_id if result else 'None'}")
+                                logger.info(f"[YOOKASSA] chat_id={result.chat.id if result and hasattr(result, 'chat') else 'None'}")
+                                logger.info(f"[YOOKASSA] ===== ОТПРАВКА УВЕДОМЛЕНИЯ ЗАВЕРШЕНА УСПЕШНО =====")
                             except Exception as send_error:
-                                logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения: {send_error}", exc_info=True)
+                                logger.error(f"[YOOKASSA] ❌❌❌ ОШИБКА ОТПРАВКИ УВЕДОМЛЕНИЯ! ❌❌❌")
+                                logger.error(f"[YOOKASSA] Тип ошибки: {type(send_error).__name__}")
+                                logger.error(f"[YOOKASSA] Сообщение ошибки: {str(send_error)}")
+                                logger.error(f"[YOOKASSA] Traceback:", exc_info=True)
                                 # Не прерываем выполнение, просто логируем ошибку
                                 logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения")
                             
@@ -812,9 +820,15 @@ def create_web_app(bot_instance):
     
     @app.route('/yookassa/webhook', methods=['POST', 'GET'])
     def yookassa_webhook():
-        """Обработчик webhook от ЮKassa"""
+        """Обработчик webhook от ЮKassa (старый путь для совместимости)"""
+        return yookassa_webhook_new()
+    
+    @app.route('/yookassa_webhook', methods=['POST', 'GET'])
+    def yookassa_webhook_new():
+        """Обработчик webhook от ЮKassa - основной endpoint"""
         if request.method == 'GET':
             # Для проверки доступности endpoint
+            logger.info("[YOOKASSA WEBHOOK] GET запрос - проверка доступности endpoint")
             return jsonify({'status': 'ok', 'message': 'YooKassa webhook endpoint is active'}), 200
         
         try:
@@ -822,8 +836,9 @@ def create_web_app(bot_instance):
             logger.info("[YOOKASSA WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС ОТ ЮKASSA =====")
             logger.info(f"[YOOKASSA WEBHOOK] Headers: {dict(request.headers)}")
             logger.info(f"[YOOKASSA WEBHOOK] Content-Type: {request.content_type}")
+            logger.info(f"[YOOKASSA WEBHOOK] Body (первые 1000 символов): {request.get_data(as_text=True)[:1000]}")
             
-            event_json = request.json
+            event_json = request.get_json(force=True)
             if not event_json:
                 logger.warning("[YOOKASSA WEBHOOK] Пустой JSON")
                 logger.warning(f"[YOOKASSA WEBHOOK] Raw data: {request.get_data()}")
