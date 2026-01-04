@@ -7406,17 +7406,25 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 # Для обновления сообщения в треде используем API напрямую
                 if message_thread_id:
                     # Используем API напрямую для поддержки тредов
-                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
-                    params = {
-                        'chat_id': chat_id,
-                        'message_id': message_id,
-                        'text': text,
-                        'parse_mode': 'HTML',
-                        'message_thread_id': message_thread_id
-                    }
-                    if reply_markup_json:
-                        params['reply_markup'] = reply_markup_json
-                    bot.api_call('editMessageText', params)
+                    try:
+                        import json
+                        reply_markup_json = json.dumps(markup.to_dict()) if markup else None
+                        params = {
+                            'chat_id': chat_id,
+                            'message_id': message_id,
+                            'text': text,
+                            'parse_mode': 'HTML',
+                            'message_thread_id': message_thread_id
+                        }
+                        if reply_markup_json:
+                            params['reply_markup'] = reply_markup_json
+                        result = bot.api_call('editMessageText', params)
+                        if not result or not result.get('ok'):
+                            raise Exception(f"API call failed: {result}")
+                    except Exception as api_e:
+                        logger.error(f"[SHOW EPISODES PAGE] Ошибка API call: {api_e}", exc_info=True)
+                        # Пробуем обычный edit_message_text без message_thread_id
+                        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
                 else:
                     bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[SHOW EPISODES PAGE] Сообщение обновлено успешно")
@@ -16021,8 +16029,9 @@ def series_season_all_callback(call):
             logger.error(f"[SERIES SEASON ALL] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
-        from datetime import datetime as dt
-        if seasons_data:
+        try:
+            from datetime import datetime as dt
+            if seasons_data:
             now = dt.now()
             # Проверяем, выходит ли сериал
             is_airing, _ = get_series_airing_status(kp_id)
@@ -16093,13 +16102,24 @@ def series_season_all_callback(call):
                         logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены, подписок нет")
                     else:
                         logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
+            except Exception as inner_e:
+                logger.error(f"[SERIES SEASON ALL] Ошибка при проверке всех эпизодов: {inner_e}", exc_info=True)
         
         # Обновляем список эпизодов - используем текущую страницу из состояния или 1
         state = user_episodes_state.get(user_id, {})
         current_page = state.get('page', 1) if state.get('kp_id') == kp_id and state.get('season_num') == str(season_num) else 1
         
+        # Получаем message_thread_id из сообщения, если оно есть
+        message_thread_id = None
+        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+            message_thread_id = call.message.message_thread_id
+        
         # Используем функцию show_episodes_page для отображения эпизодов
-        show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id)
+        try:
+            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+            logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
+        except Exception as e:
+            logger.error(f"[SERIES SEASON ALL] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SERIES SEASON ALL] Ошибка: {e}", exc_info=True)
         try:
