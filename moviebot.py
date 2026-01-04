@@ -20216,7 +20216,8 @@ if IS_PRODUCTION:
             "message_reaction",
             "message_reaction_count",
             "chat_member",
-            "my_chat_member"
+            "my_chat_member",
+            "web_app_data"
         ]
         logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
         try:
