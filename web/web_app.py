@@ -74,6 +74,12 @@ def create_web_app(bot_instance):
                     logger.info(f"[WEBHOOK] Message type: {update.message.content_type if hasattr(update.message, 'content_type') else 'unknown'}")
                 if hasattr(update, 'callback_query') and update.callback_query:
                     logger.info(f"[WEBHOOK] Callback query data: {update.callback_query.data[:100] if update.callback_query.data else 'None'}")
+                if hasattr(update, 'pre_checkout_query') and update.pre_checkout_query:
+                    logger.info(f"[WEBHOOK] ⚠️⚠️⚠️ PRE_CHECKOUT_QUERY ОБНАРУЖЕН! ⚠️⚠️⚠️")
+                    logger.info(f"[WEBHOOK] Pre-checkout query ID: {update.pre_checkout_query.id}")
+                    logger.info(f"[WEBHOOK] Pre-checkout query currency: {update.pre_checkout_query.currency}")
+                    logger.info(f"[WEBHOOK] Pre-checkout query total_amount: {update.pre_checkout_query.total_amount}")
+                    logger.info(f"[WEBHOOK] Pre-checkout query invoice_payload: {update.pre_checkout_query.invoice_payload}")
                 
                 bot_instance.process_new_updates([update])
                 logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
