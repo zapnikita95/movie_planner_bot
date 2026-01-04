@@ -1084,36 +1084,52 @@ def get_admin_statistics():
             stats['total_groups'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
             
             # Запросы к API Кинопоиска за день
-            cursor.execute('''
-                SELECT COUNT(*) as count
-                FROM kinopoisk_api_logs
-                WHERE timestamp >= CURRENT_DATE
-            ''')
-            row = cursor.fetchone()
-            stats['kp_api_requests_day'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            try:
+                cursor.execute('''
+                    SELECT COUNT(*) as count
+                    FROM kinopoisk_api_logs
+                    WHERE timestamp >= CURRENT_DATE
+                ''')
+                row = cursor.fetchone()
+                stats['kp_api_requests_day'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            except Exception as e:
+                logger.warning(f"Ошибка получения статистики API за день: {e}")
+                stats['kp_api_requests_day'] = 0
             
             # Запросы к API Кинопоиска за неделю
-            cursor.execute('''
-                SELECT COUNT(*) as count
-                FROM kinopoisk_api_logs
-                WHERE timestamp >= NOW() - INTERVAL '7 days'
-            ''')
-            row = cursor.fetchone()
-            stats['kp_api_requests_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            try:
+                cursor.execute('''
+                    SELECT COUNT(*) as count
+                    FROM kinopoisk_api_logs
+                    WHERE timestamp >= NOW() - INTERVAL '7 days'
+                ''')
+                row = cursor.fetchone()
+                stats['kp_api_requests_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            except Exception as e:
+                logger.warning(f"Ошибка получения статистики API за неделю: {e}")
+                stats['kp_api_requests_week'] = 0
             
             # Запросы к API Кинопоиска за месяц
-            cursor.execute('''
-                SELECT COUNT(*) as count
-                FROM kinopoisk_api_logs
-                WHERE timestamp >= NOW() - INTERVAL '30 days'
-            ''')
-            row = cursor.fetchone()
-            stats['kp_api_requests_month'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            try:
+                cursor.execute('''
+                    SELECT COUNT(*) as count
+                    FROM kinopoisk_api_logs
+                    WHERE timestamp >= NOW() - INTERVAL '30 days'
+                ''')
+                row = cursor.fetchone()
+                stats['kp_api_requests_month'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            except Exception as e:
+                logger.warning(f"Ошибка получения статистики API за месяц: {e}")
+                stats['kp_api_requests_month'] = 0
             
             # Всего запросов к API Кинопоиска
-            cursor.execute('SELECT COUNT(*) as count FROM kinopoisk_api_logs')
-            row = cursor.fetchone()
-            stats['kp_api_requests_total'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            try:
+                cursor.execute('SELECT COUNT(*) as count FROM kinopoisk_api_logs')
+                row = cursor.fetchone()
+                stats['kp_api_requests_total'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            except Exception as e:
+                logger.warning(f"Ошибка получения общей статистики API: {e}")
+                stats['kp_api_requests_total'] = 0
             
             # Платные пользователи (активные подписки personal)
             cursor.execute('''

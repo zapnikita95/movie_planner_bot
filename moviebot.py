@@ -6940,10 +6940,10 @@ def handle_noop(call):
     """Обработчик для неактивных кнопок (noop)"""
     bot.answer_callback_query(call.id)
 
-def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=None):
+def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=None, message_thread_id=None):
     """Показывает страницу эпизодов сезона с пагинацией"""
     try:
-        logger.info(f"[SHOW EPISODES PAGE] Начало: kp_id={kp_id}, season={season_num}, chat_id={chat_id}, user_id={user_id}, page={page}, message_id={message_id}")
+        logger.info(f"[SHOW EPISODES PAGE] Начало: kp_id={kp_id}, season={season_num}, chat_id={chat_id}, user_id={user_id}, page={page}, message_id={message_id}, message_thread_id={message_thread_id}")
         EPISODES_PER_PAGE = 20
         
         # Получаем film_id
@@ -7091,12 +7091,28 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         
         if message_id:
             try:
-                logger.info(f"[SHOW EPISODES PAGE] Обновление сообщения: message_id={message_id}")
-                bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"[SHOW EPISODES PAGE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
+                # Для обновления сообщения в треде нужно передать message_thread_id
+                if message_thread_id:
+                    # Используем API напрямую для поддержки тредов
+                    bot.edit_message_text(
+                        text, 
+                        chat_id, 
+                        message_id, 
+                        reply_markup=markup, 
+                        parse_mode='HTML',
+                        message_thread_id=message_thread_id
+                    )
+                else:
+                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[SHOW EPISODES PAGE] Сообщение обновлено успешно")
             except Exception as e:
                 logger.error(f"[SHOW EPISODES PAGE] Ошибка редактирования сообщения: {e}", exc_info=True)
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                # При ошибке отправляем новое сообщение
+                if message_thread_id:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                else:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         else:
             logger.info(f"[SHOW EPISODES PAGE] Отправка нового сообщения")
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
@@ -15000,10 +15016,32 @@ def series_track_callback(call):
             markup.add(InlineKeyboardButton(button_text, callback_data=f"series_season:{kp_id}:{season_num}"))
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{kp_id}"))
         
-        bot.edit_message_text(
-            f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:",
-            chat_id, message_id, reply_markup=markup, parse_mode='HTML'
-        )
+        # Получаем message_thread_id из сообщения, если оно есть
+        message_thread_id = None
+        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+            message_thread_id = call.message.message_thread_id
+        
+        logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
+        try:
+            if message_thread_id:
+                bot.edit_message_text(
+                    f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:",
+                    chat_id, message_id, reply_markup=markup, parse_mode='HTML',
+                    message_thread_id=message_thread_id
+                )
+            else:
+                bot.edit_message_text(
+                    f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:",
+                    chat_id, message_id, reply_markup=markup, parse_mode='HTML'
+                )
+            logger.info(f"[SERIES TRACK] Сообщение обновлено успешно")
+        except Exception as e:
+            logger.error(f"[SERIES TRACK] Ошибка обновления сообщения: {e}", exc_info=True)
+            # При ошибке отправляем новое сообщение
+            if message_thread_id:
+                bot.send_message(chat_id, f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:", reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+            else:
+                bot.send_message(chat_id, f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:", reply_markup=markup, parse_mode='HTML')
         bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
@@ -15026,8 +15064,13 @@ def handle_episodes_page(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        logger.info(f"[EPISODES PAGE] Переключение страницы: user_id={user_id}, kp_id={kp_id}, season={season_num}, page={page}")
-        show_episodes_page(kp_id, season_num, chat_id, user_id, page, call.message.message_id)
+        # Получаем message_thread_id из сообщения, если оно есть
+        message_thread_id = None
+        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+            message_thread_id = call.message.message_thread_id
+        
+        logger.info(f"[EPISODES PAGE] Переключение страницы: user_id={user_id}, kp_id={kp_id}, season={season_num}, page={page}, message_thread_id={message_thread_id}")
+        show_episodes_page(kp_id, season_num, chat_id, user_id, page, call.message.message_id, message_thread_id)
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка в handle_episodes_page: {e}", exc_info=True)
         try:
@@ -15208,9 +15251,14 @@ def series_episode_callback(call):
             state = user_episodes_state.get(user_id, {})
             current_page = state.get('page', 1) if state.get('kp_id') == kp_id and state.get('season_num') == str(season_num) else 1
             
+            # Получаем message_thread_id из сообщения, если оно есть
+            message_thread_id = None
+            if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                message_thread_id = call.message.message_thread_id
+            
             # Используем функцию show_episodes_page для отображения эпизодов
-            logger.info(f"[SERIES EPISODE] Обновление интерфейса: kp_id={kp_id}, season={season_num}, page={current_page}, message_id={message_id}")
-            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id)
+            logger.info(f"[SERIES EPISODE] Обновление интерфейса: kp_id={kp_id}, season={season_num}, page={current_page}, message_id={message_id}, message_thread_id={message_thread_id}")
+            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
             logger.info(f"[SERIES EPISODE] Интерфейс обновлен успешно")
             
             # Обновляем главное сообщение со списком сезонов, если оно существует
