@@ -5651,7 +5651,12 @@ def main_text_handler(message):
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_search_state")
         
         # Обработка ответа на /search без запроса
-        if message.reply_to_message and message.reply_to_message.message_id == state.get('message_id'):
+        # Проверяем, что это ответ на сообщение бота или просто текст от пользователя в состоянии поиска
+        saved_message_id = state.get('message_id')
+        is_reply_to_search = message.reply_to_message and message.reply_to_message.message_id == saved_message_id
+        is_text_in_search_state = text and not message.reply_to_message  # Текст без ответа, но в состоянии поиска
+        
+        if is_reply_to_search or is_text_in_search_state:
             query = text
             if query:
                 # Получаем тип поиска из состояния
@@ -5702,12 +5707,19 @@ def main_text_handler(message):
                         pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
                     markup.row(*pagination_row)
                 
+                # Добавляем кнопку "Назад в меню"
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                
                 # Добавляем пояснение про эмодзи
-                results_text += "\n🎬 - фильм\n📺 - сериал"
+                results_text += "\n\n🎬 - фильм\n📺 - сериал"
                 
                 bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов")
+            else:
+                logger.warning(f"[SEARCH] Пустой запрос от пользователя {user_id}")
             return
+        else:
+            logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано: '{text}' (reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}, saved_message_id={saved_message_id})")
     
     # === user_import_state ===
     if user_id in user_import_state:
