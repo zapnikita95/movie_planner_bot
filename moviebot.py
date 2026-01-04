@@ -10215,16 +10215,186 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
         
         if film_id:
+            # Получаем информацию об оценках
+            with db_lock:
+                # Получаем среднюю оценку
+                cursor.execute('''
+                    SELECT AVG(rating) as avg FROM ratings 
+                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id))
+                avg_result = cursor.fetchone()
+                avg_rating = None
+                if avg_result:
+                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                    avg_rating = float(avg) if avg is not None else None
+                
+                # Получаем активных пользователей
+                cursor.execute('''
+                    SELECT DISTINCT user_id
+                    FROM stats
+                    WHERE chat_id = %s AND user_id IS NOT NULL
+                ''', (chat_id,))
+                active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Получаем всех, кто оценил этот фильм
+                cursor.execute('''
+                    SELECT DISTINCT user_id FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id))
+                rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Определяем текст и эмодзи кнопки
+                if active_users and active_users.issubset(rated_users) and avg_rating is not None:
+                    # Все активные пользователи оценили - показываем среднюю оценку
+                    rating_int = int(round(avg_rating))
+                    if 1 <= rating_int <= 4:
+                        emoji = "💩"
+                    elif 5 <= rating_int <= 7:
+                        emoji = "💬"
+                    else:  # 8-10
+                        emoji = "🏆"
+                    rating_text = f"{emoji} {avg_rating:.0f}/10"
+                else:
+                    rating_text = "💬 Оценить"
+            
             markup.row(
                 InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+                InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}")
             )
             
             # Если это сериал, добавляем кнопки для сериалов
             if is_series and user_id:
                 if has_notifications_access(chat_id, user_id):
-                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    # Проверяем, все ли серии просмотрены
+                    from api.kinopoisk_api import get_seasons_data
+                    from datetime import datetime as dt
+                    seasons_data = get_seasons_data(kp_id)
+                    all_episodes_watched = False
+                    if seasons_data and film_id:
+                        now = dt.now()
+                        # Проверяем, выходит ли сериал
+                        is_airing = False
+                        for season in seasons_data:
+                            episodes = season.get('episodes', [])
+                            for ep in episodes:
+                                release_str = ep.get('releaseDate', '')
+                                if release_str and release_str != '—':
+                                    try:
+                                        release_date = None
+                                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                            try:
+                                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                                break
+                                            except:
+                                                continue
+                                        if release_date and release_date > now:
+                                            is_airing = True
+                                            break
+                                    except:
+                                        pass
+                            if is_airing:
+                                break
+                        
+                        # Если сериал не выходит, проверяем, все ли серии просмотрены
+                        if not is_airing:
+                            total_episodes = 0
+                            watched_episodes = 0
+                            with db_lock:
+                                cursor.execute('''
+                                    SELECT season_number, episode_number 
+                                    FROM series_tracking 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                ''', (chat_id, film_id, user_id))
+                                watched_rows = cursor.fetchall()
+                                watched_set = set()
+                                for w_row in watched_rows:
+                                    if isinstance(w_row, dict):
+                                        watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
+                                    else:
+                                        watched_set.add((w_row[0], w_row[1]))
+                                
+                                for season in seasons_data:
+                                    episodes = season.get('episodes', [])
+                                    season_num = season.get('number', '')
+                                    for ep in episodes:
+                                        total_episodes += 1
+                                        ep_num = str(ep.get('episodeNumber', ''))
+                                        if (season_num, ep_num) in watched_set:
+                                            watched_episodes += 1
+                            
+                            if total_episodes > 0 and watched_episodes == total_episodes:
+                                all_episodes_watched = True
+                                # Отмечаем сериал как просмотренный в БД
+                                with db_lock:
+                                    cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                                    conn.commit()
+                        else:
+                            # Если сериал выходит, проверяем, все ли вышедшие серии просмотрены
+                            total_episodes = 0
+                            watched_episodes = 0
+                            with db_lock:
+                                cursor.execute('''
+                                    SELECT season_number, episode_number 
+                                    FROM series_tracking 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                ''', (chat_id, film_id, user_id))
+                                watched_rows = cursor.fetchall()
+                                watched_set = set()
+                                for w_row in watched_rows:
+                                    if isinstance(w_row, dict):
+                                        watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
+                                    else:
+                                        watched_set.add((w_row[0], w_row[1]))
+                                
+                                for season in seasons_data:
+                                    episodes = season.get('episodes', [])
+                                    season_num = season.get('number', '')
+                                    for ep in episodes:
+                                        release_str = ep.get('releaseDate', '')
+                                        if release_str and release_str != '—':
+                                            try:
+                                                release_date = None
+                                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                                    try:
+                                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                                        break
+                                                    except:
+                                                        continue
+                                                # Считаем только вышедшие эпизоды
+                                                if release_date and release_date <= now:
+                                                    total_episodes += 1
+                                                    ep_num = str(ep.get('episodeNumber', ''))
+                                                    if (season_num, ep_num) in watched_set:
+                                                        watched_episodes += 1
+                                            except:
+                                                pass
+                            
+                            if total_episodes > 0 and watched_episodes == total_episodes:
+                                all_episodes_watched = True
+                                # Отмечаем сериал как просмотренный в БД
+                                with db_lock:
+                                    cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                                    conn.commit()
+                    
+                    # Проверяем подписку
+                    is_subscribed = False
+                    if film_id:
+                        with db_lock:
+                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                            sub_row = cursor.fetchone()
+                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                    
+                    # Показываем соответствующую кнопку
+                    if all_episodes_watched:
+                        markup.add(InlineKeyboardButton("✅ Просмотрено", callback_data=f"series_track:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                    
+                    # Кнопка подписки
+                    if is_subscribed:
+                        markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
@@ -15270,6 +15440,107 @@ def series_track_callback(call):
             if watched_count > 0 and watched_count < episodes_count:
                 button_text += f" [{watched_count}/{episodes_count}]"
             markup.add(InlineKeyboardButton(button_text, callback_data=f"series_season:{kp_id}:{season_num}"))
+        
+        # Проверяем, все ли сезоны просмотрены
+        all_seasons_watched = True
+        for season in seasons_data:
+            season_num = season.get('number', '')
+            episodes = season.get('episodes', [])
+            episodes_count = len(episodes)
+            
+            # Проверяем, вышел ли сезон
+            season_released = True
+            if episodes:
+                for ep in episodes:
+                    release_str = ep.get('releaseDate', '')
+                    if release_str and release_str != '—':
+                        try:
+                            release_date = None
+                            for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                try:
+                                    release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                    break
+                                except:
+                                    continue
+                            if release_date and release_date > now:
+                                season_released = False
+                                break
+                        except:
+                            pass
+            
+            # Если сезон не вышел, пропускаем
+            if not season_released:
+                continue
+            
+            # Проверяем, все ли эпизоды сезона просмотрены
+            watched_count = 0
+            for ep in episodes:
+                ep_num = ep.get('episodeNumber', '')
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                watched_row = cursor.fetchone()
+                if watched_row:
+                    watched_count += 1
+            
+            if watched_count < episodes_count or episodes_count == 0:
+                all_seasons_watched = False
+                break
+        
+        # Если все сезоны просмотрены, добавляем сообщение и кнопку "Оценить"
+        if all_seasons_watched:
+            # Отмечаем сериал как просмотренный в БД
+            cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            conn.commit()
+        
+        # Добавляем кнопку "Оценить" если все сезоны просмотрены
+        if all_seasons_watched:
+            # Получаем информацию об оценках
+            with db_lock:
+                # Получаем среднюю оценку
+                cursor.execute('''
+                    SELECT AVG(rating) as avg FROM ratings 
+                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id))
+                avg_result = cursor.fetchone()
+                avg_rating = None
+                if avg_result:
+                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                    avg_rating = float(avg) if avg is not None else None
+                
+                # Получаем активных пользователей
+                cursor.execute('''
+                    SELECT DISTINCT user_id
+                    FROM stats
+                    WHERE chat_id = %s AND user_id IS NOT NULL
+                ''', (chat_id,))
+                active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Получаем всех, кто оценил этот фильм
+                cursor.execute('''
+                    SELECT DISTINCT user_id FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id))
+                rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Определяем текст и эмодзи кнопки
+                if active_users and active_users.issubset(rated_users) and avg_rating is not None:
+                    # Все активные пользователи оценили - показываем среднюю оценку
+                    rating_int = int(round(avg_rating))
+                    if 1 <= rating_int <= 4:
+                        emoji = "💩"
+                    elif 5 <= rating_int <= 7:
+                        emoji = "💬"
+                    else:  # 8-10
+                        emoji = "🏆"
+                    rating_text = f"{emoji} {avg_rating:.0f}/10"
+                else:
+                    rating_text = "💬 Оценить"
+            
+            markup.add(InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}"))
+        
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{kp_id}"))
         
         # Получаем message_thread_id из сообщения, если оно есть
@@ -15280,6 +15551,8 @@ def series_track_callback(call):
         logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
         try:
             text_msg = f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:"
+            if all_seasons_watched:
+                text_msg += f"\n\n✅ Отлично, все сезоны просмотрены! Оцените сериал"
             if message_thread_id:
                 # Используем API напрямую для поддержки тредов
                 reply_markup_json = json.dumps(markup.to_dict()) if markup else None
