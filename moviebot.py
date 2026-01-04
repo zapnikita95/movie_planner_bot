@@ -5847,7 +5847,17 @@ def handle_rating_internal(message, rating):
                     cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                     conn.commit()
                     logger.info(f"[RATE] Фильм {film_id} отмечен как просмотренный после оценки пользователем {user_id}")
-                    bot.reply_to(message, f"Спасибо! Фильм отмечен как просмотренный, ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                    
+                    # Создаем кнопку "Вернуться к описанию"
+                    markup = InlineKeyboardMarkup()
+                    if kp_id:
+                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"show_film_description:{kp_id}"))
+                    
+                    reply_msg = bot.reply_to(message, f"Спасибо! Фильм отмечен как просмотренный, ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", reply_markup=markup if markup.keyboard else None)
+                    
+                    # Сохраняем message_id для удаления при возврате к описанию
+                    if kp_id and reply_msg:
+                        rating_messages[reply_msg.message_id] = film_id
                 else:
                     # Создаем кнопку "Вернуться к описанию"
                     markup = InlineKeyboardMarkup()
@@ -5899,8 +5909,8 @@ def handle_rating_internal(message, rating):
                     conn.commit()
                     logger.info(f"[RATE] Все активные пользователи оценили фильм {film_id}, отмечен как просмотренный")
                 
-                # Если средняя оценка >= 9, показываем похожие фильмы и продолжения (для фильмов и сериалов)
-                if avg and avg >= 9 and kp_id:
+                # Если оценка пользователя >= 9 или средняя оценка >= 9, показываем похожие фильмы и продолжения (для фильмов и сериалов)
+                if (rating >= 9 or (avg and avg >= 9)) and kp_id:
                     # Определяем тип текущего фильма
                     is_current_series = get_film_type(kp_id)
                     
@@ -15911,10 +15921,6 @@ def series_episode_callback(call):
                         else:
                             logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
             
-            # Обновление сообщения с эпизодами уже выполнено выше в коде
-            pass
-            except Exception as e:
-                logger.error(f"[SERIES EPISODE] Ошибка при обновлении главного сообщения: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SERIES EPISODE] Ошибка: {e}", exc_info=True)
         try:
