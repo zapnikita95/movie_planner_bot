@@ -254,13 +254,13 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                     
                     # Определяем статус сезона
                     if stats['watched'] == stats['total'] and stats['total'] > 0:
-                        status = "✅ Просмотрен полностью"
+                        status = "✅ Просмотрен"
                     elif stats['watched'] > 0:
-                        status = f"⏳ Просмотрено {stats['watched']}/{stats['total']}"
+                        status = "👁 Частично просмотрен"
                     else:
                         status = "⬜ Не просмотрен"
                     
-                    text += f"<b>Сезон {number}</b> ({stats['total']} серий) — {status}\n"
+                    text += f"Сезон {number} ({stats['total']} серий) — {status}\n"
                 
                 text += "\n"
                 
@@ -355,13 +355,13 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                         
                         # Определяем статус сезона
                         if stats['watched'] == stats['total'] and stats['total'] > 0:
-                            status = "✅ Просмотрен полностью"
+                            status = "✅ Просмотрен"
                         elif stats['watched'] > 0:
-                            status = f"⏳ Просмотрено {stats['watched']}/{stats['total']}"
+                            status = "👁 Частично просмотрен"
                         else:
                             status = "⬜ Не просмотрен"
                         
-                        text += f"<b>Сезон {number}</b> ({stats['total']} серий) — {status}\n"
+                        text += f"Сезон {number} ({stats['total']} серий) — {status}\n"
                     
                     text += "\n"
                     
