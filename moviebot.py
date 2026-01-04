@@ -22378,9 +22378,17 @@ def got_payment(message):
     """Обработчик successful_payment для Telegram Stars - основной handler для Stars платежей"""
     try:
         logger.info(f"[STARS SUCCESS] ===== ПОЛУЧЕН successful_payment =====")
+        logger.info(f"[STARS SUCCESS] ⚠️ ВАЖНО: Этот handler должен сработать для Stars платежей!")
         logger.info(f"[STARS SUCCESS] message_id={message.message_id}, date={message.date}")
         logger.info(f"[STARS SUCCESS] from_user.id={message.from_user.id}, from_user.username={message.from_user.username}")
         logger.info(f"[STARS SUCCESS] chat.id={message.chat.id}, chat.type={message.chat.type}")
+        
+        # Проверяем наличие successful_payment
+        if not hasattr(message, 'successful_payment') or not message.successful_payment:
+            logger.error(f"[STARS SUCCESS] ❌ КРИТИЧЕСКАЯ ОШИБКА: message.successful_payment отсутствует!")
+            logger.error(f"[STARS SUCCESS] message.content_type={getattr(message, 'content_type', 'N/A')}")
+            logger.error(f"[STARS SUCCESS] message.__dict__={message.__dict__}")
+            return
         
         payment = message.successful_payment
         user_id = message.from_user.id

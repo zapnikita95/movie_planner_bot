@@ -52,6 +52,14 @@ def create_web_app(bot_instance):
                 logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
                 logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
                 
+                # КРИТИЧНО: Логируем successful_payment если есть
+                if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
+                    logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment! ⭐⭐⭐")
+                    logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
+                    logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
+                    logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
+                    logger.info(f"[WEBHOOK] successful_payment.telegram_payment_charge_id={getattr(update.message.successful_payment, 'telegram_payment_charge_id', 'N/A')}")
+                
                 # Проверяем наличие web_app_data
                 if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
                     logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
