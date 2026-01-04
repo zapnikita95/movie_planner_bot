@@ -3548,9 +3548,13 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
 # Логируем регистрацию обработчика
 logger.info("[WEB APP] Регистрируем обработчик web_app_data")
 
-@bot.message_handler(content_types=['web_app_data'])
+@bot.message_handler(content_types=['web_app_data'], priority=1)
 def handle_web_app_data(message):
-    logger.info(f"[WEB APP] Получены данные от Web App: {message.web_app_data.data}")
+    logger.info(f"[WEB APP] ===== ПОЛУЧЕНЫ ДАННЫЕ ОТ WEB APP =====")
+    logger.info(f"[WEB APP] message.web_app_data: {message.web_app_data}")
+    logger.info(f"[WEB APP] message.web_app_data.data: {message.web_app_data.data if hasattr(message, 'web_app_data') and message.web_app_data else 'НЕТ ДАННЫХ'}")
+    logger.info(f"[WEB APP] message.chat.id: {message.chat.id}")
+    logger.info(f"[WEB APP] message.from_user.id: {message.from_user.id}")
     
     try:
         data = json.loads(message.web_app_data.data)
