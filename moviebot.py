@@ -1230,13 +1230,13 @@ def get_random_events_enabled(chat_id):
 dice_game_state = {}  # chat_id: {'participants': {user_id: dice_value}, 'message_id': int, 'start_time': datetime}
 
 def check_weekend_schedule():
-    """Проверяет расписание на выходные (пт-сб-вс) и предлагает рандомный фильм, если нет планов"""
+    """Проверяет расписание на выходные (пт-сб-вс) и предлагает рандомный фильм, если нет планов. Выполняется только в субботу."""
     try:
         now = datetime.now(plans_tz)
         current_weekday = now.weekday()
         
-        # Проверяем только в пятницу, субботу и воскресенье
-        if current_weekday not in [4, 5, 6]:  # 4=пятница, 5=суббота, 6=воскресенье
+        # Проверяем только в субботу (5 = суббота)
+        if current_weekday != 5:
             return
         
         # Получаем все чаты
@@ -1251,17 +1251,18 @@ def check_weekend_schedule():
             if not get_random_events_enabled(chat_id):
                 continue
             
-            # Проверяем, есть ли планы на выходные (пт-сб-вс)
-            friday = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            if current_weekday == 4:  # Пятница
-                friday = friday
-            elif current_weekday == 5:  # Суббота
-                friday = friday - timedelta(days=1)
-            else:  # Воскресенье
-                friday = friday - timedelta(days=2)
+            # Проверяем, отключено ли это напоминание
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_weekend_films_disabled'", (chat_id,))
+            reminder_disabled_row = cursor.fetchone()
+            if reminder_disabled_row:
+                is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
+                if is_disabled == 'true':
+                    continue
             
-            sunday = friday + timedelta(days=2)
-            sunday = sunday.replace(hour=23, minute=59, second=59)
+            # Проверяем, есть ли планы на выходные (пт-сб-вс)
+            # Суббота - проверяем планы с пятницы по воскресенье
+            friday = now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+            sunday = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=1)
             
             # Проверяем планы на выходные
             cursor.execute('''
@@ -1278,9 +1279,11 @@ def check_weekend_schedule():
                 try:
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                    markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+                    markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:weekend_films"))
                     bot.send_message(
                         chat_id,
-                        "🎬 На выходных нет запланированных фильмов!\n\nХотите выбрать рандомный фильм?",
+                        "🎬 На выходных нет запланированных фильмов!\n\nХотите выбрать какой-нибудь фильм из вашей базы?",
                         reply_markup=markup,
                         parse_mode='HTML'
                     )
@@ -1302,6 +1305,15 @@ def choose_random_participant():
         
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, что это групповой чат (не личный)
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    continue  # Пропускаем личные чаты
+            except Exception as e:
+                logger.warning(f"[RANDOM EVENTS] Не удалось получить информацию о чате {chat_id}: {e}")
+                continue
             
             # Проверяем, включены ли случайные события
             if not get_random_events_enabled(chat_id):
@@ -1338,14 +1350,28 @@ def choose_random_participant():
             user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
             username = participant.get('username') if isinstance(participant, dict) else participant[1]
             
+            # Формируем имя пользователя для отображения
+            if username:
+                user_name = f"@{username}"
+            else:
+                try:
+                    user_info = bot.get_chat_member(chat_id, user_id)
+                    user_name = user_info.user.first_name or "участник"
+                except:
+                    user_name = "участник"
+            
             # Отправляем сообщение
             try:
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
-                mention = f"@{username}" if username else f"<a href='tg://user?id={user_id}'>участник</a>"
+                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                
+                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
+                
                 bot.send_message(
                     chat_id,
-                    f"🎬 <b>{mention}</b> выбери фильм на выходные!",
+                    text,
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
@@ -1377,6 +1403,15 @@ def start_dice_game():
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
             
+            # Проверяем, что это групповой чат (не личный)
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    continue  # Пропускаем личные чаты
+            except Exception as e:
+                logger.warning(f"[RANDOM EVENTS] Не удалось получить информацию о чате {chat_id}: {e}")
+                continue
+            
             # Проверяем, включены ли случайные события
             if not get_random_events_enabled(chat_id):
                 continue
@@ -1407,25 +1442,18 @@ def start_dice_game():
             if len(participants) < 2:
                 continue
             
-            # Формируем список упоминаний
-            mentions = []
-            for p in participants:
-                user_id = p.get('user_id') if isinstance(p, dict) else p[0]
-                username = p.get('username') if isinstance(p, dict) else p[1]
-                if username:
-                    mentions.append(f"@{username}")
-                else:
-                    mentions.append(f"<a href='tg://user?id={user_id}'>участник</a>")
-            
-            mentions_text = ", ".join(mentions)
-            
             # Отправляем сообщение с кнопкой
             try:
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
+                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                
+                text = "🔮 Вас посетил дух игры в кубик!\n\n"
+                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
+                
                 msg = bot.send_message(
                     chat_id,
-                    f"🎲 Испытай удачу! {mentions_text} Кто выберет фильм на выходные?",
+                    text,
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
@@ -1465,6 +1493,15 @@ def check_cinema_reminder():
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
             
+            # Проверяем, что это групповой чат (не личный)
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    continue  # Пропускаем личные чаты
+            except Exception as e:
+                logger.warning(f"[CINEMA REMINDER] Не удалось получить информацию о чате {chat_id}: {e}")
+                continue
+            
             # Проверяем, включены ли случайные события
             if not get_random_events_enabled(chat_id):
                 continue
@@ -1501,6 +1538,14 @@ def check_cinema_reminder():
                 except:
                     pass
             
+            # Проверяем, отключено ли это напоминание
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_cinema_premieres_disabled'", (chat_id,))
+            reminder_disabled_row = cursor.fetchone()
+            if reminder_disabled_row:
+                is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
+                if is_disabled == 'true':
+                    continue
+            
             # Отправляем напоминание с премьерами
             try:
                 # Получаем премьеры текущего месяца
@@ -1524,7 +1569,11 @@ def check_cinema_reminder():
                     
                     text += "\n\nИспользуйте /premieres для просмотра всех премьер"
                     
-                    bot.send_message(chat_id, text, parse_mode='HTML')
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+                    markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:cinema_premieres"))
+                    
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                     
                     # Сохраняем дату последнего напоминания
                     cursor.execute('''
@@ -1719,7 +1768,7 @@ def handle_dice_result(message):
         logger.error(f"[RANDOM EVENTS] Ошибка в handle_dice_result: {e}", exc_info=True)
 
 # Добавляем задачи для случайных событий
-scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri-sun', hour=10, minute=0, timezone=plans_tz, id='check_weekend_schedule')  # каждый день выходных в 10:00
+scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='sat', hour=10, minute=0, timezone=plans_tz, id='check_weekend_schedule')  # каждую субботу в 10:00
 scheduler.add_job(choose_random_participant, 'cron', day_of_week='mon-sun', hour=12, minute=0, timezone=plans_tz, id='choose_random_participant')  # каждый день в 12:00 (будет проверять 14 дней)
 scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minute=0, timezone=plans_tz, id='start_dice_game')  # каждый день в 14:00 (будет проверять 14 дней)
 scheduler.add_job(check_cinema_reminder, 'cron', day_of_week='mon-sun', hour=11, minute=0, timezone=plans_tz, id='check_cinema_reminder')  # каждый день в 11:00 (будет проверять 14 дней)
@@ -3147,6 +3196,115 @@ def premiere_add_to_db(call):
         logger.error(f"[PREMIERE ADD] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("reminder:"))
+def handle_reminder_callback(call):
+    """Обработчик для управления регулярными напоминаниями"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        action_parts = call.data.split(":")
+        if len(action_parts) < 3:
+            return
+        
+        action_type = action_parts[1]  # disable или enable
+        reminder_type = action_parts[2]  # weekend_films, cinema_premieres, random_events
+        
+        with db_lock:
+            if reminder_type == "weekend_films":
+                key = 'reminder_weekend_films_disabled'
+                new_value = 'true' if action_type == 'disable' else 'false'
+                message_text = "Напоминание о фильмах на выходных отключено" if action_type == 'disable' else "Напоминание о фильмах на выходных включено"
+            elif reminder_type == "cinema_premieres":
+                key = 'reminder_cinema_premieres_disabled'
+                new_value = 'true' if action_type == 'disable' else 'false'
+                message_text = "Напоминание о премьерах в кино отключено" if action_type == 'disable' else "Напоминание о премьерах в кино включено"
+            elif reminder_type == "random_events":
+                key = 'random_events_enabled'
+                new_value = 'false' if action_type == 'disable' else 'true'
+                message_text = "Случайные события отключены" if action_type == 'disable' else "Случайные события включены"
+            else:
+                return
+            
+            cursor.execute('''
+                INSERT INTO settings (chat_id, key, value)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            ''', (chat_id, key, new_value))
+            conn.commit()
+        
+        bot.answer_callback_query(call.id, message_text)
+        
+        # Если это было из меню регулярных напоминаний, обновляем его
+        if hasattr(call.message, 'text') and 'Регулярные напоминания' in call.message.text:
+            # Вызываем обработчик настроек для обновления меню
+            fake_call = type('obj', (object,), {
+                'id': call.id,
+                'from_user': call.from_user,
+                'message': call.message,
+                'data': 'settings:notify:regular_reminders'
+            })()
+            # Найдем и вызовем обработчик настроек
+            from telebot.types import CallbackQuery
+            fake_callback = CallbackQuery()
+            fake_callback.id = call.id
+            fake_callback.from_user = call.from_user
+            fake_callback.message = call.message
+            fake_callback.data = 'settings:notify:regular_reminders'
+            # Просто обновим сообщение напрямую
+            with db_lock:
+                cursor.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
+                reminder_rows = cursor.fetchall()
+                
+                reminders_status = {}
+                for row in reminder_rows:
+                    key = row.get('key') if isinstance(row, dict) else row[0]
+                    value = row.get('value') if isinstance(row, dict) else row[1]
+                    reminders_status[key] = value
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            weekend_films_disabled = reminders_status.get('reminder_weekend_films_disabled', 'false') == 'true'
+            if weekend_films_disabled:
+                markup.add(InlineKeyboardButton("⏰ Включить: Фильмы на выходных", callback_data="reminder:enable:weekend_films"))
+            else:
+                markup.add(InlineKeyboardButton("❌ Отменить: Фильмы на выходных", callback_data="reminder:disable:weekend_films"))
+            
+            cinema_premieres_disabled = reminders_status.get('reminder_cinema_premieres_disabled', 'false') == 'true'
+            if cinema_premieres_disabled:
+                markup.add(InlineKeyboardButton("⏰ Включить: Премьеры в кино", callback_data="reminder:enable:cinema_premieres"))
+            else:
+                markup.add(InlineKeyboardButton("❌ Отменить: Премьеры в кино", callback_data="reminder:disable:cinema_premieres"))
+            
+            random_events_enabled = reminders_status.get('random_events_enabled', 'true') == 'true'
+            if not random_events_enabled:
+                markup.add(InlineKeyboardButton("⏰ Включить: Случайные события", callback_data="reminder:enable:random_events"))
+            else:
+                markup.add(InlineKeyboardButton("❌ Отменить: Случайные события", callback_data="reminder:disable:random_events"))
+            
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
+            
+            text = "📋 <b>Регулярные напоминания</b>\n\n"
+            text += "Управление регулярными напоминаниями бота:\n\n"
+            text += "• <b>Фильмы на выходных</b> — напоминание каждую субботу, если нет планов\n"
+            text += "• <b>Премьеры в кино</b> — напоминание о премьерах, если давно не добавляли фильмы в кино\n"
+            text += "• <b>Случайные события</b> — все случайные события (выбор участника, игра в кубик и т.д.)"
+            
+            bot.edit_message_text(
+                text,
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+    except Exception as e:
+        logger.error(f"❌ Ошибка в handle_reminder_callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Произошла ошибка")
         except:
             pass
 
@@ -18734,6 +18892,7 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("🏠 Домашний просмотр", callback_data="settings:notify:home"))
             markup.add(InlineKeyboardButton("🎬 Просмотр в кино", callback_data="settings:notify:cinema"))
             markup.add(InlineKeyboardButton("🎫 Билеты на сеанс", callback_data="settings:notify:tickets"))
+            markup.add(InlineKeyboardButton("📋 Регулярные напоминания", callback_data="settings:notify:regular_reminders"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
             separate_text = "✅ Включено" if separate else "❌ Выключено"
@@ -19091,6 +19250,7 @@ def handle_settings_callback(call):
                 markup.add(InlineKeyboardButton("🏠 Домашний просмотр", callback_data="settings:notify:home"))
                 markup.add(InlineKeyboardButton("🎬 Просмотр в кино", callback_data="settings:notify:cinema"))
                 markup.add(InlineKeyboardButton("🎫 Билеты на сеанс", callback_data="settings:notify:tickets"))
+                markup.add(InlineKeyboardButton("📋 Регулярные напоминания", callback_data="settings:notify:regular_reminders"))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
                 
                 separate_text = "✅ Включено" if separate else "❌ Выключено"
@@ -19130,7 +19290,60 @@ def handle_settings_callback(call):
                     reply_markup=markup,
                 parse_mode='HTML'
             )
-            return
+                return
+            
+            elif sub_action == "regular_reminders":
+                # Показываем меню регулярных напоминаний
+                with db_lock:
+                    # Проверяем статус каждого напоминания
+                    cursor.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
+                    reminder_rows = cursor.fetchall()
+                    
+                    reminders_status = {}
+                    for row in reminder_rows:
+                        key = row.get('key') if isinstance(row, dict) else row[0]
+                        value = row.get('value') if isinstance(row, dict) else row[1]
+                        reminders_status[key] = value
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                
+                # Напоминание о фильмах на выходных
+                weekend_films_disabled = reminders_status.get('reminder_weekend_films_disabled', 'false') == 'true'
+                if weekend_films_disabled:
+                    markup.add(InlineKeyboardButton("⏰ Включить: Фильмы на выходных", callback_data="reminder:enable:weekend_films"))
+                else:
+                    markup.add(InlineKeyboardButton("❌ Отменить: Фильмы на выходных", callback_data="reminder:disable:weekend_films"))
+                
+                # Напоминание о премьерах в кино
+                cinema_premieres_disabled = reminders_status.get('reminder_cinema_premieres_disabled', 'false') == 'true'
+                if cinema_premieres_disabled:
+                    markup.add(InlineKeyboardButton("⏰ Включить: Премьеры в кино", callback_data="reminder:enable:cinema_premieres"))
+                else:
+                    markup.add(InlineKeyboardButton("❌ Отменить: Премьеры в кино", callback_data="reminder:disable:cinema_premieres"))
+                
+                # Случайные события (все сразу)
+                random_events_enabled = reminders_status.get('random_events_enabled', 'true') == 'true'
+                if not random_events_enabled:
+                    markup.add(InlineKeyboardButton("⏰ Включить: Случайные события", callback_data="reminder:enable:random_events"))
+                else:
+                    markup.add(InlineKeyboardButton("❌ Отменить: Случайные события", callback_data="reminder:disable:random_events"))
+                
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
+                
+                text = "📋 <b>Регулярные напоминания</b>\n\n"
+                text += "Управление регулярными напоминаниями бота:\n\n"
+                text += "• <b>Фильмы на выходных</b> — напоминание каждую субботу, если нет планов\n"
+                text += "• <b>Премьеры в кино</b> — напоминание о премьерах, если давно не добавляли фильмы в кино\n"
+                text += "• <b>Случайные события</b> — все случайные события (выбор участника, игра в кубик и т.д.)"
+                
+                bot.edit_message_text(
+                    text,
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
         
         if action == "edit":
             # Вызываем команду /edit
