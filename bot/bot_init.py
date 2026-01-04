@@ -46,8 +46,8 @@ except Exception as e:
 scheduler = BackgroundScheduler()
 scheduler.start()
 
-# Команды бота
-commands = [
+# Финальный список команд для отображения в личке и группе
+BOT_COMMANDS = [
     BotCommand("start", "Главное меню"),
     BotCommand("list", "Список непросмотренных фильмов"),
     BotCommand("rate", "Оценить просмотренные фильмы"),
@@ -58,32 +58,65 @@ commands = [
     BotCommand("settings", "Настройки")
 ]
 
-# Устанавливаем команды для разных scope
-try:
-    # Для всех групповых чатов
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
-    logger.info("Команды установлены для всех групповых чатов")
-except Exception as e:
-    logger.error(f"Ошибка при установке команд для групповых чатов: {e}")
+def setup_bot_commands(bot_instance=None):
+    """
+    Устанавливает команды бота для всех scope (личные чаты и группы).
+    Эта функция должна вызываться при старте бота и периодически для синхронизации.
+    
+    Args:
+        bot_instance: Экземпляр бота. Если None, используется глобальный bot.
+    """
+    bot_to_use = bot_instance if bot_instance is not None else bot
+    
+    # Определяем все scope для установки команд
+    scopes = [
+        (telebot.types.BotCommandScopeAllGroupChats(), "всех групповых чатов"),
+        (telebot.types.BotCommandScopeAllChatAdministrators(), "администраторов групп"),
+        (telebot.types.BotCommandScopeAllPrivateChats(), "всех личных чатов"),
+        (telebot.types.BotCommandScopeDefault(), "дефолтного scope")
+    ]
+    
+    success_count = 0
+    error_count = 0
+    
+    for scope, description in scopes:
+        try:
+            bot_to_use.set_my_commands(BOT_COMMANDS, scope=scope)
+            logger.info(f"✓ Команды установлены для {description}")
+            success_count += 1
+        except Exception as e:
+            logger.error(f"✗ Ошибка при установке команд для {description}: {e}")
+            error_count += 1
+    
+    if success_count > 0:
+        logger.info(f"Команды успешно синхронизированы: {success_count}/{len(scopes)} scope")
+    if error_count > 0:
+        logger.warning(f"Ошибки при синхронизации команд: {error_count}/{len(scopes)} scope")
+    
+    return success_count == len(scopes)
 
-try:
-    # Для всех администраторов в группах (чтобы команды показывались администраторам)
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllChatAdministrators())
-    logger.info("Команды установлены для администраторов групп")
-except Exception as e:
-    logger.error(f"Ошибка при установке команд для администраторов групп: {e}")
+def sync_commands_periodically():
+    """
+    Периодическая синхронизация команд (вызывается планировщиком).
+    Гарантирует, что команды всегда актуальны в Telegram API.
+    """
+    logger.info("Периодическая синхронизация команд...")
+    setup_bot_commands()
 
-try:
-    # Для всех личных чатов
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllPrivateChats())
-    logger.info("Команды установлены для всех личных чатов")
-except Exception as e:
-    logger.error(f"Ошибка при установке команд для личных чатов: {e}")
+# Устанавливаем команды при импорте модуля (при старте бота)
+setup_bot_commands()
 
+# Добавляем периодическую синхронизацию команд каждый час
+# Это гарантирует, что команды всегда будут актуальными, даже если Telegram API их сбросит
 try:
-    # Для дефолтного scope (личные чаты)
-    bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
-    logger.info("Команды установлены для дефолтного scope")
+    scheduler.add_job(
+        sync_commands_periodically,
+        'interval',
+        hours=1,
+        id='sync_bot_commands',
+        replace_existing=True
+    )
+    logger.info("Периодическая синхронизация команд настроена (каждый час)")
 except Exception as e:
-    logger.error(f"Ошибка при установке команд для дефолтного scope: {e}")
+    logger.warning(f"Не удалось настроить периодическую синхронизацию команд: {e}")
 
