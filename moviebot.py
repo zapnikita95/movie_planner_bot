@@ -20391,7 +20391,6 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
             markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
             markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
-            markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
             
             bot.edit_message_text(
                 f"⚙️ <b>Настройки</b>\n\n"
