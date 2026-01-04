@@ -16,18 +16,32 @@ app = Flask(__name__)
 def create_web_app(bot_instance):
     """Создает Flask приложение с webhook обработчиками"""
     
-    @app.route('/webhook', methods=['POST'])
+    @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
+        # Логируем ВСЕ запросы, включая GET
         logger.info("=" * 80)
-        logger.info("[WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС =====")
+        logger.info(f"[WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС ({request.method}) =====")
+        logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
+        logger.info(f"[WEBHOOK] Content-Type: {request.headers.get('content-type')}")
+        
+        if request.method == 'GET':
+            logger.info("[WEBHOOK] GET запрос - возвращаем 200")
+            return '', 200
+        
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
             logger.info(f"[WEBHOOK] Размер JSON: {len(json_string)} байт")
             # Проверяем, есть ли web_app_data в сыром JSON
             if 'web_app_data' in json_string.lower():
                 logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ В JSON ЕСТЬ 'web_app_data'! ⚠️⚠️⚠️")
-            # Логируем первые 1000 символов JSON для отладки
-            logger.info(f"[WEBHOOK] JSON (первые 1000 символов): {json_string[:1000]}")
+            # Логируем первые 2000 символов JSON для отладки
+            logger.info(f"[WEBHOOK] JSON (первые 2000 символов): {json_string[:2000]}")
+            logger.info(f"[WEBHOOK] Полный JSON размер: {len(json_string)} байт")
+            
+            # Проверяем наличие web_app_data в сыром JSON ДО парсинга
+            if 'web_app_data' in json_string:
+                logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ В СЫРОМ JSON ЕСТЬ 'web_app_data'! ⚠️⚠️⚠️")
+            
             update = telebot.types.Update.de_json(json_string)
             logger.info(f"[WEBHOOK] Тип update: {type(update)}")
             logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")

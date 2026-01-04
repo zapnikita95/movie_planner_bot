@@ -3624,7 +3624,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
 # Логируем регистрацию обработчика
 logger.info("[WEB APP] Регистрируем обработчик web_app_data")
 
-@bot.message_handler(content_types=['web_app_data'], priority=1)
+@bot.message_handler(content_types='web_app_data', priority=1)
 def handle_web_app_data(message):
     logger.info(f"[WEB APP] ===== ПОЛУЧЕНЫ ДАННЫЕ ОТ WEB APP =====")
     logger.info(f"[WEB APP] message.web_app_data: {message.web_app_data}")
