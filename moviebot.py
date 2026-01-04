@@ -7891,13 +7891,13 @@ def series_subscribe_callback(call):
                         id=f'series_notification_{chat_id}_{film_id}_{user_id}_{next_episode_date.strftime("%Y%m%d")}'
                     )
                     logger.info(f"[SERIES SUBSCRIBE] Уведомление поставлено успешно")
-                    bot.answer_callback_query(call.id, f"✅ Подписка оформлена! Уведомление: {next_episode_date.strftime('%d.%m.%Y')}")
+                    # Не вызываем answer_callback_query здесь - вызовем после обновления сообщения
                 else:
                     logger.error(f"[SERIES SUBSCRIBE] scheduler не доступен!")
-                    bot.answer_callback_query(call.id, "✅ Подписка оформлена, но уведомление не установлено")
+                    # Не вызываем answer_callback_query здесь - вызовем после обновления сообщения
             except Exception as scheduler_e:
                 logger.error(f"[SERIES SUBSCRIBE] Ошибка при постановке уведомления: {scheduler_e}", exc_info=True)
-                bot.answer_callback_query(call.id, "✅ Подписка оформлена, но уведомление не установлено")
+                # Не вызываем answer_callback_query здесь - вызовем после обновления сообщения
         else:
             # Нет ближайшей даты - ставим периодическую проверку (через 3 недели)
             logger.info(f"[SERIES SUBSCRIBE] Нет ближайшей даты выхода, ставим проверку через 3 недели")
@@ -7916,13 +7916,13 @@ def series_subscribe_callback(call):
                         id=f'series_check_{chat_id}_{film_id}_{user_id}_{int(check_time.timestamp())}'
                     )
                     logger.info(f"[SERIES SUBSCRIBE] Задача проверки поставлена успешно")
-                    bot.answer_callback_query(call.id, "✅ Подписка оформлена! Будем проверять новые серии")
+                    # Не вызываем answer_callback_query здесь - вызовем после обновления сообщения
                 else:
                     logger.error(f"[SERIES SUBSCRIBE] scheduler не доступен!")
-                    bot.answer_callback_query(call.id, "✅ Подписка оформлена, но проверка не установлена")
+                    # Не вызываем answer_callback_query здесь - вызовем после обновления сообщения
             except Exception as scheduler_e:
                 logger.error(f"[SERIES SUBSCRIBE] Ошибка при постановке задачи проверки: {scheduler_e}", exc_info=True)
-                bot.answer_callback_query(call.id, "✅ Подписка оформлена, но проверка не установлена")
+                # Не вызываем answer_callback_query здесь - вызовем после обновления сообщения
         
         logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
         
@@ -7953,23 +7953,37 @@ def series_subscribe_callback(call):
                             if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
                                 message_thread_id = call.message.message_thread_id
                         
-                        logger.info(f"[SERIES SUBSCRIBE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
+                        logger.info(f"[SERIES SUBSCRIBE] Вызываю show_film_info_with_buttons: message_id={message_id}, message_thread_id={message_thread_id}")
                         # Обновляем существующее сообщение с обновленной кнопкой
                         show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
                         logger.info(f"[SERIES SUBSCRIBE] Сообщение обновлено успешно")
+                        bot.answer_callback_query(call.id, "✅ Подписка оформлена!")
                     else:
                         logger.warning(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
-                else:
-                    logger.error(f"[SERIES SUBSCRIBE] Сериал не найден в БД при обновлении сообщения: kp_id={kp_id}")
+                        bot.answer_callback_query(call.id, "✅ Подписка оформлена!")
+        except telebot.apihelper.ApiTelegramException as e:
+            logger.error(f"[SERIES SUBSCRIBE] Telegram API ошибка при обновлении сообщения: {e}", exc_info=True)
+            logger.error(f"[SERIES SUBSCRIBE] error_code={getattr(e, 'error_code', 'N/A')}, result_json={getattr(e, 'result_json', {})}")
+            
+            # Fallback: отправляем новое сообщение
+            try:
+                bot.send_message(chat_id, "✅ Вы подписались на уведомления о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
+                logger.info(f"[SERIES SUBSCRIBE] Отправлено fallback сообщение")
+            except Exception as send_e:
+                logger.error(f"[SERIES SUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
+            
+            bot.answer_callback_query(call.id, "✅ Подписка оформлена!")
+            # Не прерываем выполнение - подписка уже оформлена
         except Exception as e:
-            logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
+            logger.error(f"[SERIES SUBSCRIBE] Неизвестная ошибка при обновлении сообщения: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "✅ Подписка оформлена!")
             # Не прерываем выполнение - подписка уже оформлена
     except Exception as e:
-        logger.error(f"[SERIES SUBSCRIBE] Ошибка: {e}", exc_info=True)
+        logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка при подписке", show_alert=True)
-        except:
-            pass
+        except Exception as answer_e:
+            logger.error(f"[SERIES SUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_unsubscribe:"))
 def series_unsubscribe_callback(call):
@@ -8015,8 +8029,6 @@ def series_unsubscribe_callback(call):
             conn.commit()
             logger.info(f"[SERIES UNSUBSCRIBE] Отписка выполнена в БД")
         
-        bot.answer_callback_query(call.id, "✅ Отписка выполнена")
-        
         # Обновляем сообщение с обновленной кнопкой
         logger.info(f"[SERIES UNSUBSCRIBE] Обновление сообщения с описанием сериала")
         try:
@@ -8044,24 +8056,40 @@ def series_unsubscribe_callback(call):
                             if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
                                 message_thread_id = call.message.message_thread_id
                         
-                        logger.info(f"[SERIES UNSUBSCRIBE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
+                        logger.info(f"[SERIES UNSUBSCRIBE] Вызываю show_film_info_with_buttons: message_id={message_id}, message_thread_id={message_thread_id}")
                         # Обновляем существующее сообщение с обновленной кнопкой
                         show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
                         logger.info(f"[SERIES UNSUBSCRIBE] Сообщение обновлено успешно")
+                        bot.answer_callback_query(call.id, "✅ Отписка выполнена")
                     else:
                         logger.warning(f"[SERIES UNSUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
+                        bot.answer_callback_query(call.id, "✅ Отписка выполнена")
                 else:
                     logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден в БД при обновлении сообщения: kp_id={kp_id}")
+                    bot.answer_callback_query(call.id, "✅ Отписка выполнена")
+        except telebot.apihelper.ApiTelegramException as e:
+            logger.error(f"[SERIES UNSUBSCRIBE] Telegram API ошибка при обновлении сообщения: {e}", exc_info=True)
+            logger.error(f"[SERIES UNSUBSCRIBE] error_code={getattr(e, 'error_code', 'N/A')}, result_json={getattr(e, 'result_json', {})}")
+            
+            # Fallback: отправляем новое сообщение
+            try:
+                bot.send_message(chat_id, "🔕 Вы отписались от уведомлений о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
+                logger.info(f"[SERIES UNSUBSCRIBE] Отправлено fallback сообщение")
+            except Exception as send_e:
+                logger.error(f"[SERIES UNSUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
+            
+            bot.answer_callback_query(call.id, "✅ Отписка выполнена")
         except Exception as e:
-            logger.error(f"[SERIES UNSUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
+            logger.error(f"[SERIES UNSUBSCRIBE] Неизвестная ошибка при обновлении сообщения: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "✅ Отписка выполнена")
         
         logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
     except Exception as e:
-        logger.error(f"[SERIES UNSUBSCRIBE] Ошибка: {e}", exc_info=True)
+        logger.error(f"[SERIES UNSUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка при отписке", show_alert=True)
-        except:
-            pass
+        except Exception as answer_e:
+            logger.error(f"[SERIES UNSUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_emoji:"))
 def handle_add_emoji(call):
@@ -11005,8 +11033,54 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 else:
                     bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
                 logger.info(f"[SHOW FILM INFO] Сообщение обновлено: {info.get('title')}, kp_id={kp_id}, message_id={message_id}")
+            except telebot.apihelper.ApiTelegramException as e:
+                error_str = str(e).lower()
+                logger.error(f"[SHOW FILM INFO] Telegram API ошибка при обновлении сообщения: {e}", exc_info=True)
+                logger.error(f"[SHOW FILM INFO] error_code={getattr(e, 'error_code', 'N/A')}, result_json={getattr(e, 'result_json', {})}")
+                
+                # Проверяем, является ли это ошибкой "message is not modified"
+                if "message is not modified" in error_str or "message_not_modified" in error_str or "bad request: message is not modified" in error_str:
+                    # Если текст не изменился — просто обновляем клавиатуру
+                    logger.info(f"[SHOW FILM INFO] Текст не изменился, обновляю только клавиатуру...")
+                    try:
+                        if message_thread_id:
+                            import json
+                            reply_markup_json = json.dumps(markup.to_dict()) if markup else None
+                            params = {
+                                'chat_id': chat_id,
+                                'message_id': message_id,
+                                'message_thread_id': message_thread_id
+                            }
+                            if reply_markup_json:
+                                params['reply_markup'] = reply_markup_json
+                            bot.api_call('editMessageReplyMarkup', params)
+                        else:
+                            bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
+                        logger.info(f"[SHOW FILM INFO] Клавиатура обновлена успешно")
+                    except Exception as e2:
+                        logger.error(f"[SHOW FILM INFO] Не удалось обновить markup: {e2}", exc_info=True)
+                        # При ошибке отправляем новое сообщение
+                        try:
+                            if message_thread_id:
+                                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                            else:
+                                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                            logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
+                        except Exception as send_e:
+                            logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
+                else:
+                    # Другая ошибка API - отправляем новое сообщение
+                    logger.warning(f"[SHOW FILM INFO] Другая ошибка Telegram API, отправляю новое сообщение")
+                    try:
+                        if message_thread_id:
+                            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                        else:
+                            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                        logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
+                    except Exception as send_e:
+                        logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
             except Exception as e:
-                logger.error(f"[SHOW FILM INFO] Ошибка обновления сообщения: {e}", exc_info=True)
+                logger.error(f"[SHOW FILM INFO] Неизвестная ошибка обновления сообщения: {e}", exc_info=True)
                 # При ошибке отправляем новое сообщение
                 try:
                     if message_thread_id:
