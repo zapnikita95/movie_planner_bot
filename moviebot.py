@@ -7221,6 +7221,8 @@ def series_subscribe_callback(call):
                         except:
                             pass
         
+        logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id}, film_id={film_id})")
+        
         if next_episode_date and next_episode:
             # Ставим уведомление на дату выхода следующей серии
             from datetime import timedelta
@@ -7265,7 +7267,24 @@ def series_subscribe_callback(call):
             )
             bot.answer_callback_query(call.id, "✅ Подписка оформлена! Будем проверять новые серии")
         
-        logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
+        # Обновляем сообщение с кнопками, чтобы показать новое состояние подписки
+        try:
+            message_id = call.message.message_id
+            from api.kinopoisk_api import get_seasons
+            seasons_text = get_seasons(kp_id, chat_id, user_id)
+            
+            if seasons_text:
+                full_text = f"📺 <b>{title}</b>\n\n{seasons_text}"
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                # Теперь показываем кнопку "Отписаться", так как подписка активна
+                markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
+                
+                bot.edit_message_text(full_text, chat_id, message_id, parse_mode='HTML', reply_markup=markup)
+                logger.info(f"[SERIES SUBSCRIBE] Сообщение обновлено: кнопка изменена на 'Отписаться'")
+        except Exception as e:
+            logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SERIES SUBSCRIBE] Ошибка: {e}", exc_info=True)
         try:
@@ -21626,6 +21645,10 @@ else:
         logger.info("Старые webhook очищены")
     except Exception as e:
         logger.warning(f"Не удалось очистить webhook: {e}")
+    
+    # Обновляем команды перед запуском
+    logger.info("Обновляю команды бота перед запуском...")
+    setup_bot_commands()
     
     # Запускаем polling независимо от того, как выполняется код
     # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
