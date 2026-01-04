@@ -10906,6 +10906,35 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
+        # Проверяем, есть ли план для этого фильма (дома)
+        if film_id:
+            with db_lock:
+                cursor.execute('''
+                    SELECT id, plan_type FROM plans 
+                    WHERE film_id = %s AND chat_id = %s
+                    ORDER BY plan_datetime ASC
+                    LIMIT 1
+                ''', (film_id, chat_id))
+                plan_row = cursor.fetchone()
+            
+            if plan_row:
+                plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[1]
+                
+                # Добавляем кнопки только для планов "дома"
+                if plan_type == 'home':
+                    # Кнопка "Отметить просмотренным" (если фильм еще не просмотрен)
+                    if existing:
+                        watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
+                        if not watched:
+                            markup.add(InlineKeyboardButton("✅ Отметить просмотренным", callback_data=f"mark_watched_from_description:{film_id}"))
+                    
+                    # Кнопки "Изменить" и "Удалить" в одной строке
+                    markup.row(
+                        InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan:{plan_id}"),
+                        InlineKeyboardButton("🗑️ Удалить", callback_data=f"remove_from_calendar:{plan_id}")
+                    )
+        
         # Отправляем или обновляем сообщение
         if message_id:
             # Обновляем существующее сообщение
