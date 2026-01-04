@@ -14435,8 +14435,11 @@ def show_seasons_callback(call):
         user_id = call.from_user.id
         message_id = call.message.message_id
         
+        logger.info(f"[SHOW SEASONS] Начало: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}")
+        
         # Проверяем доступ к функциям уведомлений
         if not has_notifications_access(chat_id, user_id):
+            logger.warning(f"[SHOW SEASONS] Нет доступа: user_id={user_id}, chat_id={chat_id}")
             bot.answer_callback_query(
                 call.id, 
                 "🔒 Функционал можно подключить через /payment", 
@@ -14799,13 +14802,18 @@ def series_locked_callback(call):
 def series_track_callback(call):
     """Обработчик для отметки сезонов/серий как просмотренных"""
     try:
+        bot.answer_callback_query(call.id)
+        
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         message_id = call.message.message_id
         
+        logger.info(f"[SERIES TRACK] Начало: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}")
+        
         # Проверяем доступ к функциям уведомлений
         if not has_notifications_access(chat_id, user_id):
+            logger.warning(f"[SERIES TRACK] Нет доступа: user_id={user_id}, chat_id={chat_id}")
             bot.answer_callback_query(
                 call.id, 
                 "🔒 Функционал можно подключить через /payment", 
@@ -14908,6 +14916,8 @@ def series_track_callback(call):
 def handle_episodes_page(call):
     """Обработчик переключения страниц эпизодов"""
     try:
+        bot.answer_callback_query(call.id)
+        
         parts = call.data.split(":")
         kp_id = parts[1]
         season_num = parts[2]
@@ -14916,8 +14926,8 @@ def handle_episodes_page(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
+        logger.info(f"[EPISODES PAGE] Переключение страницы: user_id={user_id}, kp_id={kp_id}, season={season_num}, page={page}")
         show_episodes_page(kp_id, season_num, chat_id, user_id, page, call.message.message_id)
-        bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка в handle_episodes_page: {e}", exc_info=True)
         try:
@@ -14951,6 +14961,7 @@ def series_season_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_episode:"))
 def series_episode_callback(call):
     """Обработчик для отметки эпизода как просмотренного"""
+    logger.info(f"[CALLBACK HANDLER] series_episode_callback вызван: data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id if call.message else None}")
     try:
         # Немедленный ответ для улучшения отзывчивости
         bot.answer_callback_query(call.id)
@@ -14989,14 +15000,27 @@ def series_episode_callback(call):
             logger.info(f"[SERIES EPISODE] Текущий статус: watched={old_is_watched}, сериал='{title}', сезон={season_num}, эпизод={ep_num}")
             
             # Переключаем статус просмотра
-            cursor.execute('''
-                INSERT INTO series_tracking (chat_id, film_id, kp_id, user_id, season_number, episode_number, watched, watched_date)
-                VALUES (%s, %s, %s, %s, %s, %s, TRUE, NOW())
-                ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number)
-                DO UPDATE SET watched = NOT series_tracking.watched, watched_date = CASE WHEN NOT series_tracking.watched THEN NOW() ELSE series_tracking.watched_date END
-            ''', (chat_id, film_id, kp_id, user_id, season_num, ep_num))
-            conn.commit()
+            # Используем более явную логику для переключения
+            if old_is_watched:
+                # Если уже просмотрен, снимаем отметку
+                cursor.execute('''
+                    UPDATE series_tracking 
+                    SET watched = FALSE, watched_date = NULL
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                logger.info(f"[SERIES EPISODE] Снятие отметки: сезон={season_num}, эпизод={ep_num}")
+            else:
+                # Если не просмотрен, отмечаем как просмотренный
+                cursor.execute('''
+                    INSERT INTO series_tracking (chat_id, film_id, kp_id, user_id, season_number, episode_number, watched, watched_date)
+                    VALUES (%s, %s, %s, %s, %s, %s, TRUE, NOW())
+                    ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number)
+                    DO UPDATE SET watched = TRUE, watched_date = NOW()
+                ''', (chat_id, film_id, kp_id, user_id, season_num, ep_num))
+                logger.info(f"[SERIES EPISODE] Отметка эпизода: сезон={season_num}, эпизод={ep_num}")
             
+            conn.commit()
             logger.info(f"[SERIES EPISODE] Статус переключен в БД: chat_id={chat_id}, film_id={film_id}, season={season_num}, episode={ep_num}")
             
             # Получаем новый статус

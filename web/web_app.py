@@ -69,10 +69,18 @@ def create_web_app(bot_instance):
             # Обрабатываем обновление с обработкой ошибок
             try:
                 logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
+                logger.info(f"[WEBHOOK] Update ID: {update.update_id}, type: {type(update)}")
+                if hasattr(update, 'message') and update.message:
+                    logger.info(f"[WEBHOOK] Message type: {update.message.content_type if hasattr(update.message, 'content_type') else 'unknown'}")
+                if hasattr(update, 'callback_query') and update.callback_query:
+                    logger.info(f"[WEBHOOK] Callback query data: {update.callback_query.data[:100] if update.callback_query.data else 'None'}")
+                
                 bot_instance.process_new_updates([update])
                 logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
             except Exception as e:
                 logger.error(f"[WEBHOOK] ❌ Ошибка в bot.process_new_updates: {e}", exc_info=True)
+                import traceback
+                logger.error(f"[WEBHOOK] Traceback: {traceback.format_exc()}")
                 # Возвращаем 200, чтобы Telegram не повторял запрос
                 return '', 200
             
