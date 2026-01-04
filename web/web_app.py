@@ -46,6 +46,19 @@ def create_web_app(bot_instance):
             logger.info(f"[WEBHOOK] Тип update: {type(update)}")
             logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
             
+            # КРИТИЧНО: Проверяем наличие successful_payment на уровне update
+            if hasattr(update, 'message') and update.message and hasattr(update.message, 'successful_payment') and update.message.successful_payment:
+                logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment НА УРОВНЕ UPDATE! ⭐⭐⭐")
+                logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
+                logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
+                logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
+            
+            # Проверяем наличие pre_checkout_query (хотя для Stars не должен прийти)
+            if hasattr(update, 'pre_checkout_query') and update.pre_checkout_query:
+                logger.info(f"[WEBHOOK] ⚠️ PRE CHECKOUT QUERY пришел! (хотя для Stars не должен)")
+                logger.info(f"[WEBHOOK] pre_checkout_query.currency={update.pre_checkout_query.currency}")
+                logger.info(f"[WEBHOOK] pre_checkout_query.invoice_payload={update.pre_checkout_query.invoice_payload}")
+            
             # Логируем информацию о реплае для отладки
             if update.message:
                 logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")

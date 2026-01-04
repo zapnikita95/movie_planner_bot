@@ -5849,7 +5849,33 @@ def handle_rating_internal(message, rating):
                     logger.info(f"[RATE] Фильм {film_id} отмечен как просмотренный после оценки пользователем {user_id}")
                     bot.reply_to(message, f"Спасибо! Фильм отмечен как просмотренный, ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
                 else:
-                    bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10")
+                    # Создаем кнопку "Вернуться к описанию"
+                    markup = InlineKeyboardMarkup()
+                    # Получаем kp_id из rating_messages или из сообщения
+                    reply_msg_id = message.reply_to_message.message_id if message.reply_to_message else None
+                    kp_id_for_back = None
+                    if reply_msg_id and reply_msg_id in rating_messages:
+                        film_id_from_msg = rating_messages[reply_msg_id]
+                        with db_lock:
+                            cursor.execute("SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s", (film_id_from_msg, chat_id))
+                            kp_row = cursor.fetchone()
+                            if kp_row:
+                                kp_id_for_back = kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0]
+                    elif film_id:
+                        with db_lock:
+                            cursor.execute("SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                            kp_row = cursor.fetchone()
+                            if kp_row:
+                                kp_id_for_back = kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0]
+                    
+                    if kp_id_for_back:
+                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"show_film_description:{kp_id_for_back}"))
+                    
+                    reply_msg = bot.reply_to(message, f"Спасибо! Ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", reply_markup=markup if markup.keyboard else None)
+                    
+                    # Сохраняем message_id для удаления при возврате к описанию
+                    if kp_id_for_back and reply_msg:
+                        rating_messages[reply_msg.message_id] = film_id
                 
                 # Проверяем, все ли активные пользователи оценили фильм
                 cursor.execute('''
@@ -5873,8 +5899,8 @@ def handle_rating_internal(message, rating):
                     conn.commit()
                     logger.info(f"[RATE] Все активные пользователи оценили фильм {film_id}, отмечен как просмотренный")
                 
-                # Если средняя оценка > 9, показываем похожие фильмы и продолжения
-                if avg and avg > 9 and kp_id:
+                # Если средняя оценка >= 9, показываем похожие фильмы и продолжения (для фильмов и сериалов)
+                if avg and avg >= 9 and kp_id:
                     # Определяем тип текущего фильма
                     is_current_series = get_film_type(kp_id)
                     
@@ -7606,6 +7632,34 @@ def series_subscribe_callback(call):
             )
             bot.answer_callback_query(call.id, "✅ Подписка оформлена! Будем проверять новые серии")
         
+        # Обновляем сообщение с описанием сериала, чтобы изменить кнопку
+        try:
+            # Получаем информацию о сериале из базы
+            with db_lock:
+                cursor.execute("SELECT id, title, link, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
+                    link = row.get('link') if isinstance(row, dict) else row[2]
+                    watched = row.get('watched') if isinstance(row, dict) else row[3]
+                    
+                    # Получаем информацию о сериале через API
+                    from api.kinopoisk_api import extract_movie_info
+                    info = extract_movie_info(link)
+                    if info:
+                        existing = (film_id, title, watched)
+                        # Обновляем сообщение с описанием
+                        if call.message:
+                            try:
+                                # Удаляем старое сообщение и отправляем новое
+                                bot.delete_message(chat_id, call.message.message_id)
+                            except:
+                                pass
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+        except Exception as e:
+            logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
+        
         logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
     except Exception as e:
         logger.error(f"[SERIES SUBSCRIBE] Ошибка: {e}", exc_info=True)
@@ -7650,6 +7704,35 @@ def series_unsubscribe_callback(call):
             conn.commit()
         
         bot.answer_callback_query(call.id, "✅ Отписка выполнена")
+        
+        # Обновляем сообщение с описанием сериала, чтобы изменить кнопку
+        try:
+            # Получаем информацию о сериале из базы
+            with db_lock:
+                cursor.execute("SELECT id, title, link, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
+                    link = row.get('link') if isinstance(row, dict) else row[2]
+                    watched = row.get('watched') if isinstance(row, dict) else row[3]
+                    
+                    # Получаем информацию о сериале через API
+                    from api.kinopoisk_api import extract_movie_info
+                    info = extract_movie_info(link)
+                    if info:
+                        existing = (film_id, title, watched)
+                        # Обновляем сообщение с описанием
+                        if call.message:
+                            try:
+                                # Удаляем старое сообщение и отправляем новое
+                                bot.delete_message(chat_id, call.message.message_id)
+                            except:
+                                pass
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+        except Exception as e:
+            logger.error(f"[SERIES UNSUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
+        
         logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
     except Exception as e:
         logger.error(f"[SERIES UNSUBSCRIBE] Ошибка: {e}", exc_info=True)
@@ -10842,133 +10925,48 @@ def handle_show_facts(call):
 def handle_show_film_description_callback(call):
     """Обработчик показа описания фильма по kp_id"""
     try:
+        bot.answer_callback_query(call.id)
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
         logger.info(f"[FILM DESCRIPTION] Показ описания фильма kp_id={kp_id} от пользователя {user_id}")
         
+        # Удаляем сообщение с оценкой, если оно есть
+        try:
+            if call.message:
+                bot.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
+        
         # Получаем информацию о фильме из базы
         with db_lock:
-            cursor.execute("SELECT id, title, kp_id, link, year, genres, director, actors, description, is_series FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            cursor.execute("SELECT id, title, link, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
             movie_row = cursor.fetchone()
         
         if not movie_row:
-            bot.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+            bot.send_message(chat_id, "❌ Фильм не найден в базе")
             return
         
-        if isinstance(movie_row, dict):
-            film_id = movie_row.get('id')
-            title = movie_row.get('title')
-            link = movie_row.get('link')
-            year = movie_row.get('year')
-            genres = movie_row.get('genres')
-            director = movie_row.get('director')
-            actors = movie_row.get('actors')
-            description = movie_row.get('description')
-            is_series = movie_row.get('is_series', 0)
-        else:
-            film_id = movie_row[0]
-            title = movie_row[1]
-            link = movie_row[3]
-            year = movie_row[4]
-            genres = movie_row[5]
-            director = movie_row[6]
-            actors = movie_row[7]
-            description = movie_row[8]
-            is_series = movie_row[9] if len(movie_row) > 9 else 0
+        film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
+        title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[1]
+        link = movie_row.get('link') if isinstance(movie_row, dict) else movie_row[2]
+        watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[3]
         
-        # Формируем описание фильма
-        if not description or description == '—':
-            description = 'Нет описания'
+        # Получаем информацию о фильме через API
+        from api.kinopoisk_api import extract_movie_info
+        info = extract_movie_info(link)
         
-        # Ограничиваем длину описания
-        if len(description) > 500:
-            description = description[:497] + "..."
+        if not info:
+            bot.send_message(chat_id, "❌ Не удалось получить информацию о фильме")
+            return
         
-        text = f"🎬 <b>{title}</b> ({year or '—'})\n\n"
-        if genres and genres != '—':
-            text += f"📂 <b>Жанры:</b> {genres}\n"
-        if director and director != '—':
-            text += f"🎥 <b>Режиссёр:</b> {director}\n"
-        if actors and actors != '—':
-            text += f"👥 <b>Актёры:</b> {actors}\n"
-        text += f"\n📝 <b>Описание:</b>\n{description}\n\n"
-        text += f"<a href='{link}'>Кинопоиск</a>"
+        # Формируем existing для передачи в show_film_info_with_buttons
+        existing = (film_id, title, watched)
         
-        # Создаем кнопки
-        markup = InlineKeyboardMarkup(row_width=1)
+        # Показываем описание фильма/сериала со всеми кнопками
+        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
         
-        # Кнопка "Отметить просмотренным"
-        with db_lock:
-            cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-            watched_row = cursor.fetchone()
-            watched = watched_row.get('watched') if isinstance(watched_row, dict) else (watched_row[0] if watched_row else 0)
-        
-        if not watched:
-            markup.add(InlineKeyboardButton("✅ Отметить просмотренным", callback_data=f"mark_watched_from_description:{film_id}"))
-        
-        # Кнопки "Оценить" и "Интересные факты"
-        try:
-            from database.db_operations import get_ratings_info
-        except ImportError:
-            def get_ratings_info(chat_id, film_id, user_id):
-                with db_lock:
-                    cursor.execute("SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)", (chat_id, film_id, user_id))
-                    row = cursor.fetchone()
-                    return {'current_user_rated': row is not None, 'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)}
-        
-        ratings_info = get_ratings_info(chat_id, film_id, user_id)
-        
-        if ratings_info['current_user_rated']:
-            markup.row(
-                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}"),
-                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}")
-            )
-        else:
-            markup.row(
-                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}"),
-                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}")
-            )
-        
-        # Проверяем, есть ли фильм в календаре
-        with db_lock:
-            cursor.execute("SELECT id, plan_type, ticket_file_id FROM plans WHERE chat_id = %s AND film_id = %s", (chat_id, film_id))
-            plan_row = cursor.fetchone()
-        
-        if plan_row:
-            plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
-            plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else (plan_row[1] if len(plan_row) > 1 else None)
-            ticket_file_id = plan_row.get('ticket_file_id') if isinstance(plan_row, dict) else (plan_row[2] if len(plan_row) > 2 else None)
-            
-            # Если это план для кино, добавляем кнопку для билетов
-            if plan_type == 'cinema':
-                if has_tickets_access(chat_id, user_id):
-                    if ticket_file_id:
-                        # Билеты есть - кнопка "Перейти к билетам"
-                        markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
-                    else:
-                        # Билетов нет - кнопка "Добавить билеты"
-                        markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
-                else:
-                    # Нет доступа - заблокированная кнопка
-                    if ticket_file_id:
-                        markup.add(InlineKeyboardButton("🔒 Перейти к билетам", callback_data=f"ticket_locked:{plan_id}"))
-                    else:
-                        markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
-            
-            # Кнопки "Изменить" и "Удалить из расписания" в одной строке (50/50)
-            markup.row(
-                InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan_datetime:{plan_id}"),
-                InlineKeyboardButton("🗑️ Удалить", callback_data=f"remove_from_calendar:{plan_id}")
-            )
-        else:
-            markup.add(InlineKeyboardButton("📅 Добавить в календарь", callback_data=f"plan_from_added:{kp_id}"))
-        
-        bot.answer_callback_query(call.id)
-        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-        # Сохраняем ссылку в bot_messages для обработки реакций
-        bot_messages[msg.message_id] = link
         logger.info(f"[FILM DESCRIPTION] Описание фильма {title} показано пользователю {user_id}")
     except Exception as e:
         logger.error(f"[FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
@@ -15821,6 +15819,22 @@ def series_episode_callback(call):
             status = "✅ отмечен как просмотренный" if is_watched else "⬜ снята отметка о просмотре"
             logger.info(f"[SERIES EPISODE] Новый статус: watched={is_watched}, статус='{status}'")
             
+            # Обновляем сообщение с эпизодами, чтобы показать новый статус
+            # Получаем message_thread_id из сообщения, если оно есть
+            message_thread_id = None
+            if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                message_thread_id = call.message.message_thread_id
+            
+            # Находим текущую страницу из состояния пользователя или используем 1
+            current_page = 1
+            if user_id in user_episodes_state:
+                state = user_episodes_state[user_id]
+                if str(state.get('kp_id')) == str(kp_id) and str(state.get('season_num')) == str(season_num):
+                    current_page = state.get('page', 1)
+            
+            # Обновляем сообщение с эпизодами
+            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+            
             # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
             if is_watched:
@@ -15897,50 +15911,8 @@ def series_episode_callback(call):
                         else:
                             logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) все эпизоды просмотрены, но есть активная подписка - не помечаем как просмотренный")
             
-            # Обновляем список эпизодов - используем текущую страницу из состояния или 1
-            state = user_episodes_state.get(user_id, {})
-            current_page = state.get('page', 1) if state.get('kp_id') == kp_id and state.get('season_num') == str(season_num) else 1
-            
-            # Получаем message_thread_id из сообщения, если оно есть
-            message_thread_id = None
-            if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
-                message_thread_id = call.message.message_thread_id
-            
-            # Используем функцию show_episodes_page для отображения эпизодов
-            logger.info(f"[SERIES EPISODE] Обновление интерфейса: kp_id={kp_id}, season={season_num}, page={current_page}, message_id={message_id}, message_thread_id={message_thread_id}")
-            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
-            logger.info(f"[SERIES EPISODE] Интерфейс обновлен успешно")
-            
-            # Обновляем главное сообщение со списком сезонов, если оно существует
-            # Пытаемся найти и обновить сообщение с сезонами для этого сериала
-            try:
-                # Используем локальную функцию get_seasons для получения обновленного текста
-                from api.kinopoisk_api import get_seasons
-                seasons_text = get_seasons(kp_id, chat_id, user_id)
-                if seasons_text:
-                    # Получаем информацию о сериале для формирования полного текста
-                    cursor.execute("SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                    title_row = cursor.fetchone()
-                    if title_row:
-                        title = title_row.get('title') if isinstance(title_row, dict) else title_row[0]
-                        full_text = f"📺 <b>{title}</b>\n\n{seasons_text}"
-                        
-                        # Проверяем, подписан ли пользователь
-                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                        sub_row = cursor.fetchone()
-                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                        
-                        markup = InlineKeyboardMarkup()
-                        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                        if is_subscribed:
-                            markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                        else:
-                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
-                        
-                        # Пытаемся обновить сообщение с сезонами (может быть в другом потоке)
-                        # Для этого нужно найти message_id, но пока просто пропускаем
-                        # Обновление произойдет при следующем открытии сериала
+            # Обновление сообщения с эпизодами уже выполнено выше в коде
+            pass
             except Exception as e:
                 logger.error(f"[SERIES EPISODE] Ошибка при обновлении главного сообщения: {e}", exc_info=True)
     except Exception as e:
@@ -16470,7 +16442,7 @@ def rubles_to_stars(rubles):
     
     return stars_rounded
 
-def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount, provider_token=None):
+def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount, provider_token=''):
     """Создает инвойс для оплаты через Telegram Stars
     
     Args:
@@ -16480,7 +16452,7 @@ def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount
         description: описание товара/услуги
         payload: уникальный идентификатор платежа
         stars_amount: количество звезд
-        provider_token: не используется для Stars, но оставлен для совместимости
+        provider_token: для Stars должен быть пустой строкой '' (не None!)
     
     Returns:
         True если инвойс успешно отправлен, False в противном случае
@@ -16488,12 +16460,16 @@ def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount
     try:
         # Для Telegram Stars используем валюту XTR
         # Согласно документации: https://core.telegram.org/bots/api#sendinvoice
+        # КРИТИЧНО: provider_token должен быть пустой строкой '', а не None
+        # Если None - Telegram может интерпретировать как обычный платеж и ждать pre_checkout
+        provider_token = provider_token or ''  # Гарантируем, что это пустая строка
+        
         bot.send_invoice(
             chat_id=chat_id,
             title=title,
             description=description,
             invoice_payload=payload,
-            provider_token=provider_token,  # Для Stars может быть None или пустая строка
+            provider_token=provider_token,  # Для Stars должна быть пустая строка ''
             currency='XTR',  # XTR - валюта Telegram Stars
             prices=[telebot.types.LabeledPrice(label=description, amount=stars_amount)],  # amount в звездах
             start_parameter=payload[:64] if len(payload) > 64 else payload  # start_parameter ограничен 64 символами
@@ -22590,13 +22566,17 @@ if IS_PRODUCTION:
             "message_reaction",
             "message_reaction_count",
             "chat_member",
-            "my_chat_member"
+            "my_chat_member",
+            "web_app_data",
+            "pre_checkout_query",      # Для обычных платежей (карты, YooKassa)
+            "successful_payment"        # КРИТИЧНО! Для Telegram Stars платежей
         ]
         logger.info(f"Устанавливаем webhook с allowed_updates: {allowed_updates}")
         try:
             bot.set_webhook(url=webhook_url, allowed_updates=allowed_updates)
             logger.info(f"Webhook успешно установлен: {webhook_url}")
             logger.info(f"allowed_updates включает: {', '.join(allowed_updates)}")
+            logger.info(f"✅ КРИТИЧНО: 'successful_payment' включен в allowed_updates для Stars платежей!")
         except Exception as e:
             logger.error(f"ОШИБКА при set_webhook: {e}")
     else:
