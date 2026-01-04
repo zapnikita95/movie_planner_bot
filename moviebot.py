@@ -127,6 +127,48 @@ def setup_menu_button(chat_id=None):
     except Exception as e:
         logger.error(f"❌ Ошибка при настройке menu button: {e}", exc_info=True)
 
+# Функция для установки команд бота
+def setup_bot_commands():
+    """Устанавливает команды бота для отображения в меню /"""
+    try:
+        from telebot.types import BotCommand, BotCommandScopeDefault, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats
+        
+        # Список команд
+        commands = [
+            BotCommand("start", "Главное меню"),
+            BotCommand("list", "Список непросмотренных фильмов"),
+            BotCommand("rate", "Оценить просмотренные фильмы"),
+            BotCommand("plan", "Запланировать просмотр дома или в кино"),
+            BotCommand("ticket", "Работа с билетами в кино"),
+            BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
+            BotCommand("stats", "Детальная статистика группы и участников"),
+            BotCommand("settings", "Настройки")
+        ]
+        
+        # Устанавливаем команды для всех чатов (по умолчанию)
+        try:
+            bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+            logger.info("✅ Команды установлены для всех чатов (по умолчанию)")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось установить команды по умолчанию: {e}")
+        
+        # Устанавливаем команды для групповых чатов
+        try:
+            bot.set_my_commands(commands, scope=BotCommandScopeAllGroupChats())
+            logger.info("✅ Команды установлены для групповых чатов")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось установить команды для групповых чатов: {e}")
+        
+        # Устанавливаем команды для приватных чатов
+        try:
+            bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+            logger.info("✅ Команды установлены для приватных чатов")
+        except Exception as e:
+            logger.warning(f"⚠️ Не удалось установить команды для приватных чатов: {e}")
+            
+    except Exception as e:
+        logger.error(f"❌ Ошибка при установке команд бота: {e}", exc_info=True)
+
 # Очищаем старые webhook, если были (с обработкой ошибок)
 try:
     bot.remove_webhook()
@@ -164,28 +206,7 @@ scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz,
 scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
 
-# Команды
-commands = [
-    BotCommand("start", "Приветствие и инструкция по использованию"),
-    BotCommand("list", "Список непросмотренных фильмов"),
-    BotCommand("random", "Рандомный фильм с фильтрами"),
-    BotCommand("search", "Поиск фильмов через Kinopoisk API"),
-    BotCommand("plan", "Запланировать просмотр дома или в кино"),
-    BotCommand("schedule", "Список запланированных просмотров"),
-    BotCommand("total", "Статистика: фильмы, жанры, режиссёры, актёры и оценки"),
-    BotCommand("stats", "Детальная статистика группы и участников"),
-    BotCommand("rate", "Оценить просмотренные фильмы"),
-    BotCommand("settings", "Настройки: эмодзи, часовой пояс, загрузка голосов"),
-    BotCommand("clean", "Очистить базу данных (чат или данные о просмотрах)"),
-    BotCommand("edit", "Редактировать расписание и оценки"),
-    BotCommand("ticket", "Работа с билетами в кино"),
-    BotCommand("seasons", "Просмотр сезонов сериалов"),
-    BotCommand("premieres", "Список премьер месяца"),
-    BotCommand("payment", "Оплата подписки"),
-    BotCommand("help", "Помощь по командам")
-]
-bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeAllGroupChats())
-bot.set_my_commands(commands, scope=telebot.types.BotCommandScopeDefault())
+# Команды теперь устанавливаются через функцию setup_bot_commands() при запуске бота
 
 # БД уже инициализирована через init_database()
 # Используем глобальные объекты из модуля database
@@ -20858,6 +20879,12 @@ if IS_PRODUCTION:
     else:
         logger.warning("Webhook URL не определён! Установите RENDER_EXTERNAL_URL или RAILWAY_PUBLIC_DOMAIN")
 
+    # Устанавливаем команды бота
+    try:
+        setup_bot_commands()
+    except Exception as e:
+        logger.warning(f"Не удалось установить команды бота: {e}")
+
     # КЛЮЧЕВОЕ: запускаем Flask сервер
     port = int(os.getenv('PORT', 10000))
     logger.info(f"Запускаем Flask сервер на 0.0.0.0:{port}")
@@ -20880,6 +20907,12 @@ else:
         setup_menu_button(chat_id=None)
     except Exception as e:
         logger.warning(f"Не удалось настроить menu_button по умолчанию: {e}")
+    
+    # Устанавливаем команды бота
+    try:
+        setup_bot_commands()
+    except Exception as e:
+        logger.warning(f"Не удалось установить команды бота: {e}")
     
     # Запускаем polling независимо от того, как выполняется код
     # (это важно для случаев, когда скрипт импортируется, но нужно запустить бота)
