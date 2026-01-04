@@ -7874,6 +7874,8 @@ def admin_stats_command(message):
         text += "👥 <b>Пользователи:</b>\n"
         text += f"   • Активных за 30 дней: {stats.get('active_users_30d', 0)}\n"
         text += f"   • Всего пользователей: {stats.get('total_users', 0)}\n"
+        text += f"   • Новых за день: {stats.get('new_users_day', 0)}\n"
+        text += f"   • Новых за неделю: {stats.get('new_users_week', 0)}\n"
         text += f"   • Платных пользователей: {stats.get('paid_users', 0)}\n\n"
         
         text += "👥 <b>Группы:</b>\n"
@@ -7891,6 +7893,11 @@ def admin_stats_command(message):
         text += f"   • За день: {stats.get('user_requests_day', 0)}\n"
         text += f"   • За неделю: {stats.get('user_requests_week', 0)}\n"
         text += f"   • За месяц: {stats.get('user_requests_month', 0)}\n\n"
+        
+        text += "💳 <b>Подписки:</b>\n"
+        text += f"   • Новых за день: {stats.get('new_subscriptions_day', 0)}\n"
+        text += f"   • Новых за неделю: {stats.get('new_subscriptions_week', 0)}\n"
+        text += f"   • Отписавшихся за неделю: {stats.get('cancelled_subscriptions_week', 0)}\n\n"
         
         text += "🎬 <b>Контент:</b>\n"
         text += f"   • Всего фильмов: {stats.get('total_movies', 0)}\n"

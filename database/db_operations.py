@@ -1215,6 +1215,66 @@ def get_admin_statistics():
             ''')
             stats['top_commands_week'] = cursor.fetchall()
             
+            # Новые пользователи за день (кто впервые появился в stats за день)
+            cursor.execute('''
+                SELECT COUNT(DISTINCT user_id) as count
+                FROM stats s1
+                WHERE s1.user_id > 0 
+                AND s1.timestamp >= CURRENT_DATE
+                AND NOT EXISTS (
+                    SELECT 1 FROM stats s2 
+                    WHERE s2.user_id = s1.user_id 
+                    AND s2.timestamp < CURRENT_DATE
+                )
+            ''')
+            row = cursor.fetchone()
+            stats['new_users_day'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            
+            # Новые пользователи за неделю (кто впервые появился в stats за неделю)
+            cursor.execute('''
+                SELECT COUNT(DISTINCT user_id) as count
+                FROM stats s1
+                WHERE s1.user_id > 0 
+                AND s1.timestamp >= NOW() - INTERVAL '7 days'
+                AND NOT EXISTS (
+                    SELECT 1 FROM stats s2 
+                    WHERE s2.user_id = s1.user_id 
+                    AND s2.timestamp < NOW() - INTERVAL '7 days'
+                )
+            ''')
+            row = cursor.fetchone()
+            stats['new_users_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            
+            # Новые платные подписки за день
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM subscriptions
+                WHERE activated_at >= CURRENT_DATE
+                AND is_active = TRUE
+            ''')
+            row = cursor.fetchone()
+            stats['new_subscriptions_day'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            
+            # Новые платные подписки за неделю
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM subscriptions
+                WHERE activated_at >= NOW() - INTERVAL '7 days'
+                AND is_active = TRUE
+            ''')
+            row = cursor.fetchone()
+            stats['new_subscriptions_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            
+            # Отписавшиеся за неделю
+            cursor.execute('''
+                SELECT COUNT(*) as count
+                FROM subscriptions
+                WHERE cancelled_at >= NOW() - INTERVAL '7 days'
+                AND cancelled_at IS NOT NULL
+            ''')
+            row = cursor.fetchone()
+            stats['cancelled_subscriptions_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            
     except Exception as e:
         logger.error(f"Ошибка получения статистики: {e}", exc_info=True)
         stats['error'] = str(e)
