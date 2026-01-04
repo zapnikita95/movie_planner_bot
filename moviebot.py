@@ -1448,7 +1448,7 @@ def start_dice_game():
                 markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
                 markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
                 
-                text = "🔮 Вас посетил дух игры в кубик!\n\n"
+                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
                 text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
                 
                 msg = bot.send_message(
@@ -3851,9 +3851,9 @@ def handle_web_app_data(message):
         logger.error(f"[WEB APP] Ошибка: {e}", exc_info=True)
         bot.send_message(chat_id=message.chat.id, text="Произошла ошибка в Web App. Попробуйте заново.")
 
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
-    logger.info(f"[HANDLER] /start вызван от {message.from_user.id}, chat_type={message.chat.type}, text='{message.text}'")
+    logger.info(f"[HANDLER] {'/start' if message.text.startswith('/start') else '/menu'} вызван от {message.from_user.id}, chat_type={message.chat.type}, text='{message.text}'")
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/start', message.chat.id)
     logger.info(f"Команда /start от пользователя {message.from_user.id}")
@@ -18958,13 +18958,19 @@ def handle_settings_callback(call):
             with db_lock:
                 cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
                 row = cursor.fetchone()
-                is_enabled = row and row.get('value') == 'true' if isinstance(row, dict) else (row and row[0] == 'true' if row else False)
+                # По умолчанию включено (если нет записи в БД, считаем что включено)
+                is_enabled = True
+                if row:
+                    value = row.get('value') if isinstance(row, dict) else row[0]
+                    is_enabled = value == 'true'
             
             markup = InlineKeyboardMarkup(row_width=1)
             if is_enabled:
                 markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
             else:
                 markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
+            markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
+            markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
             status_text = "включены" if is_enabled else "выключены"
@@ -18981,6 +18987,74 @@ def handle_settings_callback(call):
                 reply_markup=markup,
                 parse_mode='HTML'
             )
+            return
+        
+        if action.startswith("random_events:example:"):
+            # Отправка примера случайного события
+            example_type = action.split(":")[-1]  # with_user или without_user
+            chat_id = call.message.chat.id
+            
+            # Проверяем, что это групповой чат
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    bot.answer_callback_query(call.id, "Примеры событий работают только в групповых чатах", show_alert=True)
+                    return
+            except Exception as e:
+                logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить информацию о чате {chat_id}: {e}")
+                bot.answer_callback_query(call.id, "Ошибка при отправке примера", show_alert=True)
+                return
+            
+            bot.answer_callback_query(call.id, "Отправляю пример события...")
+            
+            if example_type == "with_user":
+                # Пример события с участником (выбор случайного участника)
+                # Получаем список активных участников
+                with db_lock:
+                    cursor.execute('''
+                        SELECT DISTINCT user_id, username 
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        LIMIT 10
+                    ''', (chat_id,))
+                    participants = cursor.fetchall()
+                
+                if participants:
+                    participant = random.choice(participants)
+                    user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+                    username = participant.get('username') if isinstance(participant, dict) else participant[1]
+                    
+                    # Формируем имя пользователя для отображения
+                    if username:
+                        user_name = f"@{username}"
+                    else:
+                        try:
+                            user_info = bot.get_chat_member(chat_id, user_id)
+                            user_name = user_info.user.first_name or "участник"
+                        except:
+                            user_name = "участник"
+                else:
+                    user_name = "участник"
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                
+                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
+                
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            else:
+                # Пример события без участника (игра в кубик)
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
+                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                
+                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
+                
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            
             return
         
         if action.startswith("random_events:"):
@@ -19005,6 +19079,8 @@ def handle_settings_callback(call):
                 markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
             else:
                 markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
+            markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
+            markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
             bot.edit_message_text(
