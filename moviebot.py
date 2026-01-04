@@ -631,7 +631,7 @@ def get_watched_custom_emoji_ids(chat_id):
 
 def is_watched_emoji(reaction_emoji, chat_id):
     """Проверяет, является ли реакция одним из сохранённых эмодзи для просмотра"""
-    watched_emojis = get_watched_emoji(chat_id)
+    watched_emojis = get_watched_emojis(chat_id)
     # Если сохранено несколько эмодзи, проверяем каждый
     return reaction_emoji in watched_emojis
 
@@ -4061,8 +4061,6 @@ def send_welcome(message):
         username = message.from_user.username or f"user_{message.from_user.id}"
         log_request(message.from_user.id, username, '/start', message.chat.id)
         logger.info(f"Команда /start от пользователя {message.from_user.id}")
-        
-        emoji = get_watched_emoji(message.chat.id)  # Берёт актуальный эмодзи из настроек
     except Exception as e:
         logger.error(f"[SEND_WELCOME] Ошибка в начале функции: {e}", exc_info=True)
         try:
@@ -7829,14 +7827,14 @@ def series_subscribe_callback(call):
                     info = extract_movie_info(link)
                     if info:
                         existing = (film_id, title, watched)
-                        # Обновляем сообщение с описанием
-                        if call.message:
-                            try:
-                                # Удаляем старое сообщение и отправляем новое
-                                bot.delete_message(chat_id, call.message.message_id)
-                            except:
-                                pass
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+                        # Получаем message_thread_id из сообщения, если оно есть
+                        message_thread_id = None
+                        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                            message_thread_id = call.message.message_thread_id
+                        
+                        # Обновляем существующее сообщение
+                        message_id = call.message.message_id if call.message else None
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
         except Exception as e:
             logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
         
@@ -7902,14 +7900,14 @@ def series_unsubscribe_callback(call):
                     info = extract_movie_info(link)
                     if info:
                         existing = (film_id, title, watched)
-                        # Обновляем сообщение с описанием
-                        if call.message:
-                            try:
-                                # Удаляем старое сообщение и отправляем новое
-                                bot.delete_message(chat_id, call.message.message_id)
-                            except:
-                                pass
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+                        # Получаем message_thread_id из сообщения, если оно есть
+                        message_thread_id = None
+                        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                            message_thread_id = call.message.message_thread_id
+                        
+                        # Обновляем существующее сообщение
+                        message_id = call.message.message_id if call.message else None
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
         except Exception as e:
             logger.error(f"[SERIES UNSUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
         
@@ -10586,8 +10584,19 @@ def handle_view_film_reply_internal(message, state):
         except:
             pass
 
-def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None):
-    """Показывает описание фильма с кнопками действий"""
+def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
+    """Показывает описание фильма с кнопками действий
+    
+    Args:
+        chat_id: ID чата
+        user_id: ID пользователя
+        info: Информация о фильме из API
+        link: Ссылка на Кинопоиск
+        kp_id: ID фильма на Кинопоиске
+        existing: Кортеж (film_id, title, watched) или None
+        message_id: ID сообщения для обновления (если None - отправляет новое)
+        message_thread_id: ID треда для групповых чатов
+    """
     try:
         is_series = info.get('is_series', False)
         type_emoji = "📺" if is_series else "🎬"
@@ -10801,9 +10810,46 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
-        # Отправляем сообщение
-        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-        logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}")
+        # Отправляем или обновляем сообщение
+        if message_id:
+            # Обновляем существующее сообщение
+            try:
+                if message_thread_id:
+                    # Для тредов используем API напрямую
+                    import json
+                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
+                    params = {
+                        'chat_id': chat_id,
+                        'message_id': message_id,
+                        'text': text,
+                        'parse_mode': 'HTML',
+                        'disable_web_page_preview': False,
+                        'message_thread_id': message_thread_id
+                    }
+                    if reply_markup_json:
+                        params['reply_markup'] = reply_markup_json
+                    bot.api_call('editMessageText', params)
+                else:
+                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                logger.info(f"[SHOW FILM INFO] Сообщение обновлено: {info.get('title')}, kp_id={kp_id}, message_id={message_id}")
+            except Exception as e:
+                logger.error(f"[SHOW FILM INFO] Ошибка обновления сообщения: {e}", exc_info=True)
+                # При ошибке отправляем новое сообщение
+                try:
+                    if message_thread_id:
+                        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                    else:
+                        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                    logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
+                except Exception as send_e:
+                    logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
+        else:
+            # Отправляем новое сообщение
+            if message_thread_id:
+                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+            else:
+                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+            logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}")
         
     except Exception as e:
         logger.error(f"[SHOW FILM INFO] Ошибка: {e}", exc_info=True)
@@ -11168,12 +11214,21 @@ def handle_show_film_description_callback(call):
         
         logger.info(f"[FILM DESCRIPTION] Показ описания фильма kp_id={kp_id} от пользователя {user_id}")
         
+        # Проверяем, является ли это сообщение с оценкой
+        is_rating_message = False
+        if call.message and call.message.message_id in rating_messages:
+            is_rating_message = True
+            # Удаляем из rating_messages
+            rating_messages.pop(call.message.message_id, None)
+        
         # Удаляем сообщение с оценкой, если оно есть
-        try:
-            if call.message:
-                bot.delete_message(chat_id, call.message.message_id)
-        except:
-            pass
+        if is_rating_message:
+            try:
+                if call.message:
+                    bot.delete_message(chat_id, call.message.message_id)
+                    logger.info(f"[FILM DESCRIPTION] Удалено сообщение с оценкой: message_id={call.message.message_id}")
+            except Exception as del_e:
+                logger.warning(f"[FILM DESCRIPTION] Не удалось удалить сообщение с оценкой: {del_e}")
         
         # Получаем информацию о фильме из базы
         with db_lock:
@@ -11200,8 +11255,19 @@ def handle_show_film_description_callback(call):
         # Формируем existing для передачи в show_film_info_with_buttons
         existing = (film_id, title, watched)
         
+        # Получаем message_thread_id из сообщения, если оно есть
+        message_thread_id = None
+        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+            message_thread_id = call.message.message_thread_id
+        
         # Показываем описание фильма/сериала со всеми кнопками
-        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+        # Если это НЕ сообщение с оценкой (т.е. существующее сообщение с описанием) - обновляем его
+        # Если это сообщение с оценкой (уже удалено) - отправляем новое
+        message_id_to_update = None
+        if call.message and not is_rating_message:
+            message_id_to_update = call.message.message_id
+        
+        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id_to_update, message_thread_id=message_thread_id)
         
         logger.info(f"[FILM DESCRIPTION] Описание фильма {title} показано пользователю {user_id}")
     except Exception as e:
