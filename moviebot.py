@@ -176,14 +176,14 @@ scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='
 # Проверка подписок и отправка уведомлений за день до списания (каждый день в 9:00 МСК)
 scheduler.add_job(check_subscription_payments, 'cron', hour=9, minute=0, timezone=plans_tz, id='check_subscription_payments')
 
-# Обработка рекуррентных платежей (каждый день в 0:00 МСК)
+# Обработка рекуррентных платежей (каждый день в 9:00 МСК)
 if process_recurring_payments:
-    scheduler.add_job(process_recurring_payments, 'cron', hour=0, minute=0, timezone=plans_tz, id='process_recurring_payments')
+    scheduler.add_job(process_recurring_payments, 'cron', hour=9, minute=0, timezone=plans_tz, id='process_recurring_payments')
 else:
     logger.warning("process_recurring_payments не доступна, задача не добавлена в планировщик")
 
 # Добавляем задачи очистки и голосования в scheduler
-scheduler.add_job(clean_home_plans, 'cron', hour=2, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 2:00 МСК
+scheduler.add_job(clean_home_plans, 'cron', hour=9, minute=0, timezone=plans_tz, id='clean_home_plans')  # каждый день в 9:00 МСК
 scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=plans_tz, id='start_cinema_votes')  # каждый понедельник в 9:00 МСК
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=plans_tz, id='resolve_cinema_votes')  # каждый вторник в 9:00 МСК
 
@@ -17101,6 +17101,21 @@ def handle_payment_callback(call):
             get_user_group_subscriptions, cancel_subscription
         )
         from datetime import datetime
+        
+        if action.startswith("reminder_ok:"):
+            # Подтверждение получения напоминания о списании
+            try:
+                subscription_id = int(action.split(":")[1])
+                bot.answer_callback_query(call.id, "✅ Напоминание получено")
+                # Удаляем кнопки из сообщения
+                try:
+                    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                except:
+                    pass
+                logger.info(f"[PAYMENT REMINDER] Пользователь {user_id} подтвердил получение напоминания для подписки {subscription_id}")
+            except Exception as e:
+                logger.error(f"[PAYMENT REMINDER] Ошибка обработки подтверждения: {e}")
+            return
         
         if action == "active":
             # Показываем действующие подписки

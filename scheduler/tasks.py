@@ -1227,12 +1227,19 @@ def check_subscription_payments():
                 text += "💡 Вы можете изменить или отменить подписку до списания."
                 
                 markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("✅ Ок", callback_data=f"payment:reminder_ok:{subscription_id}"))
                 markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
-                markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
-                markup.add(InlineKeyboardButton("💰 Управление подпиской", callback_data="payment:active"))
+                markup.add(InlineKeyboardButton("❌ Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
                 
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                logger.info(f"[SUBSCRIPTION PAYMENT] Отправлено уведомление о списании для подписки {subscription_id}, user_id={user_id}")
+                # Для личных подписок отправляем в личку, для групповых - в групповой чат
+                if subscription_type == 'personal':
+                    # Отправляем в личку пользователю
+                    bot.send_message(user_id, text, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[SUBSCRIPTION PAYMENT] Отправлено уведомление о списании в личку для подписки {subscription_id}, user_id={user_id}")
+                else:
+                    # Отправляем в групповой чат
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[SUBSCRIPTION PAYMENT] Отправлено уведомление о списании в группу для подписки {subscription_id}, chat_id={chat_id}")
                 
             except Exception as e:
                 logger.error(f"[SUBSCRIPTION PAYMENT] Ошибка отправки уведомления для подписки: {e}", exc_info=True)
