@@ -117,13 +117,11 @@ except Exception as e:
 def setup_menu_button(chat_id=None):
     """Настраивает menu_button для открытия Mini App"""
     try:
+        from telebot.types import MenuButtonWebApp
+        menu_button = MenuButtonWebApp(text="🎬 Меню", web_app=telebot.types.WebAppInfo(url=WEB_APP_URL))
         bot.set_chat_menu_button(
             chat_id=chat_id,  # None = для всех личных чатов по умолчанию
-            menu_button={
-                "type": "web_app",
-                "text": "🎬 Меню",
-                "web_app": {"url": WEB_APP_URL}
-            }
+            menu_button=menu_button
         )
         logger.info(f"✅ Menu button настроен для {'всех чатов' if chat_id is None else f'чата {chat_id}'}")
     except Exception as e:
@@ -3762,12 +3760,9 @@ def start_menu_callback(call):
         chat_id = call.message.chat.id
         action = call.data.split(":")[1]  # seasons, premieres, random, search, schedule, payment, help
         
-        # Создаём фейковое сообщение для команды
-        fake_message = telebot.types.Message()
-        fake_message.from_user = call.from_user
-        fake_message.chat = call.message.chat
-        fake_message.message_id = call.message.message_id
-        fake_message.date = call.message.date
+        # Используем существующее сообщение и устанавливаем текст команды
+        message = call.message
+        message.text = None  # Очищаем текст
         
         # Удаляем сообщение с меню
         try:
@@ -3777,26 +3772,26 @@ def start_menu_callback(call):
         
         # Вызываем соответствующую команду
         if action == 'seasons':
-            fake_message.text = '/seasons'
-            seasons_command(fake_message)
+            message.text = '/seasons'
+            seasons_command(message)
         elif action == 'premieres':
-            fake_message.text = '/premieres'
-            premieres_command(fake_message)
+            message.text = '/premieres'
+            premieres_command(message)
         elif action == 'random':
-            fake_message.text = '/random'
-            random_start(fake_message)
+            message.text = '/random'
+            random_start(message)
         elif action == 'search':
-            fake_message.text = '/search'
-            handle_search(fake_message)
+            message.text = '/search'
+            handle_search(message)
         elif action == 'schedule':
-            fake_message.text = '/schedule'
-            show_schedule(fake_message)
+            message.text = '/schedule'
+            show_schedule(message)
         elif action == 'payment':
-            fake_message.text = '/payment'
-            payment_command(fake_message)
+            message.text = '/payment'
+            payment_command(message)
         elif action == 'help':
-            fake_message.text = '/help'
-            help_command(fake_message)
+            message.text = '/help'
+            help_command(message)
         
         logger.info(f"[START MENU] Выбран раздел: {action} для пользователя {user_id}")
     except Exception as e:
