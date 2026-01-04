@@ -2233,6 +2233,51 @@ def get_facts(kp_id):
         logger.error(f"Ошибка get_facts: {e}", exc_info=True)
         return None
 
+def get_series_airing_status(kp_id):
+    """Определяет, выходит ли сериал (есть ли будущие эпизоды)"""
+    try:
+        from api.kinopoisk_api import get_seasons_data
+        from datetime import datetime as dt
+        seasons_data = get_seasons_data(kp_id)
+        if not seasons_data:
+            return False, None
+        
+        now = dt.now()
+        is_airing = False
+        next_episode = None
+        next_episode_date = None
+        
+        for season in seasons_data:
+            episodes = season.get('episodes', [])
+            for ep in episodes:
+                release_str = ep.get('releaseDate', '')
+                if release_str and release_str != '—':
+                    try:
+                        release_date = None
+                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                            try:
+                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                break
+                            except:
+                                continue
+                        
+                        if release_date and release_date > now:
+                            if not next_episode_date or release_date < next_episode_date:
+                                next_episode_date = release_date
+                                next_episode = {
+                                    'season': season.get('number', ''),
+                                    'episode': ep.get('episodeNumber', ''),
+                                    'date': release_date
+                                }
+                                is_airing = True
+                    except:
+                        pass
+        
+        return is_airing, next_episode
+    except Exception as e:
+        logger.warning(f"[GET_SERIES_AIRING_STATUS] Ошибка: {e}")
+        return False, None
+
 def get_seasons(kp_id, chat_id=None, user_id=None):
     """Получает информацию о сезонах сериала с отметками просмотренных"""
     headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
@@ -3364,6 +3409,18 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
         text += f"<i>Жанры:</i> {info['genres']}\n"
         text += f"<i>В ролях:</i> {info['actors']}\n\n"
         text += f"<i>Кратко:</i> {info['description']}\n\n"
+        
+        # Если это сериал, добавляем информацию о статусе выхода серий
+        if is_series:
+            kp_id = info.get('kp_id')
+            if kp_id:
+                is_airing, next_episode = get_series_airing_status(kp_id)
+                if is_airing and next_episode:
+                    text += f"🟢 <b>Сериал выходит сейчас</b>\n"
+                    text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n\n"
+                else:
+                    text += f"🔴 <b>Сериал не выходит</b>\n\n"
+        
         text += f"<a href='{link}'>Кинопоиск</a>"
         
         # Создаем кнопки
@@ -9219,6 +9276,16 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             text += f"<i>В ролях:</i> {info['actors']}\n"
         if info.get('description'):
             text += f"\n<i>Кратко:</i> {info['description']}\n"
+        
+        # Если это сериал, добавляем информацию о статусе выхода серий
+        if is_series:
+            is_airing, next_episode = get_series_airing_status(kp_id)
+            if is_airing and next_episode:
+                text += f"\n🟢 <b>Сериал выходит сейчас</b>\n"
+                text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
+            else:
+                text += f"\n🔴 <b>Сериал не выходит</b>\n"
+        
         text += f"\n<a href='{link}'>Кинопоиск</a>"
         
         # Если фильм уже в базе, показываем дополнительную информацию
@@ -14345,6 +14412,71 @@ def series_episode_callback(call):
             
             status = "✅ отмечен как просмотренный" if is_watched else "⬜ снята отметка о просмотре"
             
+            # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
+            # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
+            if is_watched:
+                from api.kinopoisk_api import get_seasons_data
+                from datetime import datetime as dt
+                seasons_data = get_seasons_data(kp_id)
+                if seasons_data:
+                    now = dt.now()
+                    # Проверяем, выходит ли сериал
+                    is_airing, _ = get_series_airing_status(kp_id)
+                    
+                    # Получаем все просмотренные эпизоды
+                    cursor.execute('''
+                        SELECT season_number, episode_number 
+                        FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    watched_rows = cursor.fetchall()
+                    watched_set = set()
+                    for w_row in watched_rows:
+                        if isinstance(w_row, dict):
+                            watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
+                        else:
+                            watched_set.add((w_row[0], w_row[1]))
+                    
+                    # Подсчитываем общее количество эпизодов и просмотренных
+                    total_episodes = 0
+                    watched_episodes = 0
+                    
+                    for season in seasons_data:
+                        episodes = season.get('episodes', [])
+                        season_num = season.get('number', '')
+                        for ep in episodes:
+                            if not is_airing:
+                                # Если сериал не выходит, считаем все эпизоды
+                                total_episodes += 1
+                                ep_num = str(ep.get('episodeNumber', ''))
+                                if (season_num, ep_num) in watched_set:
+                                    watched_episodes += 1
+                            else:
+                                # Если сериал выходит, считаем только вышедшие эпизоды
+                                release_str = ep.get('releaseDate', '')
+                                if release_str and release_str != '—':
+                                    try:
+                                        release_date = None
+                                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                            try:
+                                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                                break
+                                            except:
+                                                continue
+                                        if release_date and release_date <= now:
+                                            total_episodes += 1
+                                            ep_num = str(ep.get('episodeNumber', ''))
+                                            if (season_num, ep_num) in watched_set:
+                                                watched_episodes += 1
+                                    except:
+                                        pass
+                    
+                    # Если все серии просмотрены и сериал не выходит, помечаем сериал как просмотренный
+                    if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
+                        cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        conn.commit()
+                        logger.info(f"[SERIES EPISODE] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены")
+            
             # Обновляем список эпизодов - используем текущую страницу из состояния или 1
             state = user_episodes_state.get(user_id, {})
             current_page = state.get('page', 1) if state.get('kp_id') == kp_id and state.get('season_num') == str(season_num) else 1
@@ -14433,6 +14565,71 @@ def series_season_all_callback(call):
             conn.commit()
         
         bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
+        
+        # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
+        from api.kinopoisk_api import get_seasons_data
+        from datetime import datetime as dt
+        seasons_data = get_seasons_data(kp_id)
+        if seasons_data:
+            now = dt.now()
+            # Проверяем, выходит ли сериал
+            is_airing, _ = get_series_airing_status(kp_id)
+            
+            # Получаем все просмотренные эпизоды
+            with db_lock:
+                cursor.execute('''
+                    SELECT season_number, episode_number 
+                    FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id))
+                watched_rows = cursor.fetchall()
+                watched_set = set()
+                for w_row in watched_rows:
+                    if isinstance(w_row, dict):
+                        watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
+                    else:
+                        watched_set.add((w_row[0], w_row[1]))
+            
+            # Подсчитываем общее количество эпизодов и просмотренных
+            total_episodes = 0
+            watched_episodes = 0
+            
+            for season in seasons_data:
+                episodes = season.get('episodes', [])
+                season_num = season.get('number', '')
+                for ep in episodes:
+                    if not is_airing:
+                        # Если сериал не выходит, считаем все эпизоды
+                        total_episodes += 1
+                        ep_num = str(ep.get('episodeNumber', ''))
+                        if (season_num, ep_num) in watched_set:
+                            watched_episodes += 1
+                    else:
+                        # Если сериал выходит, считаем только вышедшие эпизоды
+                        release_str = ep.get('releaseDate', '')
+                        if release_str and release_str != '—':
+                            try:
+                                release_date = None
+                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                    try:
+                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                        break
+                                    except:
+                                        continue
+                                if release_date and release_date <= now:
+                                    total_episodes += 1
+                                    ep_num = str(ep.get('episodeNumber', ''))
+                                    if (season_num, ep_num) in watched_set:
+                                        watched_episodes += 1
+                            except:
+                                pass
+            
+            # Если все серии просмотрены и сериал не выходит, помечаем сериал как просмотренный
+            if total_episodes > 0 and watched_episodes == total_episodes and not is_airing:
+                with db_lock:
+                    cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    conn.commit()
+                logger.info(f"[SERIES SEASON ALL] Сериал {title} (film_id={film_id}) помечен как просмотренный, все {total_episodes} эпизодов просмотрены")
         
         # Обновляем список эпизодов - используем текущую страницу из состояния или 1
         state = user_episodes_state.get(user_id, {})
