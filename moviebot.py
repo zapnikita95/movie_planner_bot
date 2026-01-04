@@ -7770,13 +7770,17 @@ def handle_cancel_rating(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_subscribe:"))
 def series_subscribe_callback(call):
     """Обработчик подписки на новые серии сериала"""
+    logger.info(f"[SERIES SUBSCRIBE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, chat_id={call.message.chat.id if call.message else None}")
     try:
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
+        logger.info(f"[SERIES SUBSCRIBE] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
+        
         # Проверяем доступ к функциям уведомлений
         if not has_notifications_access(chat_id, user_id):
+            logger.warning(f"[SERIES SUBSCRIBE] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}")
             bot.answer_callback_query(
                 call.id, 
                 "🔒 Функционал можно подключить через /payment", 
@@ -7784,16 +7788,19 @@ def series_subscribe_callback(call):
             )
             return
         
+        logger.info(f"[SERIES SUBSCRIBE] Получение film_id из БД для kp_id={kp_id}")
         with db_lock:
             # Получаем film_id
             cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
             row = cursor.fetchone()
             if not row:
+                logger.error(f"[SERIES SUBSCRIBE] Сериал не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
                 bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
                 return
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
             title = row.get('title') if isinstance(row, dict) else row[1]
+            logger.info(f"[SERIES SUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
             
             # Проверяем, подписан ли уже
             cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
@@ -7801,9 +7808,11 @@ def series_subscribe_callback(call):
             is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
             
             if is_subscribed:
+                logger.info(f"[SERIES SUBSCRIBE] Пользователь уже подписан: user_id={user_id}, film_id={film_id}")
                 bot.answer_callback_query(call.id, "Вы уже подписаны на этот сериал", show_alert=True)
                 return
             
+            logger.info(f"[SERIES SUBSCRIBE] Добавление подписки в БД: user_id={user_id}, film_id={film_id}, kp_id={kp_id}")
             # Добавляем/обновляем подписку
             cursor.execute('''
                 INSERT INTO series_subscriptions (chat_id, film_id, kp_id, user_id, subscribed)
@@ -7811,10 +7820,13 @@ def series_subscribe_callback(call):
                 ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET subscribed = TRUE
             ''', (chat_id, film_id, kp_id, user_id))
             conn.commit()
+            logger.info(f"[SERIES SUBSCRIBE] Подписка добавлена в БД успешно")
         
         # Получаем информацию о следующей серии и ставим уведомление
+        logger.info(f"[SERIES SUBSCRIBE] Получение данных о сезонах для kp_id={kp_id}")
         from api.kinopoisk_api import get_seasons_data
         seasons = get_seasons_data(kp_id)
+        logger.info(f"[SERIES SUBSCRIBE] Получено сезонов: {len(seasons) if seasons else 0}")
         
         next_episode_date = None
         next_episode = None
@@ -7878,7 +7890,8 @@ def series_subscribe_callback(call):
             bot.answer_callback_query(call.id, f"✅ Подписка оформлена! Уведомление: {next_episode_date.strftime('%d.%m.%Y')}")
         else:
             # Нет ближайшей даты - ставим периодическую проверку (через 3 недели)
-            from datetime import timedelta
+            logger.info(f"[SERIES SUBSCRIBE] Нет ближайшей даты выхода, ставим проверку через 3 недели")
+            from datetime import timedelta, datetime
             import pytz
             
             check_time = datetime.now(pytz.utc) + timedelta(weeks=3)
@@ -7889,11 +7902,13 @@ def series_subscribe_callback(call):
                 args=[chat_id, film_id, kp_id, user_id],
                 id=f'series_check_{chat_id}_{film_id}_{user_id}_{int(check_time.timestamp())}'
             )
+            logger.info(f"[SERIES SUBSCRIBE] Задача проверки поставлена на {check_time}")
             bot.answer_callback_query(call.id, "✅ Подписка оформлена! Будем проверять новые серии")
         
         logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
         
-        # Удаляем старое сообщение и отправляем новое с обновленной кнопкой
+        # Обновляем сообщение с обновленной кнопкой
+        logger.info(f"[SERIES SUBSCRIBE] Обновление сообщения с описанием сериала")
         try:
             # Получаем информацию о сериале из базы
             with db_lock:
@@ -7905,6 +7920,7 @@ def series_subscribe_callback(call):
                     link = row.get('link') if isinstance(row, dict) else row[2]
                     watched = row.get('watched') if isinstance(row, dict) else row[3]
                     
+                    logger.info(f"[SERIES SUBSCRIBE] Получение информации о сериале через API: link={link}")
                     # Получаем информацию о сериале через API
                     from api.kinopoisk_api import extract_movie_info
                     info = extract_movie_info(link)
@@ -7912,20 +7928,20 @@ def series_subscribe_callback(call):
                         existing = (film_id, title, watched)
                         # Получаем message_thread_id из сообщения, если оно есть
                         message_thread_id = None
-                        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
-                            message_thread_id = call.message.message_thread_id
+                        message_id = None
+                        if call.message:
+                            message_id = call.message.message_id
+                            if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                                message_thread_id = call.message.message_thread_id
                         
-                        # Удаляем старое сообщение
-                        try:
-                            if call.message:
-                                bot.delete_message(chat_id, call.message.message_id)
-                        except Exception as delete_e:
-                            logger.warning(f"[SERIES SUBSCRIBE] Не удалось удалить сообщение: {delete_e}")
-                        
-                        # Отправляем новое сообщение с обновленной кнопкой
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=None, message_thread_id=message_thread_id)
+                        logger.info(f"[SERIES SUBSCRIBE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
+                        # Обновляем существующее сообщение с обновленной кнопкой
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
+                        logger.info(f"[SERIES SUBSCRIBE] Сообщение обновлено успешно")
                     else:
                         logger.warning(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
+                else:
+                    logger.error(f"[SERIES SUBSCRIBE] Сериал не найден в БД при обновлении сообщения: kp_id={kp_id}")
         except Exception as e:
             logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
             # Не прерываем выполнение - подписка уже оформлена
@@ -7939,13 +7955,17 @@ def series_subscribe_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_unsubscribe:"))
 def series_unsubscribe_callback(call):
     """Обработчик отписки от новых серий сериала"""
+    logger.info(f"[SERIES UNSUBSCRIBE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, chat_id={call.message.chat.id if call.message else None}")
     try:
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
+        logger.info(f"[SERIES UNSUBSCRIBE] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
+        
         # Проверяем доступ к функциям уведомлений
         if not has_notifications_access(chat_id, user_id):
+            logger.warning(f"[SERIES UNSUBSCRIBE] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}")
             bot.answer_callback_query(
                 call.id, 
                 "🔒 Функционал можно подключить через /payment", 
@@ -7953,27 +7973,33 @@ def series_unsubscribe_callback(call):
             )
             return
         
+        logger.info(f"[SERIES UNSUBSCRIBE] Получение film_id из БД для kp_id={kp_id}")
         with db_lock:
             # Получаем film_id
             cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
             row = cursor.fetchone()
             if not row:
+                logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
                 bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
                 return
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
+            logger.info(f"[SERIES UNSUBSCRIBE] Найден сериал: film_id={film_id}")
             
             # Отписываемся
+            logger.info(f"[SERIES UNSUBSCRIBE] Отписка от сериала: user_id={user_id}, film_id={film_id}")
             cursor.execute('''
                 UPDATE series_subscriptions 
                 SET subscribed = FALSE 
                 WHERE chat_id = %s AND film_id = %s AND user_id = %s
             ''', (chat_id, film_id, user_id))
             conn.commit()
+            logger.info(f"[SERIES UNSUBSCRIBE] Отписка выполнена в БД")
         
         bot.answer_callback_query(call.id, "✅ Отписка выполнена")
         
-        # Удаляем старое сообщение и отправляем новое с обновленной кнопкой
+        # Обновляем сообщение с обновленной кнопкой
+        logger.info(f"[SERIES UNSUBSCRIBE] Обновление сообщения с описанием сериала")
         try:
             # Получаем информацию о сериале из базы
             with db_lock:
@@ -7985,6 +8011,7 @@ def series_unsubscribe_callback(call):
                     link = row.get('link') if isinstance(row, dict) else row[2]
                     watched = row.get('watched') if isinstance(row, dict) else row[3]
                     
+                    logger.info(f"[SERIES UNSUBSCRIBE] Получение информации о сериале через API: link={link}")
                     # Получаем информацию о сериале через API
                     from api.kinopoisk_api import extract_movie_info
                     info = extract_movie_info(link)
@@ -7992,18 +8019,20 @@ def series_unsubscribe_callback(call):
                         existing = (film_id, title, watched)
                         # Получаем message_thread_id из сообщения, если оно есть
                         message_thread_id = None
-                        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
-                            message_thread_id = call.message.message_thread_id
+                        message_id = None
+                        if call.message:
+                            message_id = call.message.message_id
+                            if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                                message_thread_id = call.message.message_thread_id
                         
-                        # Удаляем старое сообщение
-                        try:
-                            if call.message:
-                                bot.delete_message(chat_id, call.message.message_id)
-                        except Exception as delete_e:
-                            logger.warning(f"[SERIES UNSUBSCRIBE] Не удалось удалить сообщение: {delete_e}")
-                        
-                        # Отправляем новое сообщение с обновленной кнопкой
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=None, message_thread_id=message_thread_id)
+                        logger.info(f"[SERIES UNSUBSCRIBE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
+                        # Обновляем существующее сообщение с обновленной кнопкой
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
+                        logger.info(f"[SERIES UNSUBSCRIBE] Сообщение обновлено успешно")
+                    else:
+                        logger.warning(f"[SERIES UNSUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
+                else:
+                    logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден в БД при обновлении сообщения: kp_id={kp_id}")
         except Exception as e:
             logger.error(f"[SERIES UNSUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
         
