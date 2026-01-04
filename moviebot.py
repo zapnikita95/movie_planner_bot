@@ -18448,177 +18448,56 @@ def handle_payment_callback(call):
                         'group_username': group_username
                     }
             
-            # Сразу создаем платеж, без промежуточного шага
-            # Инициализируем ЮKassa
-            if not YOOKASSA_AVAILABLE:
-                logger.error(f"[PAYMENT] YooKassa библиотека не установлена!")
-                bot.answer_callback_query(call.id, "Ошибка: система оплаты недоступна. Обратитесь к администратору.", show_alert=True)
-                return
+            # Показываем выбор способа оплаты
+            # Конвертируем в звезды для кнопки оплаты звездами
+            stars_amount = rubles_to_stars(final_price)
             
-            if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
-                logger.error(f"[PAYMENT] YooKassa ключи не настроены! YOOKASSA_SHOP_ID={YOOKASSA_SHOP_ID is not None}, YOOKASSA_SECRET_KEY={YOOKASSA_SECRET_KEY is not None}")
-                bot.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
-                return
-            
-            # Логируем первые и последние символы для отладки (безопасно)
-            shop_id_preview = f"{YOOKASSA_SHOP_ID[:4]}...{YOOKASSA_SHOP_ID[-4:]}" if YOOKASSA_SHOP_ID and len(YOOKASSA_SHOP_ID) > 8 else "N/A"
-            secret_key_preview = f"{YOOKASSA_SECRET_KEY[:4]}...{YOOKASSA_SECRET_KEY[-4:]}" if YOOKASSA_SECRET_KEY and len(YOOKASSA_SECRET_KEY) > 8 else "N/A"
-            logger.info(f"[PAYMENT] Инициализация YooKassa: shop_id={shop_id_preview}, secret_key={secret_key_preview}")
-            
-            # Убираем пробелы, если есть
-            shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
-            secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
-            
-            from yookassa import Configuration, Payment
-            Configuration.account_id = shop_id
-            Configuration.secret_key = secret_key
-            
-            # Формируем описание платежа
-            period_names = {
-                'month': 'месяц',
-                '3months': '3 месяца',
-                'year': 'год',
-                'lifetime': 'навсегда'
-            }
-            period_name = period_names.get(period_type, period_type)
-            
-            plan_names = {
-                'notifications': 'Уведомления о сериалах',
-                'recommendations': 'Персональные рекомендации',
-                'tickets': 'Билеты в кино',
-                'all': 'Все режимы'
-            }
-            plan_name = plan_names.get(plan_type, plan_type)
-            
-            subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
-            description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
-            
-            # Создаем уникальный ID платежа
+            # Сохраняем данные платежа в состояние для оплаты (чтобы не превышать лимит callback_data в 64 байта)
             import uuid as uuid_module
             payment_id = str(uuid_module.uuid4())
             
-            # Определяем URL для возврата - используем deep link для Telegram
-            # Deep link откроет бота напрямую: tg://resolve?domain=movie_planner_bot
-            # Или можно использовать https://t.me/movie_planner_bot - это тоже работает
-            return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
-            
-            # Для групповых подписок используем выбранный chat_id группы
-            if sub_type == 'group' and group_chat_id:
-                payment_chat_id = group_chat_id
-            else:
-                payment_chat_id = chat_id
-            
-            # Подготавливаем metadata для платежа
-            metadata = {
-                "user_id": str(user_id),
-                "chat_id": str(payment_chat_id),
-                "subscription_type": sub_type,
-                "plan_type": plan_type,
-                "period_type": period_type,
-                "payment_id": payment_id
+            if user_id not in user_payment_state:
+                user_payment_state[user_id] = {}
+            user_payment_state[user_id]['payment_data'] = {
+                'payment_id': payment_id,
+                'sub_type': sub_type,
+                'group_size': group_size,
+                'plan_type': plan_type,
+                'period_type': period_type,
+                'amount': final_price,
+                'stars_amount': stars_amount,
+                'chat_id': payment_chat_id if sub_type == 'group' and group_chat_id else chat_id,
+                'group_chat_id': group_chat_id,
+                'group_username': group_username,
+                'group_title': group_title
             }
             
-            # Добавляем group_size, telegram_username или group_username в зависимости от типа подписки
-            if sub_type == 'group':
-                metadata["group_size"] = str(group_size) if group_size else ""
-                # Используем выбранную группу или текущую
-                if group_username:
-                    metadata["group_username"] = group_username
-                elif not is_private:
-                    # В группе - сохраняем username группы
-                    group_username = call.message.chat.username
-                    if group_username:
-                        metadata["group_username"] = group_username
-            else:
-                # Для личной подписки
-                if is_private:
-                    # В личке - сохраняем username пользователя
-                    telegram_username = call.from_user.username
-                    if telegram_username:
-                        metadata["telegram_username"] = telegram_username
+            # Обновляем сообщение с кнопками выбора способа оплаты
+            text += f"\n\n💳 <b>Выберите способ оплаты</b>\n"
+            text += f"💰 Сумма: <b>{final_price}₽{period_suffix}</b> ({stars_amount}⭐)\n"
             
-            # Создаем платеж
+            markup = InlineKeyboardMarkup(row_width=1)
+            # Кнопка оплаты звездами (без ЮKassa)
+            payment_id_short = payment_id[:8]
+            callback_data_stars = f"pay_stars:{payment_id_short}"
+            markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+            
+            # Кнопка оплаты через ЮKassa (только если доступна)
+            if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
+                callback_data_yookassa = f"pay_yookassa:{payment_id_short}"
+                markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
+            
+            if group_size:
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
+            else:
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
+            
             try:
-                payment = Payment.create({
-                    "amount": {
-                        "value": f"{final_price:.2f}",
-                        "currency": "RUB"
-                    },
-                    "confirmation": {
-                        "type": "redirect",
-                        "return_url": return_url
-                    },
-                    "capture": True,
-                    "description": description,
-                    "metadata": metadata
-                })
-                
-                # Сохраняем информацию о платеже в БД
-                from database.db_operations import save_payment
-                # Для групповых подписок используем выбранный chat_id группы
-                payment_chat_id_for_db = payment_chat_id if sub_type == 'group' and group_chat_id else chat_id
-                save_payment(
-                    payment_id=payment_id,
-                    yookassa_payment_id=payment.id,
-                    user_id=user_id,
-                    chat_id=payment_chat_id_for_db,
-                    subscription_type=sub_type,
-                    plan_type=plan_type,
-                    period_type=period_type,
-                    group_size=group_size,
-                    amount=final_price,
-                    status='pending'
-                )
-                
-                # Получаем URL для оплаты
-                confirmation_url = payment.confirmation.confirmation_url
-                
-                # Обновляем сообщение с кнопкой для оплаты
-                text += f"\n\n💳 <b>Оплата</b>\n"
-                text += f"💰 Сумма: <b>{final_price}₽{period_suffix}</b>\n\n"
-                text += "Нажмите кнопку ниже для перехода к оплате:"
-                
-                # Конвертируем в звезды для кнопки оплаты звездами
-                stars_amount = rubles_to_stars(final_price)
-                
-                # Сохраняем данные платежа в состояние для оплаты звездами (чтобы не превышать лимит callback_data в 64 байта)
-                if user_id not in user_payment_state:
-                    user_payment_state[user_id] = {}
-                user_payment_state[user_id]['stars_payment'] = {
-                    'payment_id': payment_id,
-                    'sub_type': sub_type,
-                    'group_size': group_size,
-                    'plan_type': plan_type,
-                    'period_type': period_type,
-                    'amount': final_price,
-                    'stars_amount': stars_amount,
-                    'chat_id': payment_chat_id_for_db,
-                    'description': description
-                }
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
-                # Добавляем кнопку оплаты звездами (используем короткий callback_data)
-                # Используем только payment_id (первые 8 символов) для экономии места
-                payment_id_short = payment_id[:8]
-                callback_data_stars = f"pay_stars:{payment_id_short}"
-                markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
-                
-                if group_size:
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
-                else:
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
-                
-                try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
-                
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e:
-                logger.error(f"[PAYMENT] Ошибка создания платежа в ЮKassa: {e}", exc_info=True)
-                bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
             return
         
         if action.startswith("pay:"):
@@ -22049,12 +21928,12 @@ def handle_pay_stars_callback(call):
         logger.info(f"[STARS CALLBACK] Начало обработки: user_id={user_id}, payment_id_short={payment_id_short}")
         
         # Получаем данные платежа из состояния
-        if user_id not in user_payment_state or 'stars_payment' not in user_payment_state[user_id]:
+        if user_id not in user_payment_state or 'payment_data' not in user_payment_state[user_id]:
             logger.error(f"[STARS CALLBACK] Данные платежа не найдены в состоянии для user_id={user_id}")
             bot.answer_callback_query(call.id, "❌ Ошибка: данные платежа не найдены. Попробуйте заново.", show_alert=True)
             return
         
-        payment_data = user_payment_state[user_id]['stars_payment']
+        payment_data = user_payment_state[user_id]['payment_data']
         full_payment_id = payment_data['payment_id']
         
         # Проверяем, что короткий ID совпадает
@@ -22067,6 +21946,8 @@ def handle_pay_stars_callback(call):
         sub_type = payment_data['sub_type']
         plan_type = payment_data['plan_type']
         period_type = payment_data['period_type']
+        final_price = payment_data['amount']
+        payment_chat_id = payment_data.get('chat_id', chat_id)
         
         # Формируем заголовок и описание для invoice
         subscription_type_name = 'Личная подписка' if sub_type == 'personal' else 'Групповая подписка'
@@ -22090,10 +21971,24 @@ def handle_pay_stars_callback(call):
         invoice_title = subscription_type_name
         invoice_description = f"{plan_name}, период: {period_name}"
         
+        # Сохраняем информацию о платеже в БД (без yookassa_payment_id)
+        from database.db_operations import save_payment
+        save_payment(
+            payment_id=full_payment_id,
+            yookassa_payment_id=None,  # Для Stars нет yookassa_payment_id
+            user_id=user_id,
+            chat_id=payment_chat_id,
+            subscription_type=sub_type,
+            plan_type=plan_type,
+            period_type=period_type,
+            group_size=payment_data.get('group_size'),
+            amount=final_price,
+            status='pending'
+        )
+        
         logger.info(f"[STARS CALLBACK] Создание invoice: stars_amount={stars_amount}, payment_id={full_payment_id}")
         
-        # Создаем invoice для оплаты звездами
-        # Используем sendInvoice с параметром prices в звездах
+        # Создаем invoice для оплаты звездами напрямую через Telegram API
         try:
             # Формируем invoice_payload с полным payment_id
             invoice_payload = f"stars_{full_payment_id}"
@@ -22129,6 +22024,174 @@ def handle_pay_stars_callback(call):
             
     except Exception as e:
         logger.error(f"[STARS CALLBACK] Ошибка обработки callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка. Попробуйте позже.", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("pay_yookassa:"))
+def handle_pay_yookassa_callback(call):
+    """Обработчик нажатия на кнопку оплаты через ЮKassa"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Извлекаем короткий payment_id из callback_data
+        payment_id_short = call.data.split(":")[1]
+        logger.info(f"[YOOKASSA CALLBACK] Начало обработки: user_id={user_id}, payment_id_short={payment_id_short}")
+        
+        # Получаем данные платежа из состояния
+        if user_id not in user_payment_state or 'payment_data' not in user_payment_state[user_id]:
+            logger.error(f"[YOOKASSA CALLBACK] Данные платежа не найдены в состоянии для user_id={user_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: данные платежа не найдены. Попробуйте заново.", show_alert=True)
+            return
+        
+        payment_data = user_payment_state[user_id]['payment_data']
+        full_payment_id = payment_data['payment_id']
+        
+        # Проверяем, что короткий ID совпадает
+        if not full_payment_id.startswith(payment_id_short):
+            logger.error(f"[YOOKASSA CALLBACK] Несоответствие payment_id: short={payment_id_short}, full={full_payment_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: неверный идентификатор платежа.", show_alert=True)
+            return
+        
+        # Проверяем доступность ЮKassa
+        if not YOOKASSA_AVAILABLE:
+            logger.error(f"[YOOKASSA CALLBACK] YooKassa библиотека не установлена!")
+            bot.answer_callback_query(call.id, "Ошибка: система оплаты недоступна. Обратитесь к администратору.", show_alert=True)
+            return
+        
+        if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+            logger.error(f"[YOOKASSA CALLBACK] YooKassa ключи не настроены!")
+            bot.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
+            return
+        
+        sub_type = payment_data['sub_type']
+        plan_type = payment_data['plan_type']
+        period_type = payment_data['period_type']
+        final_price = payment_data['amount']
+        group_size = payment_data.get('group_size')
+        payment_chat_id = payment_data.get('chat_id', chat_id)
+        group_chat_id = payment_data.get('group_chat_id')
+        group_username = payment_data.get('group_username')
+        is_private = chat_id > 0
+        
+        # Формируем описание платежа
+        period_names = {
+            'month': 'месяц',
+            '3months': '3 месяца',
+            'year': 'год',
+            'lifetime': 'навсегда'
+        }
+        period_name = period_names.get(period_type, period_type)
+        
+        plan_names = {
+            'notifications': 'Уведомления о сериалах',
+            'recommendations': 'Персональные рекомендации',
+            'tickets': 'Билеты в кино',
+            'all': 'Все режимы'
+        }
+        plan_name = plan_names.get(plan_type, plan_type)
+        
+        subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+        description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+        
+        # Инициализируем ЮKassa
+        from yookassa import Configuration, Payment
+        shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
+        secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
+        Configuration.account_id = shop_id
+        Configuration.secret_key = secret_key
+        
+        return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
+        
+        # Подготавливаем metadata для платежа
+        metadata = {
+            "user_id": str(user_id),
+            "chat_id": str(payment_chat_id),
+            "subscription_type": sub_type,
+            "plan_type": plan_type,
+            "period_type": period_type,
+            "payment_id": full_payment_id
+        }
+        
+        if sub_type == 'group':
+            metadata["group_size"] = str(group_size) if group_size else ""
+            if group_username:
+                metadata["group_username"] = group_username
+        else:
+            if is_private:
+                telegram_username = call.from_user.username
+                if telegram_username:
+                    metadata["telegram_username"] = telegram_username
+        
+        # Создаем платеж в ЮKassa
+        try:
+            payment = Payment.create({
+                "amount": {
+                    "value": f"{final_price:.2f}",
+                    "currency": "RUB"
+                },
+                "confirmation": {
+                    "type": "redirect",
+                    "return_url": return_url
+                },
+                "capture": True,
+                "description": description,
+                "metadata": metadata
+            })
+            
+            # Сохраняем информацию о платеже в БД
+            from database.db_operations import save_payment
+            payment_chat_id_for_db = payment_chat_id if sub_type == 'group' and group_chat_id else chat_id
+            save_payment(
+                payment_id=full_payment_id,
+                yookassa_payment_id=payment.id,
+                user_id=user_id,
+                chat_id=payment_chat_id_for_db,
+                subscription_type=sub_type,
+                plan_type=plan_type,
+                period_type=period_type,
+                group_size=group_size,
+                amount=final_price,
+                status='pending'
+            )
+            
+            # Получаем URL для оплаты
+            confirmation_url = payment.confirmation.confirmation_url
+            
+            # Отправляем сообщение с кнопкой для оплаты
+            text = f"💳 <b>Оплата подписки</b>\n\n"
+            text += f"📋 <b>Выбранный тариф:</b>\n"
+            if sub_type == 'personal':
+                text += f"👤 Личная подписка\n"
+            else:
+                text += f"👥 Групповая подписка (на {group_size} участников)\n"
+            text += f"{plan_name}\n"
+            text += f"⏰ Период: {period_name}\n"
+            text += f"💰 Сумма: <b>{final_price}₽</b>\n\n"
+            text += "Нажмите кнопку ниже для перехода к оплате:"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[YOOKASSA CALLBACK] Ошибка редактирования сообщения: {e}")
+                    bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+            
+            logger.info(f"[YOOKASSA CALLBACK] Платеж создан: payment_id={full_payment_id}, yookassa_id={payment.id}")
+            
+        except Exception as e:
+            logger.error(f"[YOOKASSA CALLBACK] Ошибка создания платежа в ЮKassa: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"[YOOKASSA CALLBACK] Ошибка обработки callback: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Произошла ошибка. Попробуйте позже.", show_alert=True)
         except:
