@@ -18203,14 +18203,49 @@ def handle_payment_callback(call):
             
             # Проверяем существующие подписки
             from database.db_operations import get_user_personal_subscriptions
+            from datetime import datetime
             existing_subs = get_user_personal_subscriptions(user_id)
-            existing_plan_types = [sub.get('plan_type') for sub in existing_subs if sub.get('plan_type')]
+            
+            # Фильтруем только активные подписки и убираем дубликаты по plan_type
+            active_subs = []
+            seen_plan_types = set()
+            now = datetime.now()
+            
+            for sub in existing_subs:
+                expires_at = sub.get('expires_at')
+                plan_type = sub.get('plan_type')
+                
+                # Проверяем, что подписка активна
+                is_active = False
+                if expires_at:
+                    if isinstance(expires_at, datetime):
+                        is_active = expires_at > now
+                    else:
+                        # Если expires_at - это строка или другой тип, пытаемся преобразовать
+                        try:
+                            if isinstance(expires_at, str):
+                                expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                is_active = expires_dt > now
+                            else:
+                                is_active = True  # Если не можем проверить, считаем активной
+                        except:
+                            is_active = True
+                else:
+                    # Если нет expires_at, считаем подписку активной (lifetime)
+                    is_active = True
+                
+                # Добавляем только активные и уникальные по plan_type
+                if is_active and plan_type and plan_type not in seen_plan_types:
+                    active_subs.append(sub)
+                    seen_plan_types.add(plan_type)
+            
+            existing_plan_types = [sub.get('plan_type') for sub in active_subs if sub.get('plan_type')]
             has_all = 'all' in existing_plan_types
             
-            if existing_subs and not has_all:
+            if active_subs and not has_all:
                 # Есть подписки, но нет пакетной
                 text += "⚠️ <b>У вас уже есть активные подписки:</b>\n"
-                for sub in existing_subs:
+                for sub in active_subs:
                     plan_type = sub.get('plan_type')
                     plan_names = {
                         'notifications': 'Уведомления о сериалах',
@@ -19009,12 +19044,37 @@ def handle_payment_callback(call):
                 from datetime import datetime
                 existing_subs = get_user_personal_subscriptions(user_id)
                 
-                # Фильтруем только активные подписки
+                # Фильтруем только активные подписки и убираем дубликаты по plan_type
                 active_subs = []
+                seen_plan_types = set()
+                now = datetime.now()
+                
                 for sub in existing_subs:
                     expires_at = sub.get('expires_at')
-                    if not expires_at or (isinstance(expires_at, datetime) and expires_at > datetime.now()):
+                    plan_type = sub.get('plan_type')
+                    
+                    # Проверяем, что подписка активна
+                    is_active = False
+                    if not expires_at:
+                        # Если нет expires_at, считаем подписку активной (lifetime)
+                        is_active = True
+                    elif isinstance(expires_at, datetime):
+                        is_active = expires_at > now
+                    else:
+                        # Если expires_at - это строка или другой тип, пытаемся преобразовать
+                        try:
+                            if isinstance(expires_at, str):
+                                expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                is_active = expires_dt > now
+                            else:
+                                is_active = True  # Если не можем проверить, считаем активной
+                        except:
+                            is_active = True
+                    
+                    # Добавляем только активные и уникальные по plan_type
+                    if is_active and plan_type and plan_type not in seen_plan_types:
                         active_subs.append(sub)
+                        seen_plan_types.add(plan_type)
                 
                 if active_subs:
                     existing_plan_types = [sub.get('plan_type') for sub in active_subs]
