@@ -1624,8 +1624,8 @@ def dice_game_handler(call):
             game_state['dice_messages'][dice_msg.message_id] = user_id
             
             # Сохраняем информацию об участнике
-                game_state['participants'][user_id] = {
-                    'username': call.from_user.username or call.from_user.first_name,
+            game_state['participants'][user_id] = {
+                'username': call.from_user.username or call.from_user.first_name,
                 'dice_message_id': dice_msg.message_id,
                 'user_id': user_id
             }
