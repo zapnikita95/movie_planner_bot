@@ -7309,22 +7309,18 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 # Проверяем, просмотрен ли эпизод
                 try:
                     with db_lock:
-                        try:
-                            cursor.execute('''
-                                SELECT watched FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                                AND season_number = %s AND episode_number = %s
-                            ''', (chat_id, film_id, user_id, season_num, ep_num))
-                            watched_row = cursor.fetchone()
-                            is_watched = False
-                            if watched_row:
-                                if isinstance(watched_row, dict):
-                                    is_watched = watched_row.get('watched', False)
-                                else:
-                                    is_watched = bool(watched_row[0]) if len(watched_row) > 0 else False
-                        except Exception as db_e:
-                            logger.error(f"[SHOW EPISODES PAGE] Ошибка БД при проверке эпизода {ep_num}: {db_e}", exc_info=True)
-                            is_watched = False  # В случае ошибки БД считаем непросмотренным
+                        cursor.execute('''
+                            SELECT watched FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                            AND season_number = %s AND episode_number = %s
+                        ''', (chat_id, film_id, user_id, season_num, ep_num))
+                        watched_row = cursor.fetchone()
+                        is_watched = False
+                        if watched_row:
+                            if isinstance(watched_row, dict):
+                                is_watched = watched_row.get('watched', False)
+                            else:
+                                is_watched = bool(watched_row[0]) if len(watched_row) > 0 else False
                     
                     mark = "✅" if is_watched else "⬜"
                     button_text = f"{mark} {ep_num}"
@@ -7452,7 +7448,6 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 if message_thread_id:
                     # Используем API напрямую для поддержки тредов
                     try:
-                        import json
                         reply_markup_json = json.dumps(markup.to_dict()) if markup else None
                         params = {
                             'chat_id': chat_id,
@@ -7517,8 +7512,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         logger.error(f"[SHOW EPISODES PAGE] КРИТИЧЕСКАЯ ошибка: {e}", exc_info=True)
         # Fallback: Отправь уведомление пользователю
         try:
-            if chat_id and user_id:
-                bot.send_message(chat_id, "❌ Ошибка при обновлении списка эпизодов. Попробуйте позже.")
+            bot.send_message(chat_id, "❌ Ошибка при обновлении списка эпизодов. Попробуйте позже.")
         except:
             pass
         return False
@@ -8456,6 +8450,139 @@ def admin_stats_command(message):
     except Exception as e:
         logger.error(f"Ошибка в admin_stats_command: {e}", exc_info=True)
         bot.reply_to(message, f"❌ Ошибка получения статистики: {e}")
+
+@bot.message_handler(commands=['refundstars'])
+def refundstars_command(message):
+    """Команда для возврата звезд по ID операции (только для создателя)"""
+    # ID создателя бота
+    CREATOR_ID = 301810276
+    
+    if message.from_user.id != CREATOR_ID:
+        bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
+        return
+    
+    try:
+        logger.info(f"[HANDLER] /refundstars вызван от {message.from_user.id}")
+        
+        # Получаем текст команды (ID операции)
+        command_text = message.text.strip()
+        parts = command_text.split(maxsplit=1)
+        
+        if len(parts) < 2:
+            bot.reply_to(message, "❌ Укажите ID операции для возврата.\n\n"
+                                  "Использование: /refundstars <ID_операции>\n\n"
+                                  "Пример: /refundstars stxwe_iXQAPRqkiZSjm9JxEiO0Ke03gNqoupstFOak10sj3ZSSeHbT2_3MukFRW4kGE-YBSssodFt05T9Szh1-N2m_FgDCvAAPloyRiqVDUp3tmzfl2I891zLP4VcZ6ul8I")
+            return
+        
+        charge_id = parts[1].strip()
+        logger.info(f"[REFUND] Запрос на возврат для charge_id: {charge_id}")
+        
+        # Ищем платеж в БД по telegram_payment_charge_id
+        from database.db_connection import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT payment_id, user_id, chat_id, amount, status, telegram_payment_charge_id
+            FROM payments 
+            WHERE telegram_payment_charge_id = %s
+        """, (charge_id,))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            cursor.close()
+            bot.reply_to(message, f"❌ Платеж с ID операции '{charge_id}' не найден в базе данных.")
+            logger.warning(f"[REFUND] Платеж не найден: charge_id={charge_id}")
+            return
+        
+        # Извлекаем данные платежа
+        if isinstance(row, dict):
+            payment_id = row.get('payment_id')
+            user_id = row.get('user_id')
+            chat_id = row.get('chat_id')
+            amount = row.get('amount')
+            status = row.get('status')
+            stored_charge_id = row.get('telegram_payment_charge_id')
+        else:
+            payment_id = row[0]
+            user_id = row[1]
+            chat_id = row[2]
+            amount = row[3]
+            status = row[4]
+            stored_charge_id = row[5] if len(row) > 5 else None
+        
+        cursor.close()
+        
+        logger.info(f"[REFUND] Найден платеж: payment_id={payment_id}, user_id={user_id}, amount={amount}, status={status}")
+        
+        # Проверяем, что платеж был успешным
+        if status != 'succeeded':
+            bot.reply_to(message, f"⚠️ Платеж найден, но его статус: '{status}'. Возврат возможен только для успешных платежей.")
+            return
+        
+        # Выполняем возврат через Telegram API
+        try:
+            logger.info(f"[REFUND] Выполняем возврат через Telegram API: user_id={user_id}, charge_id={charge_id}")
+            
+            # Используем прямой вызов API, так как pyTelegramBotAPI может не поддерживать refundStarPayment
+            import requests
+            url = f"https://api.telegram.org/bot{TOKEN}/refundStarPayment"
+            data = {
+                'user_id': user_id,
+                'telegram_payment_charge_id': charge_id
+            }
+            
+            logger.info(f"[REFUND] Отправляем запрос: url={url}, data={data}")
+            response = requests.post(url, json=data, timeout=10)
+            result_data = response.json()
+            
+            logger.info(f"[REFUND] Ответ API: {result_data}")
+            
+            if result_data.get('ok'):
+                # Обновляем статус платежа в БД на 'refunded'
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE payments 
+                    SET status = 'refunded'
+                    WHERE telegram_payment_charge_id = %s
+                """, (charge_id,))
+                conn.commit()
+                cursor.close()
+                
+                bot.reply_to(message, f"✅ Возврат выполнен успешно!\n\n"
+                                      f"📋 Детали:\n"
+                                      f"   • ID операции: {charge_id}\n"
+                                      f"   • User ID: {user_id}\n"
+                                      f"   • Сумма: {amount}₽\n"
+                                      f"   • Payment ID: {payment_id}\n\n"
+                                      f"Статус платежа обновлен на 'refunded'.")
+                logger.info(f"[REFUND] ✅ Возврат успешно выполнен для user_id={user_id}, charge_id={charge_id}")
+            else:
+                error_description = result_data.get('description', 'Неизвестная ошибка')
+                error_code = result_data.get('error_code', 'N/A')
+                bot.reply_to(message, f"❌ Ошибка возврата: {error_description}\n\n"
+                                      f"Код ошибки: {error_code}\n\n"
+                                      f"Возможные причины:\n"
+                                      f"• Платеж уже был возвращен\n"
+                                      f"• Прошло более 90 дней с момента платежа\n"
+                                      f"• ID операции неверный")
+                logger.error(f"[REFUND] ❌ API вернул ошибку: {result_data}")
+                
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"[REFUND] ❌ Ошибка при возврате звезд: {e}", exc_info=True)
+            bot.reply_to(message, f"❌ Ошибка при возврате: {error_msg}\n\n"
+                                  f"Проверьте, что:\n"
+                                  f"• ID операции правильный\n"
+                                  f"• Платеж был выполнен через Telegram Stars\n"
+                                  f"• Прошло не более 90 дней с момента платежа\n"
+                                  f"• Бот имеет права на возврат платежей")
+        
+    except Exception as e:
+        logger.error(f"Ошибка в refundstars_command: {e}", exc_info=True)
+        bot.reply_to(message, f"❌ Ошибка выполнения команды: {e}")
 
 @bot.message_handler(commands=['join'])
 def join_command(message):
@@ -15798,15 +15925,11 @@ def handle_episodes_page(call):
             message_thread_id = call.message.message_thread_id
         
         logger.info(f"[EPISODES PAGE] Переключение страницы: user_id={user_id}, kp_id={kp_id}, season={season_num}, page={page}, message_thread_id={message_thread_id}")
-        success = show_episodes_page(kp_id, season_num, chat_id, user_id, page, call.message.message_id, message_thread_id)
-        if not success:
-            bot.answer_callback_query(call.id, "❌ Ошибка переключения страницы", show_alert=True)
+        show_episodes_page(kp_id, season_num, chat_id, user_id, page, call.message.message_id, message_thread_id)
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка в handle_episodes_page: {e}", exc_info=True)
-    finally:
-        # Всегда отвечаем на callback
         try:
-            bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id, "Ошибка переключения страницы")
         except:
             pass
 
@@ -15847,8 +15970,6 @@ def series_episode_callback(call):
     """Обработчик для отметки эпизода как просмотренного"""
     logger.info(f"[CALLBACK HANDLER] series_episode_callback вызван: data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id if call.message else None}")
     try:
-        # Немедленный ответ для улучшения отзывчивости
-        bot.answer_callback_query(call.id)
         
         parts = call.data.split(":")
         kp_id = parts[1]
@@ -15938,28 +16059,15 @@ def series_episode_callback(call):
                 success = show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
                 if success:
                     logger.info(f"[SERIES EPISODE] Сообщение с эпизодами обновлено успешно")
+                else:
+                    logger.warning(f"[SERIES EPISODE] show_episodes_page вернула False")
             except Exception as e:
                 logger.error(f"[SERIES EPISODE] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
-            finally:
-                # ВАЖНО: всегда отвечаем на callback, чтобы кнопка не висела
-                try:
-                    if success:
-                        status_text = "✅ Отмечено как просмотренный" if is_watched else "⬜ Отметка снята"
-                        bot.answer_callback_query(call.id, status_text)
-                    else:
-                        bot.answer_callback_query(call.id, "❌ Ошибка обновления", show_alert=True)
-                except:
-                    # Если даже answer_callback_query не работает, пробуем без параметров
-                    try:
-                        bot.answer_callback_query(call.id)
-                    except:
-                        pass
             
             # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
             # (только если эпизод был отмечен как просмотренный, не при снятии отметки)
             if is_watched:
                 try:
-                    from api.kinopoisk_api import get_seasons_data
                     from datetime import datetime as dt
                     seasons_data = get_seasons_data(kp_id)
                     if seasons_data:
@@ -16036,16 +16144,27 @@ def series_episode_callback(call):
             
     except Exception as e:
         logger.error(f"[SERIES EPISODE] Критическая ошибка: {e}", exc_info=True)
+    finally:
+        # ВАЖНО: всегда отвечаем на callback, чтобы кнопка не висела
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except:
-            pass
+            if 'is_watched' in locals():
+                status_text = "✅ Отмечено как просмотренный" if is_watched else "⬜ Отметка снята"
+                bot.answer_callback_query(call.id, status_text)
+            else:
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except Exception as answer_e:
+            logger.error(f"[SERIES EPISODE] Ошибка при ответе на callback: {answer_e}", exc_info=True)
+            # Пробуем еще раз без текста
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
 def series_season_all_callback(call):
     """Обработчик для отметки всех эпизодов сезона как просмотренных"""
     try:
-        bot.answer_callback_query(call.id)
+        # Не отвечаем на callback сразу - сделаем это в finally блоке
         
         parts = call.data.split(":")
         kp_id = parts[1]
@@ -16062,7 +16181,7 @@ def series_season_all_callback(call):
             row = cursor.fetchone()
             if not row:
                 logger.warning(f"[SERIES SEASON ALL] Сериал не найден: chat_id={chat_id}, kp_id={kp_id}")
-                bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
+                # Не отвечаем здесь - сделаем это в finally блоке
                 return
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -16070,11 +16189,15 @@ def series_season_all_callback(call):
             logger.info(f"[SERIES SEASON ALL] Сериал найден: film_id={film_id}, title='{title}'")
         
         # Получаем эпизоды сезона
-        from api.kinopoisk_api import get_seasons_data
-        seasons_data = get_seasons_data(kp_id)
+        try:
+            seasons_data = get_seasons_data(kp_id)
+        except Exception as e:
+            logger.error(f"[SERIES SEASON ALL] Ошибка при получении данных о сезонах: {e}", exc_info=True)
+            # Не отвечаем здесь - сделаем это в finally блоке
+            return
         season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
         if not season:
-            bot.answer_callback_query(call.id, "❌ Сезон не найден", show_alert=True)
+            # Не отвечаем здесь - сделаем это в finally блоке
             return
         
         episodes = season.get('episodes', [])
@@ -16104,7 +16227,7 @@ def series_season_all_callback(call):
             conn.commit()
         
         logger.info(f"[SERIES SEASON ALL] Отмечено эпизодов: {marked_count} из {len(episodes)}")
-        bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
+        # Не отвечаем на callback здесь - сделаем это в finally блоке
         
         # Обновляем текущее сообщение с эпизодами, чтобы показать все отмеченные галочки
         # Получаем message_thread_id из сообщения, если оно есть
@@ -16121,23 +16244,11 @@ def series_season_all_callback(call):
                 current_page = state.get('page', 1)
         
         # Обновляем сообщение с эпизодами
-        success = False
         try:
-            success = show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
-            if success:
-                logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
+            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+            logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
         except Exception as e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
-        finally:
-            # ВАЖНО: всегда отвечаем на callback, чтобы кнопка не висела
-            try:
-                if not success:
-                    bot.answer_callback_query(call.id, "❌ Ошибка обновления", show_alert=True)
-            except:
-                try:
-                    bot.answer_callback_query(call.id)
-                except:
-                    pass
         
         # Проверяем, все ли серии сериала просмотрены, и если да - помечаем сериал как просмотренный
         try:
@@ -16227,16 +16338,29 @@ def series_season_all_callback(call):
         
         # Используем функцию show_episodes_page для отображения эпизодов
         try:
-            show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
-            logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
+            success = show_episodes_page(kp_id, season_num, chat_id, user_id, current_page, message_id, message_thread_id)
+            if success:
+                logger.info(f"[SERIES SEASON ALL] Сообщение с эпизодами обновлено успешно")
+            else:
+                logger.warning(f"[SERIES SEASON ALL] show_episodes_page вернула False")
         except Exception as e:
             logger.error(f"[SERIES SEASON ALL] Ошибка при обновлении сообщения с эпизодами: {e}", exc_info=True)
     except Exception as e:
-        logger.error(f"[SERIES SEASON ALL] Ошибка: {e}", exc_info=True)
+        logger.error(f"[SERIES SEASON ALL] Критическая ошибка: {e}", exc_info=True)
+    finally:
+        # ВАЖНО: всегда отвечаем на callback, чтобы кнопка не висела
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except:
-            pass
+            if 'marked_count' in locals() and 'episodes' in locals():
+                bot.answer_callback_query(call.id, f"✅ Отмечено {marked_count} эпизодов как просмотренные")
+            else:
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except Exception as answer_e:
+            logger.error(f"[SERIES SEASON ALL] Ошибка при ответе на callback: {answer_e}", exc_info=True)
+            # Пробуем еще раз без текста
+            try:
+                bot.answer_callback_query(call.id)
+            except:
+                pass
 
 @bot.message_handler(commands=['help'])
 def help_command(message):
@@ -16584,6 +16708,19 @@ def rubles_to_stars(rubles):
         stars_rounded = 1
     
     return stars_rounded
+
+def stars_to_rubles(stars):
+    """Конвертирует Telegram Stars в рубли
+    80 рублей = 1 доллар = 50 звезд
+    Формула: 1 звезда = 80/50 = 1.6 рубля
+    """
+    # Конвертируем звезды в рубли: 50 звезд = 80 рублей, значит 1 звезда = 80/50 = 1.6 рубля
+    rubles = stars * 80.0 / 50.0
+    
+    # Округляем до 2 знаков после запятой (копейки)
+    rubles_rounded = round(rubles, 2)
+    
+    return rubles_rounded
 
 def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount, provider_token=''):
     """Создает инвойс для оплаты через Telegram Stars
@@ -22596,20 +22733,33 @@ def got_payment(message):
         
         logger.info(f"[STARS SUCCESS] Платеж найден, статус={payment_data['status']}, продолжаем обработку...")
         
-        # Обновляем статус платежа
+        # Обновляем статус платежа и сохраняем telegram_payment_charge_id
         logger.info(f"[STARS SUCCESS] Обновляем статус платежа на 'succeeded'...")
+        telegram_payment_charge_id = getattr(payment, 'telegram_payment_charge_id', None)
+        logger.info(f"[STARS SUCCESS] telegram_payment_charge_id={telegram_payment_charge_id}")
+        
         try:
             from database.db_connection import get_db_connection
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE payments 
-                SET status = 'succeeded'
-                WHERE payment_id = %s
-            """, (payment_id,))
+            
+            if telegram_payment_charge_id:
+                cursor.execute("""
+                    UPDATE payments 
+                    SET status = 'succeeded', telegram_payment_charge_id = %s
+                    WHERE payment_id = %s
+                """, (telegram_payment_charge_id, payment_id))
+                logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded', charge_id сохранен")
+            else:
+                cursor.execute("""
+                    UPDATE payments 
+                    SET status = 'succeeded'
+                    WHERE payment_id = %s
+                """, (payment_id,))
+                logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded' (charge_id отсутствует)")
+            
             conn.commit()
             cursor.close()
-            logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded'")
         except Exception as e:
             logger.error(f"[STARS SUCCESS] ❌ Ошибка обновления статуса платежа: {e}", exc_info=True)
         
@@ -22674,19 +22824,14 @@ def got_payment(message):
                     if not user_name:
                         user_name = message.from_user.username or f"user_{user_id}"
                 
-                # ВАЖНО: payment_data['amount'] - это сумма в РУБЛЯХ (не в звездах!)
-                # stars_amount хранится отдельно в payment.total_amount (в звездах)
-                amount_rub = float(payment_data['amount'])  # Сумма в рублях из БД
-                stars_paid = payment.total_amount  # Количество звезд, которые заплатил пользователь
+                # Конвертируем сумму из звезд в рубли для чека
+                # payment.total_amount содержит количество звезд
+                amount_in_stars = payment.total_amount
+                amount_in_rubles = stars_to_rubles(amount_in_stars)
                 
-                logger.info(f"[STARS SUCCESS] Создание чека:")
-                logger.info(f"[STARS SUCCESS]   amount_rub={amount_rub}₽ (из БД)")
-                logger.info(f"[STARS SUCCESS]   stars_paid={stars_paid}⭐ (заплачено пользователем)")
-                logger.info(f"[STARS SUCCESS]   description={description}")
-                logger.info(f"[STARS SUCCESS]   user_name={user_name}")
-                
+                logger.info(f"[STARS SUCCESS] Создание чека: stars={amount_in_stars}, rubles={amount_in_rubles}, description={description}, user_name={user_name}")
                 check_url, pdf_url = create_check(
-                    amount_rub=amount_rub,  # Сумма в РУБЛЯХ (не в звездах!)
+                    amount_rub=float(amount_in_rubles),
                     description=description,
                     user_name=user_name
                 )
