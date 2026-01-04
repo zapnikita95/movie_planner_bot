@@ -7880,14 +7880,24 @@ def series_subscribe_callback(call):
             notification_time = next_episode_date - timedelta(days=1)
             notification_time = user_tz.localize(notification_time.replace(hour=10, minute=0))
             
-            scheduler.add_job(
-                send_series_notification,
-                'date',
-                run_date=notification_time.astimezone(pytz.utc),
-                args=[chat_id, film_id, kp_id, title, next_episode['season'], next_episode['episode']],
-                id=f'series_notification_{chat_id}_{film_id}_{user_id}_{next_episode_date.strftime("%Y%m%d")}'
-            )
-            bot.answer_callback_query(call.id, f"✅ Подписка оформлена! Уведомление: {next_episode_date.strftime('%d.%m.%Y')}")
+            logger.info(f"[SERIES SUBSCRIBE] Постановка уведомления на {notification_time}")
+            try:
+                if scheduler:
+                    scheduler.add_job(
+                        send_series_notification,
+                        'date',
+                        run_date=notification_time.astimezone(pytz.utc),
+                        args=[chat_id, film_id, kp_id, title, next_episode['season'], next_episode['episode']],
+                        id=f'series_notification_{chat_id}_{film_id}_{user_id}_{next_episode_date.strftime("%Y%m%d")}'
+                    )
+                    logger.info(f"[SERIES SUBSCRIBE] Уведомление поставлено успешно")
+                    bot.answer_callback_query(call.id, f"✅ Подписка оформлена! Уведомление: {next_episode_date.strftime('%d.%m.%Y')}")
+                else:
+                    logger.error(f"[SERIES SUBSCRIBE] scheduler не доступен!")
+                    bot.answer_callback_query(call.id, "✅ Подписка оформлена, но уведомление не установлено")
+            except Exception as scheduler_e:
+                logger.error(f"[SERIES SUBSCRIBE] Ошибка при постановке уведомления: {scheduler_e}", exc_info=True)
+                bot.answer_callback_query(call.id, "✅ Подписка оформлена, но уведомление не установлено")
         else:
             # Нет ближайшей даты - ставим периодическую проверку (через 3 недели)
             logger.info(f"[SERIES SUBSCRIBE] Нет ближайшей даты выхода, ставим проверку через 3 недели")
@@ -7895,15 +7905,24 @@ def series_subscribe_callback(call):
             import pytz
             
             check_time = datetime.now(pytz.utc) + timedelta(weeks=3)
-            scheduler.add_job(
-                check_series_for_new_episodes,
-                'date',
-                run_date=check_time,
-                args=[chat_id, film_id, kp_id, user_id],
-                id=f'series_check_{chat_id}_{film_id}_{user_id}_{int(check_time.timestamp())}'
-            )
-            logger.info(f"[SERIES SUBSCRIBE] Задача проверки поставлена на {check_time}")
-            bot.answer_callback_query(call.id, "✅ Подписка оформлена! Будем проверять новые серии")
+            logger.info(f"[SERIES SUBSCRIBE] Постановка задачи проверки на {check_time}")
+            try:
+                if scheduler:
+                    scheduler.add_job(
+                        check_series_for_new_episodes,
+                        'date',
+                        run_date=check_time,
+                        args=[chat_id, film_id, kp_id, user_id],
+                        id=f'series_check_{chat_id}_{film_id}_{user_id}_{int(check_time.timestamp())}'
+                    )
+                    logger.info(f"[SERIES SUBSCRIBE] Задача проверки поставлена успешно")
+                    bot.answer_callback_query(call.id, "✅ Подписка оформлена! Будем проверять новые серии")
+                else:
+                    logger.error(f"[SERIES SUBSCRIBE] scheduler не доступен!")
+                    bot.answer_callback_query(call.id, "✅ Подписка оформлена, но проверка не установлена")
+            except Exception as scheduler_e:
+                logger.error(f"[SERIES SUBSCRIBE] Ошибка при постановке задачи проверки: {scheduler_e}", exc_info=True)
+                bot.answer_callback_query(call.id, "✅ Подписка оформлена, но проверка не установлена")
         
         logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
         
