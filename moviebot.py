@@ -2774,25 +2774,25 @@ def premiere_detail_handler(call):
             premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
         else:
             # Иначе получаем дату премьеры из основного ответа
-        for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-            date_value = data.get(date_field)
-            if date_value:
-                try:
-                    if 'T' in str(date_value):
-                        premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                    else:
-                        premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                    break
-                except:
-                    continue
+            for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+                date_value = data.get(date_field)
+                if date_value:
+                    try:
+                        if 'T' in str(date_value):
+                            premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                        else:
+                            premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                        premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                        break
+                    except:
+                        continue
         
         text = f"<b>{title}</b> ({year})\n\n"
         if premiere_date_str:
             if russia_release:
                 text += f"📅 Премьера в России: {premiere_date_str}\n"
             else:
-            text += f"📅 Премьера: {premiere_date_str}\n"
+                text += f"📅 Премьера: {premiere_date_str}\n"
         if director_str != '—':
             text += f"🎥 Режиссёр: {director_str}\n"
         if countries != '—':
