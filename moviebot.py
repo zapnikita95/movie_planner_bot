@@ -21775,17 +21775,32 @@ def handle_pay_stars_callback(call):
 def checkout(pre_checkout_query):
     """Обработчик pre_checkout_query для Telegram Stars"""
     try:
-        logger.info(f"[STARS] pre_checkout_query получен: id={pre_checkout_query.id}, user_id={pre_checkout_query.from_user.id}")
+        query_id = pre_checkout_query.id
+        user_id = pre_checkout_query.from_user.id
+        currency = pre_checkout_query.currency
+        total_amount = pre_checkout_query.total_amount
+        invoice_payload = pre_checkout_query.invoice_payload
         
-        # Всегда подтверждаем запрос
-        bot.answer_pre_checkout_query(pre_checkout_query.id, ok=True)
-        logger.info(f"[STARS] pre_checkout_query подтвержден: id={pre_checkout_query.id}")
+        logger.info(f"[STARS] pre_checkout_query получен: id={query_id}, user_id={user_id}, currency={currency}, total_amount={total_amount}, payload={invoice_payload}")
+        
+        # Проверяем, что это платеж через Stars (XTR)
+        if currency != 'XTR':
+            logger.warning(f"[STARS] pre_checkout_query не для Stars: currency={currency}")
+            bot.answer_pre_checkout_query(query_id, ok=False, error_message="Поддерживается только оплата звездами")
+            return
+        
+        # Всегда подтверждаем запрос быстро (в течение 10 секунд)
+        bot.answer_pre_checkout_query(query_id, ok=True)
+        logger.info(f"[STARS] pre_checkout_query подтвержден: id={query_id}")
+        
     except Exception as e:
         logger.error(f"[STARS] Ошибка обработки pre_checkout_query: {e}", exc_info=True)
         try:
-            bot.answer_pre_checkout_query(pre_checkout_query.id, ok=False, error_message="Ошибка обработки платежа")
-        except:
-            pass
+            query_id = pre_checkout_query.id if hasattr(pre_checkout_query, 'id') else None
+            if query_id:
+                bot.answer_pre_checkout_query(query_id, ok=False, error_message="Ошибка обработки платежа")
+        except Exception as e2:
+            logger.error(f"[STARS] Ошибка при отправке ответа на pre_checkout_query: {e2}", exc_info=True)
 
 @bot.message_handler(content_types=['successful_payment'])
 def got_payment(message):
