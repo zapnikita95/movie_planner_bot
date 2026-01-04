@@ -4095,8 +4095,8 @@ def handle_reaction(reaction):
     if not link:
         logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
         # Пробуем найти фильм в БД по последним добавленным фильмам в этом чате
-                try:
-                    with db_lock:
+        try:
+            with db_lock:
                 # Ищем последние фильмы в этом чате (за последний час)
                 cursor.execute("""
                     SELECT link FROM movies 
