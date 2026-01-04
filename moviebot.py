@@ -7095,7 +7095,6 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 # Для обновления сообщения в треде используем API напрямую
                 if message_thread_id:
                     # Используем API напрямую для поддержки тредов
-                    import json
                     reply_markup_json = json.dumps(markup.to_dict()) if markup else None
                     params = {
                         'chat_id': chat_id,
@@ -15030,7 +15029,6 @@ def series_track_callback(call):
             text_msg = f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:"
             if message_thread_id:
                 # Используем API напрямую для поддержки тредов
-                import json
                 reply_markup_json = json.dumps(markup.to_dict()) if markup else None
                 params = {
                     'chat_id': chat_id,
@@ -18032,10 +18030,27 @@ def handle_payment_callback(call):
                 # Конвертируем в звезды для кнопки оплаты звездами
                 stars_amount = rubles_to_stars(final_price)
                 
+                # Сохраняем данные платежа в состояние для оплаты звездами (чтобы не превышать лимит callback_data в 64 байта)
+                if user_id not in user_payment_state:
+                    user_payment_state[user_id] = {}
+                user_payment_state[user_id]['stars_payment'] = {
+                    'payment_id': payment_id,
+                    'sub_type': sub_type,
+                    'group_size': group_size,
+                    'plan_type': plan_type,
+                    'period_type': period_type,
+                    'amount': final_price,
+                    'stars_amount': stars_amount,
+                    'chat_id': payment_chat_id_for_db,
+                    'description': description
+                }
+                
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
-                # Добавляем кнопку оплаты звездами
-                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
+                # Добавляем кнопку оплаты звездами (используем короткий callback_data)
+                # Используем только payment_id (первые 8 символов) для экономии места
+                payment_id_short = payment_id[:8]
+                callback_data_stars = f"pay_stars:{payment_id_short}"
                 markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
                 
                 if group_size:
@@ -21363,6 +21378,81 @@ def handle_plan_day_or_date(message):
         logger.error(f"[PLAN DAY/DATE HANDLER] Ошибка: {e}", exc_info=True)
         try:
             bot.reply_to(message, "❌ Произошла ошибка при обработке даты. Попробуйте еще раз.")
+        except:
+            pass
+
+# Обработчик для оплаты звездами (callback от кнопки)
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("pay_stars:"))
+def handle_pay_stars_callback(call):
+    """Обработчик нажатия на кнопку оплаты звездами"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Извлекаем короткий payment_id из callback_data
+        payment_id_short = call.data.split(":")[1]
+        logger.info(f"[STARS CALLBACK] Начало обработки: user_id={user_id}, payment_id_short={payment_id_short}")
+        
+        # Получаем данные платежа из состояния
+        if user_id not in user_payment_state or 'stars_payment' not in user_payment_state[user_id]:
+            logger.error(f"[STARS CALLBACK] Данные платежа не найдены в состоянии для user_id={user_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: данные платежа не найдены. Попробуйте заново.", show_alert=True)
+            return
+        
+        payment_data = user_payment_state[user_id]['stars_payment']
+        full_payment_id = payment_data['payment_id']
+        
+        # Проверяем, что короткий ID совпадает
+        if not full_payment_id.startswith(payment_id_short):
+            logger.error(f"[STARS CALLBACK] Несоответствие payment_id: short={payment_id_short}, full={full_payment_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: неверный идентификатор платежа.", show_alert=True)
+            return
+        
+        stars_amount = payment_data['stars_amount']
+        description = payment_data['description']
+        
+        logger.info(f"[STARS CALLBACK] Создание invoice: stars_amount={stars_amount}, payment_id={full_payment_id}")
+        
+        # Создаем invoice для оплаты звездами
+        # Используем sendInvoice с параметром prices в звездах
+        try:
+            # Формируем invoice_payload с полным payment_id
+            invoice_payload = f"stars_{full_payment_id}"
+            
+            # Создаем invoice
+            bot.send_invoice(
+                chat_id=chat_id,
+                title=description,
+                description=description,
+                invoice_payload=invoice_payload,
+                provider_token="",  # Для Telegram Stars не нужен provider_token
+                currency="XTR",  # XTR - валюта Telegram Stars
+                prices=[telebot.types.LabeledPrice(label=description, amount=int(stars_amount))],
+                start_parameter=full_payment_id[:16],  # Ограничение 64 символа
+                photo_url=None,
+                photo_size=None,
+                photo_width=None,
+                photo_height=None,
+                need_name=False,
+                need_phone_number=False,
+                need_email=False,
+                need_shipping_address=False,
+                send_phone_number_to_provider=False,
+                send_email_to_provider=False,
+                is_flexible=False
+            )
+            
+            logger.info(f"[STARS CALLBACK] Invoice отправлен успешно: payment_id={full_payment_id}")
+            
+        except Exception as e:
+            logger.error(f"[STARS CALLBACK] Ошибка создания invoice: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"[STARS CALLBACK] Ошибка обработки callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка. Попробуйте позже.", show_alert=True)
         except:
             pass
 
