@@ -3511,7 +3511,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     if is_series and user_id:
                         if has_notifications_access(chat_id, user_id):
                             markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                         else:
                             markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                             markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
@@ -3528,10 +3528,10 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     has_access = has_notifications_access(chat_id, user_id)
                     series_text = f"📺 <b>Сериал добавлен в базу!</b>\n\n"
                     if has_access:
-                    series_text += f"Вы можете:\n"
-                    series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
-                    series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
-                    series_text += f"Используйте команду /seasons для управления сериалами."
+                        series_text += f"Вы можете:\n"
+                        series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
+                        series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
+                        series_text += f"Используйте команду /seasons для управления сериалами."
                     else:
                         series_text += f"🔒 <b>Функционал доступен с подпиской на уведомления о сериалах</b>\n\n"
                         series_text += f"Используйте /payment для оформления подписки."
@@ -3539,7 +3539,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                     series_markup = InlineKeyboardMarkup(row_width=1)
                     if has_access:
                         series_markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                    series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                        series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                     else:
                         series_markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                         series_markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
