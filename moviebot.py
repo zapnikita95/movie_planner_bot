@@ -6895,6 +6895,52 @@ def handle_add_emoji(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_custom_emoji:"))
+def handle_add_custom_emoji(call):
+    """Обработчик добавления кастомного эмодзи в список watched"""
+    try:
+        custom_emoji_id = call.data.split(":", 1)[1]
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Получаем текущие эмодзи
+        current_emojis = get_watched_emojis(chat_id)
+        current_custom_ids = get_watched_custom_emoji_ids(chat_id)
+        
+        if custom_emoji_id in current_custom_ids:
+            bot.answer_callback_query(call.id, "Кастомное эмодзи уже добавлено", show_alert=True)
+            return
+        
+        # Добавляем кастомное эмодзи
+        new_custom_ids = list(current_custom_ids) + [custom_emoji_id]
+        emojis_str = ''.join(current_emojis)
+        if new_custom_ids:
+            custom_str = ','.join([f"custom:{cid}" for cid in new_custom_ids])
+            emojis_str = emojis_str + (',' + custom_str if emojis_str else custom_str)
+        
+        # Сохраняем в БД
+        with db_lock:
+            cursor.execute("""
+                INSERT INTO settings (chat_id, key, value) 
+                VALUES (%s, 'watched_emoji', %s) 
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (chat_id, emojis_str))
+            conn.commit()
+        
+        bot.answer_callback_query(call.id, f"✅ Кастомное эмодзи добавлено!")
+        bot.edit_message_text(
+            f"✅ Кастомное эмодзи (ID: {custom_emoji_id}) добавлено в список разрешённых для отметки о просмотре!",
+            chat_id,
+            call.message.message_id
+        )
+        logger.info(f"[ADD CUSTOM EMOJI] Кастомное эмодзи {custom_emoji_id} добавлено в watched для чата {chat_id} пользователем {user_id}")
+    except Exception as e:
+        logger.error(f"[ADD CUSTOM EMOJI] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка при добавлении", show_alert=True)
+        except:
+            pass
+
 # Обработчик ответов на /list для отметки фильмов как просмотренных
 @bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in list_messages)
 def handle_list_reply(message):
