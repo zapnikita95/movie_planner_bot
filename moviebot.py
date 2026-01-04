@@ -7152,14 +7152,21 @@ def handle_rating(message):
                                             if found_description_msg and hasattr(found_description_msg, 'message_thread_id') and found_description_msg.message_thread_id:
                                                 message_thread_id = found_description_msg.message_thread_id
                                             
+                                            logger.info(f"[HANDLE RATING] Вызываю show_film_info_with_buttons: kp_id={kp_id}, message_id={found_description_msg.message_id}, message_thread_id={message_thread_id}")
+                                            # show_film_info_with_buttons теперь всегда добавляет строку о личной оценке пользователя, что гарантирует изменение текста
                                             show_film_info_with_buttons(
                                                 chat_id, user_id, info, link, kp_id, existing,
                                                 message_id=found_description_msg.message_id,
                                                 message_thread_id=message_thread_id
                                             )
                                             logger.info(f"[HANDLE RATING] Обновлено сообщение с описанием фильма: kp_id={kp_id}, message_id={found_description_msg.message_id}")
+                                except telebot.apihelper.ApiTelegramException as api_e:
+                                    error_str = str(api_e).lower()
+                                    logger.error(f"[HANDLE RATING] Telegram API ошибка при обновлении сообщения: {api_e}", exc_info=True)
+                                    logger.error(f"[HANDLE RATING] error_code={getattr(api_e, 'error_code', 'N/A')}, result_json={getattr(api_e, 'result_json', {})}")
+                                    # Ошибка уже обработана в show_film_info_with_buttons, просто логируем
                                 except Exception as update_e:
-                                    logger.error(f"[HANDLE RATING] Ошибка обновления сообщения с описанием: {update_e}", exc_info=True)
+                                    logger.error(f"[HANDLE RATING] Неизвестная ошибка обновления сообщения с описанием: {update_e}", exc_info=True)
                         except Exception as find_e:
                             logger.warning(f"[HANDLE RATING] Не удалось найти/обновить исходное сообщение: {find_e}")
                 except Exception as db_error:
@@ -10937,12 +10944,38 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         avg = float(avg) if avg is not None else None
                     else:
                         avg = None
+                    
+                    # Получаем личную оценку пользователя (если есть)
+                    user_rating = None
+                    if user_id:
+                        cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
+                        user_rating_row = cursor.fetchone()
+                        if user_rating_row:
+                            user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
                 
                 text += f"\n\n✅ <b>Просмотрено</b>"
                 if avg:
                     text += f"\n⭐ <b>Средняя оценка: {avg:.1f}/10</b>"
+                # Добавляем строку о личной оценке пользователя (чтобы текст всегда менялся при обновлении)
+                if user_rating is not None:
+                    text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
+                else:
+                    text += f"\n⭐ <b>Ваша оценка: —</b>"
             else:
                 text += f"\n\n⏳ <b>Ещё не просмотрено</b>"
+                # Добавляем строку о личной оценке пользователя даже если фильм не просмотрен (чтобы текст всегда менялся)
+                if user_id and film_id:
+                    with db_lock:
+                        cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
+                        user_rating_row = cursor.fetchone()
+                        if user_rating_row:
+                            user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
+                            if user_rating is not None:
+                                text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
+                            else:
+                                text += f"\n⭐ <b>Ваша оценка: —</b>"
+                        else:
+                            text += f"\n⭐ <b>Ваша оценка: —</b>"
         
         # Создаем кнопки
         markup = InlineKeyboardMarkup(row_width=1)
@@ -11472,14 +11505,21 @@ def handle_confirm_rating(call):
                                     if found_description_msg and hasattr(found_description_msg, 'message_thread_id') and found_description_msg.message_thread_id:
                                         message_thread_id = found_description_msg.message_thread_id
                                     
+                                    logger.info(f"[HANDLE CONFIRM RATING] Вызываю show_film_info_with_buttons: kp_id={kp_id}, message_id={found_description_msg.message_id}, message_thread_id={message_thread_id}")
+                                    # show_film_info_with_buttons теперь всегда добавляет строку о личной оценке пользователя, что гарантирует изменение текста
                                     show_film_info_with_buttons(
                                         chat_id, user_id, info, link, kp_id, existing,
                                         message_id=found_description_msg.message_id,
                                         message_thread_id=message_thread_id
                                     )
                                     logger.info(f"[HANDLE CONFIRM RATING] Обновлено сообщение с описанием фильма: kp_id={kp_id}, message_id={found_description_msg.message_id}")
+                            except telebot.apihelper.ApiTelegramException as api_e:
+                                error_str = str(api_e).lower()
+                                logger.error(f"[HANDLE CONFIRM RATING] Telegram API ошибка при обновлении сообщения: {api_e}", exc_info=True)
+                                logger.error(f"[HANDLE CONFIRM RATING] error_code={getattr(api_e, 'error_code', 'N/A')}, result_json={getattr(api_e, 'result_json', {})}")
+                                # Ошибка уже обработана в show_film_info_with_buttons, просто логируем
                             except Exception as update_e:
-                                logger.error(f"[HANDLE CONFIRM RATING] Ошибка обновления сообщения с описанием: {update_e}", exc_info=True)
+                                logger.error(f"[HANDLE CONFIRM RATING] Неизвестная ошибка обновления сообщения с описанием: {update_e}", exc_info=True)
                     except Exception as find_e:
                         logger.warning(f"[HANDLE CONFIRM RATING] Не удалось найти/обновить исходное сообщение: {find_e}")
                 
