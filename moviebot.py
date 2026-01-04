@@ -15398,8 +15398,8 @@ def seasons_command(message):
             button_text = button_text[:27] + "..."
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
     
-    # Добавляем кнопку "Просмотренные сериалы" если есть доступ и есть просмотренные сериалы
-    if has_access and fully_watched_series:
+    # Добавляем кнопку "Просмотренные сериалы" если есть просмотренные сериалы
+    if fully_watched_series:
         watched_button_text = "✅ Просмотренные"
         if len(fully_watched_series) > 0:
             # Показываем количество просмотренных сериалов
@@ -15609,8 +15609,8 @@ def seasons_list_callback(call):
                 button_text = button_text[:27] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
         
-        # Проверяем доступ и добавляем кнопку "Просмотренные сериалы" если есть просмотренные
-        if has_notifications_access(chat_id, user_id) and fully_watched_series:
+        # Добавляем кнопку "Просмотренные сериалы" если есть просмотренные
+        if fully_watched_series:
             watched_button_text = "✅ Просмотренные"
             if len(fully_watched_series) > 0:
                 watched_button_text = f"✅ Просмотренные ({len(fully_watched_series)})"
@@ -15633,21 +15633,15 @@ def watched_series_list_callback(call):
         user_id = call.from_user.id
         message_id = call.message.message_id
         
-        # Проверяем доступ к функциям уведомлений
-        if not has_notifications_access(chat_id, user_id):
-            bot.answer_callback_query(
-                call.id, 
-                "🔒 Функционал можно подключить через /payment", 
-                show_alert=True
-            )
-            return
-        
         from datetime import datetime as dt
         from api.kinopoisk_api import get_seasons_data
         
+        # Проверяем доступ к функциям уведомлений
+        has_access = has_notifications_access(chat_id, user_id)
+        
         # Получаем все сериалы
         with db_lock:
-            cursor.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
+            cursor.execute('SELECT id, title, kp_id, watched FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
             series = cursor.fetchall()
         
         if not series:
@@ -15662,10 +15656,26 @@ def watched_series_list_callback(call):
                 film_id = row.get('id')
                 title = row.get('title')
                 kp_id = row.get('kp_id')
+                watched_in_db = bool(row.get('watched'))
             else:
                 film_id = row[0]
                 title = row[1]
                 kp_id = row[2]
+                watched_in_db = bool(row[3]) if len(row) > 3 else False
+            
+            # Если сериал помечен как просмотренный в БД, добавляем его в список
+            if watched_in_db:
+                watched_series.append({
+                    'title': title,
+                    'kp_id': kp_id,
+                    'film_id': film_id,
+                    'total_episodes': 0  # Не важно для отображения
+                })
+                continue
+            
+            # Если нет доступа, пропускаем проверку эпизодов
+            if not has_access:
+                continue
             
             # Получаем данные о сезонах
             seasons_data = get_seasons_data(kp_id)
@@ -15706,12 +15716,13 @@ def watched_series_list_callback(call):
             watched_episodes = 0
             
             # Получаем просмотренные эпизоды из базы
-            cursor.execute('''
-                SELECT season_number, episode_number 
-                FROM series_tracking 
-                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-            ''', (chat_id, film_id, user_id))
-            watched_rows = cursor.fetchall()
+            with db_lock:
+                cursor.execute('''
+                    SELECT season_number, episode_number 
+                    FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id))
+                watched_rows = cursor.fetchall()
             watched_set = set()
             for w_row in watched_rows:
                 if isinstance(w_row, dict):
