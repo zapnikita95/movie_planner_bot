@@ -1635,9 +1635,25 @@ def dice_game_handler(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
+        # Если состояние игры не инициализировано (например, при примере из настроек),
+        # инициализируем его
         if chat_id not in dice_game_state:
-            bot.answer_callback_query(call.id, "Игра уже завершена", show_alert=True)
-            return
+            # Проверяем, что это групповой чат
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    bot.answer_callback_query(call.id, "Игра в кубик работает только в групповых чатах", show_alert=True)
+                    return
+            except Exception as e:
+                logger.warning(f"[DICE GAME] Не удалось получить информацию о чате {chat_id}: {e}")
+            
+            # Инициализируем состояние игры для примера из настроек
+            logger.info(f"[DICE GAME] Инициализация состояния игры для чата {chat_id} (пример из настроек)")
+            dice_game_state[chat_id] = {
+                'participants': {},
+                'message_id': call.message.message_id,
+                'start_time': datetime.now(plans_tz)
+            }
         
         game_state = dice_game_state[chat_id]
         
@@ -3871,6 +3887,7 @@ def send_welcome(message):
         else:
             markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
+        markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
         bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
@@ -3952,6 +3969,9 @@ def start_menu_callback(call):
         elif action == 'payment':
             message.text = '/payment'
             payment_command(message)
+        elif action == 'settings':
+            message.text = '/settings'
+            settings_command(message)
         elif action == 'help':
             message.text = '/help'
             help_command(message)
@@ -4024,6 +4044,7 @@ def schedule_back_callback(call):
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
+        markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
         # Отправляем главное меню
@@ -4065,7 +4086,18 @@ def back_to_start_menu_callback(call):
         markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+        # Добавляем кнопку Билеты всегда, но под замочком если нет подписки
+        try:
+            if has_tickets_access(chat_id, user_id):
+                markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
+        except Exception as e:
+            # В случае ошибки всегда показываем заблокированную версию
+            logger.warning(f"Ошибка при проверке доступа к билетам для user_id={user_id}: {e}")
+            markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
+        markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
         # Редактируем сообщение или отправляем новое
