@@ -15105,15 +15105,19 @@ def seasons_command(message):
                 sub_row = cursor.fetchone()
                 is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
         
+        # Проверяем статус выхода сериала (для всех, независимо от доступа)
+        is_airing = False
+        try:
+            is_airing, _ = get_series_airing_status(kp_id)
+        except Exception as e:
+            logger.warning(f"[SEASONS] Ошибка проверки статуса выхода для kp_id={kp_id}: {e}")
+        
         # Проверяем статус просмотра (только если есть доступ)
         all_episodes_watched = False
         has_some_watched = False
         if has_access:
             seasons_data = get_seasons_data(kp_id)
             if seasons_data:
-                # Проверяем, выходит ли сериал
-                is_airing, _ = get_series_airing_status(kp_id)
-                
                 # Получаем просмотренные эпизоды
                 with db_lock:
                     cursor.execute('''
@@ -15146,7 +15150,8 @@ def seasons_command(message):
             'kp_id': kp_id,
             'film_id': film_id,
             'is_subscribed': is_subscribed,
-            'all_watched': all_episodes_watched
+            'all_watched': all_episodes_watched,
+            'is_airing': is_airing
         }
         
         if all_episodes_watched:
@@ -15161,14 +15166,18 @@ def seasons_command(message):
     
     # Частично просмотренные сериалы (приоритетные) - в начале
     for series_info in partially_watched_series:
-        button_text = f"👁️ {series_info['title']}"
+        # Добавляем статус выхода сериала
+        airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
+        button_text = f"👁️ {airing_emoji} {series_info['title']}"
         if len(button_text) > 30:
             button_text = button_text[:27] + "..."
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
     
     # Не просмотренные сериалы
     for series_info in not_watched_series:
-        button_text = series_info['title']
+        # Добавляем статус выхода сериала
+        airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
+        button_text = f"{airing_emoji} {series_info['title']}"
         if len(button_text) > 30:
             button_text = button_text[:27] + "..."
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
@@ -15291,14 +15300,18 @@ def seasons_list_callback(call):
                 sub_row = cursor.fetchone()
                 is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
             
+            # Проверяем статус выхода сериала (для всех, независимо от доступа)
+            is_airing = False
+            try:
+                is_airing, _ = get_series_airing_status(kp_id)
+            except Exception as e:
+                logger.warning(f"[SEASONS LIST] Ошибка проверки статуса выхода для kp_id={kp_id}: {e}")
+            
             # Проверяем статус просмотра
             all_episodes_watched = False
             has_some_watched = False
             seasons_data = get_seasons_data(kp_id)
             if seasons_data:
-                # Проверяем, выходит ли сериал
-                is_airing, _ = get_series_airing_status(kp_id)
-                
                 # Получаем просмотренные эпизоды
                 with db_lock:
                     cursor.execute('''
@@ -15331,7 +15344,8 @@ def seasons_list_callback(call):
                 'kp_id': kp_id,
                 'film_id': film_id,
                 'is_subscribed': is_subscribed,
-                'all_watched': all_episodes_watched
+                'all_watched': all_episodes_watched,
+                'is_airing': is_airing
             }
             
             if all_episodes_watched:
@@ -15346,14 +15360,18 @@ def seasons_list_callback(call):
         
         # Частично просмотренные сериалы (приоритетные) - в начале
         for series_info in partially_watched_series:
-            button_text = f"👁️ {series_info['title']}"
+            # Добавляем статус выхода сериала
+            airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
+            button_text = f"👁️ {airing_emoji} {series_info['title']}"
             if len(button_text) > 30:
                 button_text = button_text[:27] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
         
         # Не просмотренные сериалы
         for series_info in not_watched_series:
-            button_text = series_info['title']
+            # Добавляем статус выхода сериала
+            airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
+            button_text = f"{airing_emoji} {series_info['title']}"
             if len(button_text) > 30:
                 button_text = button_text[:27] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
