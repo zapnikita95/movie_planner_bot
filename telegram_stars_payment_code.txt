@@ -1,0 +1,524 @@
+================================================================================
+ВЕСЬ КОД, СВЯЗАННЫЙ С TELEGRAM STARS ПЛАТЕЖАМИ
+================================================================================
+Дата создания: 2026-01-04
+Файл: moviebot.py
+
+================================================================================
+1. ФУНКЦИЯ КОНВЕРТАЦИИ РУБЛЕЙ В ЗВЕЗДЫ
+================================================================================
+
+def rubles_to_stars(rubles):
+    """Конвертирует рубли в Telegram Stars
+    80 рублей = 1 доллар = 50 звезд
+    Формула: 1 рубль = 50/80 = 0.625 звезды
+    Округляет копейки до рублей и звезды до целых значений
+    """
+    # Округляем рубли до целых (убираем копейки)
+    rubles_rounded = round(rubles)
+    
+    # Конвертируем в звезды: 80 рублей = 50 звезд, значит 1 рубль = 50/80 = 0.625 звезды
+    stars = rubles_rounded * 50.0 / 80.0
+    
+    # Округляем звезды до целых значений (вверх)
+    stars_rounded = int(round(stars))
+    
+    # Минимум 1 звезда, если сумма больше 0
+    if stars_rounded == 0 and rubles_rounded > 0:
+        stars_rounded = 1
+    
+    return stars_rounded
+
+================================================================================
+2. ФУНКЦИЯ СОЗДАНИЯ INVOICE ДЛЯ STARS
+================================================================================
+
+def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount, provider_token=None):
+    """Создает инвойс для оплаты через Telegram Stars
+    
+    Args:
+        bot: экземпляр TeleBot
+        chat_id: ID чата для отправки инвойса
+        title: название товара/услуги
+        description: описание товара/услуги
+        payload: уникальный идентификатор платежа
+        stars_amount: количество звезд
+        provider_token: не используется для Stars, но оставлен для совместимости
+    
+    Returns:
+        True если инвойс успешно отправлен, False в противном случае
+    """
+    try:
+        # Для Telegram Stars используем валюту XTR
+        # Согласно документации: https://core.telegram.org/bots/api#sendinvoice
+        bot.send_invoice(
+            chat_id=chat_id,
+            title=title,
+            description=description,
+            invoice_payload=payload,
+            provider_token=provider_token,  # Для Stars может быть None или пустая строка
+            currency='XTR',  # XTR - валюта Telegram Stars
+            prices=[telebot.types.LabeledPrice(label=description, amount=stars_amount)],  # amount в звездах
+            start_parameter=payload[:64] if len(payload) > 64 else payload  # start_parameter ограничен 64 символами
+        )
+        return True
+    except Exception as e:
+        logger.error(f"[STARS] Ошибка создания инвойса через Stars: {e}", exc_info=True)
+        return False
+
+================================================================================
+3. СОЗДАНИЕ КНОПКИ ОПЛАТЫ ЗВЕЗДАМИ (В ОБРАБОТЧИКЕ payment:subscribe:...)
+================================================================================
+
+# Определяем chat_id для платежа (до использования)
+if sub_type == 'group' and group_chat_id:
+    payment_chat_id = group_chat_id
+else:
+    payment_chat_id = chat_id
+
+# Показываем выбор способа оплаты
+# Конвертируем в звезды для кнопки оплаты звездами
+stars_amount = rubles_to_stars(final_price)
+
+# Сохраняем данные платежа в состояние для оплаты (чтобы не превышать лимит callback_data в 64 байта)
+import uuid as uuid_module
+payment_id = str(uuid_module.uuid4())
+
+if user_id not in user_payment_state:
+    user_payment_state[user_id] = {}
+user_payment_state[user_id]['payment_data'] = {
+    'payment_id': payment_id,
+    'sub_type': sub_type,
+    'group_size': group_size,
+    'plan_type': plan_type,
+    'period_type': period_type,
+    'amount': final_price,
+    'stars_amount': stars_amount,
+    'chat_id': payment_chat_id,
+    'group_chat_id': group_chat_id if sub_type == 'group' else None,
+    'group_username': group_username if sub_type == 'group' else None,
+    'group_title': group_title if sub_type == 'group' else None
+}
+
+# Обновляем сообщение с кнопками выбора способа оплаты
+text += f"\n\n💳 <b>Выберите способ оплаты</b>\n"
+text += f"💰 Сумма: <b>{final_price}₽{period_suffix}</b> ({stars_amount}⭐)\n"
+
+markup = InlineKeyboardMarkup(row_width=1)
+# Кнопка оплаты звездами (без ЮKassa)
+payment_id_short = payment_id[:8]
+callback_data_stars = f"pay_stars:{payment_id_short}"
+markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+
+# Кнопка оплаты через ЮKassa (только если доступна)
+if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
+    callback_data_yookassa = f"pay_yookassa:{payment_id_short}"
+    markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
+
+================================================================================
+4. ОБРАБОТЧИК CALLBACK ДЛЯ КНОПКИ "ОПЛАТИТЬ ЗВЕЗДАМИ"
+================================================================================
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("pay_stars:"))
+def handle_pay_stars_callback(call):
+    """Обработчик нажатия на кнопку оплаты звездами"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Извлекаем короткий payment_id из callback_data
+        payment_id_short = call.data.split(":")[1]
+        logger.info(f"[STARS CALLBACK] Начало обработки: user_id={user_id}, payment_id_short={payment_id_short}")
+        
+        # Получаем данные платежа из состояния
+        if user_id not in user_payment_state or 'payment_data' not in user_payment_state[user_id]:
+            logger.error(f"[STARS CALLBACK] Данные платежа не найдены в состоянии для user_id={user_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: данные платежа не найдены. Попробуйте заново.", show_alert=True)
+            return
+        
+        payment_data = user_payment_state[user_id]['payment_data']
+        full_payment_id = payment_data['payment_id']
+        
+        # Проверяем, что короткий ID совпадает
+        if not full_payment_id.startswith(payment_id_short):
+            logger.error(f"[STARS CALLBACK] Несоответствие payment_id: short={payment_id_short}, full={full_payment_id}")
+            bot.answer_callback_query(call.id, "❌ Ошибка: неверный идентификатор платежа.", show_alert=True)
+            return
+        
+        stars_amount = payment_data['stars_amount']
+        sub_type = payment_data['sub_type']
+        plan_type = payment_data['plan_type']
+        period_type = payment_data['period_type']
+        final_price = payment_data['amount']
+        payment_chat_id = payment_data.get('chat_id', chat_id)
+        
+        # Формируем заголовок и описание для invoice
+        subscription_type_name = 'Личная подписка' if sub_type == 'personal' else 'Групповая подписка'
+        
+        period_names = {
+            'month': 'месяц',
+            '3months': '3 месяца',
+            'year': 'год',
+            'lifetime': 'навсегда'
+        }
+        period_name = period_names.get(period_type, period_type)
+        
+        plan_names = {
+            'notifications': 'Уведомления о сериалах',
+            'recommendations': 'Персональные рекомендации',
+            'tickets': 'Билеты в кино',
+            'all': 'Все режимы'
+        }
+        plan_name = plan_names.get(plan_type, plan_type)
+        
+        invoice_title = subscription_type_name
+        invoice_description = f"{plan_name}, период: {period_name}"
+        
+        # Сохраняем информацию о платеже в БД (без yookassa_payment_id)
+        from database.db_operations import save_payment
+        save_payment(
+            payment_id=full_payment_id,
+            yookassa_payment_id=None,  # Для Stars нет yookassa_payment_id
+            user_id=user_id,
+            chat_id=payment_chat_id,
+            subscription_type=sub_type,
+            plan_type=plan_type,
+            period_type=period_type,
+            group_size=payment_data.get('group_size'),
+            amount=final_price,
+            status='pending'
+        )
+        
+        logger.info(f"[STARS CALLBACK] ===== НАЧАЛО СОЗДАНИЯ INVOICE =====")
+        logger.info(f"[STARS CALLBACK] stars_amount={stars_amount}, payment_id={full_payment_id}")
+        logger.info(f"[STARS CALLBACK] sub_type={sub_type}, plan_type={plan_type}, period_type={period_type}")
+        logger.info(f"[STARS CALLBACK] invoice_title='{invoice_title}', invoice_description='{invoice_description}'")
+        
+        # Создаем invoice для оплаты звездами напрямую через Telegram API
+        try:
+            # Формируем invoice_payload с полным payment_id
+            invoice_payload = f"stars_{full_payment_id}"
+            logger.info(f"[STARS CALLBACK] invoice_payload сформирован: {invoice_payload}")
+            
+            # Создаем invoice
+            logger.info(f"[STARS CALLBACK] Вызываем bot.send_invoice с параметрами:")
+            logger.info(f"[STARS CALLBACK]   chat_id={chat_id}")
+            logger.info(f"[STARS CALLBACK]   currency=XTR")
+            logger.info(f"[STARS CALLBACK]   amount={int(stars_amount)} stars")
+            logger.info(f"[STARS CALLBACK]   invoice_payload={invoice_payload}")
+            
+            bot.send_invoice(
+                chat_id=chat_id,
+                title=invoice_title,
+                description=invoice_description,
+                invoice_payload=invoice_payload,
+                provider_token="",  # Для Telegram Stars не нужен provider_token
+                currency="XTR",  # XTR - валюта Telegram Stars
+                prices=[LabeledPrice(label=invoice_description, amount=int(stars_amount))],
+                start_parameter=full_payment_id[:16],  # Ограничение 64 символа
+                photo_url=None,
+                photo_size=None,
+                photo_width=None,
+                photo_height=None,
+                need_name=False,
+                need_phone_number=False,
+                need_email=False,
+                need_shipping_address=False,
+                send_phone_number_to_provider=False,
+                send_email_to_provider=False,
+                is_flexible=False
+            )
+            
+            logger.info(f"[STARS CALLBACK] ✅ Invoice отправлен успешно: payment_id={full_payment_id}")
+            logger.info(f"[STARS CALLBACK] ⚠️ ВАЖНО: Для Stars pre_checkout_query НЕ отправляется!")
+            logger.info(f"[STARS CALLBACK] ⚠️ Ожидаем только successful_payment с payload={invoice_payload}")
+            logger.info(f"[STARS CALLBACK] ===== КОНЕЦ СОЗДАНИЯ INVOICE =====")
+            
+        except Exception as e:
+            logger.error(f"[STARS CALLBACK] Ошибка создания invoice: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"[STARS CALLBACK] Ошибка обработки callback: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка. Попробуйте позже.", show_alert=True)
+        except:
+            pass
+
+================================================================================
+5. ОБРАБОТЧИК pre_checkout_query (НЕ ВЫЗЫВАЕТСЯ ДЛЯ STARS!)
+================================================================================
+
+@bot.pre_checkout_query_handler(func=lambda query: True)
+def process_pre_checkout_query(pre_checkout_query):
+    """Обработчик pre_checkout_query - ВАЖНО: для Stars (XTR) этот handler НЕ вызывается!
+    
+    Telegram не отправляет pre_checkout_query для платежей в Stars.
+    Этот handler нужен только для обычных платежей (карты, YooKassa и т.д.)
+    """
+    query_id = None
+    try:
+        query_id = pre_checkout_query.id
+        user_id = pre_checkout_query.from_user.id
+        currency = pre_checkout_query.currency
+        total_amount = pre_checkout_query.total_amount
+        invoice_payload = pre_checkout_query.invoice_payload
+        
+        logger.info(f"[PRE CHECKOUT] ===== ПОЛУЧЕН pre_checkout_query =====")
+        logger.info(f"[PRE CHECKOUT] user_id={user_id}, payload={invoice_payload}, currency={currency}, amount={total_amount}")
+        logger.info(f"[PRE CHECKOUT] ⚠️ ВНИМАНИЕ: Для Stars (XTR) этот handler НЕ вызывается!")
+        logger.info(f"[PRE CHECKOUT] Это обычный платеж (не Stars), обрабатываем...")
+        
+        # КРИТИЧНО: Отвечаем мгновенно, до любых проверок, чтобы избежать таймаута
+        # Проверяем только базовые условия для Stars платежей
+        if currency == 'XTR' and invoice_payload and invoice_payload.startswith('stars_'):
+            # Это наш Stars платеж - отвечаем OK сразу
+            # Хотя для Stars это не должно произойти, но на всякий случай
+            bot.answer_pre_checkout_query(query_id, ok=True)
+            logger.warning(f"[PRE CHECKOUT] ⚠️ Неожиданно получен pre_checkout для Stars! Ответили OK: id={query_id}")
+        else:
+            # Не наш платеж или обычный платеж - отклоняем или обрабатываем
+            error_msg = "Поддерживается только оплата звездами Telegram" if currency != 'XTR' else "Неверный идентификатор платежа"
+            bot.answer_pre_checkout_query(query_id, ok=False, error_message=error_msg)
+            logger.warning(f"[PRE CHECKOUT] Отклонен: currency={currency}, payload={invoice_payload}")
+        
+    except Exception as e:
+        logger.error(f"[PRE CHECKOUT] Ошибка обработки pre_checkout_query: {e}", exc_info=True)
+        # В случае ошибки все равно отвечаем, чтобы не было таймаута
+        try:
+            if query_id is None:
+                query_id = pre_checkout_query.id if hasattr(pre_checkout_query, 'id') else None
+            if query_id:
+                # Отвечаем OK даже при ошибке, чтобы не блокировать платеж
+                bot.answer_pre_checkout_query(query_id, ok=True)
+                logger.warning(f"[PRE CHECKOUT] Ответили OK при ошибке обработки: id={query_id}")
+        except Exception as e2:
+            logger.error(f"[PRE CHECKOUT] Критическая ошибка при отправке ответа: {e2}", exc_info=True)
+
+================================================================================
+6. ОБРАБОТЧИК successful_payment (ОСНОВНОЙ ДЛЯ STARS!)
+================================================================================
+
+@bot.message_handler(content_types=['successful_payment'], priority=10)
+def got_payment(message):
+    """Обработчик successful_payment для Telegram Stars - основной handler для Stars платежей"""
+    try:
+        logger.info(f"[STARS SUCCESS] ===== ПОЛУЧЕН successful_payment =====")
+        logger.info(f"[STARS SUCCESS] ⚠️ ВАЖНО: Этот handler должен сработать для Stars платежей!")
+        logger.info(f"[STARS SUCCESS] message_id={message.message_id}, date={message.date}")
+        logger.info(f"[STARS SUCCESS] from_user.id={message.from_user.id}, from_user.username={message.from_user.username}")
+        logger.info(f"[STARS SUCCESS] chat.id={message.chat.id}, chat.type={message.chat.type}")
+        
+        # Проверяем наличие successful_payment
+        if not hasattr(message, 'successful_payment') or not message.successful_payment:
+            logger.error(f"[STARS SUCCESS] ❌ КРИТИЧЕСКАЯ ОШИБКА: message.successful_payment отсутствует!")
+            logger.error(f"[STARS SUCCESS] message.content_type={getattr(message, 'content_type', 'N/A')}")
+            logger.error(f"[STARS SUCCESS] message.__dict__={message.__dict__}")
+            return
+        
+        payment = message.successful_payment
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        logger.info(f"[STARS SUCCESS] payment.currency={payment.currency}")
+        logger.info(f"[STARS SUCCESS] payment.total_amount={payment.total_amount}")
+        logger.info(f"[STARS SUCCESS] payment.invoice_payload={payment.invoice_payload}")
+        logger.info(f"[STARS SUCCESS] payment.telegram_payment_charge_id={getattr(payment, 'telegram_payment_charge_id', 'N/A')}")
+        
+        # Проверяем, что это платеж через Stars (валюта XTR)
+        if payment.currency != 'XTR':
+            logger.warning(f"[STARS SUCCESS] ❌ Платеж не через Stars: currency={payment.currency}")
+            logger.warning(f"[STARS SUCCESS] Пропускаем обработку (это не Stars платеж)")
+            return
+        
+        logger.info(f"[STARS SUCCESS] ✅ Это Stars платеж (XTR), продолжаем обработку...")
+        
+        # Извлекаем payment_id из invoice_payload
+        invoice_payload = payment.invoice_payload
+        logger.info(f"[STARS SUCCESS] invoice_payload={invoice_payload}")
+        
+        if not invoice_payload or not invoice_payload.startswith('stars_'):
+            logger.error(f"[STARS SUCCESS] ❌ Неверный invoice_payload: {invoice_payload}")
+            logger.error(f"[STARS SUCCESS] Ожидался формат 'stars_<payment_id>'")
+            bot.reply_to(message, "❌ Ошибка: неверный идентификатор платежа")
+            return
+        
+        payment_id = invoice_payload.replace('stars_', '')
+        logger.info(f"[STARS SUCCESS] ✅ Извлечен payment_id: {payment_id}")
+        
+        # Получаем информацию о платеже из БД
+        logger.info(f"[STARS SUCCESS] Ищем платеж в БД по payment_id={payment_id}")
+        from database.db_operations import get_payment_by_id, update_payment_status, create_subscription
+        
+        # Ищем платеж по payment_id
+        payment_data = None
+        try:
+            logger.info(f"[STARS SUCCESS] Выполняем SQL запрос для поиска платежа...")
+            from database.db_connection import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status
+                FROM payments 
+                WHERE payment_id = %s
+            """, (payment_id,))
+            row = cursor.fetchone()
+            if row:
+                payment_data = {
+                    'payment_id': row[0],
+                    'user_id': row[1],
+                    'chat_id': row[2],
+                    'subscription_type': row[3],
+                    'plan_type': row[4],
+                    'period_type': row[5],
+                    'group_size': row[6],
+                    'amount': row[7],
+                    'status': row[8]
+                }
+                logger.info(f"[STARS SUCCESS] ✅ Платеж найден в БД: {payment_data}")
+            else:
+                logger.warning(f"[STARS SUCCESS] ⚠️ Платеж не найден в БД (row=None)")
+            cursor.close()
+        except Exception as e:
+            logger.error(f"[STARS SUCCESS] ❌ Ошибка получения платежа из БД: {e}", exc_info=True)
+        
+        if not payment_data:
+            logger.error(f"[STARS SUCCESS] ❌ Платеж {payment_id} не найден в БД")
+            logger.error(f"[STARS SUCCESS] Возможные причины:")
+            logger.error(f"[STARS SUCCESS]   1. Платеж не был сохранен при создании invoice")
+            logger.error(f"[STARS SUCCESS]   2. payment_id не совпадает")
+            logger.error(f"[STARS SUCCESS]   3. Проблема с БД")
+            bot.reply_to(message, "❌ Ошибка: платеж не найден в базе данных")
+            return
+        
+        # Проверяем, что платеж еще не обработан
+        logger.info(f"[STARS SUCCESS] Текущий статус платежа: {payment_data['status']}")
+        if payment_data['status'] == 'succeeded':
+            logger.warning(f"[STARS SUCCESS] ⚠️ Платеж {payment_id} уже обработан ранее")
+            bot.reply_to(message, "✅ Платеж уже был обработан ранее")
+            return
+        
+        logger.info(f"[STARS SUCCESS] Платеж найден, статус={payment_data['status']}, продолжаем обработку...")
+        
+        # Обновляем статус платежа
+        logger.info(f"[STARS SUCCESS] Обновляем статус платежа на 'succeeded'...")
+        try:
+            from database.db_connection import get_db_connection
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE payments 
+                SET status = 'succeeded'
+                WHERE payment_id = %s
+            """, (payment_id,))
+            conn.commit()
+            cursor.close()
+            logger.info(f"[STARS SUCCESS] ✅ Статус платежа {payment_id} обновлен на 'succeeded'")
+        except Exception as e:
+            logger.error(f"[STARS SUCCESS] ❌ Ошибка обновления статуса платежа: {e}", exc_info=True)
+        
+        # Создаем или продлеваем подписку
+        logger.info(f"[STARS SUCCESS] Создаем/продлеваем подписку...")
+        logger.info(f"[STARS SUCCESS] subscription_type={payment_data['subscription_type']}")
+        logger.info(f"[STARS SUCCESS] plan_type={payment_data['plan_type']}")
+        logger.info(f"[STARS SUCCESS] period_type={payment_data['period_type']}")
+        logger.info(f"[STARS SUCCESS] group_size={payment_data.get('group_size')}")
+        try:
+            logger.info(f"[STARS SUCCESS] Вызываем create_subscription с параметрами:")
+            logger.info(f"[STARS SUCCESS]   user_id={payment_data['user_id']}")
+            logger.info(f"[STARS SUCCESS]   chat_id={payment_data['chat_id']}")
+            logger.info(f"[STARS SUCCESS]   subscription_type={payment_data['subscription_type']}")
+            logger.info(f"[STARS SUCCESS]   plan_type={payment_data['plan_type']}")
+            logger.info(f"[STARS SUCCESS]   period_type={payment_data['period_type']}")
+            logger.info(f"[STARS SUCCESS]   group_size={payment_data['group_size']}")
+            logger.info(f"[STARS SUCCESS]   price={payment_data['amount']}")
+            
+            subscription_id = create_subscription(
+                user_id=payment_data['user_id'],
+                chat_id=payment_data['chat_id'],
+                subscription_type=payment_data['subscription_type'],
+                plan_type=payment_data['plan_type'],
+                period_type=payment_data['period_type'],
+                group_size=payment_data['group_size'],
+                price=payment_data['amount']
+            )
+            
+            logger.info(f"[STARS SUCCESS] ✅ Подписка создана/продлена: subscription_id={subscription_id}")
+            
+            # Отправляем подтверждение пользователю
+            text = "✅ <b>Оплата успешно завершена!</b>\n\n"
+            text += f"💰 Оплачено: {payment.total_amount}⭐ ({payment_data['amount']}₽)\n"
+            text += f"📋 Подписка активирована\n\n"
+            text += "Спасибо за покупку! 🎉"
+            
+            logger.info(f"[STARS SUCCESS] Отправляем подтверждение пользователю...")
+            bot.reply_to(message, text, parse_mode='HTML')
+            logger.info(f"[STARS SUCCESS] ✅ Подтверждение отправлено")
+            logger.info(f"[STARS SUCCESS] ===== ОБРАБОТКА successful_payment ЗАВЕРШЕНА УСПЕШНО =====")
+            
+        except Exception as e:
+            logger.error(f"[STARS SUCCESS] ❌ Ошибка создания подписки: {e}", exc_info=True)
+            logger.error(f"[STARS SUCCESS] payment_data={payment_data}")
+            bot.reply_to(message, "❌ Ошибка активации подписки. Обратитесь к администратору.")
+        
+    except Exception as e:
+        logger.error(f"[STARS SUCCESS] ❌ КРИТИЧЕСКАЯ ОШИБКА обработки successful_payment: {e}", exc_info=True)
+        logger.error(f"[STARS SUCCESS] Тип ошибки: {type(e).__name__}")
+        logger.error(f"[STARS SUCCESS] Сообщение: {str(e)}")
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке платежа. Обратитесь к администратору.")
+        except Exception as e2:
+            logger.error(f"[STARS SUCCESS] ❌ Не удалось отправить сообщение об ошибке: {e2}")
+
+================================================================================
+7. ЛОГИРОВАНИЕ successful_payment В WEBHOOK (web/web_app.py)
+================================================================================
+
+# В функции webhook(), после парсинга update:
+
+if update.message:
+    logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")
+    logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
+    logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
+    
+    # КРИТИЧНО: Логируем successful_payment если есть
+    if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
+        logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment! ⭐⭐⭐")
+        logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
+        logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
+        logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
+        logger.info(f"[WEBHOOK] successful_payment.telegram_payment_charge_id={getattr(update.message.successful_payment, 'telegram_payment_charge_id', 'N/A')}")
+
+================================================================================
+8. ВАЖНЫЕ ЗАМЕЧАНИЯ
+================================================================================
+
+⚠️ ВАЖНО: Для Telegram Stars (currency="XTR"):
+- pre_checkout_query НЕ отправляется Telegram API
+- Это официальная особенность Stars с 2024-2025 годов
+- Документация: "For payments in Telegram Stars, the pre-checkout query is not sent to the bot"
+- После send_invoice нужно ждать только successful_payment (или ошибку, если Stars не хватило)
+
+✅ ПРАВИЛЬНЫЙ ПОТОК ОПЛАТЫ STARS:
+1. Пользователь нажимает кнопку "Оплатить звездами" → callback pay_stars:...
+2. Бот создает invoice через send_invoice с currency="XTR"
+3. Telegram проверяет баланс пользователя (без pre_checkout_query!)
+4. Если Stars достаточно → приходит successful_payment
+5. Если Stars недостаточно → Telegram показывает ошибку пользователю, боту ничего не приходит
+
+❌ ЧТО НЕ НУЖНО:
+- Не нужно ждать pre_checkout_query для Stars
+- Не нужно создавать платеж в ЮKassa для Stars
+- Не нужно отвечать на pre_checkout_query для Stars (он не придет)
+
+✅ ЧТО НУЖНО:
+- Создавать invoice напрямую через send_invoice с currency="XTR"
+- Обрабатывать successful_payment с проверкой currency="XTR"
+- Сохранять payment_id в БД перед отправкой invoice
+- Использовать invoice_payload в формате "stars_<payment_id>"
+
+================================================================================
+КОНЕЦ ФАЙЛА
+================================================================================
+
