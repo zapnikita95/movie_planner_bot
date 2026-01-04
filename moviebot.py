@@ -7878,7 +7878,7 @@ def series_subscribe_callback(call):
         
         logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
         
-        # Обновляем сообщение с описанием сериала, чтобы изменить кнопку
+        # Удаляем старое сообщение и отправляем новое с обновленной кнопкой
         try:
             # Получаем информацию о сериале из базы
             with db_lock:
@@ -7900,9 +7900,15 @@ def series_subscribe_callback(call):
                         if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
                             message_thread_id = call.message.message_thread_id
                         
-                        # Обновляем существующее сообщение
-                        message_id = call.message.message_id if call.message else None
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
+                        # Удаляем старое сообщение
+                        try:
+                            if call.message:
+                                bot.delete_message(chat_id, call.message.message_id)
+                        except Exception as delete_e:
+                            logger.warning(f"[SERIES SUBSCRIBE] Не удалось удалить сообщение: {delete_e}")
+                        
+                        # Отправляем новое сообщение с обновленной кнопкой
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=None, message_thread_id=message_thread_id)
                     else:
                         logger.warning(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
         except Exception as e:
@@ -7952,7 +7958,7 @@ def series_unsubscribe_callback(call):
         
         bot.answer_callback_query(call.id, "✅ Отписка выполнена")
         
-        # Обновляем сообщение с описанием сериала, чтобы изменить кнопку
+        # Удаляем старое сообщение и отправляем новое с обновленной кнопкой
         try:
             # Получаем информацию о сериале из базы
             with db_lock:
@@ -7974,9 +7980,15 @@ def series_unsubscribe_callback(call):
                         if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
                             message_thread_id = call.message.message_thread_id
                         
-                        # Обновляем существующее сообщение
-                        message_id = call.message.message_id if call.message else None
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
+                        # Удаляем старое сообщение
+                        try:
+                            if call.message:
+                                bot.delete_message(chat_id, call.message.message_id)
+                        except Exception as delete_e:
+                            logger.warning(f"[SERIES UNSUBSCRIBE] Не удалось удалить сообщение: {delete_e}")
+                        
+                        # Отправляем новое сообщение с обновленной кнопкой
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=None, message_thread_id=message_thread_id)
         except Exception as e:
             logger.error(f"[SERIES UNSUBSCRIBE] Ошибка обновления сообщения: {e}", exc_info=True)
         
@@ -15384,7 +15396,9 @@ def seasons_command(message):
     for series_info in partially_watched_series:
         # Добавляем статус выхода сериала
         airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
-        button_text = f"👁️ {airing_emoji} {series_info['title']}"
+        # Добавляем колокольчик, если есть подписка
+        subscription_emoji = "🔔 " if series_info.get('is_subscribed', False) else ""
+        button_text = f"👁️ {airing_emoji} {subscription_emoji}{series_info['title']}"
         if len(button_text) > 30:
             button_text = button_text[:27] + "..."
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
@@ -15393,7 +15407,9 @@ def seasons_command(message):
     for series_info in not_watched_series:
         # Добавляем статус выхода сериала
         airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
-        button_text = f"{airing_emoji} {series_info['title']}"
+        # Добавляем колокольчик, если есть подписка
+        subscription_emoji = "🔔 " if series_info.get('is_subscribed', False) else ""
+        button_text = f"{airing_emoji} {subscription_emoji}{series_info['title']}"
         if len(button_text) > 30:
             button_text = button_text[:27] + "..."
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
@@ -15595,7 +15611,9 @@ def seasons_list_callback(call):
         for series_info in partially_watched_series:
             # Добавляем статус выхода сериала
             airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
-            button_text = f"👁️ {airing_emoji} {series_info['title']}"
+            # Добавляем колокольчик, если есть подписка
+            subscription_emoji = "🔔 " if series_info.get('is_subscribed', False) else ""
+            button_text = f"👁️ {airing_emoji} {subscription_emoji}{series_info['title']}"
             if len(button_text) > 30:
                 button_text = button_text[:27] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
@@ -15604,7 +15622,9 @@ def seasons_list_callback(call):
         for series_info in not_watched_series:
             # Добавляем статус выхода сериала
             airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
-            button_text = f"{airing_emoji} {series_info['title']}"
+            # Добавляем колокольчик, если есть подписка
+            subscription_emoji = "🔔 " if series_info.get('is_subscribed', False) else ""
+            button_text = f"{airing_emoji} {subscription_emoji}{series_info['title']}"
             if len(button_text) > 30:
                 button_text = button_text[:27] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
