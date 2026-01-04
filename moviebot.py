@@ -18088,6 +18088,12 @@ def handle_payment_callback(call):
             parts = action.split(":")
             sub_type = parts[1]  # personal или group
             
+            # Инициализируем переменные группы для всех случаев
+            group_chat_id = None
+            group_username = None
+            group_title = None
+            group_size = None
+            
             # Правильный парсинг для групп: payment:subscribe:group:2:all:month или payment:subscribe:group:2:all:month:chat_id
             # Для личных: payment:subscribe:personal:all:month
             if sub_type == 'group' and len(parts) >= 5:
@@ -18095,11 +18101,6 @@ def handle_payment_callback(call):
                 group_size = group_size_str  # Keep as string for SUBSCRIPTION_PRICES keys
                 plan_type = parts[3] if len(parts) > 3 else ''
                 period_type = parts[4] if len(parts) > 4 else ''
-                
-                # Инициализируем переменные группы
-                group_chat_id = None
-                group_username = None
-                group_title = None
                 
                 # Получаем информацию о группе из состояния
                 state = user_payment_state.get(user_id, {})
@@ -18566,6 +18567,12 @@ def handle_payment_callback(call):
             # Конвертируем в звезды для кнопки оплаты звездами
             stars_amount = rubles_to_stars(final_price)
             
+            # Определяем chat_id для платежа
+            if sub_type == 'group' and group_chat_id:
+                payment_chat_id = group_chat_id
+            else:
+                payment_chat_id = chat_id
+            
             # Сохраняем данные платежа в состояние для оплаты (чтобы не превышать лимит callback_data в 64 байта)
             import uuid as uuid_module
             payment_id = str(uuid_module.uuid4())
@@ -18580,10 +18587,10 @@ def handle_payment_callback(call):
                 'period_type': period_type,
                 'amount': final_price,
                 'stars_amount': stars_amount,
-                'chat_id': payment_chat_id if sub_type == 'group' and group_chat_id else chat_id,
-                'group_chat_id': group_chat_id,
-                'group_username': group_username,
-                'group_title': group_title
+                'chat_id': payment_chat_id,
+                'group_chat_id': group_chat_id if sub_type == 'group' else None,
+                'group_username': group_username if sub_type == 'group' else None,
+                'group_title': group_title if sub_type == 'group' else None
             }
             
             # Обновляем сообщение с кнопками выбора способа оплаты
