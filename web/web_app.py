@@ -8,6 +8,11 @@ import os
 import sys
 import time
 from yookassa import Configuration, Payment
+from dotenv import load_dotenv
+
+# Загружаем переменные окружения из .env файла (для локальной разработки)
+# В Railway переменные окружения уже доступны через os.getenv()
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -218,26 +223,114 @@ def create_web_app(bot_instance):
                     telegram_username = metadata.get('telegram_username')
                     group_username = metadata.get('group_username')
                     
-                    # Проверяем, есть ли уже активная подписка с такими же параметрами
-                    from database.db_operations import get_active_subscription, renew_subscription
-                    existing_sub = get_active_subscription(chat_id, user_id, subscription_type)
+                    # Проверяем, является ли это объединенным платежом
+                    is_combined = metadata.get('is_combined', 'false').lower() == 'true'
+                    combine_type = metadata.get('combine_type')
                     
-                    if existing_sub and existing_sub.get('id') and existing_sub.get('id') > 0:
-                        # Проверяем, совпадают ли параметры подписки
-                        existing_plan = existing_sub.get('plan_type')
-                        existing_period = existing_sub.get('period_type')
-                        existing_group_size = existing_sub.get('group_size')
+                    if is_combined and combine_type == 'pay_now':
+                        # Объединенный платеж - списать сейчас
+                        # Обновляем даты всех существующих подписок на сегодня
+                        from database.db_operations import get_user_personal_subscriptions, update_subscription_next_payment
+                        from datetime import datetime, timedelta
+                        import pytz
                         
-                        # Если параметры совпадают, продлеваем подписку
-                        if (existing_plan == plan_type and 
-                            existing_period == period_type and 
-                            (subscription_type != 'group' or existing_group_size == group_size)):
-                            subscription_id = existing_sub.get('id')
-                            # Продлеваем подписку
-                            renew_subscription(subscription_id, period_type)
-                            logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
+                        existing_subs_ids = metadata.get('existing_subs_ids', '')
+                        if existing_subs_ids:
+                            existing_subs_ids_list = [int(x) for x in existing_subs_ids.split(',') if x.isdigit()]
+                            now = datetime.now(pytz.UTC)
+                            next_payment = now + timedelta(days=30)
+                            
+                            for sub_id in existing_subs_ids_list:
+                                update_subscription_next_payment(sub_id, next_payment)
+                                logger.info(f"[YOOKASSA] Обновлена дата следующего списания для подписки {sub_id} на {next_payment}")
+                        
+                        # Создаем новую подписку
+                        try:
+                            subscription_id = create_subscription(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                subscription_type=subscription_type,
+                                plan_type=plan_type,
+                                period_type=period_type,
+                                price=amount,
+                                telegram_username=telegram_username,
+                                group_username=group_username,
+                                group_size=group_size,
+                                payment_method_id=payment_method_id
+                            )
+                            logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id} (объединенный платеж)")
+                        except Exception as sub_error:
+                            logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
+                            subscription_id = None
+                    elif is_combined and combine_type == 'upgrade_to_all':
+                        # Переход на "Все режимы" - отменяем старые, создаем новую
+                        from database.db_operations import cancel_subscription
+                        existing_subs_ids = metadata.get('existing_subs_ids', '')
+                        if existing_subs_ids:
+                            existing_subs_ids_list = [int(x) for x in existing_subs_ids.split(',') if x.isdigit()]
+                            for sub_id in existing_subs_ids_list:
+                                cancel_subscription(sub_id, user_id)
+                                logger.info(f"[YOOKASSA] Отменена подписка {sub_id} при переходе на 'Все режимы'")
+                        
+                        # Создаем новую подписку "Все режимы"
+                        try:
+                            subscription_id = create_subscription(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                subscription_type=subscription_type,
+                                plan_type='all',
+                                period_type=period_type,
+                                price=amount,
+                                telegram_username=telegram_username,
+                                group_username=group_username,
+                                group_size=group_size,
+                                payment_method_id=payment_method_id
+                            )
+                            logger.info(f"[YOOKASSA] Создана новая подписка 'Все режимы' {subscription_id}")
+                        except Exception as sub_error:
+                            logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
+                            subscription_id = None
+                    else:
+                        # Обычная логика (без объединения)
+                        # Проверяем, есть ли уже активная подписка с такими же параметрами
+                        from database.db_operations import get_active_subscription, renew_subscription
+                        existing_sub = get_active_subscription(chat_id, user_id, subscription_type)
+                        
+                        if existing_sub and existing_sub.get('id') and existing_sub.get('id') > 0:
+                            # Проверяем, совпадают ли параметры подписки
+                            existing_plan = existing_sub.get('plan_type')
+                            existing_period = existing_sub.get('period_type')
+                            existing_group_size = existing_sub.get('group_size')
+                            
+                            # Если параметры совпадают, продлеваем подписку
+                            if (existing_plan == plan_type and 
+                                existing_period == period_type and 
+                                (subscription_type != 'group' or existing_group_size == group_size)):
+                                subscription_id = existing_sub.get('id')
+                                # Продлеваем подписку
+                                renew_subscription(subscription_id, period_type)
+                                logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
+                            else:
+                                # Параметры не совпадают - создаем новую подписку
+                                try:
+                                    subscription_id = create_subscription(
+                                        chat_id=chat_id,
+                                        user_id=user_id,
+                                        subscription_type=subscription_type,
+                                        plan_type=plan_type,
+                                        period_type=period_type,
+                                        price=amount,
+                                        telegram_username=telegram_username,
+                                        group_username=group_username,
+                                        group_size=group_size,
+                                        payment_method_id=payment_method_id
+                                    )
+                                    logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                                except Exception as sub_error:
+                                    logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
+                                    subscription_id = None
                         else:
-                            # Параметры не совпадают - создаем новую подписку
+                            # Нет активной подписки - создаем новую
                             try:
                                 subscription_id = create_subscription(
                                     chat_id=chat_id,
@@ -255,25 +348,6 @@ def create_web_app(bot_instance):
                             except Exception as sub_error:
                                 logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                                 subscription_id = None
-                    else:
-                        # Нет активной подписки - создаем новую
-                        try:
-                            subscription_id = create_subscription(
-                                chat_id=chat_id,
-                                user_id=user_id,
-                                subscription_type=subscription_type,
-                                plan_type=plan_type,
-                                period_type=period_type,
-                                price=amount,
-                                telegram_username=telegram_username,
-                                group_username=group_username,
-                                group_size=group_size,
-                                payment_method_id=payment_method_id
-                            )
-                            logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
-                        except Exception as sub_error:
-                            logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
-                            subscription_id = None
                     
                     # Сохраняем payment_method_id в платеж
                     if payment_method_id:
@@ -299,49 +373,89 @@ def create_web_app(bot_instance):
                     # Создаем чек от самозанятого
                     check_url = None
                     pdf_url = None
+                    logger.info(f"[YOOKASSA CHECK] ===== НАЧАЛО СОЗДАНИЯ ЧЕКА =====")
+                    logger.info(f"[YOOKASSA CHECK] user_id={user_id}, chat_id={chat_id}, amount={amount}, subscription_type={subscription_type}, plan_type={plan_type}")
                     try:
                         from services.nalog_service import create_check
+                        import os
                         
-                        # Формируем описание подписки
-                        subscription_type_name = 'Личная подписка' if subscription_type == 'personal' else 'Групповая подписка'
-                        period_names = {
-                            'month': 'месяц',
-                            '3months': '3 месяца',
-                            'year': 'год',
-                            'lifetime': 'навсегда'
-                        }
-                        period_name = period_names.get(period_type, period_type)
+                        # Проверяем наличие настроек для чека
+                        nalog_inn = os.getenv('NALOG_INN')
+                        nalog_password = os.getenv('NALOG_PASSWORD')
                         
-                        plan_names = {
-                            'notifications': 'Уведомления о сериалах',
-                            'recommendations': 'Персональные рекомендации',
-                            'tickets': 'Билеты в кино',
-                            'all': 'Все режимы'
-                        }
-                        plan_name = plan_names.get(plan_type, plan_type)
+                        # Детальное логирование для отладки
+                        logger.info(f"[YOOKASSA CHECK] Проверка переменных окружения:")
+                        logger.info(f"[YOOKASSA CHECK] NALOG_INN присутствует: {nalog_inn is not None}, значение: {'***' if nalog_inn else 'None'}")
+                        logger.info(f"[YOOKASSA CHECK] NALOG_PASSWORD присутствует: {nalog_password is not None}, значение: {'***' if nalog_password else 'None'}")
                         
-                        description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+                        # Проверяем, что значения не пустые (после strip)
+                        if nalog_inn:
+                            nalog_inn = nalog_inn.strip()
+                        if nalog_password:
+                            nalog_password = nalog_password.strip()
                         
-                        # Получаем имя пользователя из metadata или БД
-                        user_name = metadata.get('telegram_username')
-                        if not user_name:
-                            # Пытаемся получить из БД или используем дефолтное
-                            user_name = f"user_{user_id}"
-                        
-                        logger.info(f"[YOOKASSA] Создание чека: amount={amount}, description={description}, user_name={user_name}")
-                        check_url, pdf_url = create_check(
-                            amount_rub=float(amount),
-                            description=description,
-                            user_name=user_name
-                        )
-                        
-                        if check_url:
-                            logger.info(f"[YOOKASSA] ✅ Чек успешно создан: check_url={check_url}")
+                        if not nalog_inn or not nalog_password:
+                            logger.warning(f"[YOOKASSA CHECK] ⚠️ NALOG_INN или NALOG_PASSWORD не настроены!")
+                            logger.warning(f"[YOOKASSA CHECK] NALOG_INN: {'установлен (пусто после strip)' if nalog_inn is not None and not nalog_inn else 'НЕ УСТАНОВЛЕН'}")
+                            logger.warning(f"[YOOKASSA CHECK] NALOG_PASSWORD: {'установлен (пусто после strip)' if nalog_password is not None and not nalog_password else 'НЕ УСТАНОВЛЕН'}")
+                            logger.warning(f"[YOOKASSA CHECK] Чек не будет создан из-за отсутствия настроек")
                         else:
-                            logger.warning(f"[YOOKASSA] ⚠️ Не удалось создать чек (возможно, не настроены NALOG_INN/NALOG_PASSWORD)")
+                            logger.info(f"[YOOKASSA CHECK] ✅ Настройки NALOG найдены, продолжаем создание чека")
+                            
+                            # Формируем описание подписки
+                            subscription_type_name = 'Личная подписка' if subscription_type == 'personal' else 'Групповая подписка'
+                            period_names = {
+                                'month': 'месяц',
+                                '3months': '3 месяца',
+                                'year': 'год',
+                                'lifetime': 'навсегда'
+                            }
+                            period_name = period_names.get(period_type, period_type)
+                            
+                            plan_names = {
+                                'notifications': 'Уведомления о сериалах',
+                                'recommendations': 'Персональные рекомендации',
+                                'tickets': 'Билеты в кино',
+                                'all': 'Все режимы'
+                            }
+                            plan_name = plan_names.get(plan_type, plan_type)
+                            
+                            description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+                            
+                            # Получаем имя пользователя из metadata или БД
+                            user_name = metadata.get('telegram_username')
+                            if not user_name:
+                                # Пытаемся получить из БД или используем дефолтное
+                                user_name = f"user_{user_id}"
+                            
+                            logger.info(f"[YOOKASSA CHECK] Параметры чека: amount={amount}, description={description}, user_name={user_name}")
+                            logger.info(f"[YOOKASSA CHECK] Вызываем create_check...")
+                            check_url, pdf_url = create_check(
+                                amount_rub=float(amount),
+                                description=description,
+                                user_name=user_name
+                            )
+                            
+                            logger.info(f"[YOOKASSA CHECK] Результат create_check: check_url={check_url}, pdf_url={pdf_url}")
+                            
+                            if check_url:
+                                logger.info(f"[YOOKASSA CHECK] ✅✅✅ ЧЕК УСПЕШНО СОЗДАН! ✅✅✅")
+                                logger.info(f"[YOOKASSA CHECK] check_url={check_url}")
+                                if pdf_url:
+                                    logger.info(f"[YOOKASSA CHECK] pdf_url={pdf_url}")
+                            else:
+                                logger.warning(f"[YOOKASSA CHECK] ⚠️ create_check вернул check_url=None (чек не создан)")
+                                logger.warning(f"[YOOKASSA CHECK] Возможные причины: ошибка API nalog.ru, неверные настройки, или другая проблема")
                     except Exception as check_error:
-                        logger.error(f"[YOOKASSA] ❌ Ошибка создания чека: {check_error}", exc_info=True)
+                        logger.error(f"[YOOKASSA CHECK] ❌❌❌ ИСКЛЮЧЕНИЕ ПРИ СОЗДАНИИ ЧЕКА! ❌❌❌")
+                        logger.error(f"[YOOKASSA CHECK] Тип ошибки: {type(check_error).__name__}")
+                        logger.error(f"[YOOKASSA CHECK] Сообщение: {str(check_error)}")
+                        logger.error(f"[YOOKASSA CHECK] Traceback:", exc_info=True)
                         # Продолжаем выполнение даже если чек не создан
+                    
+                    logger.info(f"[YOOKASSA CHECK] ===== ЗАВЕРШЕНИЕ СОЗДАНИЯ ЧЕКА =====")
+                    logger.info(f"[YOOKASSA CHECK] Итоговый результат: check_url={check_url}, pdf_url={pdf_url}")
+                    logger.info(f"[YOOKASSA CHECK] Будет ли чек добавлен в сообщение: {'ДА' if check_url else 'НЕТ'}")
                     
                     # Отправляем подробное уведомление пользователю
                     try:
