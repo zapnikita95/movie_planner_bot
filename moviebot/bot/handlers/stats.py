@@ -435,15 +435,149 @@ def register_stats_handlers(bot_instance):
                     bot_instance.reply_to(message, "📊 Нет данных о вашей статистике.\n\nОцените первый фильм, чтобы статистика начала собираться.")
                     return
                 
-                # TODO: Добавить полную логику из moviebot.py строки 9353-9487
-                # Это очень большая функция, нужно скопировать весь код
+                # Жанры (исключаем импортированные фильмы)
+                cursor.execute('''
+                    SELECT m.genres FROM movies m
+                    WHERE m.chat_id = %s AND m.watched = 1
+                    AND NOT (
+                        NOT EXISTS (
+                            SELECT 1 FROM ratings r 
+                            WHERE r.chat_id = m.chat_id 
+                            AND r.film_id = m.id 
+                            AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                        )
+                        AND EXISTS (
+                            SELECT 1 FROM ratings r 
+                            WHERE r.chat_id = m.chat_id 
+                            AND r.film_id = m.id 
+                            AND r.is_imported = TRUE
+                        )
+                    )
+                ''', (chat_id,))
+                genre_counts = {}
+                for row in cursor.fetchall():
+                    genres = row.get('genres') if isinstance(row, dict) else row[0]
+                    if genres:
+                        for g in str(genres).split(', '):
+                            if g.strip():
+                                genre_counts[g.strip()] = genre_counts.get(g.strip(), 0) + 1
+                fav_genre = max(genre_counts, key=genre_counts.get) if genre_counts else "—"
                 
-                # Временная заглушка
+                # Режиссёры - используем оценки из таблицы ratings (исключаем импортированные)
+                cursor.execute('''
+                    SELECT m.director, AVG(r.rating) as avg_rating, COUNT(DISTINCT m.id) as film_count
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                        AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                    WHERE m.chat_id = %s AND m.watched = 1 AND m.director IS NOT NULL AND m.director != %s
+                    AND NOT (
+                        NOT EXISTS (
+                            SELECT 1 FROM ratings r2 
+                            WHERE r2.chat_id = m.chat_id 
+                            AND r2.film_id = m.id 
+                            AND (r2.is_imported = FALSE OR r2.is_imported IS NULL)
+                        )
+                        AND EXISTS (
+                            SELECT 1 FROM ratings r3 
+                            WHERE r3.chat_id = m.chat_id 
+                            AND r3.film_id = m.id 
+                            AND r3.is_imported = TRUE
+                        )
+                    )
+                    GROUP BY m.director
+                ''', (chat_id, 'Не указан'))
+                director_stats = {}
+                for row in cursor.fetchall():
+                    d = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                    avg_r = row.get('avg_rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                    film_count = row.get('film_count') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0)
+                    if d and avg_r:  # Только если есть неимпортированные оценки
+                        director_stats[d] = {
+                            'count': film_count,
+                            'sum_rating': (avg_r * film_count) if avg_r else 0,
+                            'avg_rating': avg_r if avg_r else 0
+                        }
+                top_directors = sorted(director_stats.items(), key=lambda x: (-x[1]['count'], -x[1]['avg_rating']))[:3]
+                
+                # Актёры - используем оценки из таблицы ratings (исключаем импортированные)
+                cursor.execute('''
+                    SELECT m.actors, AVG(r.rating) as avg_rating, COUNT(DISTINCT m.id) as film_count
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                        AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                    WHERE m.chat_id = %s AND m.watched = 1
+                    AND NOT (
+                        NOT EXISTS (
+                            SELECT 1 FROM ratings r2 
+                            WHERE r2.chat_id = m.chat_id 
+                            AND r2.film_id = m.id 
+                            AND (r2.is_imported = FALSE OR r2.is_imported IS NULL)
+                        )
+                        AND EXISTS (
+                            SELECT 1 FROM ratings r3 
+                            WHERE r3.chat_id = m.chat_id 
+                            AND r3.film_id = m.id 
+                            AND r3.is_imported = TRUE
+                        )
+                    )
+                    GROUP BY m.actors
+                ''', (chat_id,))
+                actor_stats = {}
+                for row in cursor.fetchall():
+                    actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                    avg_r = row.get('avg_rating') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                    film_count = row.get('film_count') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0)
+                    if actors_str and avg_r:  # Только если есть неимпортированные оценки
+                        for a in actors_str.split(', '):
+                            a = a.strip()
+                            if a and a != "—":
+                                if a not in actor_stats:
+                                    actor_stats[a] = {'count': 0, 'sum_rating': 0, 'total_ratings': 0}
+                                # Для актеров считаем количество фильмов, где они участвовали
+                                actor_stats[a]['count'] += film_count
+                                # Суммируем средние оценки, умноженные на количество фильмов
+                                if avg_r:
+                                    actor_stats[a]['sum_rating'] += avg_r * film_count
+                                    actor_stats[a]['total_ratings'] += film_count
+                
+                # Пересчитываем средние для актеров
+                for actor in actor_stats:
+                    if actor_stats[actor]['total_ratings'] > 0:
+                        actor_stats[actor]['avg_rating'] = actor_stats[actor]['sum_rating'] / actor_stats[actor]['total_ratings']
+                    else:
+                        actor_stats[actor]['avg_rating'] = 0
+                
+                top_actors = sorted(actor_stats.items(), key=lambda x: (-x[1]['count'], -x[1].get('avg_rating', 0)))[:3]
+                
+                # Рассчитываем среднее из ratings (исключаем импортированные)
+                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id,))
+                avg_row = cursor.fetchone()
+                avg_rating = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
+                avg_str = f"{avg_rating:.1f}/10" if avg_rating else "—"
+                
                 text = f"📊 <b>Статистика кино-группы</b>\n\n"
                 text += f"🎬 Всего фильмов: <b>{total}</b>\n"
                 text += f"✅ Просмотрено: <b>{watched}</b>\n"
                 text += f"⏳ Ждёт просмотра: <b>{unwatched}</b>\n"
-                text += "\n<i>Полная статистика будет доступна после завершения рефакторинга</i>"
+                text += f"🌟 Средняя оценка: <b>{avg_str}</b>\n"
+                text += f"❤️ Любимый жанр: <b>{fav_genre}</b>\n\n"
+                
+                if top_directors:
+                    text += "<b>Топ режиссёров:</b>\n"
+                    for d, stats in top_directors:
+                        avg_d = stats.get('avg_rating', 0) if stats.get('avg_rating') else 0
+                        text += f"• {d} — {stats['count']} фильм(ов), средняя {avg_d:.1f}/10\n"
+                    text += "\n"
+                else:
+                    text += "<b>Топ режиссёров:</b> —\n\n"
+                
+                if top_actors:
+                    text += "<b>Топ актёров:</b>\n"
+                    for a, stats in top_actors:
+                        avg_a = stats.get('avg_rating', 0) if stats.get('avg_rating') else 0
+                        text += f"• {a} — {stats['count']} фильм(ов), средняя {avg_a:.1f}/10\n"
+                else:
+                    text += "<b>Топ актёров:</b> —\n"
                 
                 bot_instance.reply_to(message, text, parse_mode='HTML')
                 logger.info(f"✅ Ответ на /total отправлен пользователю {message.from_user.id}")
