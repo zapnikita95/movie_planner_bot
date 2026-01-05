@@ -876,7 +876,6 @@ def register_series_handlers(bot_param):
         """Обработчик заблокированных режимов рандомайзера"""
         try:
             logger.info(f"[RANDOM CALLBACK] Locked mode handler: data={call.data}, user_id={call.from_user.id}")
-        try:
             mode = call.data.split(":")[1]  # kinopoisk, my_votes, group_votes
             user_id = call.from_user.id
             chat_id = call.message.chat.id
