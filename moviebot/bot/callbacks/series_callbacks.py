@@ -15,7 +15,7 @@ from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info, get
 from moviebot.utils.helpers import has_notifications_access
 from moviebot.scheduler import send_series_notification, check_series_for_new_episodes
 from moviebot.states import user_episodes_state
-from moviebot.bot.handlers.series import show_film_info_with_buttons  # Перенесённая функция из handlers/series.py
+# show_film_info_with_buttons больше не используется - обновляем только кнопку подписки без API запросов
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -104,27 +104,37 @@ def register_series_callbacks(bot_instance):
                 )
                 return
             
-            # Получение film_id и title (добавляем в базу, если нет)
-            from moviebot.bot.handlers.series import ensure_movie_in_database
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            info = extract_movie_info(link)
-            if not info:
-                logger.error(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале для kp_id={kp_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
-                return
-            
-            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-            if not film_id:
-                logger.error(f"[SERIES SUBSCRIBE] Не удалось добавить сериал в базу для kp_id={kp_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
-                return
-            
-            title = info.get('title', 'Сериал')
-            
-            # Если сериал был добавлен, отправляем уведомление
-            if was_inserted:
-                bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
-                logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен в базу: film_id={film_id}, title={title}")
+            # Получение film_id и title из БД (добавляем в базу, если нет)
+            with db_lock:
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    film_id = row[0] if isinstance(row, tuple) else row.get('id')
+                    title = row[1] if isinstance(row, tuple) else row.get('title')
+                    logger.info(f"[SERIES SUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
+                else:
+                    # Сериал не в базе - добавляем через API
+                    logger.info(f"[SERIES SUBSCRIBE] Сериал не найден в БД, добавляем через API")
+                    from moviebot.bot.handlers.series import ensure_movie_in_database
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                    info = extract_movie_info(link)
+                    if not info:
+                        logger.error(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале для kp_id={kp_id}")
+                        bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                        return
+                    
+                    film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                    if not film_id:
+                        logger.error(f"[SERIES SUBSCRIBE] Не удалось добавить сериал в базу для kp_id={kp_id}")
+                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                        return
+                    
+                    title = info.get('title', 'Сериал')
+                    
+                    # Если сериал был добавлен, отправляем уведомление
+                    if was_inserted:
+                        bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                        logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен в базу: film_id={film_id}, title={title}")
             
             # Добавление подписки
             with db_lock:
@@ -177,17 +187,36 @@ def register_series_callbacks(bot_instance):
             
             logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
             
-            # Обновление сообщения - временно используем прямой edit_message_reply_markup
-            logger.info("[SERIES SUBSCRIBE] Обновление сообщения с описанием сериала")
+            # Обновление сообщения - обновляем только кнопку подписки (без API запросов)
+            logger.info("[SERIES SUBSCRIBE] Прямое обновление кнопки подписки (без API)")
             try:
-                logger.info("[SERIES SUBSCRIBE] Прямое обновление кнопки подписки")
+                # Получаем существующую клавиатуру из сообщения
+                old_markup = call.message.reply_markup
+                new_markup = InlineKeyboardMarkup()
                 
-                # Новая клавиатура (только меняем кнопку подписки)
-                new_markup = InlineKeyboardMarkup(row_width=1)
-                new_markup.add(InlineKeyboardButton(
-                    "🔕 Убрать подписку на новые серии",
-                    callback_data=f"series_unsubscribe:{kp_id}"
-                ))
+                # Копируем все кнопки из старой клавиатуры, заменяя только кнопку подписки
+                if old_markup and old_markup.keyboard:
+                    for row in old_markup.keyboard:
+                        new_row = []
+                        for button in row:
+                            # Проверяем, является ли это кнопкой подписки
+                            if button.callback_data and ('series_subscribe:' in button.callback_data or 'series_unsubscribe:' in button.callback_data):
+                                # Заменяем на кнопку отписки
+                                new_row.append(InlineKeyboardButton(
+                                    "🔕 Убрать подписку на новые серии",
+                                    callback_data=f"series_unsubscribe:{kp_id}"
+                                ))
+                            else:
+                                # Копируем остальные кнопки как есть
+                                new_row.append(button)
+                        if new_row:
+                            new_markup.row(*new_row)
+                else:
+                    # Если клавиатуры нет, создаем только кнопку подписки
+                    new_markup.add(InlineKeyboardButton(
+                        "🔕 Убрать подписку на новые серии",
+                        callback_data=f"series_unsubscribe:{kp_id}"
+                    ))
                 
                 # Меняем только клавиатуру (текст остаётся тем же — избежим "not modified")
                 message_id = call.message.message_id if call.message else None
@@ -208,26 +237,7 @@ def register_series_callbacks(bot_instance):
                         message_id=message_id,
                         reply_markup=new_markup
                     )
-                logger.info("[SERIES SUBSCRIBE] Клавиатура обновлена напрямую")
-                
-                # Пробуем также вызвать show_film_info_with_buttons для полного обновления (но не падаем, если не получится)
-                try:
-                    logger.info("[SERIES SUBSCRIBE] Попытка полного обновления через show_film_info_with_buttons")
-                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-                    info = extract_movie_info(link)
-                    if info:
-                        with db_lock:
-                            cursor.execute("SELECT watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                            watched_row = cursor.fetchone()
-                            watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
-                        
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=message_id, message_thread_id=message_thread_id)
-                        logger.info("[SERIES SUBSCRIBE] show_film_info_with_buttons выполнен успешно")
-                    else:
-                        logger.warning("[SERIES SUBSCRIBE] extract_movie_info вернул None, пропускаем полное обновление")
-                except Exception as full_update_e:
-                    logger.error(f"[SERIES SUBSCRIBE] Ошибка полного обновления (не критично): {full_update_e}", exc_info=True)
-                    # Не падаем, кнопка уже обновлена
+                logger.info("[SERIES SUBSCRIBE] Клавиатура обновлена напрямую (без API)")
             
             except telebot.apihelper.ApiTelegramException as tele_e:
                 logger.error(f"[SERIES SUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
@@ -298,17 +308,36 @@ def register_series_callbacks(bot_instance):
             
             logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
             
-            # Обновление сообщения - временно используем прямой edit_message_reply_markup
-            logger.info("[SERIES UNSUBSCRIBE] Обновление сообщения с описанием сериала")
+            # Обновление сообщения - обновляем только кнопку подписки (без API запросов)
+            logger.info("[SERIES UNSUBSCRIBE] Прямое обновление кнопки подписки (без API)")
             try:
-                logger.info("[SERIES UNSUBSCRIBE] Прямое обновление кнопки подписки")
+                # Получаем существующую клавиатуру из сообщения
+                old_markup = call.message.reply_markup
+                new_markup = InlineKeyboardMarkup()
                 
-                # Новая клавиатура (только меняем кнопку подписки)
-                new_markup = InlineKeyboardMarkup(row_width=1)
-                new_markup.add(InlineKeyboardButton(
-                    "🔔 Подписаться на новые серии",
-                    callback_data=f"series_subscribe:{kp_id}"
-                ))
+                # Копируем все кнопки из старой клавиатуры, заменяя только кнопку подписки
+                if old_markup and old_markup.keyboard:
+                    for row in old_markup.keyboard:
+                        new_row = []
+                        for button in row:
+                            # Проверяем, является ли это кнопкой подписки
+                            if button.callback_data and ('series_subscribe:' in button.callback_data or 'series_unsubscribe:' in button.callback_data):
+                                # Заменяем на кнопку подписки
+                                new_row.append(InlineKeyboardButton(
+                                    "🔔 Подписаться на новые серии",
+                                    callback_data=f"series_subscribe:{kp_id}"
+                                ))
+                            else:
+                                # Копируем остальные кнопки как есть
+                                new_row.append(button)
+                        if new_row:
+                            new_markup.row(*new_row)
+                else:
+                    # Если клавиатуры нет, создаем только кнопку подписки
+                    new_markup.add(InlineKeyboardButton(
+                        "🔔 Подписаться на новые серии",
+                        callback_data=f"series_subscribe:{kp_id}"
+                    ))
                 
                 # Меняем только клавиатуру (текст остаётся тем же — избежим "not modified")
                 message_id = call.message.message_id if call.message else None
@@ -329,26 +358,7 @@ def register_series_callbacks(bot_instance):
                         message_id=message_id,
                         reply_markup=new_markup
                     )
-                logger.info("[SERIES UNSUBSCRIBE] Клавиатура обновлена напрямую")
-                
-                # Пробуем также вызвать show_film_info_with_buttons для полного обновления (но не падаем, если не получится)
-                try:
-                    logger.info("[SERIES UNSUBSCRIBE] Попытка полного обновления через show_film_info_with_buttons")
-                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-                    info = extract_movie_info(link)
-                    if info:
-                        with db_lock:
-                            cursor.execute("SELECT watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                            watched_row = cursor.fetchone()
-                            watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
-                        
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=message_id, message_thread_id=message_thread_id)
-                        logger.info("[SERIES UNSUBSCRIBE] show_film_info_with_buttons выполнен успешно")
-                    else:
-                        logger.warning("[SERIES UNSUBSCRIBE] extract_movie_info вернул None, пропускаем полное обновление")
-                except Exception as full_update_e:
-                    logger.error(f"[SERIES UNSUBSCRIBE] Ошибка полного обновления (не критично): {full_update_e}", exc_info=True)
-                    # Не падаем, кнопка уже обновлена
+                logger.info("[SERIES UNSUBSCRIBE] Клавиатура обновлена напрямую (без API)")
             
             except telebot.apihelper.ApiTelegramException as tele_e:
                 logger.error(f"[SERIES UNSUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
