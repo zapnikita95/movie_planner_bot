@@ -3092,15 +3092,9 @@ def register_payment_callbacks(bot_instance):
             
                 # Проверка на пустые значения
                 if not plan_type or not period_type:
-                    logger.error(f"[STARS] Ошибка парсинга callback_data: {action}, parts={parts}")
+                    logger.error(f"[STARS] Ошибка: неверные параметры платежа: plan_type={plan_type}, period_type={period_type}")
                     bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
                     return
-            
-                # Вычисляем финальную цену с учетом скидок
-                if sub_type == 'personal':
-                    final_price = calculate_discounted_price(user_id, 'personal', plan_type, period_type)
-                else:  # group
-                    final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
             
                 if final_price <= 0:
                     bot_instance.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
@@ -3137,13 +3131,7 @@ def register_payment_callbacks(bot_instance):
                     import uuid as uuid_module
                     payment_id = str(uuid_module.uuid4())
             
-                # Для групповых подписок используем выбранный chat_id группы
-                if sub_type == 'group' and group_size:
-                    # Получаем chat_id группы из состояния или используем текущий
-                    state = user_payment_state.get(user_id, {})
-                    payment_chat_id = state.get('chat_id', chat_id)
-                else:
-                    payment_chat_id = chat_id
+                # payment_chat_id уже установлен выше из payment_data или chat_id
             
                 # Сохраняем информацию о платеже в БД
                 from moviebot.database.db_operations import save_payment
@@ -3181,6 +3169,161 @@ def register_payment_callbacks(bot_instance):
                 except Exception as e:
                     logger.error(f"[STARS] Ошибка создания инвойса через Stars: {e}", exc_info=True)
                     bot_instance.answer_callback_query(call.id, "Ошибка создания инвойса. Попробуйте позже.", show_alert=True)
+                return
+        
+            if action.startswith("pay_yookassa:"):
+                # Обработка нажатия на кнопку "Оплатить картой/ЮMoney" через YooKassa
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                except:
+                    pass
+                
+                # Получаем payment_id из callback_data
+                parts = action.split(":")
+                payment_id_short = parts[1] if len(parts) > 1 else ''
+                
+                # Получаем данные платежа из состояния
+                state = user_payment_state.get(user_id, {})
+                payment_data = state.get('payment_data', {})
+                
+                if not payment_data:
+                    logger.error(f"[YOOKASSA] Не найдены данные платежа в состоянии для user_id={user_id}")
+                    bot_instance.answer_callback_query(call.id, "Ошибка: данные платежа не найдены. Начните заново.", show_alert=True)
+                    return
+                
+                sub_type = payment_data.get('sub_type', 'personal')
+                plan_type = payment_data.get('plan_type', '')
+                period_type = payment_data.get('period_type', '')
+                final_price = payment_data.get('amount', 0)
+                group_size = payment_data.get('group_size')
+                payment_chat_id = payment_data.get('chat_id', chat_id)
+                group_chat_id = payment_data.get('group_chat_id')
+                group_username = payment_data.get('group_username')
+                group_title = payment_data.get('group_title')
+                
+                if not plan_type or not period_type or final_price <= 0:
+                    logger.error(f"[YOOKASSA] Неверные данные платежа: plan_type={plan_type}, period_type={period_type}, final_price={final_price}")
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                    return
+                
+                logger.info(f"[YOOKASSA] Создание платежа: user_id={user_id}, sub_type={sub_type}, plan_type={plan_type}, period_type={period_type}, final_price={final_price}₽")
+                
+                # Инициализируем ЮKassa
+                if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+                    logger.error(f"[YOOKASSA] YooKassa ключи не настроены!")
+                    bot_instance.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
+                    return
+                
+                shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
+                secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
+                
+                from yookassa import Configuration, Payment
+                Configuration.account_id = shop_id
+                Configuration.secret_key = secret_key
+                
+                # Формируем описание платежа
+                period_names = {
+                    'month': 'месяц',
+                    '3months': '3 месяца',
+                    'year': 'год',
+                    'lifetime': 'навсегда'
+                }
+                period_name = period_names.get(period_type, period_type)
+                
+                plan_names = {
+                    'notifications': 'Уведомления о сериалах',
+                    'recommendations': 'Персональные рекомендации',
+                    'tickets': 'Билеты в кино',
+                    'all': 'Все режимы'
+                }
+                plan_name = plan_names.get(plan_type, plan_type)
+                
+                subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+                description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+                
+                # Создаем уникальный ID платежа
+                import uuid as uuid_module
+                payment_id = str(uuid_module.uuid4())
+                
+                return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
+                
+                # Подготавливаем metadata для платежа
+                metadata = {
+                    "user_id": str(user_id),
+                    "chat_id": str(payment_chat_id),
+                    "subscription_type": sub_type,
+                    "plan_type": plan_type,
+                    "period_type": period_type,
+                    "payment_id": payment_id
+                }
+                
+                if sub_type == 'group':
+                    metadata["group_size"] = str(group_size) if group_size else ""
+                    if group_username:
+                        metadata["group_username"] = group_username
+                
+                # Создаем платеж
+                try:
+                    payment = Payment.create({
+                        "amount": {
+                            "value": f"{final_price:.2f}",
+                            "currency": "RUB"
+                        },
+                        "confirmation": {
+                            "type": "redirect",
+                            "return_url": return_url
+                        },
+                        "capture": True,
+                        "description": description,
+                        "metadata": metadata
+                    })
+                    
+                    # Сохраняем информацию о платеже в БД
+                    from moviebot.database.db_operations import save_payment
+                    save_payment(
+                        payment_id=payment_id,
+                        yookassa_payment_id=payment.id,
+                        user_id=user_id,
+                        chat_id=payment_chat_id,
+                        subscription_type=sub_type,
+                        plan_type=plan_type,
+                        period_type=period_type,
+                        group_size=group_size,
+                        amount=final_price,
+                        status='pending'
+                    )
+                    
+                    # Получаем URL для оплаты
+                    confirmation_url = payment.confirmation.confirmation_url
+                    
+                    # Отправляем сообщение с кнопкой для оплаты
+                    text = f"💳 <b>Оплата подписки</b>\n\n"
+                    text += f"📋 <b>Выбранный тариф:</b>\n"
+                    if sub_type == 'personal':
+                        text += f"👤 Личная подписка\n"
+                    else:
+                        text += f"👥 Групповая подписка (на {group_size} участников)\n"
+                    text += f"{plan_name}\n"
+                    text += f"⏰ Период: {period_name}\n"
+                    text += f"💰 Сумма: <b>{final_price}₽</b>\n\n"
+                    text += "Нажмите кнопку ниже для перехода к оплате:"
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
+                    
+                    try:
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[YOOKASSA] Ошибка редактирования сообщения: {e}")
+                            bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                    
+                    logger.info(f"[YOOKASSA] Платеж создан: payment_id={payment_id}, yookassa_id={payment.id}, url={confirmation_url}")
+                    
+                except Exception as e:
+                    logger.error(f"[YOOKASSA] Ошибка создания платежа: {e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
                 return
         
             if action.startswith("modify:"):
