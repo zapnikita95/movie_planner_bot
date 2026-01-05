@@ -512,6 +512,9 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
 
 def register_series_handlers(bot_instance):
     """Регистрирует обработчики команд связанных с сериалами"""
+    logger.info("=" * 80)
+    logger.info(f"[REGISTER SERIES HANDLERS] ===== START: регистрация обработчиков сериалов =====")
+    logger.info(f"[REGISTER SERIES HANDLERS] bot_instance: {bot_instance}")
     
     @bot_instance.message_handler(commands=['search'])
     def _handle_search_handler(message):
@@ -1977,6 +1980,10 @@ def handle_kinopoisk_link(message):
                 logger.error(f"[SEARCH TYPE] Не удалось вызвать answer_callback_query: {answer_e}")
         finally:
             logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
+    
+    logger.info(f"[REGISTER SERIES HANDLERS] Все обработчики сериалов зарегистрированы (включая search_type_callback)")
+    logger.info(f"[REGISTER SERIES HANDLERS] ===== END =====")
+    logger.info("=" * 80)
 
 
 def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
