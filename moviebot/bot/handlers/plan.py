@@ -1066,7 +1066,7 @@ def get_plan_day_or_date_internal(message, state):
     plan_dt = None
     
     # Сначала пробуем использовать parse_session_time для более полной обработки дат
-    parsed_dt = parse_session_time(message.text.strip() if message.text else "", user_tz)
+    parsed_dt = parse_session_time(text, user_tz)
     if parsed_dt:
         plan_dt = parsed_dt
         logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
