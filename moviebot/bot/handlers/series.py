@@ -1151,17 +1151,9 @@ def register_series_handlers(bot_instance):
             
             logger.info(f"[SEARCH REPLY] Состояние найдено: state={state}, reply_to_message_id={reply_to_message.message_id if reply_to_message else 'None'}, state_message_id={state.get('message_id')}")
             
-            # Проверяем, что ответ на правильное сообщение (сообщение поиска)
-            # Если message_id не совпадает, но пользователь в состоянии поиска, все равно обрабатываем
-            if reply_to_message:
-                state_message_id = state.get('message_id')
-                if state_message_id and reply_to_message.message_id != state_message_id:
-                    logger.warning(f"[SEARCH REPLY] message_id не совпадает: reply_to_message.message_id={reply_to_message.message_id}, state_message_id={state_message_id}")
-                    # Но все равно обрабатываем, если пользователь в состоянии поиска
-                    logger.info(f"[SEARCH REPLY] Продолжаем обработку, так как пользователь в состоянии поиска")
-            
-            if reply_to_message:
-                logger.info(f"[SEARCH REPLY] Получен запрос поиска от {user_id}: {query}")
+            # Если пользователь в состоянии поиска, обрабатываем его сообщение
+            # Не требуем точного совпадения message_id, так как состояние может быть обновлено
+            logger.info(f"[SEARCH REPLY] Пользователь {user_id} в состоянии поиска, обрабатываем запрос: {query}")
                 
                 # Получаем тип поиска из состояния
                 search_type = state.get('search_type', 'mixed')
