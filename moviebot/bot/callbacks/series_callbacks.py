@@ -18,31 +18,59 @@ import sys
 import os
 
 # Импортируем show_film_info_with_buttons из старого файла (временно, пока не перенесена в новую структуру)
-try:
-    # Пытаемся импортировать из старого файла moviebot.py в корне проекта
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-    old_moviebot_path = os.path.join(project_root, 'moviebot.py')
-    if os.path.exists(old_moviebot_path):
-        # Добавляем путь к корню проекта
-        if project_root not in sys.path:
-            sys.path.insert(0, project_root)
-        # Импортируем функцию напрямую
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("moviebot_module", old_moviebot_path)
-        moviebot_module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(moviebot_module)
-        show_film_info_with_buttons = moviebot_module.show_film_info_with_buttons
-        logger.info("[SERIES CALLBACKS] show_film_info_with_buttons успешно импортирована из moviebot.py")
-    else:
-        raise ImportError("Файл moviebot.py не найден")
-except Exception as import_e:
-    logger.error(f"[SERIES CALLBACKS] Ошибка импорта show_film_info_with_buttons: {import_e}", exc_info=True)
-    # Создаем заглушку, которая будет обновлять сообщение напрямую
-    def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
-        logger.warning(f"[SERIES CALLBACKS] Используем fallback для show_film_info_with_buttons")
+# Создаем обертку, которая использует правильные зависимости
+def show_film_info_with_buttons_wrapper(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
+    """Обертка для show_film_info_with_buttons, которая использует правильные зависимости"""
+    try:
+        # Пытаемся импортировать функцию из старого файла
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        old_moviebot_path = os.path.join(project_root, 'moviebot.py')
+        if os.path.exists(old_moviebot_path):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("moviebot_module", old_moviebot_path)
+            moviebot_module = importlib.util.module_from_spec(spec)
+            
+            # Устанавливаем правильные зависимости в модуль перед выполнением
+            moviebot_module.bot = bot_instance
+            moviebot_module.cursor = cursor
+            moviebot_module.conn = conn
+            moviebot_module.db_lock = db_lock
+            moviebot_module.logger = logger
+            
+            # Импортируем необходимые функции
+            from moviebot.api.kinopoisk_api import get_series_airing_status, get_seasons_data
+            from moviebot.utils.helpers import has_notifications_access
+            moviebot_module.get_series_airing_status = get_series_airing_status
+            moviebot_module.get_seasons_data = get_seasons_data
+            moviebot_module.has_notifications_access = has_notifications_access
+            
+            spec.loader.exec_module(moviebot_module)
+            original_function = moviebot_module.show_film_info_with_buttons
+            
+            # Вызываем функцию с правильными зависимостями
+            return original_function(chat_id, user_id, info, link, kp_id, existing, message_id, message_thread_id)
+        else:
+            raise ImportError("Файл moviebot.py не найден")
+    except Exception as import_e:
+        logger.error(f"[SERIES CALLBACKS] Ошибка импорта show_film_info_with_buttons: {import_e}", exc_info=True)
+        # Fallback: обновляем только клавиатуру
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        # Проверяем статус подписки из БД
+        is_subscribed = False
+        if existing:
+            film_id = existing[0] if isinstance(existing, tuple) else existing.get('id')
+            if film_id:
+                with db_lock:
+                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                    sub_row = cursor.fetchone()
+                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+        
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+        if is_subscribed:
+            markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+        else:
+            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
         
         if message_id:
             try:
@@ -62,9 +90,88 @@ except Exception as import_e:
             except Exception as e:
                 logger.error(f"[SERIES CALLBACKS] Ошибка обновления сообщения: {e}")
 
+# Создаем алиас для удобства
+show_film_info_with_buttons = show_film_info_with_buttons_wrapper
+
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
+
+# Импортируем show_film_info_with_buttons из старого файла (временно, пока не перенесена в новую структуру)
+# Создаем обертку, которая использует правильные зависимости
+def show_film_info_with_buttons_wrapper(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
+    """Обертка для show_film_info_with_buttons, которая использует правильные зависимости"""
+    try:
+        # Пытаемся импортировать функцию из старого файла
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+        old_moviebot_path = os.path.join(project_root, 'moviebot.py')
+        if os.path.exists(old_moviebot_path):
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("moviebot_module", old_moviebot_path)
+            moviebot_module = importlib.util.module_from_spec(spec)
+            
+            # Устанавливаем правильные зависимости в модуль перед выполнением
+            moviebot_module.bot = bot_instance
+            moviebot_module.cursor = cursor
+            moviebot_module.conn = conn
+            moviebot_module.db_lock = db_lock
+            moviebot_module.logger = logger
+            
+            # Импортируем необходимые функции
+            from moviebot.api.kinopoisk_api import get_series_airing_status, get_seasons_data
+            from moviebot.utils.helpers import has_notifications_access
+            moviebot_module.get_series_airing_status = get_series_airing_status
+            moviebot_module.get_seasons_data = get_seasons_data
+            moviebot_module.has_notifications_access = has_notifications_access
+            
+            spec.loader.exec_module(moviebot_module)
+            original_function = moviebot_module.show_film_info_with_buttons
+            
+            # Вызываем функцию с правильными зависимостями
+            return original_function(chat_id, user_id, info, link, kp_id, existing, message_id, message_thread_id)
+        else:
+            raise ImportError("Файл moviebot.py не найден")
+    except Exception as import_e:
+        logger.error(f"[SERIES CALLBACKS] Ошибка импорта show_film_info_with_buttons: {import_e}", exc_info=True)
+        # Fallback: обновляем только клавиатуру
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        # Проверяем статус подписки из БД
+        is_subscribed = False
+        if existing:
+            film_id = existing[0] if isinstance(existing, tuple) else existing.get('id')
+            if film_id:
+                with db_lock:
+                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                    sub_row = cursor.fetchone()
+                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        if is_subscribed:
+            markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+        else:
+            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+        
+        if message_id:
+            try:
+                if message_thread_id:
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        message_thread_id=message_thread_id,
+                        reply_markup=markup
+                    )
+                else:
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        reply_markup=markup
+                    )
+            except Exception as e:
+                logger.error(f"[SERIES CALLBACKS] Ошибка обновления сообщения: {e}")
+
+# Создаем алиас для удобства
+show_film_info_with_buttons = show_film_info_with_buttons_wrapper
 
 
 def register_series_callbacks(bot_instance):
