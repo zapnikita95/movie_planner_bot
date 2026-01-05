@@ -14,20 +14,330 @@ from moviebot.states import (
     user_search_state, user_plan_state, user_ticket_state,
     user_settings_state, user_edit_state, user_view_film_state,
     user_import_state, user_clean_state, user_cancel_subscription_state,
-    bot_messages, plan_error_messages, list_messages, added_movie_messages
+    bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
-from moviebot.bot.handlers.series import search_films_with_type, show_film_info_with_buttons
+from moviebot.bot.handlers.series import search_films_with_type, show_film_info_with_buttons, show_film_info_without_adding
 from moviebot.bot.handlers.list import handle_view_film_reply_internal
-from moviebot.database.db_operations import add_and_announce
 from moviebot.bot.bot_init import BOT_ID
+from moviebot.database.db_operations import add_and_announce, is_bot_participant, get_watched_emojis
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
 
 
-@bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
+# ==================== ОБРАБОТЧИКИ С ПРИОРИТЕТАМИ (ДО main_text_handler) ====================
+
+def add_reactions_check(message):
+    """Проверка для обработчика add_reactions"""
+    # Пропускаем команды
+    if message.text and message.text.startswith('/'):
+        return False
+    if not message.reply_to_message:
+        return False
+    if message.from_user.id not in user_settings_state:
+        return False
+    state = user_settings_state.get(message.from_user.id, {})
+    if not state.get('adding_reactions'):
+        return False
+    if message.reply_to_message.message_id != state.get('settings_msg_id'):
+        return False
+    logger.info(f"[SETTINGS CHECK] add_reactions_check: True для user_id={message.from_user.id}")
+    return True
+
+
+@bot_instance.message_handler(func=add_reactions_check, priority=10)
+def add_reactions(message):
+    """Обработчик добавления реакций с высоким приоритетом"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    state = user_settings_state.get(user_id, {})
+    settings_msg_id = state.get('settings_msg_id')
+    action = state.get('action', 'replace')
+    
+    logger.info(f"[SETTINGS] add_reactions вызван для user_id={user_id}, action={action}")
+    
+    # Собираем обычные эмодзи и custom_id из сообщения
+    emojis = []
+    custom_ids = []
+    
+    # Обычные эмодзи из текста
+    if message.text:
+        emoji_pattern = re.compile(
+            r'[\U0001F300-\U0001F9FF]'  # Различные символы и пиктограммы
+            r'|[\U0001F600-\U0001F64F]'  # Эмодзи лиц
+            r'|[\U0001F680-\U0001F6FF]'  # Транспорт и карты
+            r'|[\U00002600-\U000026FF]'  # Разные символы
+            r'|[\U00002700-\U000027BF]'  # Dingbats
+            r'|[\U0001F900-\U0001F9FF]'  # Дополнительные символы
+            r'|[\U0001FA00-\U0001FAFF]'  # Шахматы и другие
+            r'|[\U00002B50-\U00002B55]'  # Звезды
+            r'|👍|✅|❤️|🔥|🎉|😂|🤣|😍|😢|😡|👎|⭐|🌟|💯|🎬|🍿'  # Популярные эмодзи
+        )
+        emojis = emoji_pattern.findall(message.text)
+    
+    # Кастомные эмодзи из entities
+    if message.entities:
+        for entity in message.entities:
+            if entity.type == 'custom_emoji' and hasattr(entity, 'custom_emoji_id'):
+                custom_id = str(entity.custom_emoji_id)
+                custom_ids.append(custom_id)
+    
+    new_reactions = emojis + [f"custom:{cid}" for cid in custom_ids]
+    
+    if not new_reactions:
+        bot_instance.reply_to(message, "❌ Не нашёл эмодзи в вашем сообщении. Попробуйте отправить эмодзи снова.")
+        return
+    
+    # Сохраняем в БД
+    try:
+        with db_lock:
+            current_emojis_local = get_watched_emojis(chat_id)
+            
+            if action == "add":
+                all_emojis = ''.join(current_emojis_local) + ''.join(emojis)
+                seen = set()
+                unique_emojis = ''.join(c for c in all_emojis if c not in seen and not seen.add(c))
+            else:
+                unique_emojis = ''.join(emojis)
+            
+            cursor.execute('''
+                INSERT INTO settings (chat_id, key, value)
+                VALUES (%s, 'watched_emoji', %s)
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            ''', (chat_id, unique_emojis))
+            conn.commit()
+        
+        action_text = "добавлены к текущим" if action == "add" else "заменены"
+        bot_instance.reply_to(message, f"✅ Реакции {action_text}:\n{unique_emojis}")
+        logger.info(f"[SETTINGS] Реакции обновлены для чата {chat_id}, user_id={user_id}: {unique_emojis}")
+    except Exception as e:
+        logger.error(f"[SETTINGS] Ошибка при сохранении реакций: {e}", exc_info=True)
+        bot_instance.reply_to(message, "❌ Произошла ошибка при сохранении реакций.")
+    
+    # Очищаем состояние
+    if user_id in user_settings_state:
+        del user_settings_state[user_id]
+
+
+@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in added_movie_messages and m.text and m.text.strip().isdigit() and 1 <= int(m.text.strip()) <= 10, priority=3)
+def handle_added_movie_rating_reply(message):
+    """Обрабатывает реплай на сообщение 'Добавлено в базу' с числом от 1 до 10"""
+    try:
+        reply_msg_id = message.reply_to_message.message_id
+        movie_data = added_movie_messages.get(reply_msg_id)
+        if not movie_data:
+            return
+        
+        rating = int(message.text.strip())
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        film_id = movie_data['film_id']
+        kp_id = movie_data['kp_id']
+        title = movie_data['title']
+        
+        # Предлагаем зачесть оценку и просмотр
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("✅ Да, зачесть", callback_data=f"confirm_rating:{film_id}:{rating}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="cancel_rating"))
+        
+        bot_instance.reply_to(
+            message,
+            f"💡 Зачесть оценку <b>{rating}/10</b> и отметить фильм <b>{title}</b> как просмотренный?",
+            parse_mode='HTML',
+            reply_markup=markup
+        )
+        logger.info(f"[ADDED MOVIE REPLY] Предложено зачесть оценку {rating} для фильма {title} (film_id={film_id})")
+    except Exception as e:
+        logger.error(f"[ADDED MOVIE REPLY] Ошибка: {e}", exc_info=True)
+
+
+@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text, priority=2)
+def handle_rate_list_reply(message):
+    """Обработчик реплаев на сообщения бота с оценками (приоритет 2)"""
+    # Пропускаем команды
+    if message.text and message.text.startswith('/'):
+        return
+    
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    
+    # Проверяем, что это реплай на список фильмов
+    reply_text = message.reply_to_message.text or ""
+    if "Список просмотренных фильмов для оценки" not in reply_text:
+        return
+    
+    text = message.text.strip()
+    if not text:
+        return
+    
+    # Парсим оценки: kp_id оценка (разделители: пробел, запятая, точка с запятой, таб)
+    ratings_pattern = r'(\d+)\s*[,;:\t]?\s*(\d+)'
+    matches = re.findall(ratings_pattern, text)
+    
+    if not matches:
+        bot_instance.reply_to(message, "❌ Не удалось распознать оценки. Используйте формат: <code>kp_id оценка</code>", parse_mode='HTML')
+        return
+    
+    results = []
+    errors = []
+    
+    with db_lock:
+        for kp_id_str, rating_str in matches:
+            try:
+                kp_id = kp_id_str.strip()
+                rating = int(rating_str.strip())
+                
+                if not (1 <= rating <= 10):
+                    errors.append(f"{kp_id}: оценка должна быть от 1 до 10")
+                    continue
+                
+                # Находим фильм по kp_id
+                cursor.execute('''
+                    SELECT id, title FROM movies
+                    WHERE chat_id = %s AND kp_id = %s AND watched = 1
+                ''', (chat_id, kp_id))
+                film_row = cursor.fetchone()
+                
+                if not film_row:
+                    errors.append(f"{kp_id}: фильм не найден или не просмотрен")
+                    continue
+                
+                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
+                
+                # Проверяем, не оценил ли уже пользователь этот фильм
+                cursor.execute('''
+                    SELECT rating FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                ''', (chat_id, film_id, user_id))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    errors.append(f"{kp_id}: вы уже оценили этот фильм")
+                    continue
+                
+                # Сохраняем оценку
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = FALSE
+                ''', (chat_id, film_id, user_id, rating))
+                
+                results.append((kp_id, title, rating))
+                
+                # Проверяем, все ли активные пользователи оценили фильм
+                cursor.execute('''
+                    SELECT DISTINCT user_id
+                    FROM stats
+                    WHERE chat_id = %s AND user_id IS NOT NULL
+                ''', (chat_id,))
+                active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Получаем всех, кто оценил этот фильм (только неимпортированные оценки)
+                cursor.execute('''
+                    SELECT DISTINCT user_id FROM ratings
+                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id))
+                rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                
+                # Если все активные пользователи оценили, отмечаем фильм как просмотренный
+                if active_users and active_users.issubset(rated_users):
+                    cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    logger.info(f"[RATE] Все активные пользователи оценили фильм {film_id}, отмечен как просмотренный")
+                
+            except ValueError:
+                errors.append(f"{kp_id_str}: неверный формат оценки")
+            except Exception as e:
+                logger.error(f"Ошибка при сохранении оценки {kp_id_str}: {e}")
+                errors.append(f"{kp_id_str}: ошибка обработки")
+        
+        conn.commit()
+    
+    # Формируем ответ
+    response_text = ""
+    
+    if results:
+        user_name = message.from_user.first_name or f"user_{user_id}"
+        response_text += f"✅ <b>{user_name}</b> поставил(а) оценки:\n\n"
+        for kp_id, title, rating in results:
+            response_text += f"• <b>{kp_id}</b> — {title}: {rating}/10\n"
+        response_text += "\n"
+    
+    if errors:
+        response_text += "⚠️ <b>Ошибки:</b>\n"
+        for error in errors:
+            response_text += f"• {error}\n"
+    
+    if not results and not errors:
+        response_text = "❌ Не удалось обработать оценки. Проверьте формат."
+    
+    bot_instance.reply_to(message, response_text, parse_mode='HTML')
+
+
+@bot_instance.message_handler(func=lambda m: (
+    m.text and 
+    ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text) and
+    not m.text.strip().startswith('/plan')
+))
+def save_movie_message(message):
+    """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
+    logger.info(f"[SAVE MOVIE] save_movie_message вызван для пользователя {message.from_user.id}, текст: '{message.text[:100]}'")
+    
+    # Сохраняем ссылку в bot_messages для обработки реакций
+    links = []
+    try:
+        # Ищем ссылки в тексте
+        links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
+        
+        # Также проверяем entities (URL в тексте)
+        if message.entities and not links:
+            text = message.text
+            for entity in message.entities:
+                if entity.type == 'url':
+                    link = text[entity.offset:entity.offset + entity.length]
+                    if 'kinopoisk.ru' in link or 'kinopoisk.com' in link:
+                        links.append(link)
+        
+        if links:
+            bot_messages[message.message_id] = links[0]
+            logger.info(f"[SAVE MOVIE] Ссылка сохранена в bot_messages для message_id={message.message_id}: {links[0]}")
+    except Exception as e:
+        logger.warning(f"[SAVE MOVIE] Ошибка при сохранении ссылки в bot_messages: {e}")
+    
+    # Пропускаем, если пользователь работает с билетами или планированием
+    if message.from_user.id in user_ticket_state:
+        state = user_ticket_state.get(message.from_user.id, {})
+        step = state.get('step')
+        logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_ticket_state, step={step}")
+        return
+    
+    if message.from_user.id in user_plan_state:
+        logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_plan_state")
+        return
+    
+    try:
+        if links:
+            chat_id = message.chat.id
+            username = message.from_user.username or f"user_{message.from_user.id}"
+            log_request(message.from_user.id, username, 'add_movie', chat_id)
+            logger.info(f"[SAVE MESSAGE] Найдено ссылок на фильмы: {len(links)}, chat_id={chat_id}")
+            
+            added_count = 0
+            for link in links:
+                if add_and_announce(link, chat_id):
+                    added_count += 1
+                    logger.info(f"[SAVE MESSAGE] Фильм обработан: {link}")
+            
+            if added_count > 1:
+                bot_instance.send_message(chat_id, f"🎉 Добавлено {added_count} новых фильмов в базу!")
+    except Exception as e:
+        logger.warning(f"[SAVE MESSAGE] Ошибка при обработке сообщения с фильмом: {e}", exc_info=True)
+
+
+@bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')), priority=1)
 def main_text_handler(message):
     """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
     logger.info(f"[MAIN TEXT HANDLER] Получено текстовое сообщение от {message.from_user.id}: '{message.text[:100] if message.text else ''}'")
@@ -76,7 +386,10 @@ def main_text_handler(message):
         is_reply_to_search = message.reply_to_message and message.reply_to_message.message_id == saved_message_id
         is_text_in_search_state = text and not message.reply_to_message  # Текст без ответа, но в состоянии поиска
         
-        if is_reply_to_search or is_text_in_search_state:
+        logger.info(f"[SEARCH STATE] saved_message_id={saved_message_id}, is_reply_to_search={is_reply_to_search}, is_text_in_search_state={is_text_in_search_state}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
+        
+        # Если пользователь в состоянии поиска и отправил текст, обрабатываем его независимо от reply_to_message
+        if is_reply_to_search or (is_text_in_search_state and text.strip()):
             query = text
             if query:
                 # Получаем тип поиска из состояния
@@ -341,46 +654,7 @@ def main_text_handler(message):
         return
     
     # 3. Обычные сообщения с фильмами (если нет состояния)
-    
-    # Сообщения с ссылками на Кинопоиск
-    if 'kinopoisk.ru' in text or 'kinopoisk.com' in text:
-        link_match = re.search(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', text)
-        if link_match:
-            link = link_match.group(1)
-            # Сохраняем ссылку в bot_messages для обработки реакций
-            bot_messages[message.message_id] = link
-            logger.info(f"[MAIN TEXT HANDLER] Ссылка сохранена в bot_messages для message_id={message.message_id}: {link}")
-            
-            # Добавляем фильм в базу
-            username = message.from_user.username or f"user_{message.from_user.id}"
-            log_request(message.from_user.id, username, 'add_movie', chat_id)
-            
-            added_count = 0
-            links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', text)
-            for link_item in links:
-                if add_and_announce(link_item, chat_id):
-                    added_count += 1
-                    logger.info(f"[MAIN TEXT HANDLER] Фильм обработан: {link_item}")
-            
-            if added_count > 1:
-                bot_instance.send_message(chat_id, f"🎉 Добавлено {added_count} новых фильмов в базу!")
-            return
-    
-    # Сообщения с entities (URL в тексте)
-    if message.entities:
-        links = []
-        for entity in message.entities:
-            if entity.type == 'url':
-                link = text[entity.offset:entity.offset + entity.length]
-                if 'kinopoisk.ru' in link or 'kinopoisk.com' in link:
-                    links.append(link)
-        
-        if links:
-            for link in links:
-                bot_messages[message.message_id] = link
-                if add_and_announce(link, chat_id):
-                    logger.info(f"[MAIN TEXT HANDLER] Фильм обработан через entities: {link}")
-            return
+    # Обработка ссылок на Кинопоиск теперь выполняется отдельным обработчиком save_movie_message
     
     # Если ничего не подошло - игнорируем
     logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано: '{text[:50]}'")

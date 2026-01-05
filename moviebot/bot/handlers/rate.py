@@ -228,3 +228,149 @@ def register_rate_handlers(bot):
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
+
+
+def handle_rating_internal(message, rating):
+    """Внутренняя функция для обработки оценки - добавляет фильм в базу при успешной оценке"""
+    from moviebot.states import rating_messages, bot_messages
+    from moviebot.bot.handlers.series import ensure_movie_in_database
+    from moviebot.api.kinopoisk_api import extract_movie_info
+    from moviebot.utils.parsing import extract_kp_id_from_text
+    import re
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    film_id = None
+    kp_id = None
+    
+    if message.reply_to_message:
+        reply_msg_id = message.reply_to_message.message_id
+        
+        # Проверяем все возможные источники film_id: rating_messages, bot_messages (цепочка реплаев)
+        # Сначала проверяем прямое сообщение
+        film_id = rating_messages.get(reply_msg_id)
+        
+        # Если не найдено, проверяем цепочку реплаев рекурсивно
+        if not film_id:
+            current_msg = message.reply_to_message
+            checked_ids = set()  # Чтобы избежать циклов
+            while current_msg and current_msg.message_id not in checked_ids:
+                checked_ids.add(current_msg.message_id)
+                # Проверяем rating_messages
+                if current_msg.message_id in rating_messages:
+                    film_id = rating_messages[current_msg.message_id]
+                    break
+                # Проверяем bot_messages (сообщения с фильмами)
+                if current_msg.message_id in bot_messages:
+                    reply_link = bot_messages[current_msg.message_id]
+                    if reply_link:
+                        # Извлекаем kp_id из ссылки для поиска
+                        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                        if match:
+                            kp_id = match.group(2)
+                            with db_lock:
+                                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                                row = cursor.fetchone()
+                                if row:
+                                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                                    break
+                # Переходим к родительскому сообщению
+                current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
+    
+    # Проверяем rating_messages на наличие kp_id (формат "kp_id:123")
+    if not film_id and message.reply_to_message:
+        reply_msg_id = message.reply_to_message.message_id
+        rating_msg_value = rating_messages.get(reply_msg_id)
+        if rating_msg_value and isinstance(rating_msg_value, str) and rating_msg_value.startswith("kp_id:"):
+            kp_id = rating_msg_value.split(":")[1]
+            logger.info(f"[RATE INTERNAL] Найден kp_id из rating_messages: {kp_id}")
+    
+    # Если film_id не найден, но есть kp_id, добавляем фильм в базу
+    if not film_id and kp_id:
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        if info:
+            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            if was_inserted:
+                logger.info(f"[RATE INTERNAL] Фильм добавлен в базу при оценке: kp_id={kp_id}, film_id={film_id}")
+        else:
+            logger.warning(f"[RATE INTERNAL] Не удалось получить информацию о фильме для kp_id={kp_id}")
+            bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
+            return
+    
+    # Если film_id все еще не найден, пытаемся найти через kp_id из сообщения
+    if not film_id:
+        # Пытаемся извлечь kp_id из текста сообщения или ссылки
+        text = message.text or ""
+        if 'kinopoisk.ru' in text or 'kinopoisk.com' in text:
+            kp_id = extract_kp_id_from_text(text)
+        elif message.reply_to_message and message.reply_to_message.text:
+            reply_text = message.reply_to_message.text
+            if 'kinopoisk.ru' in reply_text or 'kinopoisk.com' in reply_text:
+                kp_id = extract_kp_id_from_text(reply_text)
+        
+        if kp_id:
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            info = extract_movie_info(link)
+            if info:
+                film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                if was_inserted:
+                    logger.info(f"[RATE INTERNAL] Фильм добавлен в базу при оценке: kp_id={kp_id}, film_id={film_id}")
+            else:
+                logger.warning(f"[RATE INTERNAL] Не удалось получить информацию о фильме для kp_id={kp_id}")
+                bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
+                return
+    
+    if film_id:
+        try:
+            with db_lock:
+                # Проверяем, просмотрен ли фильм ДО сохранения оценки
+                cursor.execute('SELECT watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                watched_row = cursor.fetchone()
+                is_watched_before = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                is_watched_before = bool(is_watched_before) if is_watched_before is not None else False
+                
+                cursor.execute('''
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = FALSE
+                ''', (chat_id, film_id, user_id, rating))
+                conn.commit()
+                
+                cursor.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
+                avg_row = cursor.fetchone()
+                avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
+                
+                # Получаем kp_id для похожих фильмов
+                cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                kp_row = cursor.fetchone()
+                kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
+                
+                avg_str = f"{avg:.1f}" if avg else "—"
+                
+                # Если фильм не был просмотрен, отмечаем его как просмотренный
+                if not is_watched_before:
+                    cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    conn.commit()
+                    logger.info(f"[RATE INTERNAL] Фильм {film_id} отмечен как просмотренный после оценки пользователем {user_id}")
+                    
+                    # Создаем кнопку "Вернуться к описанию"
+                    markup = InlineKeyboardMarkup()
+                    if kp_id:
+                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"show_film_description:{kp_id}"))
+                    
+                    reply_msg = bot_instance.reply_to(message, f"Спасибо! Фильм отмечен как просмотренный, ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", reply_markup=markup if markup.keyboard else None)
+                    
+                    # Сохраняем message_id для удаления при возврате к описанию
+                    if kp_id and reply_msg:
+                        rating_messages[reply_msg.message_id] = film_id
+                else:
+                    bot_instance.reply_to(message, f"✅ Оценка {rating}/10 сохранена!\nСредняя: {avg_str}/10")
+                    
+        except Exception as e:
+            logger.error(f"[RATE INTERNAL] Ошибка при сохранении оценки: {e}", exc_info=True)
+            bot_instance.reply_to(message, "❌ Произошла ошибка при сохранении оценки.")
+    else:
+        logger.warning(f"[RATE INTERNAL] Не удалось найти film_id для сохранения оценки")
+        bot_instance.reply_to(message, "❌ Не удалось найти фильм для оценки. Убедитесь, что вы отвечаете на сообщение с фильмом.")

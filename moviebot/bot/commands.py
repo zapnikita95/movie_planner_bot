@@ -1,4 +1,4 @@
-"""
+ логирование всё ещё работают ебано, никаких логов текста, никакого поиска"""
 Регистрация всех command handlers
 """
 import logging
@@ -33,6 +33,15 @@ def register_all_handlers(bot):
     
     from moviebot.bot.handlers.stats import register_stats_handlers
     register_stats_handlers(bot)
+    
+    from moviebot.bot.handlers.edit import register_edit_handlers
+    register_edit_handlers(bot)
+    
+    from moviebot.bot.handlers.clean import register_clean_handlers
+    register_clean_handlers(bot)
+    
+    from moviebot.bot.handlers.join import register_join_handlers
+    register_join_handlers(bot)
     
     # Регистрируем callback handlers
     from moviebot.bot.callbacks.series_callbacks import register_series_callbacks

@@ -739,17 +739,33 @@ def register_series_callbacks(bot_instance):
             
             logger.info(f"[EPISODE TOGGLE] Переключение эпизода: kp_id={kp_id}, season={season_num}, episode={ep_num}, user_id={user_id}")
             
-            # Получаем film_id
+            # Получаем film_id (добавляем сериал в базу, если его еще нет)
             with db_lock:
                 cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 row = cursor.fetchone()
-                if not row:
-                    bot_instance.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
-                    return
-                
+            
+            film_id = None
+            if row:
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
-                
-                # Проверяем текущий статус
+            
+            # Если сериала нет в базе, добавляем его
+            if not film_id:
+                from moviebot.bot.handlers.series import ensure_movie_in_database
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                info = extract_movie_info(link)
+                if info:
+                    film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                    if was_inserted:
+                        logger.info(f"[EPISODE TOGGLE] Сериал добавлен в базу при отметке эпизода: kp_id={kp_id}, film_id={film_id}")
+                    if not film_id:
+                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                        return
+                else:
+                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                    return
+            
+            # Проверяем текущий статус и переключаем
+            with db_lock:
                 cursor.execute('''
                     SELECT watched FROM series_tracking 
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s 
@@ -769,7 +785,7 @@ def register_series_callbacks(bot_instance):
                         AND season_number = %s AND episode_number = %s
                     ''', (chat_id, film_id, user_id, season_num, ep_num))
                 else:
-                    # Добавляем отметку
+                    # Добавляем отметку эпизода
                     cursor.execute('''
                         INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
                         VALUES (%s, %s, %s, %s, %s, TRUE)
@@ -936,27 +952,31 @@ def register_series_callbacks(bot_instance):
             
             logger.info(f"[RATE FILM] Пользователь {user_id} хочет оценить фильм kp_id={kp_id}")
             
-            # Получаем film_id по kp_id (добавляем в базу, если нет)
-            from moviebot.bot.handlers.series import ensure_movie_in_database
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            info = extract_movie_info(link)
-            if not info:
-                logger.error(f"[RATE FILM] Не удалось получить информацию о фильме для kp_id={kp_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-                return
+            # Проверяем, есть ли фильм в базе
+            with db_lock:
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                row = cursor.fetchone()
             
-            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            film_id = None
+            if row:
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+            
+            # Если фильма нет в базе, просто отправляем сообщение с просьбой оценить
+            # Фильм будет добавлен в базу только при успешной оценке (через handle_rating_internal)
             if not film_id:
-                logger.error(f"[RATE FILM] Не удалось добавить фильм в базу для kp_id={kp_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+                # Получаем информацию о фильме для отображения названия
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                info = extract_movie_info(link)
+                title = info.get('title', 'Фильм') if info else 'Фильм'
+                
+                # Отправляем сообщение с просьбой оценить и добавляем его в rating_messages с kp_id
+                # Используем специальный формат для хранения kp_id вместо film_id
+                msg = bot_instance.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.\n\n<i>Фильм будет добавлен в базу при успешной оценке.</i>", parse_mode='Markdown')
+                # Сохраняем kp_id в rating_messages с префиксом "kp_id:" для идентификации
+                rating_messages[msg.message_id] = f"kp_id:{kp_id}"
+                logger.info(f"[RATE FILM] Сообщение {msg.message_id} добавлено в rating_messages для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id)
                 return
-            
-            title = info.get('title', 'Фильм')
-            
-            # Если фильм был добавлен, отправляем уведомление
-            if was_inserted:
-                bot_instance.send_message(chat_id, f"✅ Фильм добавлен в базу!")
-                logger.info(f"[RATE FILM] Фильм добавлен в базу: film_id={film_id}, title={title}")
             
             # Проверяем, есть ли уже оценка
             with db_lock:

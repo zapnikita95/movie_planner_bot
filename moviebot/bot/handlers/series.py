@@ -14,7 +14,7 @@ from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_pre
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
 from moviebot.bot.bot_init import bot as bot_instance
-from moviebot.config import KP_TOKEN
+from moviebot.config import KP_TOKEN, PLANS_TZ
 import requests
 from moviebot.states import (
     user_search_state, user_random_state, user_ticket_state,
@@ -150,81 +150,81 @@ def handle_search(message):
 
 
 def random_start(message):
-    """Команда /random - рандомный выбор фильма"""
-    # TODO: Извлечь из moviebot.py строки 10210-10296
-    try:
-        logger.info(f"[RANDOM] ===== START: user_id={message.from_user.id}, chat_id={message.chat.id}")
-        user_id = message.from_user.id
-        chat_id = message.chat.id
-        
-        username = message.from_user.username or f"user_{message.from_user.id}"
-        log_request(user_id, username, '/random', chat_id)
-        
-        # Инициализируем состояние
-        user_random_state[user_id] = {
-            'step': 'mode',
-            'mode': None,  # 'my_votes', 'group_votes', или None (обычный режим)
-            'periods': [],
-            'genres': [],
-            'directors': [],
-            'actors': []
-        }
-        
-        # Шаг 0: Выбор режима
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
-        
-        # Проверяем доступ к рекомендациям
-        has_rec_access = has_recommendations_access(chat_id, user_id)
-        
-        if has_rec_access:
-            markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
-        else:
-            markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
-        
-        # TODO: Добавить проверку количества оценок и групповых оценок
-        # Проверяем, есть ли у пользователя больше 50 оценок
-        with db_lock:
-            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-            user_ratings_count = cursor.fetchone()
-            user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
-            
-            if has_rec_access and user_ratings >= 50:
-                markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
-            else:
-                if not has_rec_access:
-                    markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
-                else:
-                    markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
-        
-        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-        bot_instance.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
-        logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка в /random: {e}", exc_info=True)
+        """Команда /random - рандомный выбор фильма"""
+        # TODO: Извлечь из moviebot.py строки 10210-10296
         try:
-            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /random")
-        except:
-            pass
+            logger.info(f"[RANDOM] ===== START: user_id={message.from_user.id}, chat_id={message.chat.id}")
+            user_id = message.from_user.id
+            chat_id = message.chat.id
+            
+            username = message.from_user.username or f"user_{message.from_user.id}"
+            log_request(user_id, username, '/random', chat_id)
+            
+            # Инициализируем состояние
+            user_random_state[user_id] = {
+                'step': 'mode',
+                'mode': None,  # 'my_votes', 'group_votes', или None (обычный режим)
+                'periods': [],
+                'genres': [],
+                'directors': [],
+                'actors': []
+            }
+            
+            # Шаг 0: Выбор режима
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+            
+            # Проверяем доступ к рекомендациям
+            has_rec_access = has_recommendations_access(chat_id, user_id)
+            
+            if has_rec_access:
+                markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
+            
+            # TODO: Добавить проверку количества оценок и групповых оценок
+            # Проверяем, есть ли у пользователя больше 50 оценок
+            with db_lock:
+                cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                user_ratings_count = cursor.fetchone()
+                user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+                
+                if has_rec_access and user_ratings >= 50:
+                    markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+                else:
+                    if not has_rec_access:
+                        markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
+            
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            bot_instance.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
+            logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка в /random: {e}", exc_info=True)
+            try:
+                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /random")
+            except:
+                pass
 
 
 def premieres_command(message):
-    """Команда /premieres - премьеры фильмов"""
-    logger.info(f"[HANDLER] /premieres вызван от {message.from_user.id}")
-    username = message.from_user.username or f"user_{message.from_user.id}"
-    log_request(message.from_user.id, username, '/premieres', message.chat.id)
-    
-    # Показываем выбор периода
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
-    markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
-    markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
-    markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
-    markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
-    markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
-    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-    
-    bot_instance.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
+        """Команда /premieres - премьеры фильмов"""
+        logger.info(f"[HANDLER] /premieres вызван от {message.from_user.id}")
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/premieres', message.chat.id)
+        
+        # Показываем выбор периода
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
+        markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
+        markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
+        markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
+        markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
+        markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        
+        bot_instance.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
 
 
 def ticket_command(message):
@@ -285,62 +285,62 @@ def settings_command(message):
     # TODO: Извлечь из moviebot.py строки 10627-10992
     logger.info(f"[HANDLER] /settings вызван от {message.from_user.id}")
     try:
-        chat_id = message.chat.id
-        user_id = message.from_user.id
-        username = message.from_user.username or f"user_{user_id}"
-        log_request(user_id, username, '/settings', chat_id)
-        logger.info(f"Команда /settings от пользователя {user_id}")
-        
-        # Проверяем на reset
-        if message.text and 'reset' in message.text.lower():
-            with db_lock:
-                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
-                conn.commit()
-            bot_instance.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
-            logger.info(f"Реакции сброшены для чата {chat_id}")
-            return
-        
-        # Сначала показываем меню выбора действия
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
-        markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
-        
-        # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
-        if has_notifications_access(chat_id, user_id):
-            markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
-        else:
-            markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
-        
-        # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
-        if has_recommendations_access(chat_id, user_id):
-            markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
-        else:
-            markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
-        
-        # Проверяем, является ли чат личным (случайные события доступны только в группах)
-        is_private = message.chat.type == 'private'
-        if is_private:
-            markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
-        else:
-            markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
-        markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
-        markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
-        markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
-        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-        
-        sent = bot_instance.send_message(chat_id,
-            f"⚙️ <b>Настройки</b>\n\n"
-            f"Выберите, что хотите настроить:",
-            reply_markup=markup,
-            parse_mode='HTML')
-        
-        logger.info(f"Настройки открыты для {user_id}, msg_id: {sent.message_id}")
-    except Exception as e:
-        logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
-        try:
-            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /settings")
-        except:
-            pass
+            chat_id = message.chat.id
+            user_id = message.from_user.id
+            username = message.from_user.username or f"user_{user_id}"
+            log_request(user_id, username, '/settings', chat_id)
+            logger.info(f"Команда /settings от пользователя {user_id}")
+            
+            # Проверяем на reset
+            if message.text and 'reset' in message.text.lower():
+                with db_lock:
+                    cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+                    conn.commit()
+                bot_instance.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
+                logger.info(f"Реакции сброшены для чата {chat_id}")
+                return
+            
+            # Сначала показываем меню выбора действия
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
+            markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
+            
+            # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
+            if has_notifications_access(chat_id, user_id):
+                markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
+            
+            # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
+            if has_recommendations_access(chat_id, user_id):
+                markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
+            
+            # Проверяем, является ли чат личным (случайные события доступны только в группах)
+            is_private = message.chat.type == 'private'
+            if is_private:
+                markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
+            else:
+                markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
+            markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
+            markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
+            markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            sent = bot_instance.send_message(chat_id,
+                f"⚙️ <b>Настройки</b>\n\n"
+                f"Выберите, что хотите настроить:",
+                reply_markup=markup,
+                parse_mode='HTML')
+            
+            logger.info(f"Настройки открыты для {user_id}, msg_id: {sent.message_id}")
+        except Exception as e:
+            logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
+            try:
+                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /settings")
+            except:
+                pass
 
 
 def help_command(message):
@@ -913,9 +913,160 @@ def register_series_handlers(bot_instance):
                     )
                     return
                 
-                # TODO: Показать настройку случайных событий (извлечь из moviebot.py строки 21920-21963)
-                logger.info(f"[SETTINGS] Показ настроек случайных событий для chat_id={chat_id}")
-                bot_instance.answer_callback_query(call.id, "Настройки случайных событий будут реализованы позже")
+                # Показываем настройку случайных событий
+                with db_lock:
+                    cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+                    row = cursor.fetchone()
+                    is_enabled = True
+                    if row:
+                        value = row.get('value') if isinstance(row, dict) else row[0]
+                        is_enabled = value == 'true'
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                if is_enabled:
+                    markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
+                else:
+                    markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
+                markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
+                markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+                
+                status_text = "включены" if is_enabled else "выключены"
+                bot_instance.edit_message_text(
+                    f"🎲 <b>Случайные события</b>\n\n"
+                    f"Текущий статус: <b>{status_text}</b>\n\n"
+                    f"Случайные события включают:\n"
+                    f"• Предложение рандомного фильма, если на выходных нет планов\n"
+                    f"• Выбор случайного участника для выбора фильма (раз в 2 недели)\n"
+                    f"• Игра в кубик для выбора фильма (раз в 2 недели)\n"
+                    f"• Напоминание о премьерах, если давно не добавляли фильмы в кино",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
+            
+            if action.startswith("random_events:example:"):
+                # Отправка примера случайного события
+                example_type = action.split(":")[-1]  # with_user или without_user
+                
+                # Проверяем, что это групповой чат
+                try:
+                    chat_info = bot_instance.get_chat(chat_id)
+                    if chat_info.type == 'private':
+                        bot_instance.answer_callback_query(call.id, "Примеры событий работают только в групповых чатах", show_alert=True)
+                        return
+                except Exception as e:
+                    logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить информацию о чате {chat_id}: {e}")
+                    bot_instance.answer_callback_query(call.id, "Ошибка при отправке примера", show_alert=True)
+                    return
+                
+                bot_instance.answer_callback_query(call.id, "Отправляю пример события...")
+                
+                import random
+                from moviebot.states import dice_game_state
+                
+                if example_type == "with_user":
+                    # Пример события с участником (выбор случайного участника)
+                    with db_lock:
+                        cursor.execute('''
+                            SELECT DISTINCT user_id, username 
+                            FROM stats 
+                            WHERE chat_id = %s 
+                            LIMIT 10
+                        ''', (chat_id,))
+                        participants = cursor.fetchall()
+                    
+                    if participants:
+                        participant = random.choice(participants)
+                        p_user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+                        username = participant.get('username') if isinstance(participant, dict) else participant[1]
+                        
+                        if username:
+                            user_name = f"@{username}"
+                        else:
+                            try:
+                                user_info = bot_instance.get_chat_member(chat_id, p_user_id)
+                                user_name = user_info.user.first_name or "участник"
+                            except:
+                                user_name = "участник"
+                    else:
+                        user_name = "участник"
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                    markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                    markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+                    
+                    text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                    text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
+                    
+                    bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                else:
+                    # Пример события без участника (игра в кубик)
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
+                    markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                    markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+                    
+                    text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                    text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
+                    text += "⏳ Осталось бросить кубик: 2 участник(ов)"
+                    
+                    sent_msg = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    
+                    # Инициализируем состояние игры для примера события
+                    if chat_id not in dice_game_state:
+                        dice_game_state[chat_id] = {
+                            'participants': {},
+                            'message_id': sent_msg.message_id,
+                            'start_time': datetime.now(PLANS_TZ),
+                            'dice_messages': {}
+                        }
+                        logger.info(f"[RANDOM EVENTS EXAMPLE] Инициализировано состояние игры для примера события в чате {chat_id}, message_id={sent_msg.message_id}")
+                
+                return
+            
+            if action.startswith("random_events:"):
+                # Включение/выключение случайных событий
+                sub_action = action.split(":", 1)[1]
+                new_value = 'true' if sub_action == 'enable' else 'false'
+                
+                with db_lock:
+                    cursor.execute('''
+                        INSERT INTO settings (chat_id, key, value)
+                        VALUES (%s, 'random_events_enabled', %s)
+                        ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                    ''', (chat_id, new_value))
+                    conn.commit()
+                
+                status_text = "включены" if new_value == 'true' else "выключены"
+                bot_instance.answer_callback_query(call.id, f"Случайные события {status_text}")
+                
+                # Обновляем сообщение
+                markup = InlineKeyboardMarkup(row_width=1)
+                if new_value == 'true':
+                    markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
+                else:
+                    markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
+                markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
+                markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+                
+                bot_instance.edit_message_text(
+                    f"🎲 <b>Случайные события</b>\n\n"
+                    f"Текущий статус: <b>{status_text}</b>\n\n"
+                    f"Случайные события включают:\n"
+                    f"• Предложение рандомного фильма, если на выходных нет планов\n"
+                    f"• Выбор случайного участника для выбора фильма (раз в 2 недели)\n"
+                    f"• Игра в кубик для выбора фильма (раз в 2 недели)\n"
+                    f"• Напоминание о премьерах, если давно не добавляли фильмы в кино",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
                 return
             
             if action == "timezone":
@@ -940,21 +1091,42 @@ def register_series_handlers(bot_instance):
                 return
             
             if action == "edit":
-                # Вызываем команду /edit - TODO: реализовать команду /edit
-                logger.info(f"[SETTINGS] Вызов команды /edit для user_id={user_id}")
-                bot_instance.answer_callback_query(call.id, "Команда /edit будет реализована позже")
+                # Вызываем команду /edit
+                from moviebot.bot.handlers.edit import edit_command
+                fake_message = type('obj', (object,), {
+                    'from_user': call.from_user,
+                    'chat': call.message.chat,
+                    'reply_to': lambda self, text, **kwargs: bot_instance.send_message(call.message.chat.id, text, **kwargs)
+                })()
+                fake_message.reply_to = lambda text, **kwargs: bot_instance.send_message(call.message.chat.id, text, **kwargs)
+                edit_command(fake_message)
+                bot_instance.answer_callback_query(call.id)
                 return
             
             if action == "clean":
-                # Вызываем команду /clean - TODO: реализовать команду /clean
-                logger.info(f"[SETTINGS] Вызов команды /clean для user_id={user_id}")
-                bot_instance.answer_callback_query(call.id, "Команда /clean будет реализована позже")
+                # Вызываем команду /clean
+                from moviebot.bot.handlers.clean import clean_command
+                fake_message = type('obj', (object,), {
+                    'from_user': call.from_user,
+                    'chat': call.message.chat,
+                    'reply_to': lambda self, text, **kwargs: bot_instance.send_message(call.message.chat.id, text, **kwargs)
+                })()
+                fake_message.reply_to = lambda text, **kwargs: bot_instance.send_message(call.message.chat.id, text, **kwargs)
+                clean_command(fake_message)
+                bot_instance.answer_callback_query(call.id)
                 return
             
             if action == "join":
-                # Вызываем команду /join - TODO: реализовать команду /join
-                logger.info(f"[SETTINGS] Вызов команды /join для user_id={user_id}")
-                bot_instance.answer_callback_query(call.id, "Команда /join будет реализована позже")
+                # Вызываем команду /join
+                from moviebot.bot.handlers.join import join_command
+                fake_message = type('obj', (object,), {
+                    'from_user': call.from_user,
+                    'chat': call.message.chat,
+                    'reply_to': lambda self, text, **kwargs: bot_instance.send_message(call.message.chat.id, text, **kwargs)
+                })()
+                fake_message.reply_to = lambda text, **kwargs: bot_instance.send_message(call.message.chat.id, text, **kwargs)
+                join_command(fake_message)
+                bot_instance.answer_callback_query(call.id)
                 return
             
             if action == "back":
@@ -1231,6 +1403,59 @@ def register_series_handlers(bot_instance):
             logger.error(f"[SEARCH REPLY] Ошибка: {e}", exc_info=True)
             try:
                 bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса поиска")
+            except:
+                pass
+
+    # Обработчик кнопки "➕ Добавить в базу"
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
+    def add_to_database_callback(call):
+        """Обработчик кнопки '➕ Добавить в базу'"""
+        try:
+            bot_instance.answer_callback_query(call.id)
+            kp_id = call.data.split(":")[1]
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            logger.info(f"[ADD TO DATABASE] Пользователь {user_id} хочет добавить фильм kp_id={kp_id} в базу")
+            
+            # Получаем информацию о фильме/сериале
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            info = extract_movie_info(link)
+            if not info:
+                logger.error(f"[ADD TO DATABASE] Не удалось получить информацию о фильме для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            # Добавляем фильм в базу
+            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            if not film_id:
+                logger.error(f"[ADD TO DATABASE] Не удалось добавить фильм в базу для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+                return
+            
+            title = info.get('title', 'Фильм')
+            
+            if was_inserted:
+                bot_instance.answer_callback_query(call.id, f"✅ {title} добавлен в базу!", show_alert=False)
+                logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title}")
+                
+                # Обновляем сообщение, показывая что фильм теперь в базе
+                # Получаем обновленные данные из базы
+                with db_lock:
+                    cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
+                    movie_row = cursor.fetchone()
+                    title_db = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
+                    watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
+                
+                # Показываем описание с кнопками (теперь фильм в базе)
+                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title_db, watched), message_id=call.message.message_id)
+            else:
+                bot_instance.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
+                logger.info(f"[ADD TO DATABASE] Фильм уже был в базе: film_id={film_id}, title={title}")
+        except Exception as e:
+            logger.error(f"[ADD TO DATABASE] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
@@ -1818,10 +2043,13 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
                 markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
         
+        # Добавляем кнопку "➕ Добавить в базу"
+        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
+        
         # Добавляем основные кнопки
         markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
         
-        # Добавляем кнопки для всех действий (сериал будет добавлен в базу при нажатии)
+        # Добавляем кнопки для всех действий (фильм/сериал будет добавлен в базу при нажатии только при определенных действиях)
         markup.row(
             InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
             InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")

@@ -1329,6 +1329,21 @@ def get_admin_statistics():
     return stats
 
 
+def is_bot_participant(chat_id, user_id):
+    """Проверяет, является ли пользователь участником бота (есть ли запись в stats)"""
+    try:
+        with db_lock:
+            cursor.execute('''
+                SELECT COUNT(*) FROM stats 
+                WHERE chat_id = %s AND user_id = %s
+            ''', (chat_id, user_id))
+            count = cursor.fetchone()
+            return (count.get('count') if isinstance(count, dict) else count[0]) > 0
+    except Exception as e:
+        logger.error(f"[IS_BOT_PARTICIPANT] Ошибка: {e}")
+        return False
+
+
 def add_and_announce(link, chat_id, user_id=None, source='unknown'):
     """Добавляет фильм в базу данных и отправляет сообщение с информацией о фильме"""
     from moviebot.api.kinopoisk_api import extract_movie_info

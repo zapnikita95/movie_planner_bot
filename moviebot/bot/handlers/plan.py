@@ -99,6 +99,9 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
         cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)',
                       (chat_id, film_id, plan_type, plan_utc, user_id))
         conn.commit()
+        
+        # Успешное планирование - фильм уже в базе (film_id получен выше)
+        logger.info(f"[PLAN] Успешное планирование: film_id={film_id}, plan_type={plan_type}, plan_datetime={plan_utc}")
     
     # Формируем сообщение об успехе
     date_str = plan_dt.strftime('%d.%m %H:%M')
@@ -653,13 +656,35 @@ def show_schedule(message):
             
             logger.info(f"[PLAN FROM ADDED] Пользователь {user_id} хочет запланировать фильм kp_id={kp_id}")
             
+            # Проверяем, есть ли фильм в базе, если нет - добавляем
+            from moviebot.bot.handlers.series import ensure_movie_in_database
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            
             link = None
+            film_id = None
             with db_lock:
-                cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 row = cursor.fetchone()
                 if row:
-                    link = row.get('link') if isinstance(row, dict) else row[0]
-                    logger.info(f"[PLAN FROM ADDED] Ссылка найдена в базе: {link}")
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    link = row.get('link') if isinstance(row, dict) else row[1]
+                    logger.info(f"[PLAN FROM ADDED] Фильм найден в базе: film_id={film_id}, link={link}")
+            
+            if not film_id:
+                # Фильм не в базе - добавляем
+                if not link:
+                    link = f"https://kinopoisk.ru/film/{kp_id}/"
+                info = extract_movie_info(link)
+                if info:
+                    film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                    if was_inserted:
+                        logger.info(f"[PLAN FROM ADDED] Фильм добавлен в базу при планировании: kp_id={kp_id}, film_id={film_id}")
+                    if not film_id:
+                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+                        return
+                else:
+                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                    return
             
             if not link:
                 link = f"https://kinopoisk.ru/film/{kp_id}/"
