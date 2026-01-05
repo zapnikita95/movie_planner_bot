@@ -1961,7 +1961,7 @@ def handle_settings_callback(call):
                 edit_command(fake_message)
                 # answer_callback_query уже вызван выше
                 return
-            
+        
         if action == "clean":
                 # Вызываем команду /clean
                 from moviebot.bot.handlers.clean import clean_command
@@ -1982,7 +1982,7 @@ def handle_settings_callback(call):
                 clean_command(fake_message)
                 bot_instance.answer_callback_query(call.id)
                 return
-            
+        
         if action == "join":
                 # Вызываем команду /join
                 from moviebot.bot.handlers.join import join_command
@@ -2004,7 +2004,7 @@ def handle_settings_callback(call):
                 bot_instance.answer_callback_query(call.id)
                 return
             
-        if action == "back":
+            if action == "back":
                 # Возврат к главному меню settings
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
@@ -2042,7 +2042,7 @@ def handle_settings_callback(call):
                 )
                 return
             
-        if action == "reset":
+            if action == "reset":
                 # Сброс к значению по умолчанию для этого чата
                 with db_lock:
                     cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
@@ -2058,7 +2058,7 @@ def handle_settings_callback(call):
                     del user_settings_state[user_id]
                 return
             
-        if action == "add" or action == "replace":
+            if action == "add" or action == "replace":
                 # Для add и replace - сохраняем режим и просим отправить эмодзи
                 user_settings_state[user_id] = {
                     'adding_reactions': True,
@@ -2066,10 +2066,10 @@ def handle_settings_callback(call):
                     'action': action,  # "add" или "replace"
                     'chat_id': chat_id
                 }
-            
-        mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
-            bot_instance.edit_message_text(
-                f"⚙️ <b>Настройки реакций</b>\n\n"
+                
+                mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
+                bot_instance.edit_message_text(
+                    f"⚙️ <b>Настройки реакций</b>\n\n"
                     f"📝 Поставьте выбранный эмодзи в ответ на это сообщение.\n\n"
                     f"Новые реакции будут {mode_text}.",
                     call.message.chat.id,
@@ -2089,7 +2089,7 @@ def handle_settings_callback(call):
                 return
             
             # Обработка подменю настроек напоминаний
-        if action.startswith("notify:"):
+            if action.startswith("notify:"):
                 sub_action = action.split(":", 1)[1]
                 notify_settings = get_notification_settings(chat_id)
                 
