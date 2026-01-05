@@ -285,62 +285,62 @@ def settings_command(message):
     # TODO: Извлечь из moviebot.py строки 10627-10992
     logger.info(f"[HANDLER] /settings вызван от {message.from_user.id}")
     try:
-            chat_id = message.chat.id
-            user_id = message.from_user.id
-            username = message.from_user.username or f"user_{user_id}"
-            log_request(user_id, username, '/settings', chat_id)
-            logger.info(f"Команда /settings от пользователя {user_id}")
-            
-            # Проверяем на reset
-            if message.text and 'reset' in message.text.lower():
-                with db_lock:
-                    cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
-                    conn.commit()
-                bot_instance.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
-                logger.info(f"Реакции сброшены для чата {chat_id}")
-                return
-            
-            # Сначала показываем меню выбора действия
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
-            markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
-            
-            # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
-            if has_notifications_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
-            
-            # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
-            if has_recommendations_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
-            
-            # Проверяем, является ли чат личным (случайные события доступны только в группах)
-            is_private = message.chat.type == 'private'
-            if is_private:
-                markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
-            else:
-                markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
-            markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
-            markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
-            markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            
-            sent = bot_instance.send_message(chat_id,
-                f"⚙️ <b>Настройки</b>\n\n"
-                f"Выберите, что хотите настроить:",
-                reply_markup=markup,
-                parse_mode='HTML')
-            
-            logger.info(f"Настройки открыты для {user_id}, msg_id: {sent.message_id}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
-            try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /settings")
-            except:
-                pass
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        username = message.from_user.username or f"user_{user_id}"
+        log_request(user_id, username, '/settings', chat_id)
+        logger.info(f"Команда /settings от пользователя {user_id}")
+        
+        # Проверяем на reset
+        if message.text and 'reset' in message.text.lower():
+            with db_lock:
+                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+                conn.commit()
+            bot_instance.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
+            logger.info(f"Реакции сброшены для чата {chat_id}")
+            return
+        
+        # Сначала показываем меню выбора действия
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
+        markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
+        
+        # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
+        if has_notifications_access(chat_id, user_id):
+            markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
+        
+        # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
+        if has_recommendations_access(chat_id, user_id):
+            markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
+        
+        # Проверяем, является ли чат личным (случайные события доступны только в группах)
+        is_private = message.chat.type == 'private'
+        if is_private:
+            markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
+        else:
+            markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
+        markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
+        markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
+        markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        
+        sent = bot_instance.send_message(chat_id,
+            f"⚙️ <b>Настройки</b>\n\n"
+            f"Выберите, что хотите настроить:",
+            reply_markup=markup,
+            parse_mode='HTML')
+        
+        logger.info(f"Настройки открыты для {user_id}, msg_id: {sent.message_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /settings")
+        except:
+            pass
 
 
 def help_command(message):
