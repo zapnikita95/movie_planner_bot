@@ -10,15 +10,38 @@ import sys
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    stream=sys.stdout  # Только stdout — Railway видит
+    stream=sys.stdout,  # Только stdout — Railway видит
+    force=True  # Принудительно перезаписываем конфигурацию
 )
 
 # Дополнительно: принудительно INFO для всех
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
+
+# Удаляем все существующие handlers
 for handler in root_logger.handlers[:]:
     root_logger.removeHandler(handler)
-root_logger.addHandler(logging.StreamHandler(sys.stdout))
+
+# Добавляем только stdout handler
+stdout_handler = logging.StreamHandler(sys.stdout)
+stdout_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+stdout_handler.setFormatter(formatter)
+root_logger.addHandler(stdout_handler)
+
+# Отключаем логирование Werkzeug (Flask) и других библиотек, которые могут перехватывать логи
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.setLevel(logging.WARNING)
+werkzeug_logger.propagate = False  # Не передаем логи Werkzeug в root logger
+
+flask_logger = logging.getLogger('flask')
+flask_logger.setLevel(logging.WARNING)
+flask_logger.propagate = False
+
+# Отключаем логирование urllib3 и других HTTP библиотек
+urllib3_logger = logging.getLogger('urllib3')
+urllib3_logger.setLevel(logging.WARNING)
+urllib3_logger.propagate = False
 
 logger = logging.getLogger(__name__)
 logger.info("=== LOGGING ПОЧИНЕН === Это сообщение должно появиться в Railway")

@@ -14,9 +14,22 @@ from dotenv import load_dotenv
 # В Railway переменные окружения уже доступны через os.getenv()
 load_dotenv()
 
+# КРИТИЧНО: Настраиваем логирование Flask так, чтобы оно не конфликтовало с основным
+# Используем тот же root logger, что и в main.py
 logger = logging.getLogger(__name__)
 
+# Отключаем логирование Werkzeug (Flask по умолчанию), чтобы не перехватывало stdout
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.setLevel(logging.WARNING)  # Только WARNING и выше, чтобы не засорять логи
+
+# Отключаем логирование Flask
+flask_logger = logging.getLogger('flask')
+flask_logger.setLevel(logging.WARNING)
+
 app = Flask(__name__)
+
+# Отключаем логирование Flask встроенным способом
+app.logger.disabled = True
 
 # Проверяем переменные окружения при старте приложения
 def check_environment_variables():
