@@ -181,9 +181,14 @@ def apply_promocode(code, original_amount, user_id, chat_id):
         (success: bool, discounted_amount: float, message: str, promocode_id: int or None)
     """
     try:
-        promocode_info = get_promocode_info(code)
+        # Приводим код к верхнему регистру для сравнения
+        code_upper = code.upper().strip()
+        logger.info(f"[APPLY PROMOCODE] Применяем промокод: code='{code}', code_upper='{code_upper}', original_amount={original_amount}, user_id={user_id}, chat_id={chat_id}")
+        
+        promocode_info = get_promocode_info(code_upper)
         
         if not promocode_info:
+            logger.warning(f"[APPLY PROMOCODE] Промокод не найден: code_upper='{code_upper}'")
             return False, original_amount, "Промокод не найден", None
         
         if not promocode_info['is_active']:

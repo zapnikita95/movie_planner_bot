@@ -2554,8 +2554,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
                 
                 # Определяем текст и эмодзи кнопки
-                if active_users and active_users.issubset(rated_users) and avg_rating is not None:
-                    # Все активные пользователи оценили - показываем среднюю оценку
+                # Показываем среднюю оценку, если есть хотя бы одна оценка
+                if avg_rating is not None:
                     rating_int = int(round(avg_rating))
                     if 1 <= rating_int <= 4:
                         emoji = "💩"

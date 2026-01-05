@@ -189,9 +189,9 @@ def handle_rate_list_reply(message):
     )
     
     # Проверяем все состояния
+    # НО НЕ пропускаем user_promo_state и user_promo_admin_state - они обрабатываются в main_text_handler
     if (user_id in user_plan_state or 
-        user_id in user_promo_state or 
-        user_id in user_promo_admin_state or
+        # user_promo_state и user_promo_admin_state обрабатываются в main_text_handler, не пропускаем их здесь
         user_id in user_ticket_state or
         user_id in user_search_state or
         user_id in user_settings_state or
@@ -859,11 +859,15 @@ def main_text_handler(message):
     # === user_promo_state ===
     if user_id in user_promo_state:
         state = user_promo_state[user_id]
-        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_promo_state")
+        logger.info(f"[PROMO] ===== START: user_id={user_id}, chat_id={chat_id}, text='{text}'")
+        logger.info(f"[PROMO] Состояние: {state}")
         
         # Обрабатываем промокод независимо от наличия реплая
         promo_code = text.strip().upper()
+        logger.info(f"[PROMO] Обработанный промокод: '{promo_code}' (исходный текст: '{text}')")
+        
         if promo_code:
+            logger.info(f"[PROMO] Применяем промокод '{promo_code}' к цене {state.get('original_price', 0)}")
             
             # Применяем промокод
             from moviebot.utils.promo import apply_promocode
@@ -873,6 +877,8 @@ def main_text_handler(message):
                 user_id,
                 chat_id
             )
+            
+            logger.info(f"[PROMO] Результат применения промокода: success={success}, discounted_price={discounted_price}, message='{message_text}', promocode_id={promocode_id}")
             
             if success:
                 # Промокод применен успешно
