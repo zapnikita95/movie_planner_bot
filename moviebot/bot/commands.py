@@ -32,7 +32,7 @@ def register_all_handlers(bot):
     register_rate_handlers(bot)
     
     from moviebot.bot.handlers.stats import register_stats_handlers
-    register_stats_handlers(bot)
+    register_stats_handlers(bot_instance)
     
     # Регистрируем callback handlers
     from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
