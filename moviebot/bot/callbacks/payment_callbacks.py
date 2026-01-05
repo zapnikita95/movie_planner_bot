@@ -4586,7 +4586,71 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                         
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        elif subscription_type == 'group':
+                            # Для групповых подписок получаем информацию о групповой подписке
+                            from moviebot.database.db_operations import get_subscription_members, get_active_group_users, get_active_group_subscription_by_chat_id
+                            group_sub = get_active_group_subscription_by_chat_id(chat_id)
+                            
+                            if group_sub:
+                                expires_at = group_sub.get('expires_at')
+                                next_payment = group_sub.get('next_payment_date')
+                                price = group_sub.get('price', 0)
+                                activated = group_sub.get('activated_at')
+                                group_size = group_sub.get('group_size')
+                                subscription_id_new = group_sub.get('id')
+                                plan_type = group_sub.get('plan_type', 'all')
+                                period_type = group_sub.get('period_type', 'lifetime')
+                                
+                                text = f"👥 <b>Групповая подписка</b>\n\n"
+                                if plan_type == 'all':
+                                    text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
+                                text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
+                                if group_size:
+                                    text += f"👥 Количество участников: <b>{group_size}</b>\n"
+                                    if subscription_id_new and subscription_id_new > 0:
+                                        try:
+                                            members = get_subscription_members(subscription_id_new)
+                                            # Исключаем бота из списка участников
+                                            if BOT_ID and BOT_ID in members:
+                                                members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
+                                            text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                                        except Exception as members_error:
+                                            logger.error(f"[PAYMENT] Ошибка получения участников подписки: {members_error}")
+                                            text += f"✅ Участников в подписке: <b>?</b>\n"
+                                if activated:
+                                    text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                                if next_payment:
+                                    text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                                if expires_at:
+                                    text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                                else:
+                                    text += f"⏰ Действует: <b>Навсегда</b>\n"
+                                
+                                markup = InlineKeyboardMarkup(row_width=1)
+                                # Показываем кнопку списка участников только для реальных подписок (не виртуальных)
+                                if subscription_id_new and subscription_id_new > 0:
+                                    markup.add(InlineKeyboardButton("👥 Список участников", callback_data=f"payment:group_members:{subscription_id_new}"))
+                                    
+                                    # Показываем кнопку "Отписаться" только для активных участников
+                                    try:
+                                        members = get_subscription_members(subscription_id_new)
+                                        if BOT_ID and BOT_ID in members:
+                                            members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
+                                        if members and user_id in members:
+                                            markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id_new}"))
+                                    except Exception as members_error:
+                                        logger.error(f"[PAYMENT] Ошибка получения участников для кнопки отписки: {members_error}")
+                                
+                                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+                            else:
+                                text = "👥 <b>Групповая подписка</b>\n\n"
+                                text += "❌ Активная подписка отсутствует, выберите тариф для подключения"
+                                markup = InlineKeyboardMarkup(row_width=1)
+                                markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:group"))
+                                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
+                            
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as update_e:
                         logger.error(f"[PAYMENT CANCEL CONFIRM] Ошибка обновления информации о подписках: {update_e}", exc_info=True)
                         # Если не удалось обновить, показываем простое сообщение
