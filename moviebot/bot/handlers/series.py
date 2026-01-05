@@ -3603,6 +3603,363 @@ def view_film_description_callback(call):
         # Показываем описание фильма
         from moviebot.bot.handlers.series import show_film_info_with_buttons
         show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=None,
+            message_id=None
+        )
+        
+        bot_instance.answer_callback_query(call.id, "✅ Описание фильма")
+        
+    except Exception as e:
+        logger.error(f"[VIEW FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении описания", show_alert=True)
+        except:
+            pass
+
+def ensure_movie_in_database(kp_id, title=None):
+    """Убеждается, что фильм есть в базе данных. Если нет - добавляет его."""
+    with db_lock:
+        cursor.execute("SELECT id FROM films WHERE kp_id = %s", (kp_id,))
+        existing = cursor.fetchone()
+        
+        if not existing:
+            # Фильма нет в базе, добавляем его
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            link = f"https://kinopoisk.ru/film/{kp_id}"
+            info = extract_movie_info(link)
+            
+            if info:
+                cursor.execute("""
+                    INSERT INTO films (kp_id, title, year, genres, director, actors, description, is_series)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    kp_id,
+                    info.get('title') or title,
+                    info.get('year'),
+                    info.get('genres'),
+                    info.get('director'),
+                    info.get('actors'),
+                    info.get('description'),
+                    info.get('is_series', False)
+                ))
+                conn.commit()
+                logger.info(f"[ENSURE MOVIE] Фильм {kp_id} добавлен в базу")
+            else:
+                logger.warning(f"[ENSURE MOVIE] Не удалось получить информацию о фильме {kp_id}")
+        
+        return existing or cursor.lastrowid
+    # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
+    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
+    def handle_search_reply(message):
+        """Обработчик ответных сообщений для поиска"""
+        logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
+        logger.info(f"[SEARCH REPLY] Получено сообщение: user_id={message.from_user.id}, text={message.text[:50] if message.text else 'None'}, has_reply={message.reply_to_message is not None}")
+        try:
+            user_id = message.from_user.id
+            chat_id = message.chat.id
+            query = message.text.strip()
+            
+            logger.info(f"[SEARCH REPLY] Проверка состояния: user_id={user_id}, user_search_state keys={list(user_search_state.keys())}")
+            
+            # Проверяем, находится ли пользователь в состоянии поиска
+            if user_id not in user_search_state:
+                logger.info(f"[SEARCH REPLY] Пользователь {user_id} не в состоянии поиска, пропускаем")
+                return  # Не обрабатываем, если пользователь не в состоянии поиска
+            
+            state = user_search_state[user_id]
+            reply_to_message = message.reply_to_message
+            
+            logger.info(f"[SEARCH REPLY] Состояние найдено: state={state}, reply_to_message_id={reply_to_message.message_id if reply_to_message else 'None'}, state_message_id={state.get('message_id')}")
+            
+            # Если пользователь в состоянии поиска, обрабатываем его сообщение
+            # Не требуем точного совпадения message_id, так как состояние может быть обновлено
+            logger.info(f"[SEARCH REPLY] Пользователь {user_id} в состоянии поиска, обрабатываем запрос: {query}")
+            
+            # Получаем тип поиска из состояния
+            search_type = state.get('search_type', 'mixed')
+            logger.info(f"[SEARCH REPLY] Тип поиска: {search_type}")
+            
+            # Выполняем поиск
+            logger.info(f"[SEARCH REPLY] Вызов search_films_with_type для query={query}, search_type={search_type}")
+            films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
+            logger.info(f"[SEARCH REPLY] Поиск завершен: найдено {len(films)} результатов, страниц: {total_pages}")
+            
+            if not films:
+                logger.warning(f"[SEARCH REPLY] Ничего не найдено по запросу '{query}'")
+                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+                # Очищаем состояние
+                del user_search_state[user_id]
+                return
+            
+            # Формируем сообщение с результатами
+            results_text = f"🔍 Результаты поиска '{query}':\n\n"
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            for film in films[:10]:  # Показываем максимум 10 результатов на странице
+                title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                year = film.get('year') or film.get('releaseYear') or 'N/A'
+                rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                
+                # Определяем тип (сериал или фильм)
+                film_type = film.get('type', '').upper()
+                is_series = film_type == 'TV_SERIES'
+                
+                if kp_id:
+                    type_indicator = "📺" if is_series else "🎬"
+                    button_text = f"{type_indicator} {title} ({year})"
+                    if len(button_text) > 50:
+                        button_text = button_text[:47] + "..."
+                    results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                    if rating != 'N/A':
+                        results_text += f" ⭐ {rating}"
+                    results_text += "\n"
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+            
+            # Добавляем пагинацию, если нужно
+            if total_pages > 1:
+                pagination_row = []
+                query_encoded = query.replace(' ', '_')
+                pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+                if total_pages > 1:
+                    pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                markup.row(*pagination_row)
+            
+            # Добавляем кнопку "Назад в меню"
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            # Добавляем пояснение про эмодзи
+            results_text += "\n\n🎬 - фильм\n📺 - сериал"
+            
+            logger.info(f"[SEARCH REPLY] Отправка результатов поиска пользователю {user_id}")
+            results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+            
+            # Обновляем состояние
+            if results_msg:
+                user_search_state[user_id] = {
+                    'chat_id': chat_id,
+                    'message_id': results_msg.message_id,
+                    'search_type': search_type,
+                    'query': query,
+                    'results_text': results_text,
+                    'films': films[:10],
+                    'total_pages': total_pages
+                }
+            
+            logger.info(f"[SEARCH REPLY] Результаты поиска отправлены пользователю {user_id}, найдено {len(films)} результатов")
+        except Exception as e:
+            logger.error(f"[SEARCH REPLY] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса поиска")
+            except:
+                pass
+
+# Обработчик кнопки результата поиска "add_film_{kp_id}:{film_type}" - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
+def add_film_from_search_callback(call):
+        """Обработчик кнопки результата поиска - показывает информацию о фильме"""
+        logger.info("=" * 80)
+        logger.info(f"[ADD FILM FROM SEARCH] ===== START: callback_id={call.id}, callback_data={call.data}")
+        try:
+            bot_instance.answer_callback_query(call.id, text="⏳ Загружаю информацию...")
+            logger.info(f"[ADD FILM FROM SEARCH] answer_callback_query вызван, callback_id={call.id}")
+            
+            # Парсим callback_data: add_film_{kp_id}:{film_type}
+            parts = call.data.split(":")
+            if len(parts) < 2:
+                logger.error(f"[ADD FILM FROM SEARCH] Неверный формат callback_data: {call.data}")
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
+                return
+            
+            kp_id = parts[0].replace("add_film_", "")
+            film_type = parts[1] if len(parts) > 1 else "FILM"
+            
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            logger.info(f"[ADD FILM FROM SEARCH] kp_id={kp_id}, film_type={film_type}, user_id={user_id}, chat_id={chat_id}")
+            
+            # Формируем ссылку на Кинопоиск
+            if film_type == "TV_SERIES" or film_type == "MINI_SERIES":
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            else:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            # Получаем информацию о фильме через API
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            info = extract_movie_info(link)
+            
+            if not info:
+                logger.error(f"[ADD FILM FROM SEARCH] Не удалось получить информацию о фильме: kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            # Проверяем, есть ли фильм уже в базе
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+            conn = get_db_connection()
+            cursor = get_db_cursor()
+            
+            existing = None
+            with db_lock:
+                cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
+                    watched = row.get('watched') if isinstance(row, dict) else row[2]
+                    existing = (film_id, title, watched)
+            
+            # Показываем карточку фильма с кнопками
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+            
+            logger.info(f"[ADD FILM FROM SEARCH] ===== END: успешно показана информация о фильме {kp_id}")
+        except Exception as e:
+            logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+        finally:
+            logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
+
+# Обработчик кнопки "➕ Добавить в базу" - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
+def view_film_description_callback(call):
+    """Обработчик кнопки 'Перейти к описанию' из сообщения об отметке как просмотренные"""
+    logger.info(f"[VIEW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}")
+    try:
+        bot_instance.answer_callback_query(call.id, text="⏳ Загружаю описание...")
+        
+        kp_id = call.data.split(":")[1]
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        logger.info(f"[VIEW FILM DESCRIPTION] Пользователь {user_id} хочет посмотреть описание фильма kp_id={kp_id}, chat_id={chat_id}")
+        
+        # Получаем информацию о фильме
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        logger.info(f"[VIEW FILM DESCRIPTION] Вызываю extract_movie_info для link={link}")
+        info = extract_movie_info(link)
+        
+        if not info:
+            logger.error(f"[VIEW FILM DESCRIPTION] Не удалось получить информацию о фильме для kp_id={kp_id}")
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Если это сериал, используем правильную ссылку
+        if info.get('is_series') or info.get('type') == 'TV_SERIES':
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            logger.info(f"[VIEW FILM DESCRIPTION] Это сериал, обновлена ссылка: {link}")
+        
+        # Получаем информацию из базы (если фильм там есть)
+        existing = None
+        with db_lock:
+            cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            row = cursor.fetchone()
+            if row:
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
+                watched = row.get('watched') if isinstance(row, dict) else row[2]
+                existing = (film_id, title, watched)
+        
+        # Показываем описание фильма
+        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+        logger.info(f"[VIEW FILM DESCRIPTION] ✅ Описание фильма показано: kp_id={kp_id}")
+    except Exception as e:
+        logger.error(f"[VIEW FILM DESCRIPTION] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
+def add_to_database_callback(call):
+    """Обработчик кнопки '➕ Добавить в базу'"""
+    logger.info("=" * 80)
+    logger.info(f"[ADD TO DATABASE] ===== START: callback_id={call.id}, callback_data={call.data}")
+    try:
+        bot_instance.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
+        logger.info(f"[ADD TO DATABASE] answer_callback_query вызван, callback_id={call.id}")
+        
+        kp_id = call.data.split(":")[1]
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        logger.info(f"[ADD TO DATABASE] Пользователь {user_id} хочет добавить фильм kp_id={kp_id} в базу, chat_id={chat_id}")
+        
+        # Получаем информацию о фильме/сериале
+        # Проверяем, фильм это или сериал
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        logger.info(f"[ADD TO DATABASE] Вызываю extract_movie_info для link={link}")
+        try:
+            info = extract_movie_info(link)
+            logger.info(f"[ADD TO DATABASE] extract_movie_info завершен, info={'получен' if info else 'None'}")
+        except Exception as api_e:
+            logger.error(f"[ADD TO DATABASE] Ошибка в extract_movie_info: {api_e}", exc_info=True)
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении информации о фильме", show_alert=True)
+            return
+        
+        if not info:
+            logger.error(f"[ADD TO DATABASE] Не удалось получить информацию о фильме для kp_id={kp_id}")
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        logger.info(f"[ADD TO DATABASE] Информация получена, title={info.get('title', 'N/A')}, is_series={info.get('is_series', False)}")
+        
+        # Если это сериал, используем правильную ссылку
+        if info.get('is_series') or info.get('type') == 'TV_SERIES':
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            logger.info(f"[ADD TO DATABASE] Это сериал, обновлена ссылка: {link}")
+        
+        # Добавляем фильм в базу
+        logger.info(f"[ADD TO DATABASE] Вызываю ensure_movie_in_database: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
+        try:
+            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            logger.info(f"[ADD TO DATABASE] ensure_movie_in_database завершен: film_id={film_id}, was_inserted={was_inserted}")
+        except Exception as db_e:
+            logger.error(f"[ADD TO DATABASE] Ошибка в ensure_movie_in_database: {db_e}", exc_info=True)
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+            return
+        if not film_id:
+            logger.error(f"[ADD TO DATABASE] Не удалось добавить фильм в базу для kp_id={kp_id}")
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+            return
+        
+        title = info.get('title', 'Фильм')
+        
+        if was_inserted:
+            bot_instance.answer_callback_query(call.id, f"✅ {title} добавлен в базу!", show_alert=False)
+            logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title}")
+            
+            # Обновляем сообщение, показывая что фильм теперь в базе
+            # Получаем обновленные данные из базы
+            with db_lock:
+                cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
+                movie_row = cursor.fetchone()
+                title_db = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
+                watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
+            
+            # Показываем описание с кнопками (теперь фильм в базе)
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title_db, watched), message_id=call.message.message_id)
+        else:
+            bot_instance.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
+            logger.info(f"[ADD TO DATABASE] Фильм уже был в базе: film_id={film_id}, title={title}")
+    except Exception as e:
+        logger.error(f"[ADD TO DATABASE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except Exception as answer_e:
+            logger.error(f"[ADD TO DATABASE] Не удалось вызвать answer_callback_query: {answer_e}")
+    finally:
+        logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
+
+
 def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
     """Показывает описание фильма с кнопками действий
     
