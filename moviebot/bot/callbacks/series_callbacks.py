@@ -7,13 +7,60 @@ from datetime import datetime as dt, timedelta
 import pytz
 import telebot
 
-from moviebot.bot.bot_init import bot, scheduler
+from moviebot.bot.bot_init import bot as bot_instance, scheduler
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_watched_emojis, get_watched_custom_emoji_ids
-from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
+from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info, get_series_airing_status
 from moviebot.utils.helpers import has_notifications_access
 from moviebot.scheduler import send_series_notification, check_series_for_new_episodes
 from moviebot.states import user_episodes_state
+import sys
+import os
+
+# Импортируем show_film_info_with_buttons из старого файла (временно, пока не перенесена в новую структуру)
+try:
+    # Пытаемся импортировать из старого файла moviebot.py в корне проекта
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    old_moviebot_path = os.path.join(project_root, 'moviebot.py')
+    if os.path.exists(old_moviebot_path):
+        # Добавляем путь к корню проекта
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        # Импортируем функцию напрямую
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("moviebot_module", old_moviebot_path)
+        moviebot_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(moviebot_module)
+        show_film_info_with_buttons = moviebot_module.show_film_info_with_buttons
+        logger.info("[SERIES CALLBACKS] show_film_info_with_buttons успешно импортирована из moviebot.py")
+    else:
+        raise ImportError("Файл moviebot.py не найден")
+except Exception as import_e:
+    logger.error(f"[SERIES CALLBACKS] Ошибка импорта show_film_info_with_buttons: {import_e}", exc_info=True)
+    # Создаем заглушку, которая будет обновлять сообщение напрямую
+    def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
+        logger.warning(f"[SERIES CALLBACKS] Используем fallback для show_film_info_with_buttons")
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+        
+        if message_id:
+            try:
+                if message_thread_id:
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        message_thread_id=message_thread_id,
+                        reply_markup=markup
+                    )
+                else:
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        reply_markup=markup
+                    )
+            except Exception as e:
+                logger.error(f"[SERIES CALLBACKS] Ошибка обновления сообщения: {e}")
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -183,11 +230,36 @@ def register_series_callbacks(bot_instance):
                         watched = row.get('watched') if isinstance(row, dict) else row[3]
                         
                         logger.info(f"[SERIES SUBSCRIBE] Получение информации о сериале через API: link={link}")
-                        # Получаем информацию о сериале через API
+                        # Получаем информацию о сериале через API с таймаутом
                         info = None
                         try:
-                            info = extract_movie_info(link)
-                            logger.info(f"[SERIES SUBSCRIBE] Информация о сериале получена успешно")
+                            import threading
+                            
+                            result = [None]
+                            exception = [None]
+                            
+                            def call_extract():
+                                try:
+                                    result[0] = extract_movie_info(link)
+                                except Exception as e:
+                                    exception[0] = e
+                            
+                            thread = threading.Thread(target=call_extract)
+                            thread.daemon = True
+                            thread.start()
+                            thread.join(timeout=10)  # Таймаут 10 секунд
+                            
+                            if thread.is_alive():
+                                logger.error(f"[SERIES SUBSCRIBE] Таймаут при получении информации о сериале через API (превышен лимит 10 секунд)")
+                                info = None
+                            elif exception[0]:
+                                raise exception[0]
+                            else:
+                                info = result[0]
+                                if info:
+                                    logger.info(f"[SERIES SUBSCRIBE] Информация о сериале получена успешно")
+                                else:
+                                    logger.warning(f"[SERIES SUBSCRIBE] extract_movie_info вернул None")
                         except Exception as api_e:
                             logger.error(f"[SERIES SUBSCRIBE] Ошибка API при получении информации о сериале: {api_e}", exc_info=True)
                             info = None
@@ -203,12 +275,102 @@ def register_series_callbacks(bot_instance):
                                     message_thread_id = call.message.message_thread_id
                             
                             logger.info(f"[SERIES SUBSCRIBE] Вызываю show_film_info_with_buttons: message_id={message_id}, message_thread_id={message_thread_id}")
-                            # TODO: Импортировать show_film_info_with_buttons из handlers/series.py когда будет реализовано
-                            # Пока отправляем простое сообщение
-                            bot_instance.send_message(chat_id, f"✅ Вы подписались на уведомления о новых сериях для {title}")
-                            logger.info(f"[SERIES SUBSCRIBE] Сообщение отправлено успешно")
+                            # Обновляем существующее сообщение с обновленной кнопкой
+                            try:
+                                # Пытаемся использовать функцию из старого файла
+                                if 'show_film_info_with_buttons' in globals() and callable(show_film_info_with_buttons):
+                                    show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
+                                    logger.info(f"[SERIES SUBSCRIBE] Сообщение обновлено успешно через show_film_info_with_buttons")
+                                else:
+                                    # Если функция не доступна, обновляем только клавиатуру
+                                    logger.warning(f"[SERIES SUBSCRIBE] show_film_info_with_buttons не доступна, обновляю только клавиатуру")
+                                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                    new_markup = InlineKeyboardMarkup(row_width=1)
+                                    new_markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+                                    
+                                    if message_thread_id:
+                                        bot_instance.edit_message_reply_markup(
+                                            chat_id=chat_id,
+                                            message_id=message_id,
+                                            message_thread_id=message_thread_id,
+                                            reply_markup=new_markup
+                                        )
+                                    else:
+                                        bot_instance.edit_message_reply_markup(
+                                            chat_id=chat_id,
+                                            message_id=message_id,
+                                            reply_markup=new_markup
+                                        )
+                                    logger.info(f"[SERIES SUBSCRIBE] Клавиатура обновлена успешно")
+                            except telebot.apihelper.ApiTelegramException as api_e:
+                                error_str = str(api_e).lower()
+                                logger.error(f"[SERIES SUBSCRIBE] Telegram API ошибка при обновлении сообщения: {api_e}", exc_info=True)
+                                
+                                # Если ошибка "message is not modified", пробуем обновить только клавиатуру
+                                if "message is not modified" in error_str or "message_not_modified" in error_str:
+                                    logger.info(f"[SERIES SUBSCRIBE] Telegram: 'message is not modified' — пробую только markup")
+                                    try:
+                                        # Получаем текущий текст и обновляем только клавиатуру
+                                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                        new_markup = InlineKeyboardMarkup(row_width=1)
+                                        new_markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+                                        
+                                        if message_thread_id:
+                                            bot_instance.edit_message_reply_markup(
+                                                chat_id=chat_id,
+                                                message_id=message_id,
+                                                message_thread_id=message_thread_id,
+                                                reply_markup=new_markup
+                                            )
+                                        else:
+                                            bot_instance.edit_message_reply_markup(
+                                                chat_id=chat_id,
+                                                message_id=message_id,
+                                                reply_markup=new_markup
+                                            )
+                                        logger.info(f"[SERIES SUBSCRIBE] Клавиатура обновлена успешно")
+                                    except Exception as markup_e:
+                                        logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления клавиатуры: {markup_e}", exc_info=True)
+                                        # Отправляем новое сообщение как fallback
+                                        bot_instance.send_message(chat_id, f"✅ Вы подписались на уведомления о новых сериях для {title}")
+                                else:
+                                    # Другая ошибка - отправляем новое сообщение
+                                    logger.warning(f"[SERIES SUBSCRIBE] Отправляю новое сообщение из-за ошибки API")
+                                    bot_instance.send_message(chat_id, f"✅ Вы подписались на уведомления о новых сериях для {title}")
+                            except Exception as update_e:
+                                logger.error(f"[SERIES SUBSCRIBE] Ошибка при обновлении сообщения через show_film_info_with_buttons: {update_e}", exc_info=True)
+                                # Отправляем новое сообщение как fallback
+                                bot_instance.send_message(chat_id, f"✅ Вы подписались на уведомления о новых сериях для {title}")
                         else:
                             logger.warning(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
+                            # Даже если не удалось получить info, обновляем клавиатуру
+                            if call.message:
+                                message_id = call.message.message_id
+                                message_thread_id = None
+                                if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                                    message_thread_id = call.message.message_thread_id
+                                
+                                try:
+                                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                    new_markup = InlineKeyboardMarkup(row_width=1)
+                                    new_markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+                                    
+                                    if message_thread_id:
+                                        bot_instance.edit_message_reply_markup(
+                                            chat_id=chat_id,
+                                            message_id=message_id,
+                                            message_thread_id=message_thread_id,
+                                            reply_markup=new_markup
+                                        )
+                                    else:
+                                        bot_instance.edit_message_reply_markup(
+                                            chat_id=chat_id,
+                                            message_id=message_id,
+                                            reply_markup=new_markup
+                                        )
+                                    logger.info(f"[SERIES SUBSCRIBE] Клавиатура обновлена успешно (без info)")
+                                except Exception as markup_e:
+                                    logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления клавиатуры без info: {markup_e}", exc_info=True)
             except Exception as e:
                 logger.error(f"[SERIES SUBSCRIBE] Ошибка при обновлении сообщения: {e}", exc_info=True)
                 try:
