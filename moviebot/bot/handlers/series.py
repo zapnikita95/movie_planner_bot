@@ -1593,6 +1593,15 @@ def handle_kinopoisk_link(message):
                 return
             
             if action == "notifications":
+                # Проверяем доступ к настройкам напоминаний
+                if not has_notifications_access(chat_id, user_id):
+                    bot_instance.answer_callback_query(
+                        call.id,
+                        "🔒 Функционал можно подключить через /payment",
+                        show_alert=True
+                    )
+                    return
+                
                 # Показываем настройки времени напоминаний
                 notify_settings = get_notification_settings(chat_id)
                 
