@@ -563,6 +563,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         message_id: ID сообщения для обновления (если None - отправляет новое)
         message_thread_id: ID треда для групповых чатов
     """
+    logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}")
     try:
         is_series = info.get('is_series', False)
         type_emoji = "📺" if is_series else "🎬"

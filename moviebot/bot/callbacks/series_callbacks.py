@@ -111,46 +111,61 @@ def register_series_callbacks(bot_instance):
             
             logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
             
-            # Обновление сообщения
+            # Обновление сообщения - временно используем прямой edit_message_reply_markup
             logger.info("[SERIES SUBSCRIBE] Обновление сообщения с описанием сериала")
             try:
-                logger.info("[SERIES SUBSCRIBE] Получение информации о сериале через API: link=https://www.kinopoisk.ru/series/{kp_id}/")
-                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-                info = extract_movie_info(link)
-                if not info:
-                    raise ValueError("No info from API")
+                logger.info("[SERIES SUBSCRIBE] Прямое обновление кнопки подписки")
                 
-                # Получаем watched из БД
-                with db_lock:
-                    cursor.execute("SELECT watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                    watched_row = cursor.fetchone()
-                    watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                # Новая клавиатура (только меняем кнопку подписки)
+                new_markup = InlineKeyboardMarkup(row_width=1)
+                new_markup.add(InlineKeyboardButton(
+                    "🔕 Убрать подписку на новые серии",
+                    callback_data=f"series_unsubscribe:{kp_id}"
+                ))
                 
-                # Вызов show_film_info_with_buttons
+                # Меняем только клавиатуру (текст остаётся тем же — избежим "not modified")
                 message_id = call.message.message_id if call.message else None
                 message_thread_id = None
                 if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
                     message_thread_id = call.message.message_thread_id
                 
-                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=message_id, message_thread_id=message_thread_id)
-                logger.info("[SERIES SUBSCRIBE] show_film_info_with_buttons выполнен успешно")
+                if message_thread_id:
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        message_thread_id=message_thread_id,
+                        reply_markup=new_markup
+                    )
+                else:
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        reply_markup=new_markup
+                    )
+                logger.info("[SERIES SUBSCRIBE] Клавиатура обновлена напрямую")
+                
+                # Пробуем также вызвать show_film_info_with_buttons для полного обновления (но не падаем, если не получится)
+                try:
+                    logger.info("[SERIES SUBSCRIBE] Попытка полного обновления через show_film_info_with_buttons")
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                    info = extract_movie_info(link)
+                    if info:
+                        with db_lock:
+                            cursor.execute("SELECT watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                            watched_row = cursor.fetchone()
+                            watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                        
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=message_id, message_thread_id=message_thread_id)
+                        logger.info("[SERIES SUBSCRIBE] show_film_info_with_buttons выполнен успешно")
+                    else:
+                        logger.warning("[SERIES SUBSCRIBE] extract_movie_info вернул None, пропускаем полное обновление")
+                except Exception as full_update_e:
+                    logger.error(f"[SERIES SUBSCRIBE] Ошибка полного обновления (не критично): {full_update_e}", exc_info=True)
+                    # Не падаем, кнопка уже обновлена
             
             except telebot.apihelper.ApiTelegramException as tele_e:
                 logger.error(f"[SERIES SUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
-                if "message is not modified" in str(tele_e).lower():
-                    # Создай new_markup и обнови только клавиатуру
-                    new_markup = InlineKeyboardMarkup()
-                    new_markup.add(InlineKeyboardButton("🔕 Отписаться", callback_data=f"series_unsubscribe:{kp_id}"))
-                    # Добавь другие кнопки
-                    
-                    bot_instance.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=call.message.message_id,
-                        reply_markup=new_markup
-                    )
-                    logger.info("[SERIES SUBSCRIBE] Только markup обновлён")
-                else:
-                    bot_instance.send_message(chat_id, f"🔔 Подписка добавлена на {title}, но карточка не обновилась. Переоткройте.")
+                bot_instance.send_message(chat_id, f"🔔 Подписка добавлена на {title}, но карточка не обновилась. Переоткройте.")
             
             except Exception as e:
                 logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления: {e}", exc_info=True)
@@ -166,7 +181,7 @@ def register_series_callbacks(bot_instance):
         finally:
             try:
                 bot_instance.answer_callback_query(call.id, text="🔔 Подписка добавлена")
-                logger.info("[SERIES SUBSCRIBE] answer_callback_query выполнен")
+                logger.info(f"[SERIES SUBSCRIBE] answer_callback_query вызван с id={call.id}")
             except Exception as e:
                 logger.error(f"[ANSWER CALLBACK] Ошибка: {e}")
 
@@ -217,44 +232,61 @@ def register_series_callbacks(bot_instance):
             
             logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
             
-            # Обновление сообщения
+            # Обновление сообщения - временно используем прямой edit_message_reply_markup
             logger.info("[SERIES UNSUBSCRIBE] Обновление сообщения с описанием сериала")
             try:
-                logger.info("[SERIES UNSUBSCRIBE] Получение информации о сериале через API")
-                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-                info = extract_movie_info(link)
-                if not info:
-                    raise ValueError("No info from API")
+                logger.info("[SERIES UNSUBSCRIBE] Прямое обновление кнопки подписки")
                 
-                # Получаем watched из БД
-                with db_lock:
-                    cursor.execute("SELECT watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                    watched_row = cursor.fetchone()
-                    watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                # Новая клавиатура (только меняем кнопку подписки)
+                new_markup = InlineKeyboardMarkup(row_width=1)
+                new_markup.add(InlineKeyboardButton(
+                    "🔔 Подписаться на новые серии",
+                    callback_data=f"series_subscribe:{kp_id}"
+                ))
                 
-                # Вызов show_film_info_with_buttons
+                # Меняем только клавиатуру (текст остаётся тем же — избежим "not modified")
                 message_id = call.message.message_id if call.message else None
                 message_thread_id = None
                 if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
                     message_thread_id = call.message.message_thread_id
                 
-                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=message_id, message_thread_id=message_thread_id)
-                logger.info("[SERIES UNSUBSCRIBE] show_film_info_with_buttons выполнен успешно")
+                if message_thread_id:
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        message_thread_id=message_thread_id,
+                        reply_markup=new_markup
+                    )
+                else:
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        reply_markup=new_markup
+                    )
+                logger.info("[SERIES UNSUBSCRIBE] Клавиатура обновлена напрямую")
+                
+                # Пробуем также вызвать show_film_info_with_buttons для полного обновления (но не падаем, если не получится)
+                try:
+                    logger.info("[SERIES UNSUBSCRIBE] Попытка полного обновления через show_film_info_with_buttons")
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                    info = extract_movie_info(link)
+                    if info:
+                        with db_lock:
+                            cursor.execute("SELECT watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                            watched_row = cursor.fetchone()
+                            watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                        
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=message_id, message_thread_id=message_thread_id)
+                        logger.info("[SERIES UNSUBSCRIBE] show_film_info_with_buttons выполнен успешно")
+                    else:
+                        logger.warning("[SERIES UNSUBSCRIBE] extract_movie_info вернул None, пропускаем полное обновление")
+                except Exception as full_update_e:
+                    logger.error(f"[SERIES UNSUBSCRIBE] Ошибка полного обновления (не критично): {full_update_e}", exc_info=True)
+                    # Не падаем, кнопка уже обновлена
             
             except telebot.apihelper.ApiTelegramException as tele_e:
                 logger.error(f"[SERIES UNSUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
-                if "message is not modified" in str(tele_e).lower():
-                    new_markup = InlineKeyboardMarkup()
-                    new_markup.add(InlineKeyboardButton("🔔 Подписаться", callback_data=f"series_subscribe:{kp_id}"))
-                    
-                    bot_instance.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=call.message.message_id,
-                        reply_markup=new_markup
-                    )
-                    logger.info("[SERIES UNSUBSCRIBE] Только markup обновлён")
-                else:
-                    bot_instance.send_message(chat_id, f"🔕 Отписка выполнена от {title}, но карточка не обновилась. Переоткройте.")
+                bot_instance.send_message(chat_id, f"🔕 Отписка выполнена от {title}, но карточка не обновилась. Переоткройте.")
             
             except Exception as e:
                 logger.error(f"[SERIES UNSUBSCRIBE] Ошибка обновления: {e}", exc_info=True)
@@ -270,7 +302,7 @@ def register_series_callbacks(bot_instance):
         finally:
             try:
                 bot_instance.answer_callback_query(call.id, text="🔕 Отписка выполнена")
-                logger.info("[SERIES UNSUBSCRIBE] answer_callback_query выполнен")
+                logger.info(f"[SERIES UNSUBSCRIBE] answer_callback_query вызван с id={call.id}")
             except Exception as e:
                 logger.error(f"[ANSWER CALLBACK] Ошибка: {e}")
 
