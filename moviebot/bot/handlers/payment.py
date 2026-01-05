@@ -2,6 +2,8 @@
 Обработчики команды /payment
 """
 import logging
+from datetime import datetime
+import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request, get_active_subscription
@@ -65,8 +67,6 @@ def register_payment_handlers(bot_instance):
             is_private = call.message.chat.type == 'private'
             
             logger.info(f"[PAYMENT MENU] Получен callback от {user_id}, action={action}, chat_id={chat_id}")
-            
-            from datetime import datetime
             
             if action.startswith("reminder_ok:"):
                 # Подтверждение получения напоминания о списании

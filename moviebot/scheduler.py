@@ -1332,6 +1332,61 @@ def check_subscription_payments():
         logger.error(f"[SUBSCRIPTION PAYMENT] Ошибка проверки подписок: {e}", exc_info=True)
 
 
+def send_successful_payment_notification(chat_id, subscription_id, subscription_type, plan_type, period_type):
+    """Отправляет уведомление об успешном платеже"""
+    if not bot:
+        return
+    
+    try:
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        from moviebot.database.db_operations import get_subscription_by_id
+        
+        # Получаем информацию о подписке
+        sub = get_subscription_by_id(subscription_id)
+        if not sub:
+            logger.error(f"[SUCCESSFUL PAYMENT] Подписка {subscription_id} не найдена")
+            return
+        
+        expires_at = sub.get('expires_at')
+        next_payment_date = sub.get('next_payment_date')
+        
+        plan_names = {
+            'notifications': '🔔 Уведомления о сериалах',
+            'recommendations': '🎯 Персональные рекомендации',
+            'tickets': '🎫 Билеты в кино',
+            'all': '📦 Все режимы'
+        }
+        plan_name = plan_names.get(plan_type, plan_type)
+        
+        text = "Спасибо, оплата успешно проведена!\n\n"
+        text += f"Ваша подписка: {plan_name}\n"
+        
+        # Если подписка навсегда, показываем "Действует неограниченно"
+        if period_type == 'lifetime' or expires_at is None:
+            text += "Действует неограниченно"
+        else:
+            # Показываем дату окончания действия подписки
+            if isinstance(expires_at, datetime):
+                expires_at_local = expires_at.astimezone(PLANS_TZ) if expires_at.tzinfo else PLANS_TZ.localize(expires_at)
+                text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
+            else:
+                text += f"Действует до: {expires_at}"
+        
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))
+        
+        # Для личных подписок отправляем в личку, для групповых - в групповой чат
+        target_chat_id = sub.get('user_id') if subscription_type == 'personal' else chat_id
+        
+        try:
+            bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
+            logger.info(f"[SUCCESSFUL PAYMENT] Уведомление отправлено для подписки {subscription_id}")
+        except Exception as e:
+            logger.error(f"[SUCCESSFUL PAYMENT] Ошибка отправки уведомления: {e}")
+    except Exception as e:
+        logger.error(f"[SUCCESSFUL PAYMENT] Ошибка: {e}", exc_info=True)
+
+
 def process_recurring_payments():
     """Выполняет безакцептные списания для подписок с payment_method_id"""
     if not bot:
@@ -1430,27 +1485,44 @@ def process_recurring_payments():
                     renew_subscription(subscription_id, period_type)
                     update_payment_status(payment_id, 'succeeded', subscription_id)
                     
-                    # Отправляем уведомление пользователю
-                    text = "✅ <b>Автоматическое списание выполнено</b>\n\n"
-                    text += f"Подписка продлена на {period_name}.\n"
-                    text += f"💰 Сумма: <b>{price}₽</b>\n\n"
-                    text += "Спасибо за использование нашего сервиса! 🎉"
-                    
-                    try:
-                        bot.send_message(chat_id, text, parse_mode='HTML')
-                        logger.info(f"[RECURRING PAYMENT] Уведомление отправлено для подписки {subscription_id}")
-                    except Exception as e:
-                        logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления: {e}")
+                    # Отправляем уведомление об успешном платеже
+                    send_successful_payment_notification(
+                        chat_id=chat_id,
+                        subscription_id=subscription_id,
+                        subscription_type=subscription_type,
+                        plan_type=plan_type,
+                        period_type=period_type
+                    )
                 else:
                     logger.warning(f"[RECURRING PAYMENT] Платеж {payment.id} не успешен, статус: {payment.status}")
-                    # Отправляем уведомление об ошибке
-                    text = "⚠️ <b>Ошибка автоматического списания</b>\n\n"
-                    text += f"Не удалось списать оплату за подписку.\n"
-                    text += f"Статус: {payment.status}\n\n"
-                    text += "Пожалуйста, проверьте способ оплаты или обратитесь в поддержку."
                     
+                    # Планируем следующую попытку на следующий день в 9:00 МСК
+                    from dateutil.relativedelta import relativedelta
+                    tomorrow = now + timedelta(days=1)
+                    # Устанавливаем время на 9:00 МСК (PLANS_TZ)
+                    next_attempt = PLANS_TZ.localize(
+                        datetime.combine(tomorrow.date(), datetime.min.time().replace(hour=9, minute=0))
+                    ).astimezone(pytz.UTC)
+                    
+                    # Обновляем next_payment_date в БД
+                    from moviebot.database.db_operations import update_subscription_next_payment
+                    update_subscription_next_payment(subscription_id, next_attempt)
+                    
+                    # Отправляем уведомление об ошибке с кнопками
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    text = "🚨 <b>Оплата не прошла!</b>\n\n"
+                    text += "Пожалуйста, обеспечьте наличие средств на карте для проведения списания, следующее списание будет завтра. Также, вы можете инициировать списание по кнопке ниже."
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("Провести платеж", callback_data=f"payment:retry_payment:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("Изменить тариф", callback_data=f"payment:modify:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
+                    
+                    # Для личных подписок отправляем в личку, для групповых - в групповой чат
+                    target_chat_id = user_id if subscription_type == 'personal' else chat_id
                     try:
-                        bot.send_message(chat_id, text, parse_mode='HTML')
+                        bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
+                        logger.info(f"[RECURRING PAYMENT] Уведомление об ошибке отправлено для подписки {subscription_id}, следующая попытка: {next_attempt}")
                     except Exception as e:
                         logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления об ошибке: {e}")
                 
