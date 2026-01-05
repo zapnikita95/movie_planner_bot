@@ -117,6 +117,8 @@ def register_start_handlers(bot):
             chat_id = call.message.chat.id
             action = call.data.split(":")[1]  # seasons, premieres, random, search, schedule, payment, help
             
+            logger.info(f"[START MENU] Обработка действия: {action}, user_id={user_id}, chat_id={chat_id}")
+            
             # Импортируем обработчики команд (они будут зарегистрированы в commands.py)
             from moviebot.bot.handlers.seasons import seasons_command
             from moviebot.bot.handlers.plan import show_schedule
@@ -126,6 +128,32 @@ def register_start_handlers(bot):
             # Используем существующее сообщение и устанавливаем текст команды
             message = call.message
             message.text = None  # Очищаем текст
+            
+            # Обрабатываем tickets_locked ПЕРВЫМ, чтобы не перехватывалось другими обработчиками
+            if action == 'tickets_locked':
+                logger.info(f"[START MENU] Обработка tickets_locked для user_id={user_id}")
+                # Показываем сообщение о необходимости подписки
+                text = "🎫 <b>Билеты в кино</b>\n\n"
+                text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+                text += "Используйте /payment для оформления подписки."
+                
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                
+                try:
+                    bot.edit_message_text(
+                        text,
+                        chat_id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    logger.info(f"[START MENU] Сообщение о билетах отправлено для user_id={user_id}")
+                except Exception as e:
+                    logger.warning(f"[START MENU] Не удалось отредактировать сообщение, отправляем новое: {e}")
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                return
             
             # Вызываем соответствующую команду
             if action == 'seasons':
@@ -170,28 +198,6 @@ def register_start_handlers(bot):
                 else:
                     message.text = '/ticket'
                     ticket_command(message)
-            elif action == 'tickets_locked':
-                # Показываем сообщение о необходимости подписки
-                text = "🎫 <b>Билеты в кино</b>\n\n"
-                text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
-                text += "Используйте /payment для оформления подписки."
-                
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
-                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                
-                try:
-                    bot.edit_message_text(
-                        text,
-                        chat_id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    logger.warning(f"[START MENU] Не удалось отредактировать сообщение, отправляем новое: {e}")
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                return
             elif action == 'payment':
                 message.text = '/payment'
                 payment_command(message)
