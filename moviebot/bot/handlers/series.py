@@ -2629,6 +2629,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             text += f"<i>В ролях:</i> {info['actors']}\n"
         if info.get('description'):
             text += f"\n<i>Кратко:</i> {info['description']}\n"
+        logger.info(f"[SHOW FILM INFO] Базовый текст сформирован, is_series={is_series}")
         
         # Если это сериал, добавляем информацию о статусе выхода серий
         if is_series:
@@ -2646,6 +2647,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 # Продолжаем без информации о статусе выхода
         
         text += f"\n<a href='{link}'>Кинопоиск</a>"
+        logger.info(f"[SHOW FILM INFO] Ссылка добавлена, existing={existing}")
         
         # Если фильм не в базе, добавляем строку "Ещё не просмотрено"
         if not existing:
@@ -2653,6 +2655,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         
         # Если фильм уже в базе, показываем дополнительную информацию
         if existing:
+            logger.info(f"[SHOW FILM INFO] Фильм в базе, обрабатываем existing={existing}")
             film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
             watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
             
@@ -2697,11 +2700,14 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                                 text += f"\n⭐ <b>Ваша оценка: —</b>"
                         else:
                             text += f"\n⭐ <b>Ваша оценка: —</b>"
+            logger.info(f"[SHOW FILM INFO] Обработка existing завершена")
         
         # Создаем кнопки
+        logger.info(f"[SHOW FILM INFO] Создание кнопок...")
         markup = InlineKeyboardMarkup(row_width=1)
         
         # Проверяем премьеру
+        logger.info(f"[SHOW FILM INFO] Проверка премьеры...")
         russia_release = info.get('russia_release')
         premiere_date = None
         premiere_date_str = ""
@@ -2743,23 +2749,29 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
         
         # Получаем film_id для проверки оценок и планов
+        logger.info(f"[SHOW FILM INFO] Получение film_id...")
         film_id = None
         if existing:
             film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+            logger.info(f"[SHOW FILM INFO] film_id из existing: {film_id}")
         else:
+            logger.info(f"[SHOW FILM INFO] Запрос film_id из БД...")
             with db_lock:
                 cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
                 film_row = cursor.fetchone()
                 if film_row:
                     film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+            logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}")
         
         # Проверяем, есть ли уже план для этого фильма
+        logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         has_plan = False
         if film_id:
             with db_lock:
                 cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
                 plan_row = cursor.fetchone()
                 has_plan = plan_row is not None
+        logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}")
         
         # Если фильм не в базе, добавляем кнопку "➕ Добавить в базу"
         if not film_id:
@@ -2770,8 +2782,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
         
         # Добавляем кнопки "Интересные факты" и "Оценить" всегда (для фильмов в базе и не в базе)
+        logger.info(f"[SHOW FILM INFO] Добавление кнопок оценок для film_id={film_id}...")
         if film_id:
             # Получаем информацию об оценках
+            logger.info(f"[SHOW FILM INFO] Запрос оценок из БД...")
             with db_lock:
                 # Получаем среднюю оценку
                 cursor.execute('''
@@ -2812,6 +2826,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     rating_text = f"{emoji} {avg_rating:.0f}/10"
                 else:
                     rating_text = "💬 Оценить"
+            logger.info(f"[SHOW FILM INFO] Оценки получены, rating_text={rating_text}")
             
             markup.row(
                 InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
@@ -2823,8 +2838,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
                 InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
             )
+        logger.info(f"[SHOW FILM INFO] Кнопки оценок добавлены")
         
         # Если это сериал, добавляем кнопки для сериалов (для фильмов в базе и не в базе)
+        logger.info(f"[SHOW FILM INFO] Проверка сериала: is_series={is_series}, user_id={user_id}")
         if is_series and user_id:
             if film_id:
                 # Фильм в базе - проверяем доступ к функциям уведомлений
@@ -2834,11 +2851,15 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 
                 if has_access:
                     # Проверяем, все ли серии просмотрены
+                    logger.info(f"[SHOW FILM INFO] Получение данных о сезонах для kp_id={kp_id}...")
                     seasons_data = get_seasons_data(kp_id)
+                    logger.info(f"[SHOW FILM INFO] Данные о сезонах получены: {seasons_data is not None}")
                     all_episodes_watched = False
                     if seasons_data and film_id:
                         # Проверяем, выходит ли сериал
+                        logger.info(f"[SHOW FILM INFO] Проверка статуса выхода сериала для kp_id={kp_id}...")
                         is_airing, _ = get_series_airing_status(kp_id)
+                        logger.info(f"[SHOW FILM INFO] Статус выхода сериала: is_airing={is_airing}")
                         
                         # Получаем просмотренные эпизоды
                         with db_lock:
@@ -2906,8 +2927,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 else:
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+        logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
         # Проверяем, есть ли план для этого фильма (дома)
+        logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         if film_id:
             with db_lock:
                 cursor.execute('''
@@ -2961,6 +2984,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan:{plan_id}"),
                         InlineKeyboardButton("🗑️ Удалить", callback_data=f"remove_from_calendar:{plan_id}")
                     )
+        logger.info(f"[SHOW FILM INFO] Обработка планов завершена")
         
         # Проверяем длину текста перед отправкой
         logger.info(f"[SHOW FILM INFO] Текст сформирован, длина={len(text)}, message_id={message_id}")
