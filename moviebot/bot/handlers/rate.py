@@ -280,22 +280,22 @@ def handle_rating_internal(message, rating):
                             elif isinstance(rating_value, int):
                                 film_id = rating_value
                                 break
-                # Проверяем bot_messages (сообщения с фильмами)
-                if current_msg.message_id in bot_messages:
-                    reply_link = bot_messages[current_msg.message_id]
-                    if reply_link:
-                        # Извлекаем kp_id из ссылки для поиска
-                        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
-                        if match:
-                            kp_id = match.group(2)
-                            with db_lock:
-                                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                                row = cursor.fetchone()
-                                if row:
-                                    film_id = row.get('id') if isinstance(row, dict) else row[0]
-                                    break
-                # Переходим к родительскому сообщению
-                current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
+                        # Проверяем bot_messages (сообщения с фильмами)
+                        if current_msg.message_id in bot_messages:
+                            reply_link = bot_messages[current_msg.message_id]
+                            if reply_link:
+                                # Извлекаем kp_id из ссылки для поиска
+                                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                                if match:
+                                    kp_id = match.group(2)
+                                    with db_lock:
+                                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                                        row = cursor.fetchone()
+                                        if row:
+                                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+                                            break
+                        # Переходим к родительскому сообщению
+                        current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
     
     # Если film_id не найден, но есть kp_id, добавляем фильм в базу
     if not film_id and kp_id:
