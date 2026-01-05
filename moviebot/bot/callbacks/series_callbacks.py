@@ -965,8 +965,8 @@ def register_series_callbacks(bot_instance):
             # Фильм будет добавлен в базу только при успешной оценке (через handle_rating_internal)
             if not film_id:
                 # Получаем информацию о фильме для отображения названия
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            info = extract_movie_info(link)
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                info = extract_movie_info(link)
                 title = info.get('title', 'Фильм') if info else 'Фильм'
                 
                 # Отправляем сообщение с просьбой оценить и добавляем его в rating_messages с kp_id
