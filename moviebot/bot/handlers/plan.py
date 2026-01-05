@@ -1299,11 +1299,11 @@ def edit_plan_callback(call):
         }
         
         markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
         if plan_type == 'cinema':
-            markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
             markup.add(InlineKeyboardButton("🎟️ Загрузить билеты", callback_data=f"edit_plan_ticket:{plan_id}"))
+            markup.add(InlineKeyboardButton("🏠 Переключить в 'дома'", callback_data=f"edit_plan_switch:{plan_id}"))
         else:
-            markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
             markup.add(InlineKeyboardButton("📺 Изменить онлайн-кинотеатр", callback_data=f"edit_plan_streaming:{plan_id}"))
             markup.add(InlineKeyboardButton("🎦 Переключить в 'в кино'", callback_data=f"edit_plan_switch:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
