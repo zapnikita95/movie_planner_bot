@@ -41,6 +41,9 @@ def register_all_handlers(bot):
     from moviebot.bot.callbacks.payment_callbacks import register_payment_callbacks
     register_payment_callbacks(bot)
     
+    from moviebot.bot.callbacks.premieres_callbacks import register_premieres_callbacks
+    register_premieres_callbacks(bot)
+    
     # TODO: Раскомментировать по мере реализации handlers:
     # from moviebot.bot.handlers.seasons import register_seasons_handlers
     # register_seasons_handlers(bot)
