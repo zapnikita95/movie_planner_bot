@@ -682,27 +682,39 @@ def main_text_handler(message):
                 # Добавляем пояснение про эмодзи
                 results_text += "\n\n🎬 - фильм\n📺 - сериал"
                 
+                logger.info(f"[SEARCH] Текст сформирован, длина: {len(results_text)} символов, кнопок: {len(markup.keyboard) if markup and markup.keyboard else 0}")
+                
                 # Проверяем длину сообщения (лимит Telegram - 4096 символов)
                 if len(results_text) > 4096:
                     logger.warning(f"[SEARCH] Сообщение слишком длинное ({len(results_text)} символов), обрезаем")
                     # Обрезаем текст и оставляем только первые результаты
                     max_length = 4000  # Оставляем запас для HTML-тегов
                     results_text = results_text[:max_length] + "\n\n... (показаны не все результаты)"
+                    logger.info(f"[SEARCH] Текст обрезан до {len(results_text)} символов")
+                
+                logger.info(f"[SEARCH] ===== ПЕРЕД ОТПРАВКОЙ =====")
+                logger.info(f"[SEARCH] chat_id={chat_id}, user_id={user_id}, text_length={len(results_text)}, has_markup={markup is not None}")
                 
                 try:
-                    logger.info(f"[SEARCH] Отправка результатов: текст длиной {len(results_text)}, кнопок: {len(markup.keyboard) if markup and markup.keyboard else 0}")
+                    logger.info(f"[SEARCH] Вызов bot_instance.reply_to...")
                     sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[SEARCH] ✅ bot_instance.reply_to завершен успешно")
                     logger.info(f"[SEARCH] ✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов, message_id={sent_message.message_id if sent_message else 'None'}")
                 except Exception as e:
                     logger.error(f"[SEARCH] ❌ КРИТИЧЕСКАЯ ОШИБКА отправки результатов поиска: {e}", exc_info=True)
                     logger.error(f"[SEARCH] Тип ошибки: {type(e).__name__}, args: {e.args}")
+                    logger.error(f"[SEARCH] Traceback: {e.__traceback__}")
                     try:
                         # Пробуем отправить без разметки
+                        logger.info(f"[SEARCH] Попытка отправить без разметки...")
                         bot_instance.reply_to(message, results_text[:4000], parse_mode='HTML')
-                        logger.info(f"[SEARCH] Отправлено без разметки")
+                        logger.info(f"[SEARCH] ✅ Отправлено без разметки")
                     except Exception as e2:
                         logger.error(f"[SEARCH] ❌ Не удалось отправить даже без разметки: {e2}", exc_info=True)
-                        bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
+                        try:
+                            bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
+                        except:
+                            pass
             else:
                 logger.warning(f"[SEARCH] Пустой запрос от пользователя {user_id}")
             return
