@@ -12,6 +12,10 @@ def has_notifications_access(chat_id, user_id):
     """Проверяет, есть ли у пользователя доступ к функциям уведомлений о сериалах
     (требуется подписка 'notifications' или 'all')
     """
+    # Для создателя (user_id 301810276) всегда разрешаем доступ
+    if user_id == 301810276:
+        return True
+    
     # Проверяем личную подписку - используем get_user_personal_subscriptions для проверки всех личных подписок
     # Это важно, так как личная подписка должна работать независимо от того, в каком чате пользователь
     personal_subs = get_user_personal_subscriptions(user_id)
@@ -82,6 +86,10 @@ def has_recommendations_access(chat_id, user_id):
     """Проверяет, есть ли у пользователя доступ к функциям рекомендаций
     (требуется подписка 'recommendations' или 'all')
     """
+    # Для создателя (user_id 301810276) всегда разрешаем доступ
+    if user_id == 301810276:
+        return True
+    
     # Проверяем личную подписку - используем get_user_personal_subscriptions для проверки всех личных подписок
     # Это важно, так как личная подписка должна работать независимо от того, в каком чате пользователь
     personal_subs = get_user_personal_subscriptions(user_id)
