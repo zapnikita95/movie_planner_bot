@@ -4346,8 +4346,12 @@ def start_menu_callback(call):
             text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
             text += "Используйте /payment для оформления подписки."
             
+            # Определяем тип чата и выбираем правильные тарифы
+            is_group = chat_id < 0
+            tariffs_callback = "payment:tariffs:group" if is_group else "payment:tariffs:personal"
+            
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+            markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data=tariffs_callback))
             
             bot.edit_message_text(
                 text,
@@ -17219,8 +17223,12 @@ def ticket_command(message):
             text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
             text += "Используйте /payment для оформления подписки."
             
+            # Определяем тип чата и выбираем правильные тарифы
+            is_group = chat_id < 0
+            tariffs_callback = "payment:tariffs:group" if is_group else "payment:tariffs:personal"
+            
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+            markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data=tariffs_callback))
             
             bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
             return
@@ -17325,6 +17333,7 @@ def has_notifications_access(chat_id, user_id):
 def has_tickets_access(chat_id, user_id):
     """Проверяет, есть ли у пользователя доступ к функциям билетов в кино
     (требуется подписка 'tickets' или 'all')
+    В группе проверяется только групповая подписка, в личке - только личная
     """
     from database.db_operations import get_user_personal_subscriptions, get_active_group_subscription_by_chat_id
     
@@ -17332,8 +17341,16 @@ def has_tickets_access(chat_id, user_id):
     if user_id == 301810276:
         return True
     
-    # Проверяем личную подписку - используем get_user_personal_subscriptions для проверки всех личных подписок
-    # Это важно, так как личная подписка должна работать независимо от того, в каком чате пользователь
+    # В группе проверяем только групповую подписку
+    if chat_id < 0:  # Групповой чат
+        group_sub = get_active_group_subscription_by_chat_id(chat_id)
+        if group_sub:
+            plan_type = group_sub.get('plan_type')
+            if plan_type in ['tickets', 'all']:
+                return True
+        return False
+    
+    # В личном чате проверяем только личную подписку
     personal_subs = get_user_personal_subscriptions(user_id)
     if personal_subs:
         for sub in personal_subs:
@@ -17342,22 +17359,12 @@ def has_tickets_access(chat_id, user_id):
                 return True
     
     # Также проверяем через get_active_subscription для обратной совместимости
-    # (на случай, если chat_id == user_id в личном чате)
     from database.db_operations import get_active_subscription
     personal_sub = get_active_subscription(chat_id, user_id, 'personal')
     if personal_sub:
         plan_type = personal_sub.get('plan_type')
         if plan_type in ['tickets', 'all']:
             return True
-    
-    # Проверяем групповую подписку (для групповых чатов)
-    if chat_id < 0:  # Групповой чат
-        # Для групповых подписок нужно искать подписку по chat_id группы
-        group_sub = get_active_group_subscription_by_chat_id(chat_id)
-        if group_sub:
-            plan_type = group_sub.get('plan_type')
-            if plan_type in ['tickets', 'all']:
-                return True
     
     return False
 
@@ -17932,7 +17939,7 @@ def handle_payment_callback(call):
             subscription_id = int(action.split(":")[1])
             from database.db_operations import get_subscription_members, get_active_group_users
             members = get_subscription_members(subscription_id, BOT_ID)
-            active_users = get_active_group_users(chat_id)
+            active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
             
             text = "👥 <b>Список участников</b>\n\n"
             text += "💸 - участник в подписке\n\n"
@@ -17989,7 +17996,7 @@ def handle_payment_callback(call):
                     diff = int(new_price_base * 0.5) - current_price_base
             
             # Проверяем количество активных пользователей
-            active_users = get_active_group_users(chat_id)
+            active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
             active_count = len(active_users)
             
             if active_count > new_size:
@@ -18155,7 +18162,7 @@ def handle_payment_callback(call):
                 return
             
             # Получаем активных пользователей и текущих участников подписки
-            active_users = get_active_group_users(group_chat_id)
+            active_users = get_active_group_users(group_chat_id, bot_id=BOT_ID)
             existing_members_dict = get_subscription_members(subscription_id, BOT_ID)
             # get_subscription_members возвращает dict {user_id: username}
             existing_member_ids = set(existing_members_dict.keys()) if existing_members_dict else set()
@@ -18226,7 +18233,7 @@ def handle_payment_callback(call):
             group_chat_id = sub.get('chat_id')
             group_size = sub.get('group_size')
             
-            active_users = get_active_group_users(group_chat_id)
+            active_users = get_active_group_users(group_chat_id, bot_id=BOT_ID)
             existing_members_dict = get_subscription_members(subscription_id, BOT_ID)
             # get_subscription_members возвращает dict {user_id: username}
             existing_member_ids = set(existing_members_dict.keys()) if existing_members_dict else set()
@@ -18479,7 +18486,7 @@ def handle_payment_callback(call):
             # Если подписки нет, но бот присутствует в группе, создаем виртуальную подписку
             if not sub:
                 # Проверяем наличие активности в группе
-                active_users = get_active_group_users(group_chat_id)
+                active_users = get_active_group_users(group_chat_id, bot_id=BOT_ID)
                 if active_users:
                     # Создаем виртуальную подписку
                     import pytz
@@ -20100,7 +20107,7 @@ def handle_payment_callback(call):
                     from database.db_operations import get_active_group_users
                     # Вызываем функцию с одним аргументом для совместимости со старой версией
                     # bot_id не критичен - функция просто вернет всех активных пользователей, включая бота
-                    active_users = get_active_group_users(chat_id)
+                    active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
                     active_count = len(active_users)
                     
                     if active_count > int(group_size):
@@ -20614,7 +20621,7 @@ def handle_payment_callback(call):
             if subscription_type == 'group' and plan_type == 'all':
                 from database.db_operations import get_active_group_users
                 try:
-                    active_users = get_active_group_users(chat_id_sub)
+                    active_users = get_active_group_users(chat_id_sub, bot_id=BOT_ID)
                     active_count = len(active_users) if active_users else 0
                     current_size = group_size or 2
                     
@@ -21376,7 +21383,7 @@ def handle_payment_username(message):
             if not sub:
                 # Проверяем наличие активности в группе
                 from database.db_operations import get_active_group_users
-                active_users = get_active_group_users(group_chat_id)
+                active_users = get_active_group_users(group_chat_id, bot_id=BOT_ID)
                 logger.info(f"[PAYMENT] Активных пользователей в группе {group_chat_id}: {len(active_users) if active_users else 0}")
                 if active_users:
                     # Создаем виртуальную подписку
@@ -21573,7 +21580,7 @@ def handle_payment_username(message):
             
             # Проверяем количество активных пользователей
             from database.db_operations import get_active_group_users
-            active_users = get_active_group_users(group_chat_id)
+            active_users = get_active_group_users(group_chat_id, bot_id=BOT_ID)
             active_count = len(active_users)
             group_size = int(state.get('group_size', 2))
             
