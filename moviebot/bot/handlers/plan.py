@@ -916,6 +916,8 @@ def get_plan_link_internal(message, state):
 
 def get_plan_day_or_date_internal(message, state):
     """Внутренняя функция для получения дня/даты в /plan"""
+    logger.info("=" * 80)
+    logger.info(f"[PLAN DAY/DATE INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
     user_id = message.from_user.id
     text = message.text.lower().strip() if message.text else ""
     plan_type = state.get('type')
