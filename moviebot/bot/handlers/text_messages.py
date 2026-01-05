@@ -30,9 +30,7 @@ cursor = get_db_cursor()
 @bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
     """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
-    logger.info(f"[MAIN TEXT HANDLER] ===== НАЧАЛО ОБРАБОТКИ ТЕКСТОВОГО СООБЩЕНИЯ =====")
     logger.info(f"[MAIN TEXT HANDLER] Получено текстовое сообщение от {message.from_user.id}: '{message.text[:100] if message.text else ''}'")
-    logger.info(f"[MAIN TEXT HANDLER] message.chat.id={message.chat.id}, message.chat.type={message.chat.type}")
     
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -53,11 +51,13 @@ def main_text_handler(message):
             return
         
         if step == 'upload_ticket':
+            # Если ждём билеты, но пришёл текст (например "готово")
             if text.lower().strip() == 'готово':
                 from moviebot.bot.handlers.series import ticket_done_internal
                 ticket_done_internal(message, state)
                 return
-            logger.info(f"[MAIN TEXT HANDLER] Игнорируем текст в режиме upload_ticket")
+            # Иначе игнорируем текст (билеты обрабатываются отдельным хэндлером для фото/документов)
+            logger.info(f"[MAIN TEXT HANDLER] Игнорируем текст в режиме upload_ticket (ожидаются фото/документы)")
             return
         
         if step == 'waiting_session_time':
@@ -70,37 +70,44 @@ def main_text_handler(message):
         state = user_search_state[user_id]
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_search_state")
         
+        # Обработка ответа на /search без запроса
+        # Проверяем, что это ответ на сообщение бота или просто текст от пользователя в состоянии поиска
         saved_message_id = state.get('message_id')
         is_reply_to_search = message.reply_to_message and message.reply_to_message.message_id == saved_message_id
-        is_text_in_search_state = text and not message.reply_to_message
+        is_text_in_search_state = text and not message.reply_to_message  # Текст без ответа, но в состоянии поиска
         
         if is_reply_to_search or is_text_in_search_state:
             query = text
             if query:
+                # Получаем тип поиска из состояния
                 search_type = state.get('search_type', 'mixed')
+                # Удаляем состояние
                 del user_search_state[user_id]
-                
+                # Вызываем обработчик поиска
                 logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}")
                 films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
-                
                 if not films:
                     bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
                     return
                 
+                # Формируем сообщение с результатами
                 results_text = f"🔍 Результаты поиска '{query}':\n\n"
                 markup = InlineKeyboardMarkup(row_width=1)
                 
-                for film in films[:10]:
+                for film in films[:10]:  # Показываем максимум 10 результатов на странице
                     title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
                     year = film.get('year') or film.get('releaseYear') or 'N/A'
                     rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
                     kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                     
-                    film_type = film.get('type', '').upper()
+                    # Определяем тип (сериал или фильм) по полю type из API
+                    film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
                     is_series = film_type == 'TV_SERIES'
                     type_indicator = "📺" if is_series else "🎬"
                     
                     if kp_id:
+                        # Ограничиваем длину текста кнопки
+                        type_indicator = "📺" if is_series else "🎬"
                         button_text = f"{type_indicator} {title} ({year})"
                         if len(button_text) > 50:
                             button_text = button_text[:47] + "..."
@@ -108,8 +115,10 @@ def main_text_handler(message):
                         if rating != 'N/A':
                             results_text += f" ⭐ {rating}"
                         results_text += "\n"
+                        # Сохраняем тип в callback_data для правильного формирования ссылки
                         markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
                 
+                # Добавляем пагинацию, если нужно
                 if total_pages > 1:
                     pagination_row = []
                     query_encoded = query.replace(' ', '_')
@@ -118,12 +127,19 @@ def main_text_handler(message):
                         pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
                     markup.row(*pagination_row)
                 
+                # Добавляем кнопку "Назад в меню"
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                
+                # Добавляем пояснение про эмодзи
                 results_text += "\n\n🎬 - фильм\n📺 - сериал"
                 
                 bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов")
+            else:
+                logger.warning(f"[SEARCH] Пустой запрос от пользователя {user_id}")
             return
+        else:
+            logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано: '{text}' (reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}, saved_message_id={saved_message_id})")
     
     # === user_import_state ===
     if user_id in user_import_state:
@@ -331,9 +347,11 @@ def main_text_handler(message):
         link_match = re.search(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', text)
         if link_match:
             link = link_match.group(1)
+            # Сохраняем ссылку в bot_messages для обработки реакций
             bot_messages[message.message_id] = link
             logger.info(f"[MAIN TEXT HANDLER] Ссылка сохранена в bot_messages для message_id={message.message_id}: {link}")
             
+            # Добавляем фильм в базу
             username = message.from_user.username or f"user_{message.from_user.id}"
             log_request(message.from_user.id, username, 'add_movie', chat_id)
             
