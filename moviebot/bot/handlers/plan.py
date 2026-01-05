@@ -320,8 +320,9 @@ def register_plan_handlers(bot_instance):
             if not link:
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("❌ Выйти", callback_data="plan:cancel"))
-                bot_instance.reply_to(message, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
-                user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id}
+                prompt_msg = bot_instance.reply_to(message, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
+                user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id, 'prompt_message_id': prompt_msg.message_id}
+                logger.info(f"[PLAN] Сохранен prompt_message_id={prompt_msg.message_id} для user_id={user_id}")
                 return
             
             if not plan_type:
@@ -962,6 +963,18 @@ def get_plan_link_internal(message, state):
     chat_id = message.chat.id
     link = None
     
+    # Проверяем, что сообщение является реплаем на сообщение бота
+    from moviebot.bot.bot_init import BOT_ID
+    is_reply = (message.reply_to_message and 
+               message.reply_to_message.from_user and 
+               message.reply_to_message.from_user.id == BOT_ID)
+    
+    prompt_message_id = state.get('prompt_message_id')
+    # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
+    if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+        logger.info(f"[PLAN LINK] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+        return
+    
     # Сначала проверяем текст самого сообщения (даже если есть реплай)
     message_text = message.text or ''
     if message_text:
@@ -1021,7 +1034,9 @@ def get_plan_link_internal(message, state):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
     markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
-    bot_instance.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
+    prompt_msg = bot_instance.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
+    user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
+    logger.info(f"[PLAN] Сохранен prompt_message_id={prompt_msg.message_id} для user_id={user_id} (step=2)")
 
 
 def get_plan_day_or_date_internal(message, state):
@@ -1036,12 +1051,14 @@ def get_plan_day_or_date_internal(message, state):
     logger.info(f"[PLAN DAY/DATE INTERNAL] prompt_message_id={prompt_message_id}, reply_to_message={message.reply_to_message.message_id if message.reply_to_message else None}")
     
     # КРИТИЧЕСКИ ВАЖНО: Проверяем, что это реплай на правильное сообщение бота
-    if not message.reply_to_message:
-        logger.warning(f"[PLAN DAY/DATE INTERNAL] Сообщение не является реплаем, пропускаем")
-        return
+    from moviebot.bot.bot_init import BOT_ID
+    is_reply = (message.reply_to_message and 
+               message.reply_to_message.from_user and 
+               message.reply_to_message.from_user.id == BOT_ID)
     
-    if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
-        logger.warning(f"[PLAN DAY/DATE INTERNAL] Реплай не на правильное сообщение: reply_to_message_id={message.reply_to_message.message_id}, ожидаемый prompt_message_id={prompt_message_id}, пропускаем")
+    # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
+    if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+        logger.info(f"[PLAN DAY/DATE INTERNAL] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
         return
     
     # Берем текст из сообщения пользователя (не из реплая)

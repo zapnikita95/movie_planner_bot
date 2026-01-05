@@ -1190,6 +1190,17 @@ def main_text_handler(message):
         step = state.get('step')
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_plan_state, step={step}")
         
+        # Проверяем, что сообщение является реплаем на сообщение бота
+        is_reply = (message.reply_to_message and 
+                   message.reply_to_message.from_user and 
+                   message.reply_to_message.from_user.id == BOT_ID)
+        
+        prompt_message_id = state.get('prompt_message_id')
+        # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
+        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+            logger.info(f"[PLAN] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+            return
+        
         if step == 1:
             from moviebot.bot.handlers.plan import get_plan_link_internal
             get_plan_link_internal(message, state)
