@@ -1991,11 +1991,20 @@ def handle_dice_result(message):
                             update_dice_game_message(chat_id, game_state, game_state['message_id'])
                         
                         # Отправляем отдельное сообщение победителю
+                        # Формируем имя с @ если есть username
+                        if winner_info.get('username'):
+                            winner_mention = f"@{winner_info.get('username')}"
+                        else:
+                            winner_mention = user_display
+                        
                         markup = InlineKeyboardMarkup(row_width=1)
-                        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
+                        markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
+                        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+                        
                         bot.send_message(
                             chat_id,
-                            f"🏆 <b>{user_display}</b> выбросил больше всех ({max_value})! Выбирайте фильм для вашей компании!",
+                            f"<b>{winner_mention}</b>, поздравляю! Приглашаю выбрать фильм для просмотра:",
                             reply_markup=markup,
                             parse_mode='HTML'
                         )
