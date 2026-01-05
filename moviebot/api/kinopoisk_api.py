@@ -502,6 +502,69 @@ def get_external_sources(kp_id):
         return []
 
 
+def get_film_filters():
+    """Получает список жанров из API Кинопоиска"""
+    headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
+    url = "https://kinopoiskapiunofficial.tech/api/v2.2/films/filters"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            genres = data.get('genres', [])
+            # Фильтруем пустые жанры и "для взрослых"
+            filtered_genres = []
+            for genre_item in genres:
+                genre_id = genre_item.get('id')
+                genre_name = genre_item.get('genre', '').strip()
+                # Пропускаем пустые жанры и "для взрослых"
+                if genre_name and genre_name.lower() != 'для взрослых':
+                    filtered_genres.append({
+                        'id': genre_id,
+                        'genre': genre_name
+                    })
+            return filtered_genres
+        return []
+    except Exception as e:
+        logger.error(f"Ошибка get_film_filters: {e}", exc_info=True)
+        return []
+
+
+def search_films_by_filters(genres=None, film_type='ALL', year_from=None, year_to=None, page=1):
+    """Поиск фильмов по фильтрам через API Кинопоиска"""
+    headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
+    url = "https://kinopoiskapiunofficial.tech/api/v2.2/films"
+    
+    params = {
+        'order': 'RATING',
+        'type': film_type,
+        'ratingFrom': 0,
+        'ratingTo': 10,
+        'page': page
+    }
+    
+    if genres:
+        # Если несколько жанров, берем первый (API не поддерживает несколько одновременно)
+        if isinstance(genres, list):
+            params['genres'] = genres[0] if genres else None
+        else:
+            params['genres'] = genres
+    
+    if year_from:
+        params['yearFrom'] = year_from
+    if year_to:
+        params['yearTo'] = year_to
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('items', [])
+        return []
+    except Exception as e:
+        logger.error(f"Ошибка search_films_by_filters: {e}", exc_info=True)
+        return []
+
+
 def get_premieres_for_period(period_type='current_month'):
     """Получает список премьер для указанного периода"""
     now = datetime.now()

@@ -61,6 +61,7 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
             for username, value in sorted(participants_with_results, key=lambda x: x[1], reverse=True):
                 text += f"• {username}: <b>{value}</b>\n"
             text += "\n"
+            logger.info(f"[DICE GAME UPDATE] Результаты бросков: {participants_with_results}")
         
         # Показываем количество оставшихся участников
         participants_who_threw = set(game_state.get('participants', {}).keys())
@@ -88,6 +89,8 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                 max_value = max(participants_with_values_dict.values())
                 winners = [uid for uid, val in participants_with_values_dict.items() if val == max_value]
                 
+                logger.info(f"[DICE GAME UPDATE] Все бросили кубик. Результаты: {participants_with_values_dict}, максимальное значение: {max_value}, победители: {winners}")
+                
                 if len(winners) == 1:
                     # Есть победитель
                     winner_id = winners[0]
@@ -100,6 +103,8 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                         user_display = user_info.user.first_name or winner_name
                     except:
                         user_display = winner_name if winner_name and not winner_name.startswith('user_') else "участник"
+                    
+                    logger.info(f"[DICE GAME UPDATE] 🏆 Победитель определен: {user_display} (user_id={winner_id}, значение={max_value})")
                     
                     text += f"🏆 <b>Победитель: {user_display}</b> (выбросил {max_value})\n\n"
                     text += f"🎬 {user_display} выбирает фильм для вашей компании!\n"

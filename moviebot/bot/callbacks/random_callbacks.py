@@ -80,9 +80,13 @@ def register_random_callbacks(bot):
                 return
             
             user_random_state[user_id]['mode'] = mode
-            user_random_state[user_id]['step'] = 'period'
+            # Для режима kinopoisk начинаем с выбора типа контента
+            if mode == 'kinopoisk':
+                user_random_state[user_id]['step'] = 'content_type'
+            else:
+                user_random_state[user_id]['step'] = 'period'
             
-            logger.info(f"[RANDOM CALLBACK] State updated: mode={mode}, step=period")
+            logger.info(f"[RANDOM CALLBACK] State updated: mode={mode}, step={user_random_state[user_id]['step']}")
             
             # Добавляем справку о режиме
             mode_descriptions = {
@@ -244,6 +248,21 @@ def register_random_callbacks(bot):
             
             user_random_state[user_id]['available_periods'] = available_periods
             
+            # Для режима kinopoisk сначала показываем выбор типа контента
+            if mode == 'kinopoisk':
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎬 Фильм", callback_data="rand_content_type:FILM"))
+                markup.add(InlineKeyboardButton("📺 Сериал", callback_data="rand_content_type:TV_SERIES"))
+                markup.add(InlineKeyboardButton("🎬 Фильм и Сериал", callback_data="rand_content_type:ALL"))
+                markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="rand_mode:back"))
+                
+                bot_instance.answer_callback_query(call.id)
+                text = f"{mode_description}\n\n🎬 <b>Шаг 1/3: Выберите тип контента</b>"
+                bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"[RANDOM CALLBACK] ✅ Mode kinopoisk selected, moving to content type selection, user_id={user_id}")
+                return
+            
+            # Для остальных режимов показываем выбор периодов
             markup = InlineKeyboardMarkup(row_width=1)
             if available_periods:
                 for period in available_periods:
@@ -251,8 +270,8 @@ def register_random_callbacks(bot):
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
             
             bot_instance.answer_callback_query(call.id)
-            # Для режимов kinopoisk и group_votes показываем Шаг 1/2, для остальных - Шаг 1/4
-            if mode in ['kinopoisk', 'group_votes']:
+            # Для режимов group_votes показываем Шаг 1/2, для остальных - Шаг 1/4
+            if mode == 'group_votes':
                 step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
             else:
                 step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"

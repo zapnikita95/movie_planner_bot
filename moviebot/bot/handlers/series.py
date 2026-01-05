@@ -845,6 +845,78 @@ def register_series_handlers(bot_param):
             except:
                 pass
     
+    @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_content_type:"))
+    def handle_rand_content_type(call):
+        """Обработчик выбора типа контента для режима kinopoisk"""
+        try:
+            logger.info(f"[RANDOM CALLBACK] ===== CONTENT TYPE HANDLER: data={call.data}, user_id={call.from_user.id}")
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            data = call.data.split(":", 1)[1]
+            
+            if user_id not in user_random_state:
+                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+                return
+            
+            mode = user_random_state[user_id].get('mode')
+            if mode != 'kinopoisk':
+                logger.warning(f"[RANDOM CALLBACK] Content type handler called for non-kinopoisk mode: {mode}")
+                bot_instance.answer_callback_query(call.id, "❌ Неверный режим", show_alert=True)
+                return
+            
+            if data == "back":
+                # Возврат к выбору режима
+                logger.info(f"[RANDOM CALLBACK] Content type back, returning to mode selection")
+                bot_instance.answer_callback_query(call.id)
+                # Вызываем random_start для возврата к выбору режима
+                from moviebot.bot.handlers.series import random_start
+                class FakeMessage:
+                    def __init__(self, call):
+                        self.from_user = call.from_user
+                        self.chat = call.message.chat
+                        self.text = '/random'
+                    def reply_to(self, text, **kwargs):
+                        return bot_instance.send_message(self.chat.id, text, **kwargs)
+                fake_message = FakeMessage(call)
+                random_start(fake_message)
+                return
+            
+            # Сохраняем выбранный тип контента
+            user_random_state[user_id]['content_type'] = data
+            user_random_state[user_id]['step'] = 'period'
+            
+            logger.info(f"[RANDOM CALLBACK] Content type selected: {data}, moving to period selection")
+            
+            # Показываем выбор периодов
+            available_periods = user_random_state[user_id].get('available_periods', [])
+            if not available_periods:
+                available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            if available_periods:
+                for period in available_periods:
+                    markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="rand_content_type:back"))
+            
+            mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм на Кинопоиске по заданным фильтрам.'
+            content_type_text = {
+                'FILM': '🎬 Фильм',
+                'TV_SERIES': '📺 Сериал',
+                'ALL': '🎬 Фильм и Сериал'
+            }.get(data, '')
+            
+            bot_instance.answer_callback_query(call.id)
+            text = f"{mode_description}\n\nВыбрано: {content_type_text}\n\n🎲 <b>Шаг 2/3: Выберите период</b>\n\n(можно выбрать несколько или пропустить)"
+            bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_content_type: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
     @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_period:"))
     def handle_rand_period(call):
         """Обработчик выбора периода для рандома"""
