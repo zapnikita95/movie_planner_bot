@@ -4523,9 +4523,9 @@ def register_payment_callbacks(bot_instance):
                             
                             # Формируем сообщение
                             plan_names = {
-                            'notifications': 'Уведомления о сериалах',
-                            'recommendations': 'Рекомендации',
-                            'tickets': 'Билеты',
+                                'notifications': 'Уведомления о сериалах',
+                                'recommendations': 'Рекомендации',
+                                'tickets': 'Билеты',
                                 'all': 'Все режимы'
                             }
                             
