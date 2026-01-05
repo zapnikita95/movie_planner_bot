@@ -44,6 +44,10 @@ def register_all_handlers(bot):
     from moviebot.bot.callbacks.premieres_callbacks import register_premieres_callbacks
     register_premieres_callbacks(bot)
     
+    # Регистрируем главный обработчик текстовых сообщений
+    from moviebot.bot.handlers.text_messages import register_text_message_handlers
+    register_text_message_handlers(bot)
+    
     # TODO: Раскомментировать по мере реализации handlers:
     # from moviebot.bot.handlers.seasons import register_seasons_handlers
     # register_seasons_handlers(bot)
