@@ -1574,7 +1574,12 @@ def register_series_handlers(bot_instance):
             state = user_search_state[user_id]
             reply_to_message = message.reply_to_message
             
-            logger.info(f"[SEARCH REPLY] Состояние найдено: state={state}, reply_to_message_id={reply_to_message.message_id if reply_to_message else 'None'}, state_message_id={state.get('message_id')}")
+            logger.info(f"[SEARCH REPLY] Состояние найдено: state={state}, reply_to_message_id={reply_to_message.message_id if reply_to_message else 'None'}, state_message_id={state.get('message_id')}, query='{query[:50] if query else 'None'}'")
+            
+            # Проверяем, что запрос не пустой
+            if not query or not query.strip():
+                logger.warning(f"[SEARCH REPLY] Пустой запрос от пользователя {user_id}")
+                return
             
             # Если пользователь в состоянии поиска, обрабатываем его сообщение
             # Не требуем точного совпадения message_id, так как состояние может быть обновлено
