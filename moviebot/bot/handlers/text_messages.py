@@ -178,11 +178,32 @@ def handle_rate_list_reply(message):
     
     user_id = message.from_user.id
     
-    # ВАЖНО: Пропускаем сообщения, если пользователь в состоянии планирования
+    # ВАЖНО: Пропускаем сообщения, если пользователь в любом состоянии
     # Эти сообщения должны обрабатываться через main_text_handler
-    from moviebot.states import user_plan_state
-    if user_id in user_plan_state:
-        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в user_plan_state")
+    from moviebot.states import (
+        user_plan_state, user_promo_state, user_promo_admin_state,
+        user_ticket_state, user_search_state, user_settings_state,
+        user_edit_state, user_view_film_state, user_import_state,
+        user_clean_state, user_cancel_subscription_state, user_refund_state,
+        user_unsubscribe_state, user_add_admin_state
+    )
+    
+    # Проверяем все состояния
+    if (user_id in user_plan_state or 
+        user_id in user_promo_state or 
+        user_id in user_promo_admin_state or
+        user_id in user_ticket_state or
+        user_id in user_search_state or
+        user_id in user_settings_state or
+        user_id in user_edit_state or
+        user_id in user_view_film_state or
+        user_id in user_import_state or
+        user_id in user_clean_state or
+        user_id in user_cancel_subscription_state or
+        user_id in user_refund_state or
+        user_id in user_unsubscribe_state or
+        user_id in user_add_admin_state):
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии (plan={user_id in user_plan_state}, promo={user_id in user_promo_state}, promo_admin={user_id in user_promo_admin_state})")
         return
     
     # Пропускаем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages
@@ -702,9 +723,9 @@ def main_text_handler(message):
         state = user_promo_state[user_id]
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_promo_state")
         
-        # Проверяем, что это ответ на сообщение бота
-        if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
-            promo_code = text.strip().upper()
+        # Обрабатываем промокод независимо от наличия реплая
+        promo_code = text.strip().upper()
+        if promo_code:
             
             # Применяем промокод
             from moviebot.utils.promo import apply_promocode
@@ -864,32 +885,33 @@ def main_text_handler(message):
         logger.info(f"[MAIN TEXT HANDLER] user_promo_admin_state[{user_id}] = {state}")
         logger.info(f"[MAIN TEXT HANDLER] message.reply_to_message = {message.reply_to_message}")
         logger.info(f"[MAIN TEXT HANDLER] BOT_ID = {BOT_ID}")
+        logger.info(f"[MAIN TEXT HANDLER] text = '{text}'")
         
-        # Проверяем, что это ответ на сообщение бота
-        if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
-            logger.info(f"[MAIN TEXT HANDLER] Это ответ на сообщение бота, обрабатываем промокод")
-            # Парсим ввод: код скидка количество
-            parts = text.strip().split()
-            if len(parts) != 3:
-                bot_instance.reply_to(message, "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\n\nНапример: NEW2026 20% 100")
-                return
-            
-            code = parts[0].strip()
-            discount_input = parts[1].strip()
-            total_uses_str = parts[2].strip()
-            
-            # Создаем промокод
-            from moviebot.utils.promo import create_promocode
-            success, result_message = create_promocode(code, discount_input, total_uses_str)
-            
-            if success:
-                bot_instance.reply_to(message, f"✅ {result_message}")
-            else:
-                bot_instance.reply_to(message, f"❌ {result_message}")
-            
-            # Удаляем состояние
-            del user_promo_admin_state[user_id]
+        # Обрабатываем промокод независимо от наличия реплая
+        # Парсим ввод: код скидка количество
+        parts = text.strip().split()
+        if len(parts) != 3:
+            bot_instance.reply_to(message, "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\n\nНапример: NEW2026 20% 100")
             return
+        
+        code = parts[0].strip()
+        discount_input = parts[1].strip()
+        total_uses_str = parts[2].strip()
+        
+        logger.info(f"[MAIN TEXT HANDLER] Парсинг промокода: code={code}, discount={discount_input}, uses={total_uses_str}")
+        
+        # Создаем промокод
+        from moviebot.utils.promo import create_promocode
+        success, result_message = create_promocode(code, discount_input, total_uses_str)
+        
+        if success:
+            bot_instance.reply_to(message, f"✅ {result_message}")
+        else:
+            bot_instance.reply_to(message, f"❌ {result_message}")
+        
+        # Удаляем состояние
+        del user_promo_admin_state[user_id]
+        return
     
     # === user_cancel_subscription_state ===
     if user_id in user_cancel_subscription_state:
@@ -944,10 +966,9 @@ def main_text_handler(message):
         state = user_unsubscribe_state[user_id]
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_unsubscribe_state")
         
-        # Проверяем, что это ответ на сообщение бота
-        if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
-            target_id_str = text.strip()
-            
+        # Обрабатываем ID независимо от наличия реплая
+        target_id_str = text.strip()
+        if target_id_str:
             try:
                 target_id = int(target_id_str)
                 is_group = target_id < 0  # Отрицательные ID обычно группы
@@ -981,10 +1002,9 @@ def main_text_handler(message):
         state = user_add_admin_state[user_id]
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_add_admin_state")
         
-        # Проверяем, что это ответ на сообщение бота
-        if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
-            admin_id_str = text.strip()
-            
+        # Обрабатываем ID независимо от наличия реплая
+        admin_id_str = text.strip()
+        if admin_id_str:
             try:
                 admin_id = int(admin_id_str)
                 
