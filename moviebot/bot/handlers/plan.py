@@ -118,8 +118,36 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
             markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
         else:
             markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
+    elif plan_type == 'home' and plan_id and kp_id:
+        # Для планов "дома" показываем онлайн-кинотеатры
+        try:
+            from moviebot.api.kinopoisk_api import get_external_sources
+            sources = get_external_sources(kp_id)
+            if sources:
+                # Сохраняем источники в базу для будущего использования
+                import json
+                sources_dict = {platform: url for platform, url in sources[:6]}
+                sources_json = json.dumps(sources_dict, ensure_ascii=False)
+                with db_lock:
+                    cursor.execute('''
+                        UPDATE plans 
+                        SET ticket_file_id = %s 
+                        WHERE id = %s
+                    ''', (sources_json, plan_id))
+                    conn.commit()
+                
+                markup = InlineKeyboardMarkup(row_width=2)
+                for platform, url in sources[:6]:
+                    markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id}:{platform}"))
+                markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
+        except Exception as e:
+            logger.warning(f"[PROCESS PLAN] Не удалось получить онлайн-кинотеатры: {e}", exc_info=True)
     
-    bot_instance.send_message(chat_id, f"✅ <b>{title}</b> запланирован на {date_str} {type_text}", parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
+    text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
+    if plan_type == 'home' and markup.keyboard:
+        text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
+    
+    bot_instance.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
     return True
 
@@ -1329,6 +1357,88 @@ def handle_remove_from_calendar_callback(call):
             logger.warning(f"[REMOVE FROM CALENDAR] Не удалось обновить сообщение: {e}")
     except Exception as e:
         logger.error(f"[REMOVE FROM CALENDAR] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_select:"))
+def streaming_select_callback(call):
+    """Обработчик выбора онлайн-кинотеатра"""
+    logger.info(f"[STREAMING SELECT] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+    try:
+        parts = call.data.split(":")
+        plan_id = int(parts[1])
+        platform = parts[2] if len(parts) > 2 else ''
+        
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[STREAMING SELECT] Пользователь {user_id} выбрал кинотеатр {platform} для плана {plan_id}")
+        
+        # Получаем источники из базы (сохранены в ticket_file_id как JSON)
+        with db_lock:
+            cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+            sources_row = cursor.fetchone()
+            sources_json = sources_row.get('ticket_file_id') if sources_row and isinstance(sources_row, dict) else (sources_row[0] if sources_row else None)
+            
+            if sources_json:
+                import json
+                try:
+                    sources_dict = json.loads(sources_json)
+                    url = sources_dict.get(platform, '')
+                    
+                    if url:
+                        # Сохраняем выбор кинотеатра в базу
+                        cursor.execute('''
+                            UPDATE plans 
+                            SET streaming_service = %s, streaming_url = %s 
+                            WHERE id = %s AND chat_id = %s
+                        ''', (platform, url, plan_id, chat_id))
+                        conn.commit()
+                        
+                        bot_instance.answer_callback_query(call.id, f"✅ Выбран {platform}")
+                        logger.info(f"[STREAMING SELECT] Кинотеатр {platform} сохранен для плана {plan_id}")
+                        
+                        # Удаляем сообщение с выбором кинотеатра
+                        try:
+                            bot_instance.delete_message(chat_id, call.message.message_id)
+                        except Exception as e:
+                            logger.warning(f"[STREAMING SELECT] Не удалось удалить сообщение: {e}")
+                    else:
+                        bot_instance.answer_callback_query(call.id, "❌ Кинотеатр не найден", show_alert=True)
+                except json.JSONDecodeError:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка данных", show_alert=True)
+            else:
+                bot_instance.answer_callback_query(call.id, "❌ Источники не найдены", show_alert=True)
+    except Exception as e:
+        logger.error(f"[STREAMING SELECT] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_done:"))
+def streaming_done_callback(call):
+    """Обработчик кнопки 'Завершить' - удаляет сообщение с кинотеатрами"""
+    logger.info(f"[STREAMING DONE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Удаляем сообщение
+        try:
+            bot_instance.delete_message(chat_id, message_id)
+            bot_instance.answer_callback_query(call.id, "✅ Сообщение удалено")
+            logger.info(f"[STREAMING DONE] Сообщение {message_id} удалено")
+        except Exception as e:
+            logger.warning(f"[STREAMING DONE] Не удалось удалить сообщение: {e}")
+            bot_instance.answer_callback_query(call.id, "✅")
+    except Exception as e:
+        logger.error(f"[STREAMING DONE] Ошибка: {e}", exc_info=True)
         try:
             bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
