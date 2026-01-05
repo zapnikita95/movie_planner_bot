@@ -517,127 +517,128 @@ def show_schedule(message):
 # Callback handlers на уровне модуля (как в старом moviebot.py)
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
 def show_film_description_callback(call):
-        """Обработчик кнопки показа описания фильма из /schedule"""
-        logger.info("=" * 80)
-        logger.info(f"[SHOW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
-        logger.info(f"[SHOW FILM DESCRIPTION] ✅ ОБРАБОТЧИК ВЫЗВАН!")
-        try:
-            logger.info(f"[SHOW FILM DESCRIPTION] Вызов answer_callback_query")
-            bot_instance.answer_callback_query(call.id)
-            logger.info(f"[SHOW FILM DESCRIPTION] answer_callback_query выполнен")
-            kp_id = call.data.split(":")[1]
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            
-            logger.info(f"[SHOW FILM DESCRIPTION] Пользователь {user_id} хочет посмотреть описание фильма kp_id={kp_id}")
-            
-            # Получаем информацию о фильме
-            from moviebot.api.kinopoisk_api import extract_movie_info
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            info = extract_movie_info(link)
-            
-            if not info:
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-                return
-            
-            # Проверяем, есть ли фильм в базе
-            with db_lock:
-                cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                row = cursor.fetchone()
-            
-            existing = None
-            if row:
-                if isinstance(row, dict):
-                    film_id = row.get('id')
-                    title = row.get('title')
-                    watched = row.get('watched')
-                else:
-                    film_id = row[0]
-                    title = row[1]
-                    watched = row[2]
-                existing = (film_id, title, watched)
-            
-            # Показываем описание фильма
-            logger.info(f"[SHOW FILM DESCRIPTION] Вызов show_film_info_with_buttons")
-            from moviebot.bot.handlers.series import show_film_info_with_buttons
-            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
-            logger.info(f"[SHOW FILM DESCRIPTION] show_film_info_with_buttons завершен")
-            logger.info(f"[SHOW FILM DESCRIPTION] ===== END (успешно) =====")
-            
-        except Exception as e:
-            logger.error(f"[SHOW FILM DESCRIPTION] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
-            logger.error(f"[SHOW FILM DESCRIPTION] Тип ошибки: {type(e).__name__}, args: {e.args}")
-            try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
-
-    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
-    def schedule_back_callback(call):
-        """Обработчик кнопки возврата из расписания - удаляет оба сообщения с планами"""
-        try:
-            bot_instance.answer_callback_query(call.id)
-            chat_id = call.message.chat.id
-            
-            # Получаем сохраненные message_id обоих сообщений
-            if hasattr(show_schedule, '_schedule_messages') and chat_id in show_schedule._schedule_messages:
-                messages = show_schedule._schedule_messages[chat_id]
-                cinema_message_id = messages.get('cinema_message_id')
-                home_message_id = messages.get('home_message_id')
-                
-                # Удаляем оба сообщения
-                if cinema_message_id:
-                    try:
-                        bot_instance.delete_message(chat_id, cinema_message_id)
-                    except Exception as e:
-                        logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение с кино: {e}")
-                
-                if home_message_id:
-                    try:
-                        bot_instance.delete_message(chat_id, home_message_id)
-                    except Exception as e:
-                        logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение с домом: {e}")
-                
-                # Удаляем из словаря
-                del show_schedule._schedule_messages[chat_id]
+    """Обработчик кнопки показа описания фильма из /schedule"""
+    logger.info("=" * 80)
+    logger.info(f"[SHOW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+    logger.info(f"[SHOW FILM DESCRIPTION] ✅ ОБРАБОТЧИК ВЫЗВАН!")
+    try:
+        logger.info(f"[SHOW FILM DESCRIPTION] Вызов answer_callback_query")
+        bot_instance.answer_callback_query(call.id)
+        logger.info(f"[SHOW FILM DESCRIPTION] answer_callback_query выполнен")
+        kp_id = call.data.split(":")[1]
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        logger.info(f"[SHOW FILM DESCRIPTION] Пользователь {user_id} хочет посмотреть описание фильма kp_id={kp_id}")
+        
+        # Получаем информацию о фильме
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Проверяем, есть ли фильм в базе
+        with db_lock:
+            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            row = cursor.fetchone()
+        
+        existing = None
+        if row:
+            if isinstance(row, dict):
+                film_id = row.get('id')
+                title = row.get('title')
+                watched = row.get('watched')
             else:
-                # Если не нашли сохраненные сообщения, удаляем текущее
+                film_id = row[0]
+                title = row[1]
+                watched = row[2]
+            existing = (film_id, title, watched)
+        
+        # Показываем описание фильма
+        logger.info(f"[SHOW FILM DESCRIPTION] Вызов show_film_info_with_buttons")
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
+        logger.info(f"[SHOW FILM DESCRIPTION] show_film_info_with_buttons завершен")
+        logger.info(f"[SHOW FILM DESCRIPTION] ===== END (успешно) =====")
+        
+    except Exception as e:
+        logger.error(f"[SHOW FILM DESCRIPTION] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        logger.error(f"[SHOW FILM DESCRIPTION] Тип ошибки: {type(e).__name__}, args: {e.args}")
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
+def schedule_back_callback(call):
+    """Обработчик кнопки возврата из расписания - удаляет оба сообщения с планами"""
+    try:
+        bot_instance.answer_callback_query(call.id)
+        chat_id = call.message.chat.id
+        
+        # Получаем сохраненные message_id обоих сообщений
+        if hasattr(show_schedule, '_schedule_messages') and chat_id in show_schedule._schedule_messages:
+            messages = show_schedule._schedule_messages[chat_id]
+            cinema_message_id = messages.get('cinema_message_id')
+            home_message_id = messages.get('home_message_id')
+            
+            # Удаляем оба сообщения
+            if cinema_message_id:
                 try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    bot_instance.delete_message(chat_id, cinema_message_id)
                 except Exception as e:
-                    logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение: {e}")
+                    logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение с кино: {e}")
             
-            # Показываем главное меню после удаления сообщений
-            welcome_text = """
-            🎬 <b>Главное меню</b>
-
-            💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
-
-            Выберите раздел из меню ниже ⬇
-            """.strip()
+            if home_message_id:
+                try:
+                    bot_instance.delete_message(chat_id, home_message_id)
+                except Exception as e:
+                    logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение с домом: {e}")
             
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
-            markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
-            markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
-            markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
-            markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
-            markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
-            markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
-            markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
-            
+            # Удаляем из словаря
+            del show_schedule._schedule_messages[chat_id]
+        else:
+            # Если не нашли сохраненные сообщения, удаляем текущее
             try:
-                bot_instance.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='HTML')
+                bot_instance.delete_message(chat_id, call.message.message_id)
             except Exception as e:
-                logger.error(f"[SCHEDULE BACK] Ошибка при отправке главного меню: {e}")
-            
-            logger.info(f"[SCHEDULE BACK] Пользователь {call.from_user.id} вернулся из расписания")
+                logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение: {e}")
+        
+        # Показываем главное меню после удаления сообщений
+        welcome_text = """
+        🎬 <b>Главное меню</b>
+
+        💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
+
+        Выберите раздел из меню ниже ⬇
+        """.strip()
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
+        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
+        markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
+        markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+        markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
+        markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
+        markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
+        
+        try:
+            bot_instance.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='HTML')
         except Exception as e:
-            logger.error(f"[SCHEDULE BACK] Ошибка: {e}", exc_info=True)
-            try:
-                bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
-            except:
-                pass
+            logger.error(f"[SCHEDULE BACK] Ошибка при отправке главного меню: {e}")
+        
+        logger.info(f"[SCHEDULE BACK] Пользователь {call.from_user.id} вернулся из расписания")
+    except Exception as e:
+        logger.error(f"[SCHEDULE BACK] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+        except:
+            pass
 
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
