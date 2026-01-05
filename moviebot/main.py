@@ -5,35 +5,23 @@
 # КРИТИЧЕСКИ ВАЖНО: Настройка logging ДО всех импортов
 import logging
 import sys
-import os
 
-# Принудительно включаем unflushed вывод (критично для Railway)
-# Это гарантирует, что логи сразу попадают в stdout без буферизации
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(line_buffering=True)
-if hasattr(sys.stderr, 'reconfigure'):
-    sys.stderr.reconfigure(line_buffering=True)
-
-# Глобальная настройка logging (один раз, до всех импортов!)
-# force=True сбрасывает все предыдущие настройки
+# Простая настройка — работает на Railway 100%
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[
-        logging.StreamHandler(sys.stdout)  # В stdout — Railway видит
-    ],
-    force=True  # Сбрасывает все предыдущие настройки
+    stream=sys.stdout  # Только stdout — Railway видит
 )
 
-# Принудительно INFO для всех логгеров
-logging.getLogger().setLevel(logging.INFO)
+# Дополнительно: принудительно INFO для всех
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+for handler in root_logger.handlers[:]:
+    root_logger.removeHandler(handler)
+root_logger.addHandler(logging.StreamHandler(sys.stdout))
 
 logger = logging.getLogger(__name__)
-logger.info("=" * 80)
-logger.info("=== GLOBAL LOGGING НАСТРОЕН ===")
-logger.info("=== Railway должен видеть это ===")
-logger.info("=" * 80)
+logger.info("=== LOGGING ПОЧИНЕН === Это сообщение должно появиться в Railway")
 
 # Теперь загружаем переменные окружения
 from dotenv import load_dotenv
