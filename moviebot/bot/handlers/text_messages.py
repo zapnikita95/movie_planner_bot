@@ -1066,8 +1066,23 @@ def main_file_handler(message):
         
         if step == 'upload_ticket':
             # Обработка загрузки билетов для фильма
-            from moviebot.bot.handlers.series import handle_ticket_upload_internal
-            handle_ticket_upload_internal(message, state)
+            plan_id = state.get('plan_id')
+            if not plan_id:
+                bot_instance.reply_to(message, "❌ Ошибка: план не найден.")
+                if user_id in user_ticket_state:
+                    del user_ticket_state[user_id]
+                return
+            
+            file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+            
+            with db_lock:
+                cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (file_id, plan_id))
+                conn.commit()
+            
+            title = state.get('film_title', 'фильм')
+            dt = state.get('plan_dt', '')
+            
+            bot_instance.reply_to(message, f"✅ Билет прикреплён!\n\n<b>{title}</b> — {dt}\n\nМожете отправить ещё билеты или написать 'готово'.", parse_mode='HTML')
             return
         
         if step == 'waiting_ticket_file':
