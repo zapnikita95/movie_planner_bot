@@ -93,6 +93,23 @@ from moviebot.bot.commands import register_all_handlers
 register_all_handlers(bot)
 logger.info("Все handlers зарегистрированы")
 
+# DEBUG: Универсальный debug handler для всех callbacks (самый последний, ловит все)
+@bot.callback_query_handler(func=lambda call: True)
+def debug_all_callbacks(call):
+    """Debug handler для отслеживания всех callbacks"""
+    logger.info("=" * 80)
+    logger.info(f"[DEBUG ALL CALLBACK] ===== ПОЛУЧЕН CALLBACK =====")
+    logger.info(f"[DEBUG ALL CALLBACK] callback_data='{call.data}'")
+    logger.info(f"[DEBUG ALL CALLBACK] user_id={call.from_user.id}")
+    logger.info(f"[DEBUG ALL CALLBACK] chat_id={call.message.chat.id if call.message else 'N/A'}")
+    logger.info(f"[DEBUG ALL CALLBACK] message_id={call.message.message_id if call.message else 'N/A'}")
+    logger.info(f"[DEBUG ALL CALLBACK] callback_id={call.id}")
+    logger.info("=" * 80)
+    try:
+        bot.answer_callback_query(call.id, text="🔧 Debug: callback получен")
+    except Exception as e:
+        logger.error(f"[DEBUG ALL CALLBACK] Ошибка при ответе на callback: {e}")
+
 # Периодическая синхронизация команд каждый час
 scheduler.add_job(
     sync_commands_periodically,
