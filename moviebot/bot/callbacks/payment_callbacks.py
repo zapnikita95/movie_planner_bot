@@ -2317,6 +2317,7 @@ def register_payment_callbacks(bot_instance):
         
             if action.startswith("modify:"):
                 # Обработка кнопки "Изменить подписку"
+                logger.info(f"[PAYMENT MODIFY] Получен callback modify: action={action}, user_id={user_id}")
                 try:
                     bot_instance.answer_callback_query(call.id)
                 except:
@@ -2324,9 +2325,11 @@ def register_payment_callbacks(bot_instance):
                 
                 parts = action.split(":")
                 subscription_id_str = parts[1] if len(parts) > 1 else None
+                logger.info(f"[PAYMENT MODIFY] subscription_id_str={subscription_id_str}")
                 
                 # Если subscription_id == "all", значит пользователь хочет изменить все подписки
                 if subscription_id_str == "all":
+                    logger.info(f"[PAYMENT MODIFY] Обработка modify:all для user_id={user_id}")
                     # Получаем все активные подписки пользователя
                     from moviebot.database.db_operations import get_user_personal_subscriptions
                     all_subs = get_user_personal_subscriptions(user_id)
@@ -4349,7 +4352,7 @@ def register_payment_callbacks(bot_instance):
         
             if action.startswith("cancel:"):
                 # Подтверждение отмены
-                logger.info(f"[PAYMENT CANCEL] Начало обработки отмены: action={action}, user_id={user_id}, chat_id={chat_id}")
+                logger.info(f"[PAYMENT CANCEL] Получен callback cancel: action={action}, user_id={user_id}, chat_id={chat_id}")
                 parts = action.split(":")
                 second_param = parts[1]
             
