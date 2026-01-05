@@ -1132,20 +1132,35 @@ def register_series_handlers(bot_instance):
     @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.reply_to_message, priority=5)
     def handle_search_reply(message):
         """Обработчик ответных сообщений для поиска"""
+        logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
+        logger.info(f"[SEARCH REPLY] Получено сообщение: user_id={message.from_user.id}, text={message.text[:50] if message.text else 'None'}, has_reply={message.reply_to_message is not None}")
         try:
             user_id = message.from_user.id
             chat_id = message.chat.id
             query = message.text.strip()
             
+            logger.info(f"[SEARCH REPLY] Проверка состояния: user_id={user_id}, user_search_state keys={list(user_search_state.keys())}")
+            
             # Проверяем, находится ли пользователь в состоянии поиска
             if user_id not in user_search_state:
+                logger.info(f"[SEARCH REPLY] Пользователь {user_id} не в состоянии поиска, пропускаем")
                 return  # Не обрабатываем, если пользователь не в состоянии поиска
             
             state = user_search_state[user_id]
             reply_to_message = message.reply_to_message
             
+            logger.info(f"[SEARCH REPLY] Состояние найдено: state={state}, reply_to_message_id={reply_to_message.message_id if reply_to_message else 'None'}, state_message_id={state.get('message_id')}")
+            
             # Проверяем, что ответ на правильное сообщение (сообщение поиска)
-            if reply_to_message and reply_to_message.message_id == state.get('message_id'):
+            # Если message_id не совпадает, но пользователь в состоянии поиска, все равно обрабатываем
+            if reply_to_message:
+                state_message_id = state.get('message_id')
+                if state_message_id and reply_to_message.message_id != state_message_id:
+                    logger.warning(f"[SEARCH REPLY] message_id не совпадает: reply_to_message.message_id={reply_to_message.message_id}, state_message_id={state_message_id}")
+                    # Но все равно обрабатываем, если пользователь в состоянии поиска
+                    logger.info(f"[SEARCH REPLY] Продолжаем обработку, так как пользователь в состоянии поиска")
+            
+            if reply_to_message:
                 logger.info(f"[SEARCH REPLY] Получен запрос поиска от {user_id}: {query}")
                 
                 # Получаем тип поиска из состояния
