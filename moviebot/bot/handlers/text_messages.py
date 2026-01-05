@@ -292,30 +292,67 @@ def handle_rate_list_reply(message):
     bot_instance.reply_to(message, response_text, parse_mode='HTML')
 
 
+def is_kinopoisk_link(message):
+    """
+    Извлекает все ссылки на Kinopoisk из сообщения через message.entities.
+    Возвращает список ссылок или None, если ссылок нет.
+    """
+    links = []
+    
+    if not message.text:
+        return None
+    
+    # Проверяем entities (рекомендуемый способ - надёжный)
+    if message.entities:
+        text = message.text
+        for entity in message.entities:
+            if entity.type == 'url':
+                # Извлекаем URL из текста по offset и length
+                link = text[entity.offset:entity.offset + entity.length]
+                if 'kinopoisk.ru' in link or 'kinopoisk.com' in link:
+                    links.append(link)
+            elif entity.type == 'text_link':
+                # Ссылка в виде text_link (гиперссылка)
+                if 'kinopoisk.ru' in entity.url or 'kinopoisk.com' in entity.url:
+                    links.append(entity.url)
+    
+    # Fallback: если entities не сработали, проверяем текст напрямую
+    # (убираем угловые скобки, которые Telegram добавляет для форматирования)
+    if not links:
+        clean_text = message.text.replace('<', '').replace('>', '')
+        # Ищем ссылки через regex
+        found_links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', clean_text)
+        links.extend(found_links)
+    
+    # Убираем дубликаты, сохраняя порядок
+    seen = set()
+    unique_links = []
+    for link in links:
+        if link not in seen:
+            seen.add(link)
+            unique_links.append(link)
+    
+    return unique_links if unique_links else None
+
+
 @bot_instance.message_handler(func=lambda m: (
     m.text and 
-    ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text) and
-    not m.text.strip().startswith('/plan')
+    not m.text.strip().startswith('/plan') and
+    is_kinopoisk_link(m) is not None
 ), priority=0)
 def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
     logger.info(f"[SAVE MOVIE] save_movie_message вызван для пользователя {message.from_user.id}, текст: '{message.text[:100]}'")
     
-    # Сохраняем ссылку в bot_messages для обработки реакций
-    links = []
+    # Извлекаем все ссылки на Kinopoisk
+    links = is_kinopoisk_link(message)
+    
+    if not links:
+        logger.info(f"[SAVE MOVIE] Ссылки на Kinopoisk не найдены")
+        return
+    
+    # Сохраняем первую ссылку в bot_messages для обработки реакций
     try:
-        # Ищем ссылки в тексте
-        links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', message.text)
-        
-        # Также проверяем entities (URL в тексте)
-        if message.entities and not links:
-            text = message.text
-            for entity in message.entities:
-                if entity.type == 'url':
-                    link = text[entity.offset:entity.offset + entity.length]
-                    if 'kinopoisk.ru' in link or 'kinopoisk.com' in link:
-                        links.append(link)
-        
         if links:
             bot_messages[message.message_id] = links[0]
             logger.info(f"[SAVE MOVIE] Ссылка сохранена в bot_messages для message_id={message.message_id}: {links[0]}")
