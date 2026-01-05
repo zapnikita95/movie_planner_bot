@@ -774,46 +774,5 @@ def register_series_callbacks(bot_instance):
             except Exception as answer_e:
                 logger.error(f"[FACTS] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("plan_from_added:") or call.data.startswith("plan_film:"))
-    def plan_from_added_callback(call):
-        """Обработчик кнопки 'Запланировать просмотр' из сообщения о добавлении фильма"""
-        try:
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            kp_id = call.data.split(":")[1]
-            
-            logger.info(f"[PLAN FROM ADDED] Пользователь {user_id} хочет запланировать фильм kp_id={kp_id}")
-            
-            # Получаем link из базы или формируем его
-            link = None
-            with db_lock:
-                cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                row = cursor.fetchone()
-                if row:
-                    link = row.get('link') if isinstance(row, dict) else row[0]
-            
-            if not link:
-                link = f"https://kinopoisk.ru/film/{kp_id}/"
-            
-            # Устанавливаем состояние для планирования
-            user_plan_state[user_id] = {
-                'step': 2,
-                'link': link,
-                'chat_id': chat_id
-            }
-            
-            # Показываем кнопки выбора типа просмотра
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
-            markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
-            
-            bot_instance.answer_callback_query(call.id, "Выберите тип просмотра")
-            bot_instance.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
-        except Exception as e:
-            logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
-        finally:
-            # ВСЕГДА отвечаем на callback!
-            try:
-                bot_instance.answer_callback_query(call.id)
-            except Exception as answer_e:
-                logger.error(f"[PLAN FROM ADDED] Не удалось ответить на callback: {answer_e}", exc_info=True)
+    # Обработчик plan_from_added перенесен в moviebot/bot/handlers/plan.py
+    # чтобы избежать конфликтов с дублирующим обработчиком
