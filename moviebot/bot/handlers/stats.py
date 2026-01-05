@@ -465,7 +465,7 @@ def register_stats_handlers(bot_instance):
                 text += "👥 <i>Нет данных об участниках</i>\n"
             
             bot_instance.reply_to(message, text, parse_mode='HTML')
-            logger.info(f"✅ Ответ на /stats отправлен пользователю {message.from_user.id}")
+                logger.info(f"✅ Ответ на /stats отправлен пользователю {message.from_user.id}")
         except Exception as e:
             logger.error(f"❌ Ошибка в /stats: {e}", exc_info=True)
             try:

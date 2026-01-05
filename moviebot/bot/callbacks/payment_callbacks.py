@@ -2802,9 +2802,9 @@ def register_payment_callbacks(bot_instance):
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                             return
-                        elif len(existing_plan_types) == 2:
-                            # Если у пользователя уже есть 2 подписки из 3, предлагаем пакетную
-                            # ВАЖНО: Эта проверка должна быть ДО проверки plan_type in existing_plan_types
+                        elif len(existing_plan_types) == 2 and plan_type != 'all':
+                            # Если у пользователя уже есть 2 подписки из 3, и он пытается добавить третью отдельную (не пакетную)
+                            # Показываем сообщение с предложением пакетной подписки
                             can_add = False
                             plan_names = {
                                 'notifications': 'Уведомления о сериалах',
@@ -3232,15 +3232,128 @@ def register_payment_callbacks(bot_instance):
                     'group_title': group_title if sub_type == 'group' else None
                 }
             
-                # Обновляем сообщение с кнопками выбора способа оплаты
-                text += f"\n\n💳 <b>Выберите способ оплаты</b>\n"
-                text += f"💰 Сумма: <b>{final_price}₽{period_suffix}</b> ({stars_amount}⭐)\n"
+                # Проверяем, есть ли существующие подписки и нужно ли предлагать варианты переподписки
+                need_resubscription_options = False
+                existing_subs_for_resub = []
+                total_existing_price = 0
+                next_payment_date = None
+                next_sub_for_resub = None
                 
-                # Добавляем информационное сообщение для всех тарифов, кроме "навсегда"
-                if period_type != 'lifetime':
-                    text += "\nℹ️ После оформления подписки, данные карты будут сохранены для проведения списаний по выбранному расписанию. В дальнейшем, подтверждать отдельно платежи не придется. Вы сможете отменить подписку в любой момент\n"
-            
-                markup = InlineKeyboardMarkup(row_width=1)
+                if sub_type == 'personal' and not is_owner:
+                    from moviebot.database.db_operations import get_user_personal_subscriptions
+                    existing_subs_for_resub = get_user_personal_subscriptions(user_id)
+                    
+                    # Фильтруем только активные подписки
+                    active_subs_for_resub = []
+                    now = datetime.now(pytz.UTC)
+                    for sub in existing_subs_for_resub:
+                        expires_at = sub.get('expires_at')
+                        is_active = False
+                        if not expires_at:
+                            is_active = True
+                        elif isinstance(expires_at, datetime):
+                            if expires_at.tzinfo is None:
+                                expires_at = pytz.UTC.localize(expires_at)
+                            if expires_at.tzinfo != pytz.UTC:
+                                expires_at = expires_at.astimezone(pytz.UTC)
+                            is_active = expires_at > now
+                        else:
+                            try:
+                                if isinstance(expires_at, str):
+                                    expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                    if expires_dt.tzinfo is None:
+                                        expires_dt = pytz.UTC.localize(expires_dt)
+                                    if expires_dt.tzinfo != pytz.UTC:
+                                        expires_dt = expires_dt.astimezone(pytz.UTC)
+                                    is_active = expires_dt > now
+                                else:
+                                    is_active = True
+                            except:
+                                is_active = True
+                        
+                        if is_active:
+                            active_subs_for_resub.append(sub)
+                            total_existing_price += sub.get('price', 0)
+                            
+                            # Находим ближайшее следующее списание
+                            sub_next_payment = sub.get('next_payment_date')
+                            if sub_next_payment:
+                                if not next_payment_date or (isinstance(sub_next_payment, datetime) and isinstance(next_payment_date, datetime) and sub_next_payment < next_payment_date):
+                                    next_payment_date = sub_next_payment
+                                    next_sub_for_resub = sub
+                    
+                    # Проверяем, нужно ли предлагать варианты переподписки
+                    # Если есть существующие подписки и сумма новой подписки отличается от суммы существующих
+                    if active_subs_for_resub and final_price != total_existing_price:
+                        need_resubscription_options = True
+                        existing_subs_for_resub = active_subs_for_resub
+                
+                # Если нужно предложить варианты переподписки
+                if need_resubscription_options:
+                    # Сохраняем информацию о существующих подписках в состоянии
+                    if user_id not in user_payment_state:
+                        user_payment_state[user_id] = {}
+                    user_payment_state[user_id]['existing_subs'] = existing_subs_for_resub
+                    user_payment_state[user_id]['next_sub'] = next_sub_for_resub
+                    
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    
+                    text += f"\n\n⚠️ <b>У вас уже есть активные подписки:</b>\n"
+                    for sub in existing_subs_for_resub:
+                        plan_type_existing = sub.get('plan_type')
+                        plan_name = plan_names.get(plan_type_existing, plan_type_existing)
+                        text += f"• {plan_name}\n"
+                    
+                    text += f"\n💰 <b>Текущие подписки:</b> {total_existing_price}₽/мес\n"
+                    text += f"💰 <b>Новая подписка:</b> {final_price}₽{period_suffix}\n\n"
+                    
+                    diff_price = final_price - total_existing_price
+                    if diff_price > 0:
+                        text += f"💡 <b>Доплата:</b> {diff_price}₽\n\n"
+                    elif diff_price < 0:
+                        text += f"💡 <b>Экономия:</b> {abs(diff_price)}₽\n\n"
+                    
+                    text += "Выберите способ оформления:\n\n"
+                    text += "1️⃣ <b>Оплатить сейчас</b> — текущие подписки будут отменены, новая подписка начнется после оплаты с датой списания в текущий день.\n\n"
+                    
+                    if next_payment_date and next_sub_for_resub and period_type == 'month':
+                        text += f"2️⃣ <b>Увеличить со следующего списания</b> — текущие подписки будут отменены, сумма следующего списания будет изменена на {final_price}₽"
+                        if isinstance(next_payment_date, datetime):
+                            text += f" (дата: {next_payment_date.strftime('%d.%m.%Y')})"
+                        text += "\n\n"
+                    
+                    # Добавляем информационное сообщение для всех тарифов, кроме "навсегда"
+                    if period_type != 'lifetime':
+                        text += "ℹ️ После оформления подписки, данные карты будут сохранены для проведения списаний по выбранному расписанию. В дальнейшем, подтверждать отдельно платежи не придется. Вы сможете отменить подписку в любой момент\n"
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    
+                    # Кнопка "Оплатить сейчас"
+                    payment_id_short = payment_id[:8]
+                    callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
+                    markup.add(InlineKeyboardButton(f"1️⃣ Оплатить сейчас ({final_price}₽)", callback_data=callback_data_stars))
+                    
+                    # Кнопка "Увеличить со следующего списания" (только для месячных подписок и если есть следующее списание)
+                    if next_payment_date and next_sub_for_resub and period_type == 'month':
+                        markup.add(InlineKeyboardButton("2️⃣ Увеличить со следующего списания", callback_data=f"payment:combine:add_to_next:{plan_type}:{period_type}"))
+                    
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                else:
+                    # Обычный поток - показываем стандартные кнопки оплаты
+                    # Обновляем сообщение с кнопками выбора способа оплаты
+                    text += f"\n\n💳 <b>Выберите способ оплаты</b>\n"
+                    text += f"💰 Сумма: <b>{final_price}₽{period_suffix}</b> ({stars_amount}⭐)\n"
+                    
+                    # Добавляем информационное сообщение для всех тарифов, кроме "навсегда"
+                    if period_type != 'lifetime':
+                        text += "\nℹ️ После оформления подписки, данные карты будут сохранены для проведения списаний по выбранному расписанию. В дальнейшем, подтверждать отдельно платежи не придется. Вы сможете отменить подписку в любой момент\n"
+                
+                    markup = InlineKeyboardMarkup(row_width=1)
                 # Кнопка оплаты звездами (без ЮKassa)
                 payment_id_short = payment_id[:8]
                 # Используем формат payment:pay_stars:... для обработки в payment_callbacks.py
