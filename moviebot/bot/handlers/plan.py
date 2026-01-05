@@ -567,7 +567,10 @@ def show_schedule(message):
             chat_id = call.message.chat.id
             plan_type = call.data.split(":")[1]  # 'home' или 'cinema'
             
+            logger.info(f"[PLAN TYPE] Получен callback: user_id={user_id}, chat_id={chat_id}, plan_type={plan_type}, user_plan_state keys={list(user_plan_state.keys())}")
+            
             if user_id not in user_plan_state:
+                logger.warning(f"[PLAN TYPE] Состояние не найдено для user_id={user_id}, текущие состояния: {list(user_plan_state.keys())}")
                 bot_instance.edit_message_text("❌ Ошибка: сессия истекла. Начните заново с /plan", chat_id, call.message.message_id)
                 return
             
@@ -662,6 +665,8 @@ def show_schedule(message):
                 'link': link,
                 'chat_id': chat_id
             }
+            
+            logger.info(f"[PLAN FROM ADDED] Состояние установлено: user_id={user_id}, state={user_plan_state[user_id]}")
             
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
