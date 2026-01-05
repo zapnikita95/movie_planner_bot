@@ -482,16 +482,26 @@ def handle_settings_callback(call):
         if action == "edit":
             # Вызываем команду /edit
             logger.info(f"[SETTINGS CALLBACK] Обработка action=edit для user_id={user_id}, chat_id={chat_id}")
+            
+            # Отвечаем на callback сразу
+            bot_instance.answer_callback_query(call.id)
+            
             try:
                 from moviebot.bot.handlers.settings.edit import edit_command
                 logger.info(f"[SETTINGS CALLBACK] edit_command успешно импортирован")
             except ImportError as e:
                 logger.error(f"[SETTINGS CALLBACK] Ошибка импорта edit_command: {e}", exc_info=True)
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка: не удалось загрузить команду /edit", show_alert=True)
+                try:
+                    bot_instance.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /edit. Попробуйте вызвать её напрямую: /edit")
+                except:
+                    pass
                 return
             except Exception as e:
                 logger.error(f"[SETTINGS CALLBACK] Неожиданная ошибка при импорте edit_command: {e}", exc_info=True)
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка при загрузке команды", show_alert=True)
+                try:
+                    bot_instance.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /edit напрямую")
+                except:
+                    pass
                 return
             
             # Удаляем сообщение перед вызовом команды (как в рабочей версии)
@@ -511,11 +521,12 @@ def handle_settings_callback(call):
                     self.text = '/edit'
                 
                 def reply_to(self, text, **kwargs):
+                    # reply_to должен отправлять сообщение в тот же чат
                     return bot_instance.send_message(self.chat.id, text, **kwargs)
             
             try:
                 fake_message = FakeMessage(call)
-                logger.info(f"[SETTINGS CALLBACK] Вызов edit_command для user_id={user_id}")
+                logger.info(f"[SETTINGS CALLBACK] Вызов edit_command для user_id={user_id}, chat_id={chat_id}")
                 edit_command(fake_message)
                 logger.info(f"[SETTINGS CALLBACK] edit_command успешно выполнен")
             except Exception as e:
