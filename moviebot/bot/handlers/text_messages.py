@@ -6,10 +6,19 @@ import logging
 import re
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# КРИТИЧЕСКИ ВАЖНО: Импортируем bot_instance ДО всех декораторов
+from moviebot.bot.bot_init import bot as bot_instance
+
+# Логируем, что модуль импортирован (декораторы выполнятся при импорте)
+logger = logging.getLogger(__name__)
+logger.info("=" * 80)
+logger.info("[TEXT MESSAGES] Модуль text_messages.py импортирован - декораторы будут зарегистрированы")
+logger.info(f"[TEXT MESSAGES] bot_instance: {bot_instance} (тип: {type(bot_instance).__name__})")
+logger.info("=" * 80)
+
 from moviebot.database.db_operations import log_request, get_user_timezone_or_default, set_notification_setting
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.api.kinopoisk_api import extract_movie_info, search_films
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.states import (
     user_search_state, user_plan_state, user_ticket_state,
     user_settings_state, user_edit_state, user_view_film_state,
@@ -28,7 +37,7 @@ import moviebot.bot.handlers.promo  # noqa: F401
 import moviebot.bot.handlers.admin  # noqa: F401
 from moviebot.database.db_operations import add_and_announce, is_bot_participant, get_watched_emojis
 
-logger = logging.getLogger(__name__)
+# logger уже создан выше
 conn = get_db_connection()
 cursor = get_db_cursor()
 
