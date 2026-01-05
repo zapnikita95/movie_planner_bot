@@ -177,10 +177,19 @@ def handle_list_mark_watched_reply(message):
         
         marked_count = 0
         errors = []
+        marked_films = []  # Список отмеченных фильмов (kp_id, title)
         
         with db_lock:
             for kp_id in kp_ids:
                 try:
+                    # Сначала получаем название фильма
+                    cursor.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    film_row = cursor.fetchone()
+                    film_title = None
+                    if film_row:
+                        film_title = film_row.get('title') if isinstance(film_row, dict) else film_row[0]
+                    
+                    # Отмечаем фильм как просмотренный
                     cursor.execute('''
                         UPDATE movies 
                         SET watched = 1 
@@ -188,18 +197,43 @@ def handle_list_mark_watched_reply(message):
                     ''', (chat_id, kp_id))
                     if cursor.rowcount > 0:
                         marked_count += 1
+                        marked_films.append((kp_id, film_title))
                 except Exception as e:
                     errors.append(f"{kp_id}: {e}")
                     logger.error(f"[LIST MARK WATCHED] Ошибка при отметке фильма {kp_id}: {e}")
             
             conn.commit()
         
-        # Формируем ответ
-        response_text = f"✅ Отмечено как просмотренные: {marked_count} фильм(ов)"
-        if errors:
-            response_text += f"\n⚠️ Ошибки: {len(errors)}"
+        # Формируем ответ с названиями фильмов
+        if marked_count == 0:
+            response_text = "❌ Не удалось отметить фильмы как просмотренные"
+        else:
+            response_text = f"✅ Отмечено как просмотренные: {marked_count} фильм(ов)\n\n"
+            
+            # Добавляем названия фильмов
+            for kp_id, title in marked_films:
+                if title:
+                    response_text += f"• <b>{title}</b> [ID: {kp_id}]\n"
+                else:
+                    response_text += f"• [ID: {kp_id}]\n"
+            
+            if errors:
+                response_text += f"\n⚠️ Ошибки: {len(errors)}"
         
-        bot_instance.reply_to(message, response_text)
+        # Создаем кнопки для перехода к описанию
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup()
+        
+        # Добавляем кнопки для каждого отмеченного фильма (максимум 5, чтобы не перегружать)
+        for kp_id, title in marked_films[:5]:
+            button_text = f"📖 {title[:30]}..." if title and len(title) > 30 else (f"📖 {title}" if title else f"📖 ID: {kp_id}")
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"view_film_description:{kp_id}"))
+        
+        # Если фильмов больше 5, добавляем кнопку "Показать все"
+        if len(marked_films) > 5:
+            markup.add(InlineKeyboardButton("📋 Показать все отмеченные фильмы", callback_data="list:watched"))
+        
+        bot_instance.reply_to(message, response_text, reply_markup=markup, parse_mode='HTML')
         logger.info(f"[LIST MARK WATCHED REPLY] ✅ Завершено: отмечено {marked_count} фильмов")
     except Exception as e:
         logger.error(f"[LIST MARK WATCHED REPLY] ❌ Ошибка: {e}", exc_info=True)
