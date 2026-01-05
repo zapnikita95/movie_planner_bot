@@ -391,7 +391,7 @@ def register_seasons_handlers(bot):
             try:
                 # Пытаемся импортировать из handlers/series (когда будет реализовано)
                 from moviebot.bot.handlers.series import show_film_info_with_buttons
-                show_film_info_with_buttons(bot, chat_id, user_id, info, link, kp_id, existing)
+                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
             except (ImportError, AttributeError):
                 # Временная заглушка: показываем базовую информацию о сериале
                 logger.warning("[SEASONS] show_film_info_with_buttons не найден, используем временное отображение")
