@@ -20694,30 +20694,63 @@ def handle_payment_callback(call):
             
             markup = InlineKeyboardMarkup(row_width=1)
             
-            # Добавляем кнопки для продления периода
-            if available_periods:
-                text += "📅 <b>Продлить подписку:</b>\n"
-                for period in available_periods:
-                    if subscription_type == 'personal':
-                        price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period, 0)
-                    else:
-                        group_size_str = str(group_size) if group_size else '2'
-                        price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get(period, 0)
-                    
-                    period_name = period_names.get(period, period)
-                    if period == '3months':
-                        price_text = f"{price}₽/3 мес"
-                    elif period == 'year':
-                        price_text = f"{price}₽/год"
-                    elif period == 'lifetime':
-                        price_text = f"{price}₽"
-                    else:
-                        price_text = f"{price}₽/мес"
-                    
-                    if subscription_type == 'personal':
-                        markup.add(InlineKeyboardButton(f"📅 {period_name.capitalize()} ({price_text})", callback_data=f"payment:subscribe:personal:{plan_type}:{period}"))
-                    else:
-                        markup.add(InlineKeyboardButton(f"📅 {period_name.capitalize()} ({price_text})", callback_data=f"payment:subscribe:group:{group_size}:{plan_type}:{period}:{chat_id_sub}"))
+            # Для групповых подписок с отдельными функциями (notifications, recommendations, tickets)
+            # показываем другие подписки и пакетную на месяц, а не варианты продления
+            if subscription_type == 'group' and plan_type in ['notifications', 'recommendations', 'tickets']:
+                text += "💡 <b>Доступные подписки:</b>\n\n"
+                group_size_str = str(group_size) if group_size else '2'
+                
+                # Показываем другие отдельные подписки
+                other_plans = []
+                if plan_type == 'notifications':
+                    other_plans = ['recommendations', 'tickets']
+                elif plan_type == 'recommendations':
+                    other_plans = ['notifications', 'tickets']
+                elif plan_type == 'tickets':
+                    other_plans = ['notifications', 'recommendations']
+                
+                for other_plan in other_plans:
+                    other_price = SUBSCRIPTION_PRICES['group'][group_size_str][other_plan].get('month', 0)
+                    if other_price > 0:
+                        markup.add(InlineKeyboardButton(
+                            f"{plan_names.get(other_plan, other_plan)} ({other_price}₽/мес)",
+                            callback_data=f"payment:upgrade_plan:{subscription_id}:{other_plan}"
+                        ))
+                
+                # Показываем пакетную подписку на месяц
+                all_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get('month', 0)
+                if all_price > 0:
+                    markup.add(InlineKeyboardButton(
+                        f"{plan_names.get('all', 'all')} ({all_price}₽/мес)",
+                        callback_data=f"payment:upgrade_plan:{subscription_id}:all"
+                    ))
+            else:
+                # Для других случаев показываем варианты продления периода
+                if available_periods:
+                    text += "📅 <b>Продлить подписку:</b>\n"
+                    for period in available_periods:
+                        if subscription_type == 'personal':
+                            price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period, 0)
+                        else:
+                            group_size_str = str(group_size) if group_size else '2'
+                            price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get(period, 0)
+                        
+                        # Показываем только варианты с ценой больше 0
+                        if price > 0:
+                            period_name = period_names.get(period, period)
+                            if period == '3months':
+                                price_text = f"{price}₽/3 мес"
+                            elif period == 'year':
+                                price_text = f"{price}₽/год"
+                            elif period == 'lifetime':
+                                price_text = f"{price}₽"
+                            else:
+                                price_text = f"{price}₽/мес"
+                            
+                            if subscription_type == 'personal':
+                                markup.add(InlineKeyboardButton(f"📅 {period_name.capitalize()} ({price_text})", callback_data=f"payment:subscribe:personal:{plan_type}:{period}"))
+                            else:
+                                markup.add(InlineKeyboardButton(f"📅 {period_name.capitalize()} ({price_text})", callback_data=f"payment:subscribe:group:{group_size}:{plan_type}:{period}:{chat_id_sub}"))
             
             # Для групповых подписок - проверяем возможность расширения
             if subscription_type == 'group' and plan_type == 'all':
