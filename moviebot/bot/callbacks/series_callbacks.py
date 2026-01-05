@@ -3,6 +3,7 @@ Callback handlers для работы с сериалами
 """
 import logging
 import json
+import re
 from datetime import datetime as dt, timedelta
 import pytz
 import telebot
@@ -188,12 +189,26 @@ def register_series_callbacks(bot_instance):
             
             logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
             
-            # Обновление сообщения - обновляем только кнопку подписки (без API запросов)
-            logger.info("[SERIES SUBSCRIBE] Прямое обновление кнопки подписки (без API)")
+            # Обновление сообщения - обновляем текст и кнопку подписки (без API запросов)
+            logger.info("[SERIES SUBSCRIBE] Прямое обновление текста и кнопки подписки (без API)")
             try:
-                # Получаем существующую клавиатуру из сообщения
+                # Получаем существующую клавиатуру и текст из сообщения
                 old_markup = call.message.reply_markup
+                old_text = call.message.text or call.message.caption or ""
                 new_markup = InlineKeyboardMarkup()
+                
+                # Обновляем текст: заменяем строку со статусом подписки
+                new_text = old_text
+                # Заменяем статус подписки на "Подписан"
+                import re
+                new_text = re.sub(
+                    r'🔔 <b>Статус подписки: ❌ Не подписан</b>',
+                    '🔔 <b>Статус подписки: ✅ Подписан</b>',
+                    new_text
+                )
+                # Если строки со статусом не было, добавляем её в конец
+                if 'Статус подписки' not in new_text:
+                    new_text += "\n\n🔔 <b>Статус подписки: ✅ Подписан</b>"
                 
                 # Копируем все кнопки из старой клавиатуры, заменяя только кнопку подписки
                 if old_markup and old_markup.keyboard:
@@ -219,26 +234,30 @@ def register_series_callbacks(bot_instance):
                         callback_data=f"series_unsubscribe:{kp_id}"
                     ))
                 
-                # Меняем только клавиатуру (текст остаётся тем же — избежим "not modified")
+                # Обновляем текст и клавиатуру
                 message_id = call.message.message_id if call.message else None
                 message_thread_id = None
                 if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
                     message_thread_id = call.message.message_thread_id
                 
                 if message_thread_id:
-                    bot_instance.edit_message_reply_markup(
+                    bot_instance.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         message_thread_id=message_thread_id,
-                        reply_markup=new_markup
+                        text=new_text,
+                        reply_markup=new_markup,
+                        parse_mode='HTML'
                     )
                 else:
-                    bot_instance.edit_message_reply_markup(
+                    bot_instance.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
-                        reply_markup=new_markup
+                        text=new_text,
+                        reply_markup=new_markup,
+                        parse_mode='HTML'
                     )
-                logger.info("[SERIES SUBSCRIBE] Клавиатура обновлена напрямую (без API)")
+                logger.info("[SERIES SUBSCRIBE] Текст и клавиатура обновлены напрямую (без API)")
             
             except telebot.apihelper.ApiTelegramException as tele_e:
                 logger.error(f"[SERIES SUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
@@ -309,12 +328,26 @@ def register_series_callbacks(bot_instance):
             
             logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
             
-            # Обновление сообщения - обновляем только кнопку подписки (без API запросов)
-            logger.info("[SERIES UNSUBSCRIBE] Прямое обновление кнопки подписки (без API)")
+            # Обновление сообщения - обновляем текст и кнопку подписки (без API запросов)
+            logger.info("[SERIES UNSUBSCRIBE] Прямое обновление текста и кнопки подписки (без API)")
             try:
-                # Получаем существующую клавиатуру из сообщения
+                # Получаем существующую клавиатуру и текст из сообщения
                 old_markup = call.message.reply_markup
+                old_text = call.message.text or call.message.caption or ""
                 new_markup = InlineKeyboardMarkup()
+                
+                # Обновляем текст: заменяем строку со статусом подписки
+                new_text = old_text
+                # Заменяем статус подписки на "Не подписан"
+                import re
+                new_text = re.sub(
+                    r'🔔 <b>Статус подписки: ✅ Подписан</b>',
+                    '🔔 <b>Статус подписки: ❌ Не подписан</b>',
+                    new_text
+                )
+                # Если строки со статусом не было, добавляем её в конец
+                if 'Статус подписки' not in new_text:
+                    new_text += "\n\n🔔 <b>Статус подписки: ❌ Не подписан</b>"
                 
                 # Копируем все кнопки из старой клавиатуры, заменяя только кнопку подписки
                 if old_markup and old_markup.keyboard:
@@ -340,26 +373,30 @@ def register_series_callbacks(bot_instance):
                         callback_data=f"series_subscribe:{kp_id}"
                     ))
                 
-                # Меняем только клавиатуру (текст остаётся тем же — избежим "not modified")
+                # Обновляем текст и клавиатуру
                 message_id = call.message.message_id if call.message else None
                 message_thread_id = None
                 if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
                     message_thread_id = call.message.message_thread_id
                 
                 if message_thread_id:
-                    bot_instance.edit_message_reply_markup(
+                    bot_instance.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         message_thread_id=message_thread_id,
-                        reply_markup=new_markup
+                        text=new_text,
+                        reply_markup=new_markup,
+                        parse_mode='HTML'
                     )
                 else:
-                    bot_instance.edit_message_reply_markup(
+                    bot_instance.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
-                        reply_markup=new_markup
+                        text=new_text,
+                        reply_markup=new_markup,
+                        parse_mode='HTML'
                     )
-                logger.info("[SERIES UNSUBSCRIBE] Клавиатура обновлена напрямую (без API)")
+                logger.info("[SERIES UNSUBSCRIBE] Текст и клавиатура обновлены напрямую (без API)")
             
             except telebot.apihelper.ApiTelegramException as tele_e:
                 logger.error(f"[SERIES UNSUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
