@@ -46,103 +46,103 @@ def search_films_with_type(query, page=1, search_type='mixed'):
 
 
 def handle_search(message):
-        """Команда /search - поиск фильмов и сериалов"""
-        logger.info(f"[HANDLER] /search вызван от {message.from_user.id}")
-        try:
-            username = message.from_user.username or f"user_{message.from_user.id}"
-            log_request(message.from_user.id, username, '/search', message.chat.id)
-            
-            query = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
-            if not query:
-                # Создаем кнопки для выбора типа поиска
-                markup = InlineKeyboardMarkup(row_width=2)
-                markup.add(
-                    InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
-                    InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
-                )
-                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                reply_msg = bot_instance.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
-                # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
-                user_search_state[message.from_user.id] = {'chat_id': message.chat.id, 'message_id': reply_msg.message_id, 'search_type': 'mixed'}
-                return
-            
-            logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
-            
-            # Получаем тип поиска из состояния, если есть
-            search_type = user_search_state.get(message.from_user.id, {}).get('search_type', 'mixed')
-            films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
-            if not films:
-                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
-                return
-            
-            # Формируем сообщение с результатами
-            results_text = f"🔍 Результаты поиска '{query}':\n\n"
-            markup = InlineKeyboardMarkup(row_width=1)
-            
-            for film in films[:10]:  # Показываем максимум 10 результатов на странице
-                # Пробуем разные варианты полей для совместимости с разными версиями API
-                title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
-                year = film.get('year') or film.get('releaseYear') or 'N/A'
-                rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
-                # Пробуем разные варианты ID
-                kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
-                
-                # Определяем тип (сериал или фильм) по полю type из API
-                film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
-                is_series = film_type == 'TV_SERIES'
-                
-                logger.info(f"[SEARCH] Фильм: title={title}, year={year}, kp_id={kp_id}, type={film_type}, is_series={is_series}")
-                
-                if kp_id:
-                    # Ограничиваем длину текста кнопки
-                    type_indicator = "📺" if is_series else "🎬"
-                    button_text = f"{type_indicator} {title} ({year})"
-                    if len(button_text) > 50:
-                        button_text = button_text[:47] + "..."
-                    results_text += f"• {type_indicator} <b>{title}</b> ({year})"
-                    if rating != 'N/A':
-                        results_text += f" ⭐ {rating}"
-                    results_text += "\n"
-                    # Сохраняем тип в callback_data для правильного формирования ссылки
-                    markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
-                else:
-                    logger.warning(f"[SEARCH] Фильм без ID: {film}")
-            
-            # Добавляем пагинацию, если нужно
-            if total_pages > 1:
-                pagination_row = []
-                # Кодируем запрос для callback_data (заменяем пробелы на подчеркивания)
-                query_encoded = query.replace(' ', '_')
-                pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
-                if total_pages > 1:
-                    pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
-                markup.row(*pagination_row)
-            
-            # Добавляем кнопку "Назад в меню"
+    """Команда /search - поиск фильмов и сериалов"""
+    logger.info(f"[HANDLER] /search вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/search', message.chat.id)
+        
+        query = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+        if not query:
+            # Создаем кнопки для выбора типа поиска
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+            )
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            reply_msg = bot_instance.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
+            # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
+            user_search_state[message.from_user.id] = {'chat_id': message.chat.id, 'message_id': reply_msg.message_id, 'search_type': 'mixed'}
+            return
+        
+        logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
+        
+        # Получаем тип поиска из состояния, если есть
+        search_type = user_search_state.get(message.from_user.id, {}).get('search_type', 'mixed')
+        films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
+        if not films:
+            bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+            return
+        
+        # Формируем сообщение с результатами
+        results_text = f"🔍 Результаты поиска '{query}':\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for film in films[:10]:  # Показываем максимум 10 результатов на странице
+            # Пробуем разные варианты полей для совместимости с разными версиями API
+            title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+            year = film.get('year') or film.get('releaseYear') or 'N/A'
+            rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+            # Пробуем разные варианты ID
+            kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
             
-            # Добавляем пояснение про эмодзи
-            results_text += "\n\n🎬 - фильм\n📺 - сериал"
+            # Определяем тип (сериал или фильм) по полю type из API
+            film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
+            is_series = film_type == 'TV_SERIES'
             
-            results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
-            # Сохраняем message_id результатов поиска для кнопки "Назад"
-            if results_msg:
-                user_search_state[message.from_user.id] = {
-                    'chat_id': message.chat.id,
-                    'message_id': results_msg.message_id,
-                    'search_type': search_type,
-                    'query': query,
-                    'results_text': results_text,
-                    'films': films[:10],  # Сохраняем первые 10 фильмов для восстановления
-                    'total_pages': total_pages
-                }
-            logger.info(f"✅ Ответ на /search отправлен пользователю {message.from_user.id}, найдено {len(films)} результатов")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в /search: {e}", exc_info=True)
-            try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /search")
-            except:
-                pass
+            logger.info(f"[SEARCH] Фильм: title={title}, year={year}, kp_id={kp_id}, type={film_type}, is_series={is_series}")
+            
+            if kp_id:
+                # Ограничиваем длину текста кнопки
+                type_indicator = "📺" if is_series else "🎬"
+                button_text = f"{type_indicator} {title} ({year})"
+                if len(button_text) > 50:
+                    button_text = button_text[:47] + "..."
+                results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                if rating != 'N/A':
+                    results_text += f" ⭐ {rating}"
+                results_text += "\n"
+                # Сохраняем тип в callback_data для правильного формирования ссылки
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+            else:
+                logger.warning(f"[SEARCH] Фильм без ID: {film}")
+        
+        # Добавляем пагинацию, если нужно
+        if total_pages > 1:
+            pagination_row = []
+            # Кодируем запрос для callback_data (заменяем пробелы на подчеркивания)
+            query_encoded = query.replace(' ', '_')
+            pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+            if total_pages > 1:
+                pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+            markup.row(*pagination_row)
+        
+        # Добавляем кнопку "Назад в меню"
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        
+        # Добавляем пояснение про эмодзи
+        results_text += "\n\n🎬 - фильм\n📺 - сериал"
+        
+        results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+        # Сохраняем message_id результатов поиска для кнопки "Назад"
+        if results_msg:
+            user_search_state[message.from_user.id] = {
+                'chat_id': message.chat.id,
+                'message_id': results_msg.message_id,
+                'search_type': search_type,
+                'query': query,
+                'results_text': results_text,
+                'films': films[:10],  # Сохраняем первые 10 фильмов для восстановления
+                'total_pages': total_pages
+            }
+        logger.info(f"✅ Ответ на /search отправлен пользователю {message.from_user.id}, найдено {len(films)} результатов")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /search: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /search")
+        except:
+            pass
 
 
 def random_start(message):
