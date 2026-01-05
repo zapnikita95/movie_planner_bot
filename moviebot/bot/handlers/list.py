@@ -260,3 +260,70 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
         logger.error(f"[LIST] Ошибка в show_list_page: {e}", exc_info=True)
         return None
 
+
+def handle_view_film_reply_internal(message, state):
+    """Обработка ответного сообщения для просмотра страницы фильма"""
+    try:
+        import re
+        user_id = message.from_user.id
+        chat_id = state.get('chat_id', message.chat.id)
+        text = message.text or ""
+        
+        logger.info(f"[VIEW FILM REPLY] Обработка ответного сообщения от {user_id}, текст: {text[:100]}")
+        
+        # Удаляем состояние
+        if user_id in user_view_film_state:
+            del user_view_film_state[user_id]
+        
+        # Извлекаем ссылку или ID из текста
+        link = None
+        kp_id = None
+        
+        # Пробуем извлечь ссылку
+        url_pattern = r'https?://(?:www\.)?(?:kinopoisk\.ru|kino\.poisk|kinopoiskapiunofficial\.tech)/film/(\d+)'
+        match = re.search(url_pattern, text)
+        if match:
+            kp_id = match.group(1)
+            link = match.group(0)
+        else:
+            # Пробуем извлечь ID из текста (только цифры)
+            id_match = re.search(r'\b(\d+)\b', text)
+            if id_match:
+                kp_id = id_match.group(1)
+                link = f"https://kinopoisk.ru/film/{kp_id}/"
+        
+        if not kp_id:
+            bot_instance.reply_to(message, "❌ Не удалось найти ссылку или ID фильма в сообщении. Попробуйте еще раз.")
+            return
+        
+        # Получаем информацию о фильме
+        info = extract_movie_info(link)
+        if not info:
+            bot_instance.reply_to(message, f"❌ Не удалось получить информацию о фильме. Проверьте ссылку или ID: {kp_id}")
+            return
+        
+        # Проверяем, есть ли фильм в базе
+        with db_lock:
+            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            existing = cursor.fetchone()
+        
+        # Формируем existing для передачи в show_film_info_with_buttons
+        if existing:
+            film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+            title = existing.get('title') if isinstance(existing, dict) else existing[1]
+            watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
+            existing_tuple = (film_id, title, watched)
+        else:
+            existing_tuple = None
+        
+        # Показываем описание фильма с кнопками
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing_tuple)
+        
+    except Exception as e:
+        logger.error(f"[VIEW FILM REPLY] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
+        except:
+            pass
+
