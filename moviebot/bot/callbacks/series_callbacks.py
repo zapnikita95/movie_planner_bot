@@ -325,6 +325,13 @@ def register_series_callbacks(bot_instance):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         
+        # Сразу отвечаем на callback, чтобы убрать "крутилку"
+        try:
+            bot_instance.answer_callback_query(call.id, text="⏳ Обрабатываю...")
+            logger.info(f"[SERIES SUBSCRIBE] answer_callback_query вызван сразу, callback_id={call.id}")
+        except Exception as e:
+            logger.warning(f"[SERIES SUBSCRIBE] Не удалось вызвать answer_callback_query сразу: {e}")
+        
         try:
             logger.info(f"[SERIES SUBSCRIBE] ===== START: callback_id={call.id}, user_id={user_id}, chat_id={chat_id}")
             
@@ -355,12 +362,15 @@ def register_series_callbacks(bot_instance):
                     logger.info(f"[SERIES SUBSCRIBE] Сериал не найден в БД, добавляем через API")
                     from moviebot.bot.handlers.series import ensure_movie_in_database
                     link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                    
+                    logger.info(f"[SERIES SUBSCRIBE] Вызываю extract_movie_info для kp_id={kp_id}")
                     info = extract_movie_info(link)
                     if not info:
                         logger.error(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале для kp_id={kp_id}")
                         bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
                         return
                     
+                    logger.info(f"[SERIES SUBSCRIBE] Информация получена, title={info.get('title', 'N/A')}, вызываю ensure_movie_in_database")
                     film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
                     if not film_id:
                         logger.error(f"[SERIES SUBSCRIBE] Не удалось добавить сериал в базу для kp_id={kp_id}")
@@ -368,13 +378,15 @@ def register_series_callbacks(bot_instance):
                         return
                     
                     title = info.get('title', 'Сериал')
+                    logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен/найден в БД: film_id={film_id}, title={title}, was_inserted={was_inserted}")
                     
                     # Если сериал был добавлен, отправляем уведомление
                     if was_inserted:
                         bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
-                        logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен в базу: film_id={film_id}, title={title}")
+                        logger.info(f"[SERIES SUBSCRIBE] Уведомление об добавлении отправлено")
             
             # Добавление подписки
+            logger.info(f"[SERIES SUBSCRIBE] Добавляю подписку в БД: chat_id={chat_id}, film_id={film_id}, kp_id={kp_id}, user_id={user_id}")
             with db_lock:
                 cursor.execute('''
                     INSERT INTO series_subscriptions (chat_id, film_id, kp_id, user_id, subscribed)
@@ -537,11 +549,13 @@ def register_series_callbacks(bot_instance):
                 pass
         
         finally:
+            # answer_callback_query уже вызван в начале, но вызываем еще раз для финального уведомления
             try:
-                bot_instance.answer_callback_query(call.id, text="🔔 Подписка добавлена")
-                logger.info(f"[SERIES SUBSCRIBE] answer_callback_query вызван с id={call.id}")
+                bot_instance.answer_callback_query(call.id, text="🔔 Подписка добавлена", show_alert=False)
+                logger.info(f"[SERIES SUBSCRIBE] Финальный answer_callback_query вызван с id={call.id}")
             except Exception as e:
-                logger.error(f"[ANSWER CALLBACK] Ошибка: {e}")
+                logger.warning(f"[SERIES SUBSCRIBE] Не удалось вызвать финальный answer_callback_query: {e}")
+            logger.info(f"[SERIES SUBSCRIBE] ===== END: callback_id={call.id}")
 
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_unsubscribe:"))
     def series_unsubscribe_callback(call):
