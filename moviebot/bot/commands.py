@@ -8,40 +8,54 @@ logger = logging.getLogger(__name__)
 
 def register_all_handlers(bot):
     """Регистрирует все обработчики команд и callbacks"""
+    logger.info("=" * 80)
+    logger.info("[REGISTER ALL HANDLERS] ===== НАЧАЛО РЕГИСТРАЦИИ ВСЕХ HANDLERS =====")
     
     # Импортируем и регистрируем handlers
+    logger.info("[REGISTER ALL HANDLERS] Регистрация handlers команд...")
     from moviebot.bot.handlers.start import register_start_handlers
     register_start_handlers(bot)
+    logger.info("✅ start handlers зарегистрированы")
     
     from moviebot.bot.handlers.list import register_list_handlers
     register_list_handlers(bot)
+    logger.info("✅ list handlers зарегистрированы")
     
     from moviebot.bot.handlers.seasons import register_seasons_handlers
     register_seasons_handlers(bot)
+    logger.info("✅ seasons handlers зарегистрированы")
     
     from moviebot.bot.handlers.plan import register_plan_handlers
     register_plan_handlers(bot)
+    logger.info("✅ plan handlers зарегистрированы (включая plan_type: callback)")
     
     from moviebot.bot.handlers.payment import register_payment_handlers
     register_payment_handlers(bot)
+    logger.info("✅ payment handlers зарегистрированы")
     
     from moviebot.bot.handlers.series import register_series_handlers
     register_series_handlers(bot)
+    logger.info("✅ series handlers зарегистрированы (включая search_type: callback)")
     
     from moviebot.bot.handlers.rate import register_rate_handlers
     register_rate_handlers(bot)
+    logger.info("✅ rate handlers зарегистрированы")
     
     from moviebot.bot.handlers.stats import register_stats_handlers
     register_stats_handlers(bot)
+    logger.info("✅ stats handlers зарегистрированы")
     
     from moviebot.bot.handlers.edit import register_edit_handlers
     register_edit_handlers(bot)
+    logger.info("✅ edit handlers зарегистрированы")
     
     from moviebot.bot.handlers.clean import register_clean_handlers
     register_clean_handlers(bot)
+    logger.info("✅ clean handlers зарегистрированы")
     
     from moviebot.bot.handlers.join import register_join_handlers
     register_join_handlers(bot)
+    logger.info("✅ join handlers зарегистрированы")
     
     # Регистрируем callback handlers
     # КРИТИЧЕСКИ ВАЖНО: Импортируем модули с callback handlers для автоматической регистрации декораторов
