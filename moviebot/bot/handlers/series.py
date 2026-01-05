@@ -5,7 +5,10 @@ import logging
 import re
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.database.db_operations import log_request, get_user_timezone_or_default, set_user_timezone
+from moviebot.database.db_operations import (
+    log_request, get_user_timezone_or_default, set_user_timezone,
+    get_watched_emojis, get_user_timezone, get_notification_settings, set_notification_setting
+)
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
@@ -17,9 +20,10 @@ from moviebot.states import (
     user_search_state, user_random_state, user_ticket_state,
     user_settings_state, settings_messages, bot_messages, added_movie_messages
 )
-from moviebot.utils.parsing import extract_kp_id_from_text
+from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection
 from datetime import datetime
 import pytz
+import telebot.types
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -680,7 +684,6 @@ def register_series_handlers(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
     def handle_settings_callback(call):
         """Обработчик callback для настроек"""
-        # TODO: Извлечь полную реализацию из moviebot.py строки 21768-22476
         try:
             bot_instance.answer_callback_query(call.id)
             user_id = call.from_user.id
@@ -689,6 +692,132 @@ def register_series_handlers(bot_instance):
             is_private = call.message.chat.type == 'private'
             
             logger.info(f"[SETTINGS CALLBACK] Получен callback от {user_id}, action={action}, chat_id={chat_id}, is_private={is_private}")
+            
+            if action == "emoji":
+                # Показываем настройки эмодзи
+                current = get_watched_emojis(chat_id)
+                current_emojis_str = ''.join(current) if isinstance(current, list) else str(current)
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
+                markup.add(InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
+                markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+                
+                bot_instance.edit_message_text(
+                    f"😀 <b>Настройка эмодзи просмотра</b>\n\n"
+                    f"<b>Текущие реакции:</b> {current_emojis_str}\n\n"
+                    f"Выберите действие или поставьте реакцию на это сообщение — она автоматически добавится к текущим.",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                
+                # Сохраняем состояние для обработки реакций
+                user_settings_state[user_id] = {
+                    'settings_msg_id': call.message.message_id,
+                    'chat_id': chat_id,
+                    'adding_reactions': False
+                }
+                settings_messages[call.message.message_id] = {
+                    'user_id': user_id,
+                    'action': 'add',
+                    'chat_id': chat_id
+                }
+                return
+            
+            if action == "notifications_locked":
+                # Заблокированная кнопка настроек напоминаний
+                try:
+                    bot_instance.answer_callback_query(
+                        call.id,
+                        "⏰ Настройки напоминаний доступны с подпиской 🔔 Уведомления или 📦 Все режимы. Подключите подписку через /payment",
+                        show_alert=True
+                    )
+                except Exception as e:
+                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для notifications_locked: {e}")
+                return
+            
+            if action == "import_locked":
+                # Заблокированная кнопка импорта базы
+                try:
+                    bot_instance.answer_callback_query(
+                        call.id,
+                        "📥 Импорт базы из Кинопоиска доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment",
+                        show_alert=True
+                    )
+                except Exception as e:
+                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для import_locked: {e}")
+                return
+            
+            if action == "notifications":
+                # Показываем настройки времени напоминаний
+                notify_settings = get_notification_settings(chat_id)
+                
+                separate = notify_settings.get('separate_weekdays', 'true') == 'true'
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("📅 Разделять будни/выходные", callback_data="settings:notify:separate_toggle"))
+                markup.add(InlineKeyboardButton("🏠 Домашний просмотр", callback_data="settings:notify:home"))
+                markup.add(InlineKeyboardButton("🎬 Просмотр в кино", callback_data="settings:notify:cinema"))
+                markup.add(InlineKeyboardButton("🎫 Билеты на сеанс", callback_data="settings:notify:tickets"))
+                markup.add(InlineKeyboardButton("📋 Регулярные напоминания", callback_data="settings:notify:regular_reminders"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+                
+                separate_text = "✅ Включено" if separate else "❌ Выключено"
+                home_weekday = f"{notify_settings.get('home_weekday_hour', 19):02d}:{notify_settings.get('home_weekday_minute', 0):02d}"
+                home_weekend = f"{notify_settings.get('home_weekend_hour', 9):02d}:{notify_settings.get('home_weekend_minute', 0):02d}"
+                cinema_weekday = f"{notify_settings.get('cinema_weekday_hour', 9):02d}:{notify_settings.get('cinema_weekday_minute', 0):02d}"
+                cinema_weekend = f"{notify_settings.get('cinema_weekend_hour', 9):02d}:{notify_settings.get('cinema_weekend_minute', 0):02d}"
+                ticket_minutes = notify_settings.get('ticket_before_minutes', 10)
+                
+                if ticket_minutes == -1:
+                    ticket_text = "Не присылать отдельно"
+                elif ticket_minutes == 0:
+                    ticket_text = "Вместе с уведомлением"
+                else:
+                    ticket_text = f"За {ticket_minutes} минут"
+                
+                text = f"⏰ <b>Настройки напоминаний</b>\n\n"
+                text += f"📅 Разделение будни/выходные: <b>{separate_text}</b>\n\n"
+                text += f"🏠 <b>Домашний просмотр:</b>\n"
+                if separate:
+                    text += f"   Будни: <b>{home_weekday}</b>\n"
+                    text += f"   Выходные: <b>{home_weekend}</b>\n"
+                else:
+                    text += f"   Время: <b>{home_weekday}</b>\n"
+                text += f"\n🎬 <b>Просмотр в кино:</b>\n"
+                if separate:
+                    text += f"   Будни: <b>{cinema_weekday}</b>\n"
+                    text += f"   Выходные: <b>{cinema_weekend}</b>\n"
+                else:
+                    text += f"   Время: <b>{cinema_weekday}</b>\n"
+                text += f"\n🎫 <b>Билеты на сеанс:</b> <b>{ticket_text}</b>"
+                
+                bot_instance.edit_message_text(
+                    text,
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
+            
+            if action == "import":
+                # Импорт базы из Кинопоиска - TODO: реализовать полностью
+                bot_instance.edit_message_text(
+                    f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
+                    f"Отправьте ID пользователя Кинопоиска или ссылку на профиль.\n\n"
+                    f"Примеры:\n"
+                    f"• <code>1931396</code>\n"
+                    f"• <code>https://www.kinopoisk.ru/user/1931396</code>",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    parse_mode='HTML'
+                )
+                logger.info(f"[SETTINGS] Импорт базы - TODO: реализовать полностью")
+                return
             
             if action == "random_events_locked":
                 # Показываем сообщение о том, что раздел доступен только в групповых чатах
@@ -717,18 +846,201 @@ def register_series_handlers(bot_instance):
                 bot_instance.answer_callback_query(call.id, "Настройки случайных событий будут реализованы позже")
                 return
             
-            # TODO: Добавить обработку остальных действий:
-            # - settings:notifications
-            # - settings:notifications_locked
-            # - settings:import
-            # - settings:import_locked
-            # - settings:emoji
-            # - settings:timezone
-            # - settings:edit
-            # - settings:clean
-            # - settings:join
-            # - settings:back
-            # и другие из moviebot.py строки 21768-22476
+            if action == "timezone":
+                # Показываем выбор часового пояса
+                current_tz = get_user_timezone(user_id)
+                current_tz_name = "Москва" if not current_tz or current_tz.zone == 'Europe/Moscow' else "Сербия"
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🇷🇺 Москва (Europe/Moscow)", callback_data="timezone:Moscow"))
+                markup.add(InlineKeyboardButton("🇷🇸 Сербия (Europe/Belgrade)", callback_data="timezone:Serbia"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+                
+                bot_instance.edit_message_text(
+                    f"🕐 <b>Выбор часового пояса</b>\n\n"
+                    f"Текущий: <b>{current_tz_name}</b>\n\n"
+                    f"Выберите часовой пояс. Все время будет отображаться и планироваться в выбранном часовом поясе.",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
+            
+            if action == "edit":
+                # Вызываем команду /edit - TODO: реализовать команду /edit
+                logger.info(f"[SETTINGS] Вызов команды /edit для user_id={user_id}")
+                bot_instance.answer_callback_query(call.id, "Команда /edit будет реализована позже")
+                return
+            
+            if action == "clean":
+                # Вызываем команду /clean - TODO: реализовать команду /clean
+                logger.info(f"[SETTINGS] Вызов команды /clean для user_id={user_id}")
+                bot_instance.answer_callback_query(call.id, "Команда /clean будет реализована позже")
+                return
+            
+            if action == "join":
+                # Вызываем команду /join - TODO: реализовать команду /join
+                logger.info(f"[SETTINGS] Вызов команды /join для user_id={user_id}")
+                bot_instance.answer_callback_query(call.id, "Команда /join будет реализована позже")
+                return
+            
+            if action == "back":
+                # Возврат к главному меню settings
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
+                markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
+                
+                # Проверяем доступ к настройкам напоминаний
+                if has_notifications_access(chat_id, user_id):
+                    markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
+                
+                # Проверяем доступ к импорту базы
+                if has_recommendations_access(chat_id, user_id):
+                    markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
+                
+                # Проверяем, является ли чат личным (случайные события доступны только в группах)
+                if is_private:
+                    markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
+                else:
+                    markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
+                markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
+                markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
+                markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                
+                bot_instance.edit_message_text(
+                    f"⚙️ <b>Настройки</b>\n\n"
+                    f"Выберите, что хотите настроить:",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
+            
+            if action == "reset":
+                # Сброс к значению по умолчанию для этого чата
+                with db_lock:
+                    cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+                    conn.commit()
+                bot_instance.edit_message_text(
+                    "✅ Реакции сброшены к значению по умолчанию (✅)",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    parse_mode='HTML'
+                )
+                logger.info(f"Реакции сброшены для чата {chat_id} пользователем {user_id}")
+                if user_id in user_settings_state:
+                    del user_settings_state[user_id]
+                return
+            
+            if action == "add" or action == "replace":
+                # Для add и replace - сохраняем режим и просим отправить эмодзи
+                user_settings_state[user_id] = {
+                    'adding_reactions': True,
+                    'settings_msg_id': call.message.message_id,
+                    'action': action,  # "add" или "replace"
+                    'chat_id': chat_id
+                }
+                
+                mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
+                bot_instance.edit_message_text(
+                    f"⚙️ <b>Настройки реакций</b>\n\n"
+                    f"📝 Поставьте выбранный эмодзи в ответ на это сообщение.\n\n"
+                    f"Новые реакции будут {mode_text}.",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    parse_mode='HTML'
+                )
+                # Обновляем информацию о сообщении settings
+                if call.message.message_id in settings_messages:
+                    settings_messages[call.message.message_id]['action'] = action
+                else:
+                    settings_messages[call.message.message_id] = {
+                        'user_id': user_id,
+                        'action': action,
+                        'chat_id': call.message.chat.id
+                    }
+                logger.info(f"[SETTINGS] Пользователь {user_id} выбрал режим: {action}")
+                return
+            
+            # Обработка подменю настроек напоминаний
+            if action.startswith("notify:"):
+                sub_action = action.split(":", 1)[1]
+                notify_settings = get_notification_settings(chat_id)
+                
+                if sub_action == "separate_toggle":
+                    # Переключение разделения будни/выходные
+                    current = notify_settings.get('separate_weekdays', 'true')
+                    new_value = 'false' if current == 'true' else 'true'
+                    set_notification_setting(chat_id, 'notify_separate_weekdays', new_value)
+                    bot_instance.answer_callback_query(call.id, f"Разделение будни/выходные {'включено' if new_value == 'true' else 'выключено'}")
+                    # Возвращаемся к меню настроек напоминаний
+                    action = "notifications"
+                    # Рекурсивно вызываем обработчик для обновления меню
+                    call.data = f"settings:{action}"
+                    handle_settings_callback(call)
+                    return
+                
+                elif sub_action == "tickets":
+                    # Настройка времени отправки билетов
+                    ticket_minutes = notify_settings.get('ticket_before_minutes', 10)
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("⏰ За 10 минут", callback_data="settings:notify:tickets:10"))
+                    markup.add(InlineKeyboardButton("⏰ За 30 минут", callback_data="settings:notify:tickets:30"))
+                    markup.add(InlineKeyboardButton("⏰ За 1 час", callback_data="settings:notify:tickets:60"))
+                    markup.add(InlineKeyboardButton("📨 Вместе с уведомлением", callback_data="settings:notify:tickets:0"))
+                    markup.add(InlineKeyboardButton("❌ Не присылать отдельно", callback_data="settings:notify:tickets:-1"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
+                    
+                    if ticket_minutes == -1:
+                        ticket_text = "Не присылать отдельно"
+                    elif ticket_minutes == 0:
+                        ticket_text = "Вместе с уведомлением"
+                    else:
+                        ticket_text = f"За {ticket_minutes} минут"
+                    
+                    text = f"🎫 <b>Настройка отправки билетов на сеанс</b>\n\n"
+                    text += f"Текущая настройка: <b>{ticket_text}</b>\n\n"
+                    text += f"Выберите, когда присылать билеты:"
+                    
+                    bot_instance.edit_message_text(
+                        text,
+                        call.message.chat.id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    return
+                
+                elif sub_action.startswith("tickets:"):
+                    # Сохранение настройки времени отправки билетов
+                    minutes = int(sub_action.split(":", 1)[1])
+                    set_notification_setting(chat_id, 'ticket_before_minutes', minutes)
+                    
+                    if minutes == -1:
+                        ticket_text = "Не присылать отдельно"
+                    elif minutes == 0:
+                        ticket_text = "Вместе с уведомлением"
+                    else:
+                        ticket_text = f"За {minutes} минут"
+                    
+                    bot_instance.answer_callback_query(call.id, f"Билеты: {ticket_text}")
+                    # Возвращаемся к меню настроек напоминаний
+                    call.data = "settings:notifications"
+                    handle_settings_callback(call)
+                    return
+                
+                elif sub_action in ["home", "cinema", "regular_reminders"]:
+                    # TODO: Реализовать настройки времени для домашнего просмотра, кино и регулярных напоминаний
+                    logger.info(f"[SETTINGS] Настройка {sub_action} - TODO: реализовать")
+                    bot_instance.answer_callback_query(call.id, f"Настройка {sub_action} будет реализована позже")
+                    return
             
             logger.warning(f"[SETTINGS CALLBACK] Необработанное действие: {action}")
         except Exception as e:
