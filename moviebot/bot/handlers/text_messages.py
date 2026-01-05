@@ -1111,6 +1111,17 @@ def main_text_handler(message):
     chat_id = message.chat.id
     text = message.text.strip() if message.text else ""
     
+    # Пропускаем сообщения со ссылками на Кинопоиск без реплая - они обрабатываются отдельным handler
+    if text and ('kinopoisk.ru' in text.lower() or 'kinopoisk.com' in text.lower()):
+        # Проверяем, что это не реплай на промпт планирования или другие специальные случаи
+        if not message.reply_to_message or not any(prompt in (message.reply_to_message.text or "") for prompt in [
+            "Пришлите ссылку или ID фильма в ответном сообщении",
+            "Пришлите в ответном сообщении ссылку или ID фильма",
+            "В ответном сообщении пришлите ID фильмов"
+        ]):
+            logger.info(f"[MAIN TEXT HANDLER] Пропускаем сообщение со ссылкой на Кинопоиск (будет обработано handle_kinopoisk_link)")
+            return
+    
     # 1. Проверяем состояния (ticket, settings, plan, edit, search, view_film)
     
     # === user_ticket_state ===
