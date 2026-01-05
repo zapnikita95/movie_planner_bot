@@ -265,11 +265,11 @@ def handle_promo_reply_direct(message):
             markup = InlineKeyboardMarkup(row_width=1)
             
             # Создаем платеж YooKassa с учетом скидки (копируем логику из main_text_handler)
-            from moviebot.config import YOOKASSA_AVAILABLE, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+            from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
             import os
             import uuid as uuid_module
             
-            if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
+            if YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
                 from yookassa import Configuration, Payment
                 Configuration.account_id = YOOKASSA_SHOP_ID.strip()
                 Configuration.secret_key = YOOKASSA_SECRET_KEY.strip()
