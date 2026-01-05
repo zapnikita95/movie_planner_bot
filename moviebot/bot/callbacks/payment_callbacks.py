@@ -319,7 +319,6 @@ def register_payment_callbacks(bot_instance):
                         # Если несколько подписок, показываем кнопку "Изменить подписку" и кнопки "Отменить" для каждой
                         if len(active_subs) > 1:
                             markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:modify:all"))
-                            text += "\n❌ <b>Отменить подписку:</b>\n"
                             for active_sub in active_subs:
                                 sub_id = active_sub.get('id')
                                 if sub_id and sub_id > 0:
@@ -451,7 +450,6 @@ def register_payment_callbacks(bot_instance):
                         # Если несколько подписок, показываем кнопку "Изменить подписку" и кнопки "Отменить" для каждой
                         if len(active_subs) > 1:
                             markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:modify:all"))
-                            text += "\n❌ <b>Отменить подписку:</b>\n"
                             for active_sub in active_subs:
                                 sub_id = active_sub.get('id')
                                 if sub_id and sub_id > 0:
