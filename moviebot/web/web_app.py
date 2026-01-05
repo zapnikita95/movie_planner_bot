@@ -555,7 +555,8 @@ def create_web_app(bot_instance):
                     
                     # Обработка групповых подписок
                     if subscription_type == 'group':
-                            # Для групповой подписки отправляем в группу и в личку
+                        # Для групповой подписки отправляем в группу и в личку
+                        try:
                             from moviebot.database.db_operations import get_active_group_users, get_subscription_members
                             
                             # Получаем участников подписки
