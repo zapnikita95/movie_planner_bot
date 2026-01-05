@@ -7,6 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request, get_admin_statistics
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import BOT_ID
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -98,9 +99,12 @@ def register_stats_handlers(bot_instance):
                             'last_activity': None
                         }
                 
-                # Преобразуем в список и сортируем
+                # Преобразуем в список и сортируем (исключаем бота)
                 users_stats = []
                 for user_id, data in all_users.items():
+                    # Исключаем бота из статистики
+                    if BOT_ID and user_id == BOT_ID:
+                        continue
                     users_stats.append({
                         'user_id': user_id,
                         'username': data['username'],
