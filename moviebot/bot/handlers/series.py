@@ -45,11 +45,7 @@ def search_films_with_type(query, page=1, search_type='mixed'):
     return films, total_pages
 
 
-def register_series_handlers(bot_instance):
-    """Регистрирует обработчики команд связанных с сериалами"""
-    
-    @bot_instance.message_handler(commands=['search'])
-    def handle_search(message):
+def handle_search(message):
         """Команда /search - поиск фильмов и сериалов"""
         logger.info(f"[HANDLER] /search вызван от {message.from_user.id}")
         try:
@@ -148,207 +144,207 @@ def register_series_handlers(bot_instance):
             except:
                 pass
 
-    @bot_instance.message_handler(commands=['random'])
-    def random_start(message):
-        """Команда /random - рандомный выбор фильма"""
-        # TODO: Извлечь из moviebot.py строки 10210-10296
+
+def random_start(message):
+    """Команда /random - рандомный выбор фильма"""
+    # TODO: Извлечь из moviebot.py строки 10210-10296
+    try:
+        logger.info(f"[RANDOM] ===== START: user_id={message.from_user.id}, chat_id={message.chat.id}")
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(user_id, username, '/random', chat_id)
+        
+        # Инициализируем состояние
+        user_random_state[user_id] = {
+            'step': 'mode',
+            'mode': None,  # 'my_votes', 'group_votes', или None (обычный режим)
+            'periods': [],
+            'genres': [],
+            'directors': [],
+            'actors': []
+        }
+        
+        # Шаг 0: Выбор режима
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+        
+        # Проверяем доступ к рекомендациям
+        has_rec_access = has_recommendations_access(chat_id, user_id)
+        
+        if has_rec_access:
+            markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
+        
+        # TODO: Добавить проверку количества оценок и групповых оценок
+        # Проверяем, есть ли у пользователя больше 50 оценок
+        with db_lock:
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+            user_ratings_count = cursor.fetchone()
+            user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+            
+            if has_rec_access and user_ratings >= 50:
+                markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+            else:
+                if not has_rec_access:
+                    markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
+        
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        bot_instance.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
+        logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /random: {e}", exc_info=True)
         try:
-            logger.info(f"[RANDOM] ===== START: user_id={message.from_user.id}, chat_id={message.chat.id}")
-            user_id = message.from_user.id
-            chat_id = message.chat.id
+            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /random")
+        except:
+            pass
+
+
+def premieres_command(message):
+    """Команда /premieres - премьеры фильмов"""
+    logger.info(f"[HANDLER] /premieres вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/premieres', message.chat.id)
+    
+    # Показываем выбор периода
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
+    markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
+    markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
+    markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
+    markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
+    markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+    
+    bot_instance.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
+
+
+def ticket_command(message):
+    """Команда /ticket - работа с билетами"""
+    # TODO: Извлечь из moviebot.py строки 17031-17333
+    logger.info(f"[TICKET COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        username = message.from_user.username or f"user_{user_id}"
+        log_request(user_id, username, '/ticket', chat_id)
+        
+        # Проверяем доступ к функциям билетов
+        if not has_tickets_access(chat_id, user_id):
+            text = "🎫 <b>Билеты в кино</b>\n\n"
+            text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+            text += "Используйте /payment для оформления подписки."
             
-            username = message.from_user.username or f"user_{message.from_user.id}"
-            log_request(user_id, username, '/random', chat_id)
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
             
-            # Инициализируем состояние
-            user_random_state[user_id] = {
-                'step': 'mode',
-                'mode': None,  # 'my_votes', 'group_votes', или None (обычный режим)
-                'periods': [],
-                'genres': [],
-                'directors': [],
-                'actors': []
+            bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+            return
+        
+        # Проверяем, есть ли файл в сообщении
+        has_photo = message.photo is not None and len(message.photo) > 0
+        has_document = message.document is not None
+        
+        if has_photo or has_document:
+            # Сохраняем file_id для последующей обработки
+            if has_photo:
+                file_id = message.photo[-1].file_id  # Берем самое большое фото
+            else:
+                file_id = message.document.file_id
+            
+            user_ticket_state[user_id] = {
+                'step': 'select_session',
+                'file_id': file_id,
+                'chat_id': chat_id
             }
             
-            # Шаг 0: Выбор режима
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
-            
-            # Проверяем доступ к рекомендациям
-            has_rec_access = has_recommendations_access(chat_id, user_id)
-            
-            if has_rec_access:
-                markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
-            
-            # TODO: Добавить проверку количества оценок и групповых оценок
-            # Проверяем, есть ли у пользователя больше 50 оценок
-            with db_lock:
-                cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-                user_ratings_count = cursor.fetchone()
-                user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
-                
-                if has_rec_access and user_ratings >= 50:
-                    markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
-                else:
-                    if not has_rec_access:
-                        markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
-                    else:
-                        markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
-            
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            bot_instance.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
-            logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в /random: {e}", exc_info=True)
-            try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /random")
-            except:
-                pass
+            bot_instance.reply_to(message, "🎟️ <b>Билет загружен!</b>\n\nВыберите сеанс из списка или создайте новый:", parse_mode='HTML')
+            # TODO: Показать список сеансов или предложить создать новый
+        else:
+            # Нет файла - показываем инструкцию
+            bot_instance.reply_to(message, "🎫 <b>Загрузите билет</b>\n\nОтправьте фото или файл с билетом в кино, и я сохраню его для напоминания перед сеансом.")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /ticket: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /ticket")
+        except:
+            pass
 
-    @bot_instance.message_handler(commands=['premieres'])
-    def premieres_command(message):
-        """Команда /premieres - премьеры фильмов"""
-        logger.info(f"[HANDLER] /premieres вызван от {message.from_user.id}")
-        username = message.from_user.username or f"user_{message.from_user.id}"
-        log_request(message.from_user.id, username, '/premieres', message.chat.id)
+
+def settings_command(message):
+    """Команда /settings - настройки"""
+    # TODO: Извлечь из moviebot.py строки 10627-10992
+    logger.info(f"[HANDLER] /settings вызван от {message.from_user.id}")
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        username = message.from_user.username or f"user_{user_id}"
+        log_request(user_id, username, '/settings', chat_id)
+        logger.info(f"Команда /settings от пользователя {user_id}")
         
-        # Показываем выбор периода
+        # Проверяем на reset
+        if message.text and 'reset' in message.text.lower():
+            with db_lock:
+                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+                conn.commit()
+            bot_instance.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
+            logger.info(f"Реакции сброшены для чата {chat_id}")
+            return
+        
+        # Сначала показываем меню выбора действия
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
-        markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
-        markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
-        markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
-        markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
-        markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+        markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
+        markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
+        
+        # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
+        if has_notifications_access(chat_id, user_id):
+            markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
+        
+        # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
+        if has_recommendations_access(chat_id, user_id):
+            markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
+        
+        # Проверяем, является ли чат личным (случайные события доступны только в группах)
+        is_private = message.chat.type == 'private'
+        if is_private:
+            markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
+        else:
+            markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
+        markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
+        markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
+        markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
-        bot_instance.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
-
-    @bot_instance.message_handler(commands=['ticket'])
-    def ticket_command(message):
-        """Команда /ticket - работа с билетами"""
-        # TODO: Извлечь из moviebot.py строки 17031-17333
-        logger.info(f"[TICKET COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+        sent = bot_instance.send_message(chat_id,
+            f"⚙️ <b>Настройки</b>\n\n"
+            f"Выберите, что хотите настроить:",
+            reply_markup=markup,
+            parse_mode='HTML')
+        
+        logger.info(f"Настройки открыты для {user_id}, msg_id: {sent.message_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
         try:
-            user_id = message.from_user.id
-            chat_id = message.chat.id
-            username = message.from_user.username or f"user_{user_id}"
-            log_request(user_id, username, '/ticket', chat_id)
-            
-            # Проверяем доступ к функциям билетов
-            if not has_tickets_access(chat_id, user_id):
-                text = "🎫 <b>Билеты в кино</b>\n\n"
-                text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
-                text += "Используйте /payment для оформления подписки."
-                
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
-                
-                bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
-                return
-            
-            # Проверяем, есть ли файл в сообщении
-            has_photo = message.photo is not None and len(message.photo) > 0
-            has_document = message.document is not None
-            
-            if has_photo or has_document:
-                # Сохраняем file_id для последующей обработки
-                if has_photo:
-                    file_id = message.photo[-1].file_id  # Берем самое большое фото
-                else:
-                    file_id = message.document.file_id
-                
-                user_ticket_state[user_id] = {
-                    'step': 'select_session',
-                    'file_id': file_id,
-                    'chat_id': chat_id
-                }
-                
-                bot_instance.reply_to(message, "🎟️ <b>Билет загружен!</b>\n\nВыберите сеанс из списка или создайте новый:", parse_mode='HTML')
-                # TODO: Показать список сеансов или предложить создать новый
-            else:
-                # Нет файла - показываем инструкцию
-                bot_instance.reply_to(message, "🎫 <b>Загрузите билет</b>\n\nОтправьте фото или файл с билетом в кино, и я сохраню его для напоминания перед сеансом.")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в /ticket: {e}", exc_info=True)
-            try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /ticket")
-            except:
-                pass
+            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /settings")
+        except:
+            pass
 
-    @bot_instance.message_handler(commands=['settings'])
-    def settings_command(message):
-        """Команда /settings - настройки"""
-        # TODO: Извлечь из moviebot.py строки 10627-10992
-        logger.info(f"[HANDLER] /settings вызван от {message.from_user.id}")
-        try:
-            chat_id = message.chat.id
-            user_id = message.from_user.id
-            username = message.from_user.username or f"user_{user_id}"
-            log_request(user_id, username, '/settings', chat_id)
-            logger.info(f"Команда /settings от пользователя {user_id}")
-            
-            # Проверяем на reset
-            if message.text and 'reset' in message.text.lower():
-                with db_lock:
-                    cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
-                    conn.commit()
-                bot_instance.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
-                logger.info(f"Реакции сброшены для чата {chat_id}")
-                return
-            
-            # Сначала показываем меню выбора действия
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
-            markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
-            
-            # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
-            if has_notifications_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
-            
-            # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
-            if has_recommendations_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
-            
-            # Проверяем, является ли чат личным (случайные события доступны только в группах)
-            is_private = message.chat.type == 'private'
-            if is_private:
-                markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
-            else:
-                markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
-            markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
-            markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
-            markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            
-            sent = bot_instance.send_message(chat_id,
-                f"⚙️ <b>Настройки</b>\n\n"
-                f"Выберите, что хотите настроить:",
-                reply_markup=markup,
-                parse_mode='HTML')
-            
-            logger.info(f"Настройки открыты для {user_id}, msg_id: {sent.message_id}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
-            try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /settings")
-            except:
-                pass
 
-    @bot_instance.message_handler(commands=['help'])
-    def help_command(message):
-        """Команда /help - помощь"""
-        logger.info(f"[HANDLER] /help вызван от {message.from_user.id}")
-        username = message.from_user.username or f"user_{message.from_user.id}"
-        log_request(message.from_user.id, username, '/help', message.chat.id)
-        logger.info(f"Команда /help от пользователя {message.from_user.id}")
-        text = """🎬 Помощь по командам бота:
+def help_command(message):
+    """Команда /help - помощь"""
+    logger.info(f"[HANDLER] /help вызван от {message.from_user.id}")
+    username = message.from_user.username or f"user_{message.from_user.id}"
+    log_request(message.from_user.id, username, '/help', message.chat.id)
+    logger.info(f"Команда /help от пользователя {message.from_user.id}")
+    text = """🎬 Помощь по командам бота:
 
 /list — Показать список непросмотренных фильмов
 /random — Выбрать случайный непросмотренный фильм с фильтрами (год, жанр, режиссёр)
@@ -394,23 +390,57 @@ def register_series_handlers(bot_instance):
 Если у вас возникли сложности с ботом или оплатой, напишите нам:
 @zap_nikita
 movie-planner-bot@yandex.com"""
-        
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-        # Переключаемся на HTML, так как Markdown может вызывать ошибки парсинга
-        text_html = text.replace('*', '').replace('_', '')
-        # Добавляем базовое форматирование
-        text_html = text_html.replace('🎬 Помощь по командам бота:', '<b>🎬 Помощь по командам бота:</b>')
-        text_html = text_html.replace('Как использовать бота:', '<b>Как использовать бота:</b>')
-        text_html = text_html.replace('Сценарии работы с ботом:', '<b>Сценарии работы с ботом:</b>')
-        text_html = text_html.replace('1) Добавление фильмов', '<b>1) Добавление фильмов</b>')
-        text_html = text_html.replace('2) Сериалы', '<b>2) Сериалы</b>')
-        text_html = text_html.replace('3) Планирование премьер', '<b>3) Планирование премьер</b>')
-        text_html = text_html.replace('4) Поиск', '<b>4) Поиск</b>')
-        text_html = text_html.replace('5) Планирование походов в кино', '<b>5) Планирование походов в кино</b>')
-        text_html = text_html.replace('Приятного просмотра!', '<b>Приятного просмотра!</b>')
-        text_html = text_html.replace('Если у вас возникли сложности с ботом или оплатой, напишите нам:', '<b>Если у вас возникли сложности с ботом или оплатой, напишите нам:</b>')
-        bot_instance.reply_to(message, text_html, reply_markup=markup, parse_mode='HTML')
+    
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+    # Переключаемся на HTML, так как Markdown может вызывать ошибки парсинга
+    text_html = text.replace('*', '').replace('_', '')
+    # Добавляем базовое форматирование
+    text_html = text_html.replace('🎬 Помощь по командам бота:', '<b>🎬 Помощь по командам бота:</b>')
+    text_html = text_html.replace('Как использовать бота:', '<b>Как использовать бота:</b>')
+    text_html = text_html.replace('Сценарии работы с ботом:', '<b>Сценарии работы с ботом:</b>')
+    text_html = text_html.replace('1) Добавление фильмов', '<b>1) Добавление фильмов</b>')
+    text_html = text_html.replace('2) Сериалы', '<b>2) Сериалы</b>')
+    text_html = text_html.replace('3) Планирование премьер', '<b>3) Планирование премьер</b>')
+    text_html = text_html.replace('4) Поиск', '<b>4) Поиск</b>')
+    text_html = text_html.replace('5) Планирование походов в кино', '<b>5) Планирование походов в кино</b>')
+    text_html = text_html.replace('Приятного просмотра!', '<b>Приятного просмотра!</b>')
+    text_html = text_html.replace('Если у вас возникли сложности с ботом или оплатой, напишите нам:', '<b>Если у вас возникли сложности с ботом или оплатой, напишите нам:</b>')
+    bot_instance.reply_to(message, text_html, reply_markup=markup, parse_mode='HTML')
+
+
+def register_series_handlers(bot_instance):
+    """Регистрирует обработчики команд связанных с сериалами"""
+    
+    @bot_instance.message_handler(commands=['search'])
+    def _handle_search_handler(message):
+        """Обертка для регистрации команды /search"""
+        handle_search(message)
+    
+    @bot_instance.message_handler(commands=['random'])
+    def _random_start_handler(message):
+        """Обертка для регистрации команды /random"""
+        random_start(message)
+    
+    @bot_instance.message_handler(commands=['premieres'])
+    def _premieres_command_handler(message):
+        """Обертка для регистрации команды /premieres"""
+        premieres_command(message)
+    
+    @bot_instance.message_handler(commands=['ticket'])
+    def _ticket_command_handler(message):
+        """Обертка для регистрации команды /ticket"""
+        ticket_command(message)
+    
+    @bot_instance.message_handler(commands=['settings'])
+    def _settings_command_handler(message):
+        """Обертка для регистрации команды /settings"""
+        settings_command(message)
+    
+    @bot_instance.message_handler(commands=['help'])
+    def _help_command_handler(message):
+        """Обертка для регистрации команды /help"""
+        help_command(message)
 
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("timezone:"))
     def handle_timezone_callback(call):
