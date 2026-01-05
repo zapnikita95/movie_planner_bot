@@ -384,7 +384,7 @@ def main_text_handler(message):
     # === user_search_state ===
     if user_id in user_search_state:
         state = user_search_state[user_id]
-        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_search_state, state={state}")
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_search_state")
         
         # Обработка ответа на /search без запроса
         # Проверяем, что это ответ на сообщение бота или просто текст от пользователя в состоянии поиска
@@ -392,11 +392,10 @@ def main_text_handler(message):
         is_reply_to_search = message.reply_to_message and message.reply_to_message.message_id == saved_message_id
         is_text_in_search_state = text and not message.reply_to_message  # Текст без ответа, но в состоянии поиска
         
-        logger.info(f"[SEARCH STATE] saved_message_id={saved_message_id}, is_reply_to_search={is_reply_to_search}, is_text_in_search_state={is_text_in_search_state}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}, text='{text[:50]}'")
+        logger.info(f"[SEARCH STATE] saved_message_id={saved_message_id}, is_reply_to_search={is_reply_to_search}, is_text_in_search_state={is_text_in_search_state}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
         
         # Если пользователь в состоянии поиска и отправил текст, обрабатываем его независимо от reply_to_message
-        # Упрощаем логику: если пользователь в состоянии поиска и отправил текст, обрабатываем его
-        if text and text.strip():
+        if is_reply_to_search or (is_text_in_search_state and text.strip()):
             query = text
             if query:
                 # Получаем тип поиска из состояния

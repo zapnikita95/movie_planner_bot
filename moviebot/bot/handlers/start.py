@@ -143,17 +143,6 @@ def register_start_handlers(bot):
             elif action == 'schedule':
                 message.text = '/schedule'
                 show_schedule(message)
-            elif action == 'tickets_locked':
-                # Заблокированная кнопка билетов
-                try:
-                    bot.answer_callback_query(
-                        call.id,
-                        "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
-                        show_alert=True
-                    )
-                except Exception as e:
-                    logger.error(f"[START MENU] Ошибка при ответе на callback для tickets_locked: {e}")
-                return
             elif action == 'tickets':
                 # Проверяем доступ перед вызовом команды
                 if not has_tickets_access(chat_id, user_id):
@@ -182,15 +171,26 @@ def register_start_handlers(bot):
                     message.text = '/ticket'
                     ticket_command(message)
             elif action == 'tickets_locked':
-                # Заблокированная кнопка билетов - показываем пуш
+                # Показываем сообщение о необходимости подписки
+                text = "🎫 <b>Билеты в кино</b>\n\n"
+                text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+                text += "Используйте /payment для оформления подписки."
+                
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                
                 try:
-                    bot.answer_callback_query(
-                        call.id,
-                        "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
-                        show_alert=True
+                    bot.edit_message_text(
+                        text,
+                        chat_id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
                     )
                 except Exception as e:
-                    logger.error(f"[START MENU] Ошибка при ответе на callback для tickets_locked: {e}")
+                    logger.warning(f"[START MENU] Не удалось отредактировать сообщение, отправляем новое: {e}")
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 return
             elif action == 'payment':
                 message.text = '/payment'
