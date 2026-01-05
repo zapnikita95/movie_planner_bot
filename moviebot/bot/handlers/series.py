@@ -622,13 +622,20 @@ def register_series_handlers(bot_instance):
             except:
                 pass
 
-    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text))
+    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower()), priority=10)
     def handle_kinopoisk_link(message):
         """Обработчик текстовых сообщений со ссылками на Кинопоиск"""
         try:
             user_id = message.from_user.id
             chat_id = message.chat.id
             text = message.text.strip()
+            
+            # Проверяем, не находится ли пользователь в состоянии планирования или просмотра фильма
+            # Если да, то пропускаем обработку ссылки (она будет обработана соответствующим обработчиком)
+            from moviebot.states import user_plan_state, user_view_film_state
+            if user_id in user_plan_state or user_id in user_view_film_state:
+                logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии планирования/просмотра, пропускаем обработку ссылки")
+                return
             
             logger.info(f"[KINOPOISK LINK] Получена ссылка от {user_id}: {text[:100]}")
             
