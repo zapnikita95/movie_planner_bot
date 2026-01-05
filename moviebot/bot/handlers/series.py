@@ -2937,50 +2937,55 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             
             if watched:
                 logger.info(f"[SHOW FILM INFO] Фильм просмотрен, запрашиваем оценки...")
-                logger.info(f"[SHOW FILM INFO] Попытка получить db_lock для запроса оценок...")
-                import threading
-                lock_acquired = False
                 avg = None
                 user_rating = None
                 try:
-                    # Пытаемся получить lock с таймаутом 5 секунд
-                    lock_acquired = db_lock.acquire(timeout=5.0)
-                    if lock_acquired:
-                        logger.info(f"[SHOW FILM INFO] db_lock получен, выполняю запрос AVG...")
-                        try:
-                            cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
-                            avg_result = cursor.fetchone()
-                            logger.info(f"[SHOW FILM INFO] AVG запрос выполнен, результат: {avg_result}")
-                            if avg_result:
-                                avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                                avg = float(avg) if avg is not None else None
-                            else:
-                                avg = None
-                            
-                            # Получаем личную оценку пользователя (если есть)
-                            if user_id:
-                                logger.info(f"[SHOW FILM INFO] Запрос личной оценки пользователя user_id={user_id}...")
-                                cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
-                                user_rating_row = cursor.fetchone()
-                                logger.info(f"[SHOW FILM INFO] Личная оценка получена: {user_rating_row}")
-                                if user_rating_row:
-                                    user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
+                    # Чтение безопасно без блокировки, используем короткий таймаут только для защиты от deadlock
+                    import threading
+                    lock_acquired = False
+                    try:
+                        # Короткий таймаут 1 секунда - если lock занят, просто пропускаем запрос
+                        lock_acquired = db_lock.acquire(timeout=1.0)
+                        if lock_acquired:
+                            logger.info(f"[SHOW FILM INFO] db_lock получен, выполняю запрос AVG...")
+                            try:
+                                cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
+                                avg_result = cursor.fetchone()
+                                logger.info(f"[SHOW FILM INFO] AVG запрос выполнен, результат: {avg_result}")
+                                if avg_result:
+                                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                                    avg = float(avg) if avg is not None else None
                                 else:
-                                    user_rating = None
-                        finally:
-                            db_lock.release()
-                            logger.info(f"[SHOW FILM INFO] db_lock освобожден")
-                    else:
-                        logger.warning(f"[SHOW FILM INFO] ⚠️ Не удалось получить db_lock за 5 секунд, пропускаем запрос оценок")
+                                    avg = None
+                                
+                                # Получаем личную оценку пользователя (если есть)
+                                if user_id:
+                                    logger.info(f"[SHOW FILM INFO] Запрос личной оценки пользователя user_id={user_id}...")
+                                    cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
+                                    user_rating_row = cursor.fetchone()
+                                    logger.info(f"[SHOW FILM INFO] Личная оценка получена: {user_rating_row}")
+                                    if user_rating_row:
+                                        user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
+                                    else:
+                                        user_rating = None
+                            finally:
+                                db_lock.release()
+                                logger.info(f"[SHOW FILM INFO] db_lock освобожден")
+                        else:
+                            logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос оценок (не критично)")
+                            avg = None
+                            user_rating = None
+                    except Exception as lock_e:
+                        logger.warning(f"[SHOW FILM INFO] Ошибка при получении lock для оценок: {lock_e}")
+                        if lock_acquired:
+                            try:
+                                db_lock.release()
+                            except:
+                                pass
                         avg = None
                         user_rating = None
                 except Exception as db_e:
-                    logger.error(f"[SHOW FILM INFO] Ошибка при работе с БД в блоке watched: {db_e}", exc_info=True)
-                    if lock_acquired:
-                        try:
-                            db_lock.release()
-                        except:
-                            pass
+                    logger.warning(f"[SHOW FILM INFO] Ошибка при запросе оценок (не критично): {db_e}")
                     avg = None
                     user_rating = None
                 
@@ -3353,6 +3358,21 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         
         logger.info(f"[SHOW FILM INFO] Финальные проверки: text_length={len(text)}, markup_valid={markup_valid}, markup={markup is not None}")
         
+        # Детальное логирование перед отправкой
+        if markup:
+            try:
+                markup_dict = markup.to_dict()
+                keyboard = markup_dict.get('inline_keyboard', [])
+                total_buttons = sum(len(row) for row in keyboard)
+                logger.info(f"[SHOW FILM INFO] Финальный текст длиной {len(text)}, markup кнопок: {total_buttons} (строк: {len(keyboard)})")
+            except Exception as markup_log_e:
+                logger.warning(f"[SHOW FILM INFO] Не удалось получить информацию о markup для логирования: {markup_log_e}")
+                logger.info(f"[SHOW FILM INFO] Финальный текст длиной {len(text)}, markup присутствует")
+        else:
+            logger.info(f"[SHOW FILM INFO] Финальный текст длиной {len(text)}, markup отсутствует")
+        
+        logger.info(f"[SHOW FILM INFO] Отправляю сообщение в чат...")
+        
         # Отправляем или обновляем сообщение
         if message_id:
             # Обновляем существующее сообщение
@@ -3376,8 +3396,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     bot_instance.api_call('editMessageText', params)
                 else:
                     logger.info(f"[SHOW FILM INFO] Вызов edit_message_text")
+                    logger.info(f"[SHOW FILM INFO] Параметры edit: chat_id={chat_id}, message_id={message_id}, text_length={len(text)}, has_markup={markup is not None}")
                     bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                logger.info(f"[SHOW FILM INFO] Сообщение обновлено: {info.get('title')}, kp_id={kp_id}, message_id={message_id}")
+                logger.info(f"[SHOW FILM INFO] Сообщение обновлено успешно: {info.get('title')}, kp_id={kp_id}, message_id={message_id}")
             except telebot.apihelper.ApiTelegramException as e:
                 error_str = str(e).lower()
                 logger.error(f"[SHOW FILM INFO] Telegram API ошибка при обновлении сообщения: {e}", exc_info=True)
@@ -3463,8 +3484,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     logger.info(f"[SHOW FILM INFO] Отправка в тред message_thread_id={message_thread_id}")
                 
                 logger.info(f"[SHOW FILM INFO] Параметры подготовлены, вызываю send_message...")
+                logger.info(f"[SHOW FILM INFO] send_params keys: {list(send_params.keys())}, text_length: {len(send_params.get('text', ''))}")
                 msg = bot_instance.send_message(**send_params)
                 logger.info(f"[SHOW FILM INFO] ✅ Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
+                logger.info(f"[SHOW FILM INFO] Сообщение отправлено успешно")
                 
             except telebot.apihelper.ApiTelegramException as api_e:
                 error_code = getattr(api_e, 'error_code', None)
