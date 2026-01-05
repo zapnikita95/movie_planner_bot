@@ -161,9 +161,9 @@ def register_payment_callbacks(bot_instance):
     
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("payment:"))
     def handle_payment_callback(call):
+        """Обработчик callback для кнопок оплаты"""
         # Явно указываем, что используем глобальные переменные
         global YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
-        """Обработчик callback для кнопок оплаты"""
         try:
             bot_instance.answer_callback_query(call.id)
             user_id = call.from_user.id
