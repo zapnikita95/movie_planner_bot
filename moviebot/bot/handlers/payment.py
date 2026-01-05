@@ -24,20 +24,6 @@ def payment_command(message):
         is_private = message.chat.type == 'private'
         
         # Получаем активные подписки
-        personal_sub = get_active_subscription(chat_id, user_id, 'personal')
-        group_sub = get_active_subscription(chat_id, user_id, 'group')
-        
-        # Проверяем, есть ли реальные подписки (не виртуальные, id > 0)
-        has_real_subscription = False
-        if personal_sub:
-            sub_id = personal_sub.get('id')
-            if sub_id is not None and sub_id > 0:
-                has_real_subscription = True
-        if group_sub:
-            sub_id = group_sub.get('id')
-            if sub_id is not None and sub_id > 0:
-                has_real_subscription = True
-        
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
