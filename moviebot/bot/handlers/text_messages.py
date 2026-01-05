@@ -172,8 +172,11 @@ def handle_added_movie_rating_reply(message):
 @bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text)
 def handle_rate_list_reply(message):
     """Обработчик реплаев на сообщения бота с оценками"""
+    logger.info(f"[HANDLE RATE LIST REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
+    
     # Пропускаем команды
     if message.text and message.text.startswith('/'):
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск команды")
         return
     
     user_id = message.from_user.id
@@ -188,12 +191,14 @@ def handle_rate_list_reply(message):
         user_unsubscribe_state, user_add_admin_state
     )
     
+    logger.info(f"[HANDLE RATE LIST REPLY] Проверка состояний: user_search_state={user_id in user_search_state}, user_plan_state={user_id in user_plan_state}, user_ticket_state={user_id in user_ticket_state}")
+    
     # КРИТИЧЕСКИ ВАЖНО: Пропускаем user_promo_state и user_promo_admin_state - они обрабатываются в main_text_handler
     if user_id in user_promo_state or user_id in user_promo_admin_state:
         logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии промокода (promo={user_id in user_promo_state}, promo_admin={user_id in user_promo_admin_state}), передаем в main_text_handler")
         return
     
-    # Проверяем остальные состояния
+    # Проверяем остальные состояния - ВАЖНО: проверяем ДО обработки, чтобы не перехватывать сообщения из состояний
     if (user_id in user_plan_state or 
         user_id in user_ticket_state or
         user_id in user_search_state or
@@ -206,7 +211,7 @@ def handle_rate_list_reply(message):
         user_id in user_refund_state or
         user_id in user_unsubscribe_state or
         user_id in user_add_admin_state):
-        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии (plan={user_id in user_plan_state}, promo={user_id in user_promo_state}, promo_admin={user_id in user_promo_admin_state})")
+        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии (plan={user_id in user_plan_state}, search={user_id in user_search_state}, ticket={user_id in user_ticket_state}), передаем в main_text_handler")
         return
     
     # Обрабатываем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages
@@ -622,10 +627,9 @@ def main_text_handler(message):
             if query:
                 # Получаем тип поиска из состояния
                 search_type = state.get('search_type', 'mixed')
-                # Удаляем состояние
-                del user_search_state[user_id]
-                # Вызываем обработчик поиска
-                logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}")
+                # ВАЖНО: НЕ удаляем состояние ДО отправки результата, чтобы другие обработчики не перехватили сообщение
+                # Удалим состояние только после успешной отправки результата
+                logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}, состояние сохранено: {user_id in user_search_state}")
                 try:
                     films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
                     logger.info(f"[SEARCH] ✅ Поиск завершен: найдено {len(films) if films else 0} результатов, страниц: {total_pages}")
@@ -634,12 +638,17 @@ def main_text_handler(message):
                     bot_instance.reply_to(message, f"❌ Ошибка при выполнении поиска. Попробуйте еще раз.")
                     return
                 
+                logger.info(f"[SEARCH] Проверка films: films is None={films is None}, len(films)={len(films) if films else 'N/A'}, films={films[:2] if films else 'N/A'}")
+                
                 if not films:
                     logger.warning(f"[SEARCH] Ничего не найдено по запросу '{query}'")
                     bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
                     return
                 
+                logger.info(f"[SEARCH] ✅ films не пустой, начинаем формирование результатов")
+                
                 # Формируем сообщение с результатами
+                logger.info(f"[SEARCH] ===== НАЧАЛО ФОРМИРОВАНИЯ РЕЗУЛЬТАТОВ =====")
                 results_text = f"🔍 Результаты поиска '{query}':\n\n"
                 markup = InlineKeyboardMarkup(row_width=1)
                 
