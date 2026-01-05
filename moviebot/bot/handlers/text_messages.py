@@ -841,9 +841,13 @@ def main_text_handler(message):
     if user_id in user_promo_admin_state:
         state = user_promo_admin_state[user_id]
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_promo_admin_state")
+        logger.info(f"[MAIN TEXT HANDLER] user_promo_admin_state[{user_id}] = {state}")
+        logger.info(f"[MAIN TEXT HANDLER] message.reply_to_message = {message.reply_to_message}")
+        logger.info(f"[MAIN TEXT HANDLER] BOT_ID = {BOT_ID}")
         
         # Проверяем, что это ответ на сообщение бота
         if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
+            logger.info(f"[MAIN TEXT HANDLER] Это ответ на сообщение бота, обрабатываем промокод")
             # Парсим ввод: код скидка количество
             parts = text.strip().split()
             if len(parts) != 3:
