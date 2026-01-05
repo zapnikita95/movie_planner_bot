@@ -66,8 +66,8 @@ def register_payment_handlers(bot_instance):
         payment_command(message)
 
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("payment:") and (
-        call.data.startswith("payment:active") or 
-        call.data.startswith("payment:tariffs") or 
+        call.data == "payment:active" or 
+        call.data == "payment:tariffs" or 
         call.data.startswith("payment:back") or 
         call.data.startswith("payment:cancel") or 
         call.data.startswith("payment:reminder_ok") or
