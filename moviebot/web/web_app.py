@@ -212,8 +212,8 @@ def create_web_app(bot_instance):
                 db_status = payment_data.get('status')
                 if payment_status == 'succeeded' and db_status != 'succeeded':
                     logger.info(f"[YOOKASSA] Платеж успешен, обновляем статус и создаем/продлеваем подписку")
-                    # Обновляем статус платежа
-                    update_payment_status(payment_data['payment_id'], 'succeeded')
+                    # НЕ обновляем статус платежа здесь - это будет сделано после создания подписки
+                    # update_payment_status(payment_data['payment_id'], 'succeeded')
                     
                     # Создаем подписку
                     if payment and hasattr(payment, 'metadata') and payment.metadata:

@@ -170,15 +170,9 @@ def edit_plan_datetime_callback(call):
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
         
-        user_edit_state[user_id] = {
-            'action': 'edit_plan_datetime',
-            'plan_id': plan_id
-        }
-        
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"edit_plan:{plan_id}"))
-        
-        bot_instance.edit_message_text(
+        # Отправляем новое сообщение с запросом даты/времени и сохраняем его message_id
+        prompt_msg = bot_instance.send_message(
+            chat_id,
             "📅 <b>Введите новую дату и время:</b>\n\n"
             "Формат:\n"
             "• 15 января 10:30\n"
@@ -186,9 +180,16 @@ def edit_plan_datetime_callback(call):
             "• 10.05.2025 21:40\n"
             "• завтра\n"
             "• в субботу 15:00",
-            chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
+            parse_mode='HTML'
         )
-        logger.info(f"[EDIT PLAN DATETIME] Состояние установлено для плана {plan_id}")
+        
+        user_edit_state[user_id] = {
+            'action': 'edit_plan_datetime',
+            'plan_id': plan_id,
+            'prompt_message_id': prompt_msg.message_id
+        }
+        
+        logger.info(f"[EDIT PLAN DATETIME] Состояние установлено для плана {plan_id}, prompt_message_id={prompt_msg.message_id}")
     except Exception as e:
         logger.error(f"[EDIT PLAN DATETIME] Ошибка: {e}", exc_info=True)
         try:
