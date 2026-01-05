@@ -634,8 +634,24 @@ def register_series_handlers(bot_instance):
             
             # Ищем ссылки на Кинопоиск (расширенный паттерн для разных форматов)
             # Поддерживаем: kinopoisk.ru, www.kinopoisk.ru, kinopoisk.com, www.kinopoisk.com
-            # Поддерживаем: /film/, /series/, /film, /series (с слешем в конце или без)
-            links = re.findall(r'(https?://(?:www\.)?(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+/?\??)', text, re.IGNORECASE)
+            # Поддерживаем: /film/, /series/, /film, /series (с слешем в конце или без, с параметрами или без)
+            # Также поддерживаем короткие ссылки типа kinopoisk.ru/film/123
+            patterns = [
+                r'https?://(?:www\.)?(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+',
+                r'kinopoisk\.ru/(?:film|series)/\d+',
+                r'kinopoisk\.com/(?:film|series)/\d+',
+            ]
+            links = []
+            for pattern in patterns:
+                found = re.findall(pattern, text, re.IGNORECASE)
+                if found:
+                    # Нормализуем ссылки (добавляем https:// если нет)
+                    for link in found:
+                        if not link.startswith('http'):
+                            link = 'https://' + link
+                        if link not in links:
+                            links.append(link)
+            
             if not links:
                 logger.warning(f"[KINOPOISK LINK] Ссылки не найдены в тексте: {text[:200]}")
                 return
