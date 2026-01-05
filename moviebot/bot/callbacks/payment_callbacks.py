@@ -4334,9 +4334,20 @@ def register_payment_callbacks(bot_instance):
                     # Используем короткий callback_data, так как данные уже сохранены в user_promo_state
                     text = "Введите промокод в ответном сообщении:"
                     markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
-                    
-                    msg = bot_instance.send_message(chat_id, text, reply_markup=markup)
+                    # Используем короткий callback_data (лимит Telegram - 64 байта)
+                    callback_data_back = "payment:back_from_promo"
+                    if len(callback_data_back.encode('utf-8')) > 64:
+                        logger.error(f"[PROMO] ❌ callback_data слишком длинный: {len(callback_data_back)} байт")
+                        # Отправляем без кнопки, если callback_data слишком длинный
+                        msg = bot_instance.send_message(chat_id, text)
+                    else:
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data=callback_data_back))
+                        try:
+                            msg = bot_instance.send_message(chat_id, text, reply_markup=markup)
+                        except Exception as send_e:
+                            logger.error(f"[PROMO] Ошибка отправки сообщения с кнопкой: {send_e}", exc_info=True)
+                            # Пробуем отправить без кнопки
+                            msg = bot_instance.send_message(chat_id, text)
                     logger.info(f"[PROMO] Запрос промокода: user_id={user_id}, payment_id={payment_id}")
                     
                 except Exception as e:
