@@ -57,6 +57,12 @@ def register_all_handlers(bot):
     # чтобы декораторы @bot_instance.message_handler выполнились при импорте
     import moviebot.bot.handlers.text_messages  # noqa: F401 - импорт для регистрации декораторов
     
+    # КРИТИЧЕСКИ ВАЖНО: Импортируем модуль text_messages ДО вызова register_text_message_handlers
+    # чтобы декораторы @bot_instance.message_handler выполнились при импорте
+    logger.info("Импортирую модуль text_messages для регистрации декораторов...")
+    import moviebot.bot.handlers.text_messages  # noqa: F401 - импорт для регистрации декораторов
+    logger.info("✅ Модуль text_messages импортирован, декораторы зарегистрированы")
+    
     # Регистрируем главный обработчик текстовых сообщений
     from moviebot.bot.handlers.text_messages import register_text_message_handlers
     register_text_message_handlers(bot)
