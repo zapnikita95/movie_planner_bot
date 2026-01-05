@@ -1958,9 +1958,19 @@ def handle_dice_result(message):
             participants_who_threw = set(game_state.get('participants', {}).keys())
             remaining_participants = [uid for uid in all_participants if uid not in participants_who_threw]
             
+            # Для примера события или если в игре уже есть участники, проверяем только их
+            # Если участников в игре >= 2, считаем что это пример или небольшая группа
+            is_example_or_small_group = len(game_state.get('participants', {})) >= 2
+            
             # Проверяем, все ли бросили и получили результаты
-            all_threw = len(remaining_participants) == 0
-            all_have_results = len(participants_with_values) == len(game_state.get('participants', {})) and len(participants_with_values) > 0
+            if is_example_or_small_group:
+                # Для примера или небольшой группы: проверяем только участников, которые уже в игре
+                all_threw = True  # Все участники игры уже бросили (они добавляются при броске)
+                all_have_results = len(participants_with_values) == len(game_state.get('participants', {})) and len(participants_with_values) >= 2
+            else:
+                # Для реальных событий: проверяем всех участников из базы данных
+                all_threw = len(remaining_participants) == 0
+                all_have_results = len(participants_with_values) == len(game_state.get('participants', {})) and len(participants_with_values) > 0
             
             # Ждем 3 секунды после последнего броска (чтобы кубик успел остановиться)
             last_dice_time = game_state.get('last_dice_time', game_state['start_time'])
