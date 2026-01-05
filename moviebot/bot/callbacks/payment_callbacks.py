@@ -4332,7 +4332,7 @@ def register_payment_callbacks(bot_instance):
                     
                     # Отправляем сообщение с запросом промокода
                     # Используем короткий callback_data, так как данные уже сохранены в user_promo_state
-                    text = "Введите промокод в ответном сообщении:"
+                    text = "Введите промокод (можно в ответном сообщении или просто текстом):"
                     markup = InlineKeyboardMarkup()
                     # Используем короткий callback_data (лимит Telegram - 64 байта)
                     callback_data_back = "payment:back_from_promo"
