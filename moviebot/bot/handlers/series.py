@@ -2433,10 +2433,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
                 markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
         
-        # Добавляем основные кнопки
-        markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-        
-        # Получаем film_id для проверки оценок
+        # Получаем film_id для проверки оценок и планов
         film_id = None
         if existing:
             film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
@@ -2446,6 +2443,18 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 film_row = cursor.fetchone()
                 if film_row:
                     film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+        
+        # Проверяем, есть ли уже план для этого фильма
+        has_plan = False
+        if film_id:
+            with db_lock:
+                cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
+                plan_row = cursor.fetchone()
+                has_plan = plan_row is not None
+        
+        # Добавляем кнопку "Запланировать просмотр" только если фильм не запланирован
+        if not has_plan:
+            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
         
         if film_id:
             # Получаем информацию об оценках
@@ -2873,8 +2882,23 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
         # Добавляем кнопку "➕ Добавить в базу"
         markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
         
-        # Добавляем основные кнопки
-        markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+        # Проверяем, есть ли фильм в базе и запланирован ли он
+        # (для show_film_info_without_adding фильм обычно не в базе, но проверим на всякий случай)
+        film_id = None
+        has_plan = False
+        with db_lock:
+            cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            film_row = cursor.fetchone()
+            if film_row:
+                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                # Проверяем наличие планов
+                cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
+                plan_row = cursor.fetchone()
+                has_plan = plan_row is not None
+        
+        # Добавляем кнопку "Запланировать просмотр" только если фильм не запланирован
+        if not has_plan:
+            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
         
         # Добавляем кнопки для всех действий (фильм/сериал будет добавлен в базу при нажатии только при определенных действиях)
         markup.row(
