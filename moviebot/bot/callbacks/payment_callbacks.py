@@ -3354,16 +3354,16 @@ def register_payment_callbacks(bot_instance):
                         text += "\nℹ️ После оформления подписки, данные карты будут сохранены для проведения списаний по выбранному расписанию. В дальнейшем, подтверждать отдельно платежи не придется. Вы сможете отменить подписку в любой момент\n"
                 
                     markup = InlineKeyboardMarkup(row_width=1)
-                # Кнопка оплаты звездами (без ЮKassa)
-                payment_id_short = payment_id[:8]
-                # Используем формат payment:pay_stars:... для обработки в payment_callbacks.py
-                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
-                markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
-            
-                # Кнопка оплаты через ЮKassa (только если доступна)
-                if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
-                    callback_data_yookassa = f"payment:pay_yookassa:{payment_id_short}"
-                    markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
+                    # Кнопка оплаты звездами (без ЮKassa)
+                    payment_id_short = payment_id[:8]
+                    # Используем формат payment:pay_stars:... для обработки в payment_callbacks.py
+                    callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
+                    markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                
+                    # Кнопка оплаты через ЮKassa (только если доступна)
+                    if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
+                        callback_data_yookassa = f"payment:pay_yookassa:{payment_id_short}"
+                        markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
                 
                 # Добавляем кнопку промокода
                 # Сохраняем данные в состояние для использования короткого callback_data
