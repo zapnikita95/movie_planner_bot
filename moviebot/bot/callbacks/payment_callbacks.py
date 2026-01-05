@@ -3075,20 +3075,44 @@ def register_payment_callbacks(bot_instance):
                 except:
                     pass
             
-                parts = action.split(":")
-                # Формат: payment:pay_stars:personal::tickets:month:payment_id
-                # или: payment:pay_stars:group:2:all:month:payment_id
-                if len(parts) < 6:
-                    logger.error(f"[STARS] Ошибка парсинга callback_data: {action}, parts={parts}")
-                    bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
-                    return
-            
-                sub_type = parts[1]  # personal или group
-                group_size_str = parts[2] if parts[2] else ''
-                group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
-                plan_type = parts[3] if parts[3] else ''
-                period_type = parts[4] if parts[4] else ''
-                payment_id = parts[5] if len(parts) > 5 else ''
+                # Пытаемся получить данные из состояния (новый формат)
+                state = user_payment_state.get(user_id, {})
+                payment_data = state.get('payment_data', {})
+                
+                if payment_data:
+                    # Используем данные из состояния (новый формат)
+                    sub_type = payment_data.get('sub_type', 'personal')
+                    plan_type = payment_data.get('plan_type', '')
+                    period_type = payment_data.get('period_type', '')
+                    final_price = payment_data.get('amount', 0)
+                    group_size = payment_data.get('group_size')
+                    payment_id = payment_data.get('payment_id', '')
+                    payment_chat_id = payment_data.get('chat_id', chat_id)
+                    group_chat_id = payment_data.get('group_chat_id')
+                else:
+                    # Старый формат: парсим из callback_data
+                    parts = action.split(":")
+                    # Формат: payment:pay_stars:personal::tickets:month:payment_id
+                    # или: payment:pay_stars:group:2:all:month:payment_id
+                    if len(parts) < 6:
+                        logger.error(f"[STARS] Ошибка парсинга callback_data: {action}, parts={parts}")
+                        bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                        return
+                    
+                    sub_type = parts[1]  # personal или group
+                    group_size_str = parts[2] if parts[2] else ''
+                    group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                    plan_type = parts[3] if parts[3] else ''
+                    period_type = parts[4] if parts[4] else ''
+                    payment_id = parts[5] if len(parts) > 5 else ''
+                    payment_chat_id = chat_id
+                    group_chat_id = None
+                    
+                    # Вычисляем финальную цену с учетом скидок
+                    if sub_type == 'personal':
+                        final_price = calculate_discounted_price(user_id, 'personal', plan_type, period_type)
+                    else:  # group
+                        final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
             
                 # Проверка на пустые значения
                 if not plan_type or not period_type:
