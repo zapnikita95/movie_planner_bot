@@ -4332,9 +4332,9 @@ def register_payment_callbacks(bot_instance):
                         from moviebot.database.db_operations import get_payment_by_id
                         payment_data = get_payment_by_id(payment_id)
                         if payment_data and payment_data.get('yookassa_payment_id'):
-                            from yookassa import Payment
-                            from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
-                            from yookassa import Configuration
+                            from yookassa import Payment, Configuration
+                            # Используем глобальные переменные, импортированные в начале файла
+                            # НЕ импортируем локально, чтобы избежать UnboundLocalError
                             Configuration.account_id = YOOKASSA_SHOP_ID
                             Configuration.secret_key = YOOKASSA_SECRET_KEY
                             try:
