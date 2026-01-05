@@ -604,6 +604,131 @@ def register_series_handlers(bot_instance):
         except Exception as e:
             logger.error(f"[TICKET LOCKED] Ошибка: {e}", exc_info=True)
 
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_session:"))
+    def ticket_session_callback(call):
+        """Обработчик выбора сеанса - показывает информацию о сеансе и билеты"""
+        try:
+            from moviebot.utils.helpers import has_tickets_access
+            
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            # Парсим plan_id и file_id (если есть)
+            parts = call.data.split(":")
+            plan_id = int(parts[1])
+            file_id = parts[2] if len(parts) > 2 else None
+            
+            # Проверяем доступ к функциям билетов
+            if not has_tickets_access(chat_id, user_id):
+                bot_instance.edit_message_text(
+                    "🎫 <b>Билеты в кино</b>\n\n"
+                    "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+                    "Используйте /payment для оформления подписки.",
+                    chat_id,
+                    call.message.message_id,
+                    parse_mode='HTML'
+                )
+                return
+            
+            # Получаем информацию о сеансе
+            with db_lock:
+                cursor.execute('''
+                    SELECT p.id, p.plan_datetime, p.ticket_file_id, m.title, m.kp_id
+                    FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s AND p.chat_id = %s AND p.plan_type = 'cinema'
+                ''', (plan_id, chat_id))
+                plan_row = cursor.fetchone()
+            
+            if not plan_row:
+                bot_instance.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
+                return
+            
+            if isinstance(plan_row, dict):
+                plan_dt = plan_row.get('plan_datetime')
+                ticket_file_id = plan_row.get('ticket_file_id')
+                title = plan_row.get('title')
+                kp_id = plan_row.get('kp_id')
+            else:
+                plan_dt = plan_row[1]
+                ticket_file_id = plan_row[2]
+                title = plan_row[3]
+                kp_id = plan_row[4]
+            
+            # Форматируем дату и время
+            user_tz = get_user_timezone_or_default(user_id)
+            if plan_dt:
+                if isinstance(plan_dt, datetime):
+                    if plan_dt.tzinfo is None:
+                        dt = pytz.utc.localize(plan_dt).astimezone(user_tz)
+                    else:
+                        dt = plan_dt.astimezone(user_tz)
+                else:
+                    dt = datetime.fromisoformat(str(plan_dt).replace('Z', '+00:00')).astimezone(user_tz)
+                date_str = dt.strftime('%d.%m.%Y %H:%M')
+            else:
+                date_str = "Не указано"
+            
+            # Формируем текст и кнопки
+            text = f"🎬 <b>{title}</b>\n\n"
+            text += f"📅 <b>Дата и время:</b> {date_str}\n\n"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            if ticket_file_id:
+                text += "🎟️ <b>Билеты загружены</b>\n\n"
+                text += "Билеты будут отправлены вам перед сеансом."
+                markup.add(InlineKeyboardButton("📎 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
+                markup.add(InlineKeyboardButton("🔄 Заменить билеты", callback_data=f"add_ticket:{plan_id}"))
+            else:
+                text += "🎟️ <b>Билеты не загружены</b>\n\n"
+                text += "Загрузите билеты, чтобы получать их перед сеансом."
+                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+            
+            if file_id:
+                # Если есть file_id, значит пользователь хочет добавить билеты к этому сеансу
+                user_ticket_state[user_id] = {
+                    'step': 'upload_ticket',
+                    'plan_id': plan_id,
+                    'chat_id': chat_id,
+                    'file_id': file_id
+                }
+                text += "\n\n📎 Файл готов к добавлению. Нажмите '➕ Добавить билеты' для продолжения."
+            
+            markup.add(InlineKeyboardButton("⬅️ Назад к сеансам", callback_data="ticket_new"))
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+            
+            # Показываем информацию о сеансе
+            try:
+                bot_instance.edit_message_text(
+                    text,
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+            except telebot.apihelper.ApiTelegramException as e:
+                error_str = str(e).lower()
+                if "message is not modified" in error_str:
+                    # Если сообщение не изменилось, просто обновляем клавиатуру
+                    try:
+                        bot_instance.edit_message_reply_markup(
+                            chat_id=chat_id,
+                            message_id=call.message.message_id,
+                            reply_markup=markup
+                        )
+                    except:
+                        pass
+                else:
+                    raise
+        except Exception as e:
+            logger.error(f"[TICKET SESSION] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
     def ticket_new_callback(call):
         """Обработчик кнопки 'Добавить новый сеанс' - показывает выбор типа билета"""
@@ -705,17 +830,103 @@ def register_series_handlers(bot_instance):
                 'file_id': file_id
             }
             
-            bot_instance.edit_message_text(
+            # Проверяем, не совпадает ли текст с текущим сообщением
+            current_text = call.message.text or ""
+            new_text = (
                 "🎬 <b>Добавление билета на фильм</b>\n\n"
                 "Отправьте ссылку на фильм или его ID с Кинопоиска и укажите дату/время сеанса.\n"
                 "Формат: ссылка или ID + дата + время\n"
-                "Например: https://kinopoisk.ru/film/123456/ 15 января 19:30",
-                chat_id,
-                call.message.message_id,
-                parse_mode='HTML'
+                "Например: https://kinopoisk.ru/film/123456/ 15 января 19:30"
             )
+            
+            # Если текст совпадает, просто обновляем клавиатуру или отправляем новое сообщение
+            if current_text.strip() == new_text.strip():
+                # Текст не изменился, отправляем новое сообщение
+                bot_instance.send_message(
+                    chat_id,
+                    new_text,
+                    parse_mode='HTML'
+                )
+            else:
+                # Текст изменился, обновляем сообщение
+                try:
+                    bot_instance.edit_message_text(
+                        new_text,
+                        chat_id,
+                        call.message.message_id,
+                        parse_mode='HTML'
+                    )
+                except telebot.apihelper.ApiTelegramException as e:
+                    error_str = str(e).lower()
+                    if "message is not modified" in error_str:
+                        # Если сообщение не изменилось, отправляем новое
+                        bot_instance.send_message(
+                            chat_id,
+                            new_text,
+                            parse_mode='HTML'
+                        )
+                    else:
+                        raise
         except Exception as e:
             logger.error(f"[TICKET NEW FILM] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("show_ticket:"))
+    def show_ticket_callback(call):
+        """Обработчик кнопки 'Показать билеты' - отправляет билеты пользователю"""
+        try:
+            from moviebot.utils.helpers import has_tickets_access
+            
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            plan_id = int(call.data.split(":")[1])
+            
+            # Проверяем доступ к функциям билетов
+            if not has_tickets_access(chat_id, user_id):
+                bot_instance.answer_callback_query(
+                    call.id,
+                    "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
+                    show_alert=True
+                )
+                return
+            
+            # Получаем ticket_file_id
+            with db_lock:
+                cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                ticket_row = cursor.fetchone()
+            
+            if not ticket_row:
+                bot_instance.answer_callback_query(call.id, "❌ Билеты не найдены", show_alert=True)
+                return
+            
+            if isinstance(ticket_row, dict):
+                ticket_file_id = ticket_row.get('ticket_file_id')
+            else:
+                ticket_file_id = ticket_row[0]
+            
+            if not ticket_file_id:
+                bot_instance.answer_callback_query(call.id, "❌ Билеты не загружены", show_alert=True)
+                return
+            
+            # Отправляем билеты
+            try:
+                bot_instance.send_photo(chat_id, ticket_file_id, caption="🎟️ Ваши билеты")
+                bot_instance.answer_callback_query(call.id, "✅ Билеты отправлены")
+            except Exception as send_e:
+                logger.error(f"[SHOW TICKET] Ошибка отправки билетов: {send_e}", exc_info=True)
+                try:
+                    # Пробуем отправить как документ
+                    bot_instance.send_document(chat_id, ticket_file_id, caption="🎟️ Ваши билеты")
+                    bot_instance.answer_callback_query(call.id, "✅ Билеты отправлены")
+                except Exception as doc_e:
+                    logger.error(f"[SHOW TICKET] Ошибка отправки билетов как документа: {doc_e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка отправки билетов", show_alert=True)
+        except Exception as e:
+            logger.error(f"[SHOW TICKET] Ошибка: {e}", exc_info=True)
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:

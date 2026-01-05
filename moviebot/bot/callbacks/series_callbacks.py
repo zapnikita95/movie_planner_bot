@@ -1006,6 +1006,15 @@ def register_series_callbacks(bot_instance):
                 bot_instance.answer_callback_query(call.id)
                 return
             
+            # Получаем название фильма для отображения
+            title = 'Фильм'
+            if film_id:
+                with db_lock:
+                    cursor.execute('SELECT title FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    title_row = cursor.fetchone()
+                    if title_row:
+                        title = title_row.get('title') if isinstance(title_row, dict) else title_row[0]
+            
             # Проверяем, есть ли уже оценка
             with db_lock:
                 cursor.execute('''
