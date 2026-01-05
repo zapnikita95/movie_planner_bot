@@ -701,14 +701,37 @@ def register_series_handlers(bot_instance):
                 cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 row = cursor.fetchone()
                 if row:
-                    # Уже в базе - используем СВЕЖИЕ данные из API (info) + данные из базы (film_id, watched)
+                    # Уже в базе - ОБНОВЛЯЕМ данные в базе актуальными данными из API
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    logger.info(f"[KINOPOISK LINK] Фильм уже в базе (film_id={film_id}), ОБНОВЛЯЮ данные актуальными данными из API")
+                    
+                    # Обновляем данные в базе актуальными данными из API
+                    cursor.execute('''
+                        UPDATE movies 
+                        SET title = %s, year = %s, genres = %s, description = %s, 
+                            director = %s, actors = %s, is_series = %s, link = %s
+                        WHERE id = %s
+                    ''', (
+                        info['title'],
+                        info['year'],
+                        info.get('genres', '—'),
+                        info.get('description', 'Нет описания'),
+                        info.get('director', 'Не указан'),
+                        info.get('actors', '—'),
+                        1 if is_series else 0,
+                        link,
+                        film_id
+                    ))
+                    conn.commit()
+                    logger.info(f"[KINOPOISK LINK] ✅ Данные в базе обновлены актуальными данными из API")
+                    
+                    # Получаем обновленные данные из базы
                     cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
                     movie_row = cursor.fetchone()
                     title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
                     watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
                     
-                    logger.info(f"[KINOPOISK LINK] Фильм уже в базе (film_id={film_id}), но используем СВЕЖИЕ данные из API. Вызываю show_film_info_with_buttons с актуальными данными из API")
+                    logger.info(f"[KINOPOISK LINK] Вызываю show_film_info_with_buttons с актуальными данными из API (обновленными в базе)")
                     show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched))
                     logger.info(f"[KINOPOISK LINK] show_film_info_with_buttons завершена для kp_id={kp_id}")
                     return
