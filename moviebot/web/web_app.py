@@ -161,7 +161,7 @@ def create_web_app(bot_instance):
                 logger.info(f"[YOOKASSA] Платеж успешен: {payment_id}")
                 
                 # Импортируем функции для обработки платежа
-                from moviebot.database.db_operations import get_payment_by_yookassa_id, update_payment_status, create_subscription
+                from moviebot.database.db_operations import get_payment_by_yookassa_id, update_payment_status, create_subscription, add_subscription_member
                 from moviebot.api.yookassa_api import get_payment_info
                 
                 # Получаем платеж из БД
@@ -283,6 +283,14 @@ def create_web_app(bot_instance):
                                 payment_method_id=payment_method_id
                             )
                             logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id} (объединенный платеж)")
+                            
+                            # Автоматически добавляем оплатившего пользователя в групповую подписку
+                            if subscription_id and subscription_type == 'group':
+                                try:
+                                    add_subscription_member(subscription_id, user_id, telegram_username)
+                                    logger.info(f"[YOOKASSA] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
+                                except Exception as add_error:
+                                    logger.error(f"[YOOKASSA] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
                         except Exception as sub_error:
                             logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                             subscription_id = None
@@ -311,6 +319,14 @@ def create_web_app(bot_instance):
                                 payment_method_id=payment_method_id
                             )
                             logger.info(f"[YOOKASSA] Создана новая подписка 'Все режимы' {subscription_id}")
+                            
+                            # Автоматически добавляем оплатившего пользователя в групповую подписку
+                            if subscription_id and subscription_type == 'group':
+                                try:
+                                    add_subscription_member(subscription_id, user_id, telegram_username)
+                                    logger.info(f"[YOOKASSA] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
+                                except Exception as add_error:
+                                    logger.error(f"[YOOKASSA] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
                         except Exception as sub_error:
                             logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                             subscription_id = None
@@ -350,6 +366,14 @@ def create_web_app(bot_instance):
                                         payment_method_id=payment_method_id
                                     )
                                     logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                                    
+                                    # Автоматически добавляем оплатившего пользователя в групповую подписку
+                                    if subscription_id and subscription_type == 'group':
+                                        try:
+                                            add_subscription_member(subscription_id, user_id, telegram_username)
+                                            logger.info(f"[YOOKASSA] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
+                                        except Exception as add_error:
+                                            logger.error(f"[YOOKASSA] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
                                 except Exception as sub_error:
                                     logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                                     subscription_id = None
@@ -369,6 +393,14 @@ def create_web_app(bot_instance):
                                     payment_method_id=payment_method_id
                                 )
                                 logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                                
+                                # Автоматически добавляем оплатившего пользователя в групповую подписку
+                                if subscription_id and subscription_type == 'group':
+                                    try:
+                                        add_subscription_member(subscription_id, user_id, telegram_username)
+                                        logger.info(f"[YOOKASSA] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
+                                    except Exception as add_error:
+                                        logger.error(f"[YOOKASSA] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
                             except Exception as sub_error:
                                 logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                                 subscription_id = None
@@ -656,27 +688,67 @@ def create_web_app(bot_instance):
                             
                             group_text += "\nПриятного просмотра!"
                             
+                            # Формируем клавиатуру для предложения добавить участников
+                            markup = None
+                            
+                            # Проверяем, есть ли место в подписке и есть ли потенциальные участники
+                            if subscription_id and group_size and members_count < group_size and active_users:
+                                # Исключаем бота и оплатившего из списка потенциальных участников
+                                potential_members = {}
+                                for member_user_id, member_username in active_users.items():
+                                    # Пропускаем бота
+                                    if BOT_ID and member_user_id == BOT_ID:
+                                        continue
+                                    # Пропускаем оплатившего (он уже добавлен)
+                                    if member_user_id == user_id:
+                                        continue
+                                    # Пропускаем уже добавленных участников
+                                    if members_dict and member_user_id in members_dict:
+                                        continue
+                                    potential_members[member_user_id] = member_username
+                                
+                                # Если есть потенциальные участники
+                                if potential_members:
+                                    markup = InlineKeyboardMarkup(row_width=1)
+                                    
+                                    # Если потенциальных участников ровно 1 и есть место - предлагаем кнопку с его ником
+                                    if len(potential_members) == 1 and members_count + 1 <= group_size:
+                                        member_user_id = list(potential_members.keys())[0]
+                                        member_username = potential_members[member_user_id]
+                                        member_display = f"@{member_username}" if member_username else f"user_{member_user_id}"
+                                        markup.add(InlineKeyboardButton(
+                                            f"➕ Добавить {member_display}",
+                                            callback_data=f"payment:add_member:{member_user_id}:{subscription_id}"
+                                        ))
+                                        group_text += f"\n\n💡 Хотите добавить {member_display} в подписку?"
+                                    # Если потенциальных участников несколько - предлагаем кнопку "Выбрать участников"
+                                    elif len(potential_members) > 1:
+                                        markup.add(InlineKeyboardButton(
+                                            "👥 Выбрать участников",
+                                            callback_data=f"payment:select_members:{subscription_id}"
+                                        ))
+                                        group_text += f"\n\n💡 В группе есть еще участники, которых можно добавить в подписку."
+                            
                             # Если есть ограничение по количеству участников и активных пользователей больше
-                            if group_size and active_count > group_size and members_count < group_size:
+                            if group_size and active_count > group_size and members_count < group_size and not markup:
                                 group_text += f"\n\n⚠️ <b>Внимание!</b>\n"
                                 group_text += f"В группе <b>{active_count}</b> активных участников, а подписка рассчитана на <b>{group_size}</b>.\n"
                                 group_text += f"Выберите участников для подписки:"
                                 
                                 markup = InlineKeyboardMarkup(row_width=1)
                                 markup.add(InlineKeyboardButton("👥 Выбрать участников", callback_data=f"payment:select_members:{subscription_id}"))
-                                try:
+                            
+                            # Отправляем сообщение
+                            try:
+                                if markup:
                                     result = bot_instance.send_message(chat_id, group_text, reply_markup=markup, parse_mode='HTML')
-                                    logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой выбора участников отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
-                                except Exception as send_error:
-                                    logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения с кнопкой выбора участников: {send_error}", exc_info=True)
-                            else:
-                                logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в группу chat_id={chat_id}, user_id={user_id}")
-                                try:
+                                    logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
+                                else:
                                     result = bot_instance.send_message(chat_id, group_text, parse_mode='HTML')
                                     logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено в группу {chat_id}, user_id {user_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
-                                except Exception as send_error:
-                                    logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в группу: {send_error}", exc_info=True)
-                                    logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения в группу")
+                            except Exception as send_error:
+                                logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в группу: {send_error}", exc_info=True)
+                                logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения в группу")
                             
                             # Отправляем такое же сообщение в личку тому, кто оплатил
                             private_text = "Спасибо за покупку! 🎉\n\n"
