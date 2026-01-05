@@ -4251,32 +4251,76 @@ def register_payment_callbacks(bot_instance):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
             
-            if action == "promo":
+            if action == "promo" or action.startswith("promo:"):
                 # Обработка нажатия на кнопку "🏷️ Промокод"
+                # Поддерживаем оба формата: новый (короткий) и старый (длинный)
                 try:
                     bot_instance.answer_callback_query(call.id)
                     user_id = call.from_user.id
                     chat_id = call.message.chat.id
                     
-                    # Получаем данные из состояния (вместо парсинга из callback_data)
+                    # Получаем данные из состояния или парсим из callback_data
                     if user_id not in user_promo_state:
-                        # Если состояния нет, пытаемся получить из payment_state
-                        payment_state = user_payment_state.get(user_id, {})
-                        if not payment_state:
-                            bot_instance.answer_callback_query(call.id, "❌ Ошибка: состояние не найдено", show_alert=True)
-                            return
-                        
-                        # Создаем состояние из payment_state
-                        user_promo_state[user_id] = {
-                            'chat_id': chat_id,
-                            'message_id': call.message.message_id,
-                            'sub_type': payment_state.get('sub_type'),
-                            'plan_type': payment_state.get('plan_type'),
-                            'period_type': payment_state.get('period_type'),
-                            'group_size': payment_state.get('group_size'),
-                            'payment_id': payment_state.get('payment_id', ''),
-                            'original_price': payment_state.get('price', 0)
-                        }
+                        # Если состояния нет, проверяем старый формат callback_data
+                        if action.startswith("promo:"):
+                            # Парсим данные из старого формата: promo:group:2:notifications:month:250ad2b2:80
+                            parts = action.split(":")
+                            if len(parts) >= 7:
+                                sub_type = parts[1]
+                                group_size_str = parts[2] if parts[2] else ''
+                                group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                                plan_type = parts[3]
+                                period_type = parts[4]
+                                payment_id = parts[5] if len(parts) > 5 else ''
+                                original_price = float(parts[6]) if len(parts) > 6 else 0
+                                
+                                # Сохраняем в состояние
+                                user_promo_state[user_id] = {
+                                    'chat_id': chat_id,
+                                    'message_id': call.message.message_id,
+                                    'sub_type': sub_type,
+                                    'plan_type': plan_type,
+                                    'period_type': period_type,
+                                    'group_size': group_size,
+                                    'payment_id': payment_id,
+                                    'original_price': original_price
+                                }
+                            else:
+                                # Если не удалось распарсить, пытаемся получить из payment_state
+                                payment_state = user_payment_state.get(user_id, {})
+                                if not payment_state:
+                                    bot_instance.answer_callback_query(call.id, "❌ Ошибка: состояние не найдено", show_alert=True)
+                                    return
+                                
+                                # Создаем состояние из payment_state
+                                user_promo_state[user_id] = {
+                                    'chat_id': chat_id,
+                                    'message_id': call.message.message_id,
+                                    'sub_type': payment_state.get('sub_type'),
+                                    'plan_type': payment_state.get('plan_type'),
+                                    'period_type': payment_state.get('period_type'),
+                                    'group_size': payment_state.get('group_size'),
+                                    'payment_id': payment_state.get('payment_id', ''),
+                                    'original_price': payment_state.get('price', 0)
+                                }
+                        else:
+                            # Новый формат - пытаемся получить из payment_state
+                            payment_state = user_payment_state.get(user_id, {})
+                            if not payment_state:
+                                bot_instance.answer_callback_query(call.id, "❌ Ошибка: состояние не найдено", show_alert=True)
+                                return
+                            
+                            # Создаем состояние из payment_state
+                            user_promo_state[user_id] = {
+                                'chat_id': chat_id,
+                                'message_id': call.message.message_id,
+                                'sub_type': payment_state.get('sub_type'),
+                                'plan_type': payment_state.get('plan_type'),
+                                'period_type': payment_state.get('period_type'),
+                                'group_size': payment_state.get('group_size'),
+                                'payment_id': payment_state.get('payment_id', ''),
+                                'original_price': payment_state.get('price', 0)
+                            }
                     
                     promo_state = user_promo_state[user_id]
                     sub_type = promo_state.get('sub_type')
