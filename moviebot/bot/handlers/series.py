@@ -18,7 +18,8 @@ from moviebot.config import KP_TOKEN, PLANS_TZ
 import requests
 from moviebot.states import (
     user_search_state, user_random_state, user_ticket_state,
-    user_settings_state, settings_messages, bot_messages, added_movie_messages
+    user_settings_state, settings_messages, bot_messages, added_movie_messages,
+    dice_game_state
 )
 from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection
 from datetime import datetime
@@ -1188,7 +1189,6 @@ def register_series_handlers(bot_instance):
                 bot_instance.answer_callback_query(call.id, "Отправляю пример события...")
                 
                 import random
-                from moviebot.states import dice_game_state
                 
                 if example_type == "with_user":
                     # Пример события с участником (выбор случайного участника)
