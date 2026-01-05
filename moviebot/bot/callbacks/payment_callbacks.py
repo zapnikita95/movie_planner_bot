@@ -497,7 +497,6 @@ def register_payment_callbacks(bot_instance):
                     pass
             
                 from moviebot.database.db_operations import get_subscription_members, get_active_group_users
-                from datetime import datetime
                 sub = get_active_subscription(chat_id, user_id, 'group')
             
                 logger.info(f"[PAYMENT] Проверка подписки для группы {chat_id}, user_id={user_id}, sub={sub}")
@@ -4174,7 +4173,6 @@ def register_payment_callbacks(bot_instance):
                     bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
-                from datetime import datetime
                 plan_type = sub.get('plan_type', 'all')
                 period_type = sub.get('period_type', 'lifetime')
                 price = sub.get('price', 0)
