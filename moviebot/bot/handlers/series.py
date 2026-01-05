@@ -3275,8 +3275,7 @@ def handle_kinopoisk_link(message):
             
             # Формируем сообщение с результатами
             results_text = f"🔍 Результаты поиска '{query}':\n\n"
-            # Формируем сообщение с результатами
-            results_text = f"🔍 Результаты поиска '{query}':\n\n"
+            markup = InlineKeyboardMarkup(row_width=1)
             markup = InlineKeyboardMarkup(row_width=1)
             
             for film in films[:10]:  # Показываем максимум 10 результатов на странице

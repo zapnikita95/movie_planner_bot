@@ -1242,7 +1242,6 @@ def main_text_handler(message):
     # Если сообщение не обработано ни одним handler, просто логируем
     logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано ни одним специализированным handler: text='{text[:100]}', user_id={user_id}, chat_id={chat_id}")
     return
-        if state.get('type') == 'event':
             if step == 'event_name':
                 # Получаем название мероприятия
                 event_name = text.strip()
