@@ -1212,7 +1212,7 @@ def register_series_handlers(bot_param):
                 filter_parts.append(f"Жанр: {', '.join(selected_genres)}")
             
             selected_text = f"\n\nВыбрано: {'; '.join(filter_parts)}" if filter_parts else ""
-            mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.'
+            mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм на Кинопоиске по заданным фильтрам.'
             
             text = f"{mode_description}\n\n🎬 <b>Шаг 2/2: Выберите жанр</b>\n\n(можно выбрать несколько или пропустить){selected_text}"
             
@@ -1794,6 +1794,39 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== FINAL HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            
+            # Если это кнопка "Найти фильм" из случайных событий и нет состояния
+            if call.data == "rand_final:go" and user_id not in user_random_state:
+                logger.info(f"[RANDOM CALLBACK] Кнопка 'Найти фильм' из случайных событий, запускаем рандом по своей базе")
+                bot_instance.answer_callback_query(call.id)
+                
+                # Создаем фиктивное сообщение для вызова random_start
+                class FakeMessage:
+                    def __init__(self, call):
+                        self.from_user = call.from_user
+                        self.chat = call.message.chat
+                        self.text = '/random'
+                
+                    def reply_to(self, text, **kwargs):
+                        return bot_instance.send_message(self.chat.id, text, **kwargs)
+                
+                fake_message = FakeMessage(call)
+                random_start(fake_message)
+                
+                # Инициализируем состояние для рандома по своей базе
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': 'database',
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
+                
+                # Автоматически переходим к финальному шагу (без фильтров)
+                user_random_state[user_id]['step'] = 'final'
+                _random_final(call, chat_id, user_id)
+                return
             
             if user_id not in user_random_state:
                 logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}, initializing default state")
@@ -2507,33 +2540,48 @@ def register_series_handlers(bot_param):
                 if similar_movies:
                     # Формируем список похожих фильмов
                     similar_list = []
+                    first_movie_kp_id = None
                     for movie in similar_movies:
                         if isinstance(movie, dict):
                             title = movie.get('title')
                             year = movie.get('year') or '—'
                             link = movie.get('link')
+                            kp_id = movie.get('kp_id') if 'kp_id' in movie else None
                         else:
                             title = movie[0] if len(movie) > 0 else None
                             year = movie[1] if len(movie) > 1 else '—'
                             link = movie[2] if len(movie) > 2 else None
+                            kp_id = movie[8] if len(movie) > 8 else None
                         
                         if title and link:
                             similar_list.append(f"• <a href='{link}'>{title}</a> ({year})")
+                            if not first_movie_kp_id and kp_id:
+                                first_movie_kp_id = kp_id
                     
                     if similar_list:
-                        similar_text = "\n".join(similar_list)
-                        message_text = f"😔 Таких фильмов в базе не найдено! Но есть похожие из запланированных:\n\n{similar_text}"
+                        # Берем первый фильм для кнопки "Перейти к описанию"
+                        message_text = f"🕵 Найден подходящий фильм в вашей базе!\n\n{similar_list[0].replace('• ', '')}"
+                        
+                        # Создаем кнопку "Перейти к описанию" для первого фильма
+                        markup = InlineKeyboardMarkup()
+                        if first_movie_kp_id:
+                            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{first_movie_kp_id}"))
+                        markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
                     else:
                         message_text = "😔 Таких фильмов в базе не найдено!"
+                        markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
                 else:
                     message_text = "😔 Таких фильмов в базе не найдено!"
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
                 
                 try:
                     bot_instance.edit_message_text(message_text, 
-                                        chat_id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False)
+                                        chat_id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                     bot_instance.answer_callback_query(call.id)
                 except:
-                    bot_instance.send_message(chat_id, message_text, parse_mode='HTML', disable_web_page_preview=False)
+                    bot_instance.send_message(chat_id, message_text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                 del user_random_state[user_id]
                 return
             
@@ -2554,8 +2602,10 @@ def register_series_handlers(bot_param):
             
             text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
             
-            # Добавляем кнопку "Вернуться к меню"
+            # Добавляем кнопки "Перейти к описанию" и "Вернуться к меню"
             markup = InlineKeyboardMarkup()
+            if kp_id:
+                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
             markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
             
             film_message_id = None
