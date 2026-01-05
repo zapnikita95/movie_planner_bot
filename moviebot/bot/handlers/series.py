@@ -1449,6 +1449,7 @@ def handle_kinopoisk_link(message):
         kp_id = extract_kp_id_from_text(text)
         if not kp_id:
             logger.warning(f"[KINOPOISK LINK] Не удалось извлечь kp_id из текста: {text[:200]}")
+            bot_instance.reply_to(message, f"❌ Не удалось извлечь ID из ссылки: {text}")
             return
         
         # Нормализуем ссылку - используем единый формат без www
@@ -1464,15 +1465,6 @@ def handle_kinopoisk_link(message):
             link = f"https://kinopoisk.ru/film/{kp_id}"
         
         logger.info(f"[KINOPOISK LINK] Обработка ссылки: {link}, kp_id={kp_id}")
-        
-        # Извлекаем kp_id
-        kp_id = extract_kp_id_from_text(link)
-        if not kp_id:
-            logger.warning(f"[KINOPOISK LINK] Не удалось извлечь kp_id из ссылки: {link}")
-            bot_instance.reply_to(message, f"❌ Не удалось извлечь ID из ссылки: {link}")
-            return
-        
-        logger.info(f"[KINOPOISK LINK] Извлечен kp_id={kp_id} из ссылки: {link}")
         
         # ВСЕГДА получаем информацию о фильме/сериале из API (даже если фильм уже в базе)
         # Это нужно для получения актуальных данных (описание, актеры, режиссер и т.д.)
