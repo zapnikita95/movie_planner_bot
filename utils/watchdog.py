@@ -251,3 +251,4 @@ def get_watchdog(check_interval: int = 60) -> BotWatchdog:
         _watchdog_instance = BotWatchdog(check_interval=check_interval)
     return _watchdog_instance
 
+

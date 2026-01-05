@@ -859,15 +859,22 @@ def check_user_in_group(bot, user_id, group_username):
         return False
 
 
-def get_active_group_users(chat_id):
+def get_active_group_users(chat_id, bot_id=None):
     """Получает список активных пользователей группы (кто отправлял запросы или присоединился)"""
     with db_lock:
         # Получаем пользователей из stats (кто отправлял запросы)
-        cursor.execute("""
-            SELECT DISTINCT user_id, username 
-            FROM stats 
-            WHERE chat_id = %s AND user_id IS NOT NULL
-        """, (chat_id,))
+        if bot_id:
+            cursor.execute("""
+                SELECT DISTINCT user_id, username 
+                FROM stats 
+                WHERE chat_id = %s AND user_id IS NOT NULL AND user_id != %s
+            """, (chat_id, bot_id))
+        else:
+            cursor.execute("""
+                SELECT DISTINCT user_id, username 
+                FROM stats 
+                WHERE chat_id = %s AND user_id IS NOT NULL
+            """, (chat_id,))
         users = {}
         for row in cursor.fetchall():
             if isinstance(row, dict):
@@ -937,13 +944,19 @@ def get_subscription_by_id(subscription_id):
         return cursor.fetchone()
 
 
-def get_subscription_members(subscription_id):
+def get_subscription_members(subscription_id, bot_id=None):
     """Получает список участников подписки"""
     with db_lock:
-        cursor.execute("""
-            SELECT user_id, username FROM subscription_members
-            WHERE subscription_id = %s
-        """, (subscription_id,))
+        if bot_id:
+            cursor.execute("""
+                SELECT user_id, username FROM subscription_members
+                WHERE subscription_id = %s AND user_id != %s
+            """, (subscription_id, bot_id))
+        else:
+            cursor.execute("""
+                SELECT user_id, username FROM subscription_members
+                WHERE subscription_id = %s
+            """, (subscription_id,))
         members = {}
         for row in cursor.fetchall():
             user_id = row[0] if isinstance(row, dict) else row[0]
