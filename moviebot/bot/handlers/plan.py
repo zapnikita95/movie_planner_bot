@@ -16,6 +16,7 @@ from moviebot.states import (
     bot_messages
 )
 from moviebot.config import MONTHS_MAP, DAYS_FULL
+from moviebot.bot.bot_init import bot as bot_instance
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
