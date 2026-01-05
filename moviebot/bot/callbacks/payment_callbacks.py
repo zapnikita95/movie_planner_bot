@@ -2283,7 +2283,7 @@ def register_payment_callbacks(bot_instance):
                     for sub in existing_subs:
                         sub_id = sub.get('id')
                         if sub_id:
-                            cancel_subscription(sub_id)
+                            cancel_subscription(sub_id, user_id)
                 
                     # Сохраняем состояние для создания новой подписки "Все режимы"
                     all_price = SUBSCRIPTION_PRICES['personal']['all'].get(period_type, 0)
@@ -2698,21 +2698,82 @@ def register_payment_callbacks(bot_instance):
                             return
                         elif plan_type == 'all':
                             # Если пытаются добавить пакетную, когда есть другие подписки
+                            # Предлагаем два варианта: отменить сейчас или увеличить со следующего списания
                             can_add = False
-                            text = "⚠️ <b>У вас уже есть активные подписки:</b>\n\n"
+                            
+                            # Сохраняем информацию о существующих подписках в состоянии
+                            if user_id not in user_payment_state:
+                                user_payment_state[user_id] = {}
+                            user_payment_state[user_id]['existing_subs'] = active_subs
+                            
+                            # Вычисляем сумму существующих подписок
+                            total_existing_price = sum(sub.get('price', 0) for sub in active_subs)
+                            all_price = SUBSCRIPTION_PRICES['personal']['all'].get(period_type, 0)
+                            
+                            # Определяем, есть ли следующее списание
+                            next_payment_date = None
+                            next_sub = None
+                            for sub in active_subs:
+                                next_payment = sub.get('next_payment_date')
+                                if next_payment:
+                                    if not next_payment_date or (isinstance(next_payment, datetime) and next_payment < next_payment_date):
+                                        next_payment_date = next_payment
+                                        next_sub = sub
+                            
+                            plan_names = {
+                                'notifications': 'Уведомления о сериалах',
+                                'recommendations': 'Рекомендации',
+                                'tickets': 'Билеты'
+                            }
+                            
+                            text = "📦 <b>Оформление подписки \"Все режимы\"</b>\n\n"
+                            text += "⚠️ <b>У вас уже есть активные подписки:</b>\n"
                             for sub in active_subs:
                                 plan_type_existing = sub.get('plan_type')
-                                plan_names = {
-                                    'notifications': 'Уведомления о сериалах',
-                                    'recommendations': 'Рекомендации',
-                                    'tickets': 'Билеты'
-                                }
                                 plan_name = plan_names.get(plan_type_existing, plan_type_existing)
                                 text += f"• {plan_name}\n"
-                            text += "\nВы не можете добавить подписку \"Все режимы\", когда у вас уже есть другие подписки.\n\n"
-                            text += "Сначала отмените текущие подписки, затем оформите подписку \"Все режимы\"."
+                            
+                            text += f"\n💰 <b>Текущие подписки:</b> {total_existing_price}₽/мес\n"
+                            text += f"💰 <b>Подписка \"Все режимы\":</b> {all_price}₽"
+                            if period_type != 'month':
+                                period_names = {'3months': '3 месяца', 'year': 'год', 'lifetime': 'навсегда'}
+                                period_name = period_names.get(period_type, period_type)
+                                text += f" за {period_name}"
+                            text += "\n\n"
+                            
+                            # Вычисляем разницу
+                            if period_type == 'month':
+                                diff_price = all_price - total_existing_price
+                                if diff_price > 0:
+                                    text += f"💡 <b>Доплата:</b> {diff_price}₽/мес\n\n"
+                                elif diff_price < 0:
+                                    text += f"💡 <b>Экономия:</b> {abs(diff_price)}₽/мес\n\n"
+                            
+                            text += "Выберите способ оформления:\n\n"
+                            text += "1️⃣ <b>Отменить текущие подписки и оформить новую</b> — текущие подписки будут отменены сразу, новая подписка начнется после оплаты.\n\n"
+                            
+                            if next_payment_date and next_sub:
+                                text += f"2️⃣ <b>Увеличить со следующего списания</b> — текущие подписки будут отменены, сумма следующего списания будет изменена на {all_price}₽"
+                                if isinstance(next_payment_date, datetime):
+                                    text += f" (дата: {next_payment_date.strftime('%d.%m.%Y')})"
+                                text += "\n\n"
+                            
                             markup = InlineKeyboardMarkup(row_width=1)
+                            
+                            # Кнопка "Отменить сейчас и оформить новую"
+                            if period_type == 'month':
+                                markup.add(InlineKeyboardButton("1️⃣ Отменить сейчас и оформить", callback_data=f"payment:combine:upgrade_to_all:{period_type}"))
+                            else:
+                                # Для не месячных подписок только вариант "отменить сейчас"
+                                markup.add(InlineKeyboardButton("✅ Отменить текущие и оформить", callback_data=f"payment:combine:upgrade_to_all:{period_type}"))
+                            
+                            # Кнопка "Увеличить со следующего списания" (только для месячных подписок и если есть следующее списание)
+                            if period_type == 'month' and next_payment_date and next_sub:
+                                user_payment_state[user_id]['next_sub'] = next_sub
+                                markup.add(InlineKeyboardButton("2️⃣ Увеличить со следующего списания", callback_data=f"payment:combine:add_to_next:all:{period_type}"))
+                            
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                            
                             try:
                                 bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
