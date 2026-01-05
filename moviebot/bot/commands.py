@@ -44,14 +44,34 @@ def register_all_handlers(bot):
     register_join_handlers(bot)
     
     # Регистрируем callback handlers
+    # КРИТИЧЕСКИ ВАЖНО: Импортируем модули с callback handlers для автоматической регистрации декораторов
+    import moviebot.bot.callbacks.series_callbacks  # noqa: F401 - импорт для регистрации декораторов
     from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
     register_series_callbacks(bot)
+    logger.info("✅ Callback handlers для сериалов зарегистрированы")
     
+    import moviebot.bot.callbacks.payment_callbacks  # noqa: F401 - импорт для регистрации декораторов
     from moviebot.bot.callbacks.payment_callbacks import register_payment_callbacks
     register_payment_callbacks(bot)
+    logger.info("✅ Callback handlers для платежей зарегистрированы")
     
+    # premieres_callbacks использует декораторы напрямую, поэтому импортируем модуль для регистрации
+    import moviebot.bot.callbacks.premieres_callbacks  # noqa: F401 - импорт для регистрации декораторов
     from moviebot.bot.callbacks.premieres_callbacks import register_premieres_callbacks
-    register_premieres_callbacks(bot)
+    register_premieres_callbacks(bot)  # Пустая функция, но импорт модуля уже зарегистрировал handlers
+    logger.info("✅ Callback handlers для премьер зарегистрированы")
+    
+    # Импортируем модули handlers, которые содержат callback handlers с декораторами
+    # Эти handlers регистрируются автоматически при импорте модуля
+    import moviebot.bot.handlers.admin  # noqa: F401 - импорт для регистрации callback handlers
+    logger.info("✅ Callback handlers для админских команд зарегистрированы")
+    
+    import moviebot.bot.handlers.promo  # noqa: F401 - импорт для регистрации callback handlers
+    logger.info("✅ Callback handlers для промокодов зарегистрированы")
+    
+    # handlers/series.py, handlers/start.py, handlers/plan.py, handlers/rate.py, handlers/list.py
+    # уже импортируются через register_*_handlers, но их callback handlers используют декораторы напрямую
+    # поэтому они регистрируются автоматически при импорте модулей выше
     
     # КРИТИЧЕСКИ ВАЖНО: Импортируем модуль text_messages ДО вызова register_text_message_handlers
     # чтобы декораторы @bot_instance.message_handler выполнились при импорте
