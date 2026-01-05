@@ -153,6 +153,15 @@ else:
     max_retries = 3
     retry_delay = 5
     
+    # Дополнительная проверка: убеждаемся, что старый файл не запущен
+    import sys
+    if 'moviebot.py' in sys.modules or 'moviebot.py.OLD_DO_NOT_USE' in str(sys.modules):
+        logger.error("❌ ОБНАРУЖЕН ИМПОРТ СТАРОГО ФАЙЛА! Проверьте импорты.")
+    
+    # Проверяем, что используется правильный entry point
+    if __name__ != '__main__' and 'moviebot.main' not in sys.argv[0]:
+        logger.warning(f"⚠️ Неожиданный entry point: {sys.argv[0]}")
+    
     for attempt in range(max_retries):
         try:
             # Очищаем webhook перед запуском polling (на всякий случай)
@@ -162,7 +171,19 @@ else:
             # Небольшая задержка перед запуском polling, чтобы убедиться, что старые соединения закрыты
             time.sleep(2)
             
+            # Дополнительная проверка: убеждаемся, что нет активных webhook
+            try:
+                webhook_info = bot.get_webhook_info()
+                if webhook_info.url:
+                    logger.warning(f"⚠️ Обнаружен активный webhook: {webhook_info.url}")
+                    bot.remove_webhook()
+                    logger.info("Webhook удален")
+                    time.sleep(1)
+            except Exception as webhook_check_e:
+                logger.warning(f"Не удалось проверить webhook: {webhook_check_e}")
+            
             logger.info(f"Попытка запуска polling (попытка {attempt + 1}/{max_retries})...")
+            logger.info(f"✅ Используется правильный entry point: moviebot.main")
             bot.polling(none_stop=True, interval=0, timeout=20)
             break  # Если polling запустился успешно, выходим из цикла
         except KeyboardInterrupt:
