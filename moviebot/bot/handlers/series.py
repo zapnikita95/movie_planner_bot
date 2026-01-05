@@ -3344,579 +3344,257 @@ def handle_kinopoisk_link(message):
                 # Удаляем состояние даже при ошибке
                 if user_id in user_search_state:
                     del user_search_state[user_id]
-            return
-                # Включение/выключение случайных событий
-                sub_action = action.split(":", 1)[1]
-                new_value = 'true' if sub_action == 'enable' else 'false'
-                
-                with db_lock:
-                    cursor.execute('''
-                        INSERT INTO settings (chat_id, key, value)
-                        VALUES (%s, 'random_events_enabled', %s)
-                        ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-                    ''', (chat_id, new_value))
-                    conn.commit()
-                
-                status_text = "включены" if new_value == 'true' else "выключены"
-                bot_instance.answer_callback_query(call.id, f"Случайные события {status_text}")
-                
-                # Обновляем сообщение
-                markup = InlineKeyboardMarkup(row_width=1)
-                if new_value == 'true':
-                    markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
-                else:
-                    markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
-                markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
-                markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
-                
-                bot_instance.edit_message_text(
-                    f"🎲 <b>Случайные события</b>\n\n"
-                    f"Текущий статус: <b>{status_text}</b>\n\n"
-                    f"Случайные события включают:\n"
-                    f"• Предложение рандомного фильма, если на выходных нет планов\n"
-                    f"• Выбор случайного участника для выбора фильма (раз в 2 недели)\n"
-                    f"• Игра в кубик для выбора фильма (раз в 2 недели)\n"
-                    f"• Напоминание о премьерах, если давно не добавляли фильмы в кино",
-                    call.message.chat.id,
-                    call.message.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                return
-            
-            if action == "timezone":
-                # Показываем выбор часового пояса
-                current_tz = get_user_timezone(user_id)
-                current_tz_name = "Москва" if not current_tz or current_tz.zone == 'Europe/Moscow' else "Сербия"
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🇷🇺 Москва (Europe/Moscow)", callback_data="timezone:Moscow"))
-                markup.add(InlineKeyboardButton("🇷🇸 Сербия (Europe/Belgrade)", callback_data="timezone:Serbia"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
-                
-                bot_instance.edit_message_text(
-                    f"🕐 <b>Выбор часового пояса</b>\n\n"
-                    f"Текущий: <b>{current_tz_name}</b>\n\n"
-                    f"Выберите часовой пояс. Все время будет отображаться и планироваться в выбранном часовом поясе.",
-                    call.message.chat.id,
-                    call.message.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                return
-            
-            if action == "edit":
-                # Вызываем команду /edit
-                from moviebot.bot.handlers.settings.edit import edit_command
-                
-                # Удаляем сообщение перед вызовом команды (как в рабочей версии)
-                try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
-                except:
-                    pass
-                
-                # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                class FakeMessage:
-                    def __init__(self, call):
-                        self.message_id = call.message.message_id
-                        self.from_user = call.from_user
-                        self.chat = call.message.chat
-                        self.date = call.message.date
-                        self.text = '/edit'
-                    
-                    def reply_to(self, text, **kwargs):
-                        return bot_instance.send_message(self.chat.id, text, **kwargs)
-                
-                fake_message = FakeMessage(call)
-                edit_command(fake_message)
-                return
-            
-            if action == "clean":
-                # Вызываем команду /clean
-                from moviebot.bot.handlers.settings.clean import clean_command
-                
-                # Удаляем сообщение перед вызовом команды (как в рабочей версии)
-                try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
-                except:
-                    pass
-                
-                # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                class FakeMessage:
-                    def __init__(self, call):
-                        self.message_id = call.message.message_id
-                        self.from_user = call.from_user
-                        self.chat = call.message.chat
-                        self.date = call.message.date
-                        self.text = '/clean'
-                    
-                    def reply_to(self, text, **kwargs):
-                        return bot_instance.send_message(self.chat.id, text, **kwargs)
-                
-                fake_message = FakeMessage(call)
-                clean_command(fake_message)
-                return
-            
-            if action == "join":
-                # Вызываем команду /join
-                from moviebot.bot.handlers.settings.join import join_command
-                
-                # Удаляем сообщение перед вызовом команды (как в рабочей версии)
-                try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
-                except:
-                    pass
-                
-                # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                class FakeMessage:
-                    def __init__(self, call):
-                        self.message_id = call.message.message_id
-                        self.from_user = call.from_user
-                        self.chat = call.message.chat
-                        self.date = call.message.date
-                        self.text = '/join'
-                    
-                    def reply_to(self, text, **kwargs):
-                        return bot_instance.send_message(self.chat.id, text, **kwargs)
-                
-                fake_message = FakeMessage(call)
-                join_command(fake_message)
-                return
-            
-            if action == "back":
-                # Возврат к главному меню settings
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
-                markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
-                
-                # Проверяем доступ к настройкам напоминаний
-                if has_notifications_access(chat_id, user_id):
-                    markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
-                else:
-                    markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
-                
-                # Проверяем доступ к импорту базы
-                if has_recommendations_access(chat_id, user_id):
-                    markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
-                else:
-                    markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
-                
-                # Проверяем, является ли чат личным (случайные события доступны только в группах)
-                if is_private:
-                    markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
-                else:
-                    markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
-                markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
-                markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
-                markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
-                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                
-                bot_instance.edit_message_text(
-                    f"⚙️ <b>Настройки</b>\n\n"
-                    f"Выберите, что хотите настроить:",
-                    call.message.chat.id,
-                    call.message.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                return
-            
-            if action == "reset":
-                # Сброс к значению по умолчанию для этого чата
-                with db_lock:
-                    cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
-                    conn.commit()
-                bot_instance.edit_message_text(
-                    "✅ Реакции сброшены к значению по умолчанию (✅)",
-                    call.message.chat.id,
-                    call.message.message_id,
-                    parse_mode='HTML'
-                )
-                logger.info(f"Реакции сброшены для чата {chat_id} пользователем {user_id}")
-                if user_id in user_settings_state:
-                    del user_settings_state[user_id]
-                return
-            
-            if action == "add" or action == "replace":
-                # Для add и replace - сохраняем режим и просим отправить эмодзи
-                user_settings_state[user_id] = {
-                    'adding_reactions': True,
-                    'settings_msg_id': call.message.message_id,
-                    'action': action,  # "add" или "replace"
-                    'chat_id': chat_id
-                }
-                
-                mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
-                bot_instance.edit_message_text(
-                    f"⚙️ <b>Настройки реакций</b>\n\n"
-                    f"📝 Поставьте выбранный эмодзи в ответ на это сообщение.\n\n"
-                    f"Новые реакции будут {mode_text}.",
-                    call.message.chat.id,
-                    call.message.message_id,
-                    parse_mode='HTML'
-                )
-                # Обновляем информацию о сообщении settings
-                if call.message.message_id in settings_messages:
-                    settings_messages[call.message.message_id]['action'] = action
-                else:
-                    settings_messages[call.message.message_id] = {
-                        'user_id': user_id,
-                        'action': action,
-                        'chat_id': call.message.chat.id
-                    }
-                logger.info(f"[SETTINGS] Пользователь {user_id} выбрал режим: {action}")
-                return
-            
-            # Обработка подменю настроек напоминаний
-            if action.startswith("notify:"):
-                sub_action = action.split(":", 1)[1]
-                notify_settings = get_notification_settings(chat_id)
-                
-                if sub_action == "separate_toggle":
-                    # Переключение разделения будни/выходные
-                    current = notify_settings.get('separate_weekdays', 'true')
-                    new_value = 'false' if current == 'true' else 'true'
-                    set_notification_setting(chat_id, 'notify_separate_weekdays', new_value)
-                    bot_instance.answer_callback_query(call.id, f"Разделение будни/выходные {'включено' if new_value == 'true' else 'выключено'}")
-                    # Возвращаемся к меню настроек напоминаний
-                    action = "notifications"
-                    # Рекурсивно вызываем обработчик для обновления меню
-                    from moviebot.bot.handlers.settings import handle_settings_callback
-                    call.data = f"settings:{action}"
-                    handle_settings_callback(call)
-                    return
-                
-                elif sub_action == "tickets":
-                    # Настройка времени отправки билетов
-                    ticket_minutes = notify_settings.get('ticket_before_minutes', 10)
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    markup.add(InlineKeyboardButton("⏰ За 10 минут", callback_data="settings:notify:tickets:10"))
-                    markup.add(InlineKeyboardButton("⏰ За 30 минут", callback_data="settings:notify:tickets:30"))
-                    markup.add(InlineKeyboardButton("⏰ За 1 час", callback_data="settings:notify:tickets:60"))
-                    markup.add(InlineKeyboardButton("📨 Вместе с уведомлением", callback_data="settings:notify:tickets:0"))
-                    markup.add(InlineKeyboardButton("❌ Не присылать отдельно", callback_data="settings:notify:tickets:-1"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
-                    
-                    if ticket_minutes == -1:
-                        ticket_text = "Не присылать отдельно"
-                    elif ticket_minutes == 0:
-                        ticket_text = "Вместе с уведомлением"
-                    else:
-                        ticket_text = f"За {ticket_minutes} минут"
-                    
-                    text = f"🎫 <b>Настройка отправки билетов на сеанс</b>\n\n"
-                    text += f"Текущая настройка: <b>{ticket_text}</b>\n\n"
-                    text += f"Выберите, когда присылать билеты:"
-                    
-                    bot_instance.edit_message_text(
-                        text,
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                    return
-                
-                elif sub_action.startswith("tickets:"):
-                    # Сохранение настройки времени отправки билетов
-                    minutes = int(sub_action.split(":", 1)[1])
-                    set_notification_setting(chat_id, 'ticket_before_minutes', minutes)
-                    
-                    if minutes == -1:
-                        ticket_text = "Не присылать отдельно"
-                    elif minutes == 0:
-                        ticket_text = "Вместе с уведомлением"
-                    else:
-                        ticket_text = f"За {minutes} минут"
-                    
-                    bot_instance.answer_callback_query(call.id, f"Билеты: {ticket_text}")
-                    # Возвращаемся к меню настроек напоминаний
-                    from moviebot.bot.handlers.settings import handle_settings_callback
-                    call.data = "settings:notifications"
-                    handle_settings_callback(call)
-                    return
-                
-                elif sub_action == "home":
-                    # Настройка времени для домашнего просмотра
-                    separate = notify_settings.get('separate_weekdays', 'true') == 'true'
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    if separate:
-                        markup.add(InlineKeyboardButton("📅 Будни", callback_data="settings:notify:home:weekday"))
-                        markup.add(InlineKeyboardButton("🌴 Выходные", callback_data="settings:notify:home:weekend"))
-                    else:
-                        markup.add(InlineKeyboardButton("⏰ Установить время", callback_data="settings:notify:home:time"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
-                    
-                    home_weekday = f"{notify_settings.get('home_weekday_hour', 19):02d}:{notify_settings.get('home_weekday_minute', 0):02d}"
-                    home_weekend = f"{notify_settings.get('home_weekend_hour', 9):02d}:{notify_settings.get('home_weekend_minute', 0):02d}"
-                    
-                    text = f"🏠 <b>Настройка времени напоминаний для домашнего просмотра</b>\n\n"
-                    if separate:
-                        text += f"📅 Будни: <b>{home_weekday}</b>\n"
-                        text += f"🌴 Выходные: <b>{home_weekend}</b>\n"
-                    else:
-                        text += f"⏰ Время: <b>{home_weekday}</b>\n"
-                    text += f"\nОтправьте время в формате ЧЧ:ММ (например, 19:00 или 09:00)"
-                    
-                    bot_instance.edit_message_text(
-                        text,
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                    # Сохраняем состояние для обработки ввода времени
-                    if user_id not in user_settings_state:
-                        user_settings_state[user_id] = {}
-                    user_settings_state[user_id]['waiting_notify_time'] = 'home'
-                    user_settings_state[user_id]['notify_separate'] = separate
-                    return
-                
-                elif sub_action.startswith("home:"):
-                    # Обработка выбора будни/выходные для домашнего просмотра
-                    time_type = sub_action.split(":", 1)[1]  # "weekday" или "weekend"
-                    if user_id not in user_settings_state:
-                        user_settings_state[user_id] = {}
-                    user_settings_state[user_id]['waiting_notify_time'] = f'home_{time_type}'
-                    user_settings_state[user_id]['notify_separate'] = True
-                    
-                    bot_instance.answer_callback_query(call.id)
-                    bot_instance.edit_message_text(
-                        f"🏠 <b>Настройка времени для домашнего просмотра</b>\n\n"
-                        f"📅 {'Будни' if time_type == 'weekday' else 'Выходные'}\n\n"
-                        f"Отправьте время в формате ЧЧ:ММ (например, 19:00 или 09:00)",
-                        call.message.chat.id,
-                        call.message.message_id,
-                        parse_mode='HTML'
-                    )
-                    return
-                
-                elif sub_action == "cinema":
-                    # Настройка времени для кино
-                    separate = notify_settings.get('separate_weekdays', 'true') == 'true'
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    if separate:
-                        markup.add(InlineKeyboardButton("📅 Будни", callback_data="settings:notify:cinema:weekday"))
-                        markup.add(InlineKeyboardButton("🌴 Выходные", callback_data="settings:notify:cinema:weekend"))
-                    else:
-                        markup.add(InlineKeyboardButton("⏰ Установить время", callback_data="settings:notify:cinema:time"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
-                    
-                    cinema_weekday = f"{notify_settings.get('cinema_weekday_hour', 9):02d}:{notify_settings.get('cinema_weekday_minute', 0):02d}"
-                    cinema_weekend = f"{notify_settings.get('cinema_weekend_hour', 9):02d}:{notify_settings.get('cinema_weekend_minute', 0):02d}"
-                    
-                    text = f"🎬 <b>Настройка времени напоминаний для просмотра в кино</b>\n\n"
-                    if separate:
-                        text += f"📅 Будни: <b>{cinema_weekday}</b>\n"
-                        text += f"🌴 Выходные: <b>{cinema_weekend}</b>\n"
-                    else:
-                        text += f"⏰ Время: <b>{cinema_weekday}</b>\n"
-                    text += f"\nОтправьте время в формате ЧЧ:ММ (например, 09:00)"
-                    
-                    bot_instance.edit_message_text(
-                        text,
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                    if user_id not in user_settings_state:
-                        user_settings_state[user_id] = {}
-                    user_settings_state[user_id]['waiting_notify_time'] = 'cinema'
-                    user_settings_state[user_id]['notify_separate'] = separate
-                    return
-                
-                elif sub_action.startswith("cinema:"):
-                    # Обработка выбора будни/выходные для кино
-                    time_type = sub_action.split(":", 1)[1]  # "weekday" или "weekend"
-                    if user_id not in user_settings_state:
-                        user_settings_state[user_id] = {}
-                    user_settings_state[user_id]['waiting_notify_time'] = f'cinema_{time_type}'
-                    user_settings_state[user_id]['notify_separate'] = True
-                    
-                    bot_instance.answer_callback_query(call.id)
-                    bot_instance.edit_message_text(
-                        f"🎬 <b>Настройка времени для просмотра в кино</b>\n\n"
-                        f"📅 {'Будни' if time_type == 'weekday' else 'Выходные'}\n\n"
-                        f"Отправьте время в формате ЧЧ:ММ (например, 09:00)",
-                        call.message.chat.id,
-                        call.message.message_id,
-                        parse_mode='HTML'
-                    )
-                    return
-                
-                elif sub_action == "regular_reminders":
-                    # Показываем меню регулярных напоминаний
-                    with db_lock:
-                        # Проверяем статус каждого напоминания
-                        cursor.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
-                        reminder_rows = cursor.fetchall()
-                        
-                        reminders_status = {}
-                        for row in reminder_rows:
-                            key = row.get('key') if isinstance(row, dict) else row[0]
-                            value = row.get('value') if isinstance(row, dict) else row[1]
-                            reminders_status[key] = value
-                    
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    
-                    # Напоминание о фильмах на выходных
-                    weekend_films_disabled = reminders_status.get('reminder_weekend_films_disabled', 'false') == 'true'
-                    if weekend_films_disabled:
-                        markup.add(InlineKeyboardButton("⏰ Включить: Фильмы на выходных", callback_data="reminder:enable:weekend_films"))
-                    else:
-                        markup.add(InlineKeyboardButton("❌ Отменить: Фильмы на выходных", callback_data="reminder:disable:weekend_films"))
-                    
-                    # Напоминание о премьерах в кино
-                    cinema_premieres_disabled = reminders_status.get('reminder_cinema_premieres_disabled', 'false') == 'true'
-                    if cinema_premieres_disabled:
-                        markup.add(InlineKeyboardButton("⏰ Включить: Премьеры в кино", callback_data="reminder:enable:cinema_premieres"))
-                    else:
-                        markup.add(InlineKeyboardButton("❌ Отменить: Премьеры в кино", callback_data="reminder:disable:cinema_premieres"))
-                    
-                    # Случайные события (все сразу)
-                    random_events_enabled = reminders_status.get('random_events_enabled', 'true') == 'true'
-                    if not random_events_enabled:
-                        markup.add(InlineKeyboardButton("⏰ Включить: Случайные события", callback_data="reminder:enable:random_events"))
-                    else:
-                        markup.add(InlineKeyboardButton("❌ Отменить: Случайные события", callback_data="reminder:disable:random_events"))
-                    
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
-                    
-                    text = "📋 <b>Регулярные напоминания</b>\n\n"
-                    text += "Управление регулярными напоминаниями бота:\n\n"
-                    text += "• <b>Фильмы на выходных</b> — напоминание каждую субботу, если нет планов\n"
-                    text += "• <b>Премьеры в кино</b> — напоминание о премьерах, если давно не добавляли фильмы в кино\n"
-                    text += "• <b>Случайные события</b> — все случайные события (выбор участника, игра в кубик и т.д.)"
-                    
-                    bot_instance.edit_message_text(
-                        text,
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                    return
-            
-            logger.warning(f"[SETTINGS CALLBACK] Необработанное действие: {action}, callback_data={call.data}")
-            try:
-                bot_instance.answer_callback_query(call.id, f"Действие '{action}' будет реализовано позже", show_alert=True)
-            except:
-                pass
         except Exception as e:
-            logger.error(f"[SETTINGS CALLBACK] Ошибка: {e}", exc_info=True)
+            logger.error(f"[SEARCH REPLY] ❌ Критическая ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
-    # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
-    def handle_search_reply(message):
-        """Обработчик ответных сообщений для поиска"""
-        logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
-        logger.info(f"[SEARCH REPLY] Получено сообщение: user_id={message.from_user.id}, text={message.text[:50] if message.text else 'None'}, has_reply={message.reply_to_message is not None}")
-        try:
-            user_id = message.from_user.id
-            chat_id = message.chat.id
-            query = message.text.strip()
-            
-            logger.info(f"[SEARCH REPLY] Проверка состояния: user_id={user_id}, user_search_state keys={list(user_search_state.keys())}")
-            
-            # Проверяем, находится ли пользователь в состоянии поиска
-            if user_id not in user_search_state:
-                logger.info(f"[SEARCH REPLY] Пользователь {user_id} не в состоянии поиска, пропускаем")
-                return  # Не обрабатываем, если пользователь не в состоянии поиска
-            
-            state = user_search_state[user_id]
-            reply_to_message = message.reply_to_message
-            
-            logger.info(f"[SEARCH REPLY] Состояние найдено: state={state}, reply_to_message_id={reply_to_message.message_id if reply_to_message else 'None'}, state_message_id={state.get('message_id')}")
-            
-            # Если пользователь в состоянии поиска, обрабатываем его сообщение
-            # Не требуем точного совпадения message_id, так как состояние может быть обновлено
-            logger.info(f"[SEARCH REPLY] Пользователь {user_id} в состоянии поиска, обрабатываем запрос: {query}")
-            
-            # Получаем тип поиска из состояния
-            search_type = state.get('search_type', 'mixed')
-            logger.info(f"[SEARCH REPLY] Тип поиска: {search_type}")
-            
-            # Выполняем поиск
-            logger.info(f"[SEARCH REPLY] Вызов search_films_with_type для query={query}, search_type={search_type}")
-            films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
-            logger.info(f"[SEARCH REPLY] Поиск завершен: найдено {len(films)} результатов, страниц: {total_pages}")
-            
-            if not films:
-                logger.warning(f"[SEARCH REPLY] Ничего не найдено по запросу '{query}'")
-                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
-                # Очищаем состояние
-                del user_search_state[user_id]
-                return
-            
-            # Формируем сообщение с результатами
-            results_text = f"🔍 Результаты поиска '{query}':\n\n"
-            markup = InlineKeyboardMarkup(row_width=1)
-            
-            for film in films[:10]:  # Показываем максимум 10 результатов на странице
-                title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
-                year = film.get('year') or film.get('releaseYear') or 'N/A'
-                rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
-                kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
-                
-                # Определяем тип (сериал или фильм)
-                film_type = film.get('type', '').upper()
-                is_series = film_type == 'TV_SERIES'
-                
-                if kp_id:
-                    type_indicator = "📺" if is_series else "🎬"
-                    button_text = f"{type_indicator} {title} ({year})"
-                    if len(button_text) > 50:
-                        button_text = button_text[:47] + "..."
-                    results_text += f"• {type_indicator} <b>{title}</b> ({year})"
-                    if rating != 'N/A':
-                        results_text += f" ⭐ {rating}"
-                    results_text += "\n"
-                    markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
-            
-            # Добавляем пагинацию, если нужно
-            if total_pages > 1:
-                pagination_row = []
-                query_encoded = query.replace(' ', '_')
-                pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
-                if total_pages > 1:
-                    pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
-                markup.row(*pagination_row)
-            
-            # Добавляем кнопку "Назад в меню"
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            
-            # Добавляем пояснение про эмодзи
-            results_text += "\n\n🎬 - фильм\n📺 - сериал"
-            
-            logger.info(f"[SEARCH REPLY] Отправка результатов поиска пользователю {user_id}")
-            results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
-            
-            # Обновляем состояние
-            if results_msg:
-                user_search_state[user_id] = {
-                    'chat_id': chat_id,
-                    'message_id': results_msg.message_id,
-                    'search_type': search_type,
-                    'query': query,
-                    'results_text': results_text,
-                    'films': films[:10],
-                    'total_pages': total_pages
-                }
-            
-            logger.info(f"[SEARCH REPLY] Результаты поиска отправлены пользователю {user_id}, найдено {len(films)} результатов")
-        except Exception as e:
-            logger.error(f"[SEARCH REPLY] Ошибка: {e}", exc_info=True)
-            try:
-                bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса поиска")
+                bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
             except:
                 pass
 
-# Обработчик кнопки результата поиска "add_film_{kp_id}:{film_type}" - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
+# Обработчик ссылок на Кинопоиск - вынесен на уровень модуля для правильной регистрации
+@bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower()))
+def handle_kinopoisk_link(message):
+    """Обработчик текстовых сообщений со ссылками на Кинопоиск"""
+    logger.info(f"[KINOPOISK LINK] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}")
+    try:
+        from moviebot.bot.bot_init import BOT_ID
+        
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        text = message.text.strip()
+        
+        logger.info(f"[KINOPOISK LINK] Текст сообщения: '{text[:100]}'")
+        
+        # Проверяем, не является ли это ответом на промпт планирования
+        if message.reply_to_message:
+            reply_text = message.reply_to_message.text or ""
+            if any(prompt in reply_text for prompt in [
+                "Пришлите ссылку или ID фильма в ответном сообщении",
+                "Пришлите в ответном сообщении ссылку или ID фильма",
+                "В ответном сообщении пришлите ID фильмов"
+            ]):
+                logger.info(f"[KINOPOISK LINK] Сообщение является реплаем на промпт бота, пропускаем обработку (будет обработано отдельным handler)")
+                return
+        
+        # Извлекаем kp_id из текста
+        kp_id = extract_kp_id_from_text(text)
+        
+        if not kp_id:
+            logger.warning(f"[KINOPOISK LINK] Не удалось извлечь kp_id из текста: '{text[:100]}'")
+            return
+        
+        logger.info(f"[KINOPOISK LINK] Получена ссылка от {user_id}: {text}")
+        
+        # Проверяем, не находится ли пользователь в состоянии планирования
+        from moviebot.states import user_plan_state, user_view_film_state
+        
+        if user_id in user_plan_state:
+            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии планирования, прерываем планирование и обрабатываем ссылку")
+            # Обрабатываем ссылку, планирование будет прервано
+        
+        if user_id in user_view_film_state:
+            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии просмотра фильма, пропускаем обработку ссылки")
+            return
+        
+        # Обрабатываем ссылку
+        link = f"https://kinopoisk.ru/film/{kp_id}"
+        logger.info(f"[KINOPOISK LINK] Обработка ссылки: {link}, kp_id={kp_id}")
+        
+        # Получаем информацию о фильме
+        logger.info(f"[KINOPOISK LINK] ⚠️ ВАЖНО: Отправка запроса к API Кинопоиска для получения актуальной информации (даже если фильм уже в базе)")
+        logger.info(f"[KINOPOISK LINK] Вызов extract_movie_info для link={link}")
+        info = extract_movie_info(link)
+        
+        if not info:
+            logger.warning(f"[KINOPOISK LINK] extract_movie_info вернул None для link={link}")
+            try:
+                bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме/сериале. Проверьте ссылку и попробуйте еще раз.")
+            except Exception as reply_e:
+                logger.error(f"[KINOPOISK LINK] ❌ Ошибка при отправке сообщения об ошибке: {reply_e}", exc_info=True)
+            return
+        
+        logger.info(f"[KINOPOISK LINK] ✅ extract_movie_info успешно, получены актуальные данные: title={info.get('title')}, is_series={info.get('is_series')}")
+        
+        # Проверяем, есть ли фильм в базе
+        with db_lock:
+            cursor.execute("SELECT id, title, watched FROM films WHERE kp_id = %s", (kp_id,))
+            existing = cursor.fetchone()
+        
+        if existing:
+            film_id, title, watched = existing[0], existing[1], existing[2]
+            logger.info(f"[KINOPOISK LINK] Фильм уже в базе (film_id={film_id}), ОБНОВЛЯЮ данные актуальными данными из API")
+            
+            # Обновляем данные фильма актуальными данными из API
+            with db_lock:
+                cursor.execute("""
+                    UPDATE films 
+                    SET title = %s, year = %s, genres = %s, director = %s, actors = %s, 
+                        description = %s, is_series = %s
+                    WHERE kp_id = %s
+                """, (
+                    info.get('title'),
+                    info.get('year'),
+                    info.get('genres'),
+                    info.get('director'),
+                    info.get('actors'),
+                    info.get('description'),
+                    info.get('is_series', False),
+                    kp_id
+                ))
+                conn.commit()
+            
+            logger.info(f"[KINOPOISK LINK] ✅ Данные в базе обновлены актуальными данными из API")
+        
+        logger.info(f"[KINOPOISK LINK] Вызываю show_film_info_with_buttons с актуальными данными из API (обновленными в базе)")
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=existing,
+            message_id=None,
+            message_thread_id=message.message_thread_id if hasattr(message, 'message_thread_id') else None
+        )
+        
+        logger.info(f"[KINOPOISK LINK] ===== END: message_id={message.message_id}")
+        
+    except Exception as api_e:
+        logger.error(f"[KINOPOISK LINK] ❌ Ошибка при обработке ссылки на Кинопоиск: {api_e}", exc_info=True)
+        try:
+            logger.info(f"[KINOPOISK LINK] Отправка сообщения об ошибке API пользователю...")
+            error_msg = f"❌ Ошибка при получении информации о фильме/сериале: {str(api_e)[:200]}"
+            bot_instance.reply_to(message, error_msg)
+        except Exception as reply_e:
+            logger.error(f"[KINOPOISK LINK] ❌ Ошибка при отправке сообщения об ошибке API: {reply_e}", exc_info=True)
+            try:
+                bot_instance.send_message(message.chat.id, error_msg)
+            except Exception as send_e:
+                logger.error(f"[KINOPOISK LINK] ❌ Критическая ошибка отправки сообщения: {send_e}", exc_info=True)
+
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
+def add_film_from_search_callback(call):
+    """Обработчик добавления фильма из результатов поиска"""
+    try:
+        data = call.data
+        logger.info(f"[ADD FILM FROM SEARCH] Получен callback: {data}")
+        
+        # Извлекаем kp_id и тип из callback_data
+        # Формат: add_film_{kp_id}:{film_type}
+        parts = data.replace("add_film_", "").split(":")
+        kp_id = int(parts[0])
+        film_type = parts[1] if len(parts) > 1 else 'FILM'
+        
+        logger.info(f"[ADD FILM FROM SEARCH] kp_id={kp_id}, film_type={film_type}")
+        
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Формируем ссылку на Кинопоиск
+        link = f"https://kinopoisk.ru/film/{kp_id}"
+        
+        # Получаем информацию о фильме
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Добавляем фильм в базу
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=None,
+            message_id=None
+        )
+        
+        bot_instance.answer_callback_query(call.id, "✅ Фильм добавлен")
+        
+    except Exception as e:
+        logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма", show_alert=True)
+        except:
+            pass
+
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
+def view_film_description_callback(call):
+    """Обработчик кнопки 'Перейти к описанию'"""
+    try:
+        data = call.data
+        kp_id = int(data.replace("view_film_description:", ""))
+        
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем информацию о фильме
+        link = f"https://kinopoisk.ru/film/{kp_id}"
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Показываем описание фильма
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=None,
+            message_id=None
+        )
+        
+        bot_instance.answer_callback_query(call.id, "✅ Описание фильма")
+        
+    except Exception as e:
+        logger.error(f"[VIEW FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении описания", show_alert=True)
+        except:
+            pass
+
+def ensure_movie_in_database(kp_id, title=None):
+    """Убеждается, что фильм есть в базе данных. Если нет - добавляет его."""
+    with db_lock:
+        cursor.execute("SELECT id FROM films WHERE kp_id = %s", (kp_id,))
+        existing = cursor.fetchone()
+        
+        if not existing:
+            # Фильма нет в базе, добавляем его
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            link = f"https://kinopoisk.ru/film/{kp_id}"
+            info = extract_movie_info(link)
+            
+            if info:
+                cursor.execute("""
+                    INSERT INTO films (kp_id, title, year, genres, director, actors, description, is_series)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    kp_id,
+                    info.get('title') or title,
+                    info.get('year'),
+                    info.get('genres'),
+                    info.get('director'),
+                    info.get('actors'),
+                    info.get('description'),
+                    info.get('is_series', False)
+                ))
+                conn.commit()
+                logger.info(f"[ENSURE MOVIE] Фильм {kp_id} добавлен в базу")
+            else:
+                logger.warning(f"[ENSURE MOVIE] Не удалось получить информацию о фильме {kp_id}")
+        
+        return existing or cursor.lastrowid
+                
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
 def add_film_from_search_callback(call):
         """Обработчик кнопки результата поиска - показывает информацию о фильме"""
