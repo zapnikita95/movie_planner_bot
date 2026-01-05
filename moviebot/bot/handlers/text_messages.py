@@ -1518,6 +1518,16 @@ def main_text_handler(message):
             if state_chat_id and message.chat.id != state_chat_id:
                 return
             
+            # Проверяем, что сообщение является реплаем на сообщение бота
+            is_reply = (message.reply_to_message and 
+                       message.reply_to_message.from_user and 
+                       message.reply_to_message.from_user.id == BOT_ID)
+            
+            state_message_id = state.get('message_id')
+            if not is_reply or (state_message_id and message.reply_to_message.message_id != state_message_id):
+                bot_instance.reply_to(message, "❌ Пожалуйста, отправьте ID операции в ответ на сообщение бота.")
+                return
+            
             # Обрабатываем ввод charge_id
             charge_id = text.strip()
             if charge_id:

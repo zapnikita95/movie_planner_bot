@@ -815,11 +815,14 @@ def register_stats_handlers(bot_instance):
             # Если charge_id не указан, запрашиваем его
             from moviebot.states import user_refund_state
             user_id = message.from_user.id
-            user_refund_state[user_id] = {'chat_id': message.chat.id}
-            bot_instance.reply_to(message, "📝 Укажите ID операции (charge_id) для возврата.\n\n"
+            reply_msg = bot_instance.reply_to(message, "📝 Укажите ID операции (charge_id) для возврата.\n\n"
                                   "Отправьте ID операции в ответ на это сообщение.\n\n"
                                   "Пример: stxwe_iXQAPRqkiZSjm9JxEiO0Ke03gNqoupstFOak10sj3ZSSeHbT2_3MukFRW4kGE-YBSssodFt05T9Szh1-N2m_FgDCvAAPloyRiqVDUp3tmzfl2I891zLP4VcZ6ul8I")
-            logger.info(f"[REFUND] Ожидаем ввод charge_id от пользователя {user_id}")
+            user_refund_state[user_id] = {
+                'chat_id': message.chat.id,
+                'message_id': reply_msg.message_id if reply_msg else None
+            }
+            logger.info(f"[REFUND] Ожидаем ввод charge_id от пользователя {user_id}, message_id={reply_msg.message_id if reply_msg else None}")
             
         except Exception as e:
             logger.error(f"Ошибка в refundstars_command: {e}", exc_info=True)
