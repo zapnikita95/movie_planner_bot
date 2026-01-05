@@ -4480,14 +4480,14 @@ def register_payment_callbacks(bot_instance):
                             # Для личных подписок получаем обновленный список
                             from moviebot.database.db_operations import get_user_personal_subscriptions
                             all_subs = get_user_personal_subscriptions(user_id)
-                        
-                        # Фильтруем только активные подписки
-                        active_subs = []
-                        seen_plan_types = set()
-                        now = datetime.now(pytz.UTC)
-                        total_price = 0
-                        
-                        for active_sub in all_subs:
+                            
+                            # Фильтруем только активные подписки
+                            active_subs = []
+                            seen_plan_types = set()
+                            now = datetime.now(pytz.UTC)
+                            total_price = 0
+                            
+                            for active_sub in all_subs:
                             expires_at = active_sub.get('expires_at')
                             plan_type = active_sub.get('plan_type')
                             
