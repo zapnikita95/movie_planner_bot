@@ -385,7 +385,7 @@ def register_seasons_handlers(bot):
             existing = (film_id, title, watched)
             
             # Показываем описание сериала со всеми кнопками
-                from moviebot.bot.handlers.series import show_film_info_with_buttons
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
             
             # Получаем message_thread_id из сообщения, если оно есть
             message_thread_id = None
