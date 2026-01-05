@@ -3333,7 +3333,7 @@ def register_payment_callbacks(bot_instance):
                     
                     markup = InlineKeyboardMarkup(row_width=1)
                     
-                    # Кнопка "Оплатить сейчас"
+                    # Кнопка "Изменить сейчас"
                     payment_id_short = payment_id[:8]
                     callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
                     markup.add(InlineKeyboardButton(f"1️⃣ Изменить сейчас ({final_price}₽)", callback_data=callback_data_stars))
