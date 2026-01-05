@@ -1275,13 +1275,17 @@ def register_series_handlers(bot_instance):
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             search_type_text = "фильм" if search_type == 'film' else "сериал"
+            # Обновляем сообщение с новым текстом
             bot_instance.edit_message_text(
                 f"🔍 Укажите запрос для поиска {search_type_text}а в ответном сообщении, например: джон уик",
                 chat_id,
                 call.message.message_id,
                 reply_markup=markup
             )
-            logger.info(f"[SEARCH TYPE] Состояние обновлено для user_id={user_id}, search_type={search_type}")
+            # Обновляем message_id в состоянии (при edit_message_text message_id не меняется, но обновляем для ясности)
+            if user_id in user_search_state:
+                user_search_state[user_id]['message_id'] = call.message.message_id
+            logger.info(f"[SEARCH TYPE] Состояние обновлено для user_id={user_id}, search_type={search_type}, message_id={call.message.message_id}")
         except Exception as e:
             logger.error(f"[SEARCH TYPE] Ошибка: {e}", exc_info=True)
             try:
