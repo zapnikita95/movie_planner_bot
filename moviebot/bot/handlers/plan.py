@@ -143,8 +143,14 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
         except Exception as e:
             logger.warning(f"[PROCESS PLAN] Не удалось получить онлайн-кинотеатры: {e}", exc_info=True)
     
+    # Добавляем кнопку "Перейти к описанию" для обоих типов планов (если есть kp_id)
+    if kp_id:
+        if not markup.keyboard:
+            markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
+    
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
-    if plan_type == 'home' and markup.keyboard:
+    if plan_type == 'home' and markup.keyboard and any(btn.callback_data.startswith("streaming_select:") for row in markup.keyboard for btn in row):
         text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
     
     bot_instance.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
@@ -1566,12 +1572,27 @@ def streaming_done_callback(call):
         type_text = "дома" if plan_type == 'home' else "в кино"
         confirmation_text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
         
+        # Получаем kp_id для кнопки "Перейти к описанию"
+        kp_id = None
+        with db_lock:
+            cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            movie_row = cursor.fetchone()
+            if movie_row:
+                kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+        
+        # Создаем кнопку "Перейти к описанию"
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup()
+        if kp_id:
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
+        
         # Обновляем сообщение вместо удаления
         try:
             bot_instance.edit_message_text(
                 confirmation_text,
                 chat_id,
                 message_id,
+                reply_markup=markup if markup.keyboard else None,
                 parse_mode='HTML'
             )
             logger.info(f"[STREAMING DONE] Сообщение {message_id} обновлено с подтверждением планирования")
