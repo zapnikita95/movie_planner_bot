@@ -1107,7 +1107,18 @@ def main_text_handler(message):
                 markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                 
-                bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"[PROMO] Отправка сообщения с результатом применения промокода: text_result length={len(text_result)}, has_markup={markup.keyboard is not None}")
+                try:
+                    sent_msg = bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[PROMO] ✅ Сообщение отправлено успешно: message_id={sent_msg.message_id if sent_msg else 'None'}")
+                except Exception as send_e:
+                    logger.error(f"[PROMO] ❌ Ошибка отправки сообщения: {send_e}", exc_info=True)
+                    try:
+                        # Пробуем отправить без reply_to
+                        sent_msg = bot_instance.send_message(chat_id, text_result, reply_markup=markup, parse_mode='HTML')
+                        logger.info(f"[PROMO] ✅ Сообщение отправлено через send_message: message_id={sent_msg.message_id if sent_msg else 'None'}")
+                    except Exception as send2_e:
+                        logger.error(f"[PROMO] ❌ Ошибка отправки через send_message: {send2_e}", exc_info=True)
                 
                 # Удаляем состояние промокода
                 del user_promo_state[user_id]
