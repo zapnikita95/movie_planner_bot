@@ -126,6 +126,9 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
 
 def register_plan_handlers(bot_instance):
     """Регистрирует обработчики команд /plan и /schedule"""
+    logger.info("=" * 80)
+    logger.info(f"[REGISTER PLAN HANDLERS] ===== START: регистрация обработчиков планирования =====")
+    logger.info(f"[REGISTER PLAN HANDLERS] bot_instance: {bot_instance}")
     
     @bot_instance.message_handler(commands=['plan'])
     def plan_handler(message):
