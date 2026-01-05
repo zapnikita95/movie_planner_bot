@@ -1529,12 +1529,20 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
     Показывает описание фильма/сериала с ВСЕМИ кнопками БЕЗ добавления в базу.
     Используется когда пользователь отправляет ссылку на сериал.
     """
+    logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, link={link}")
     try:
+        if not info:
+            logger.error(f"[SHOW FILM INFO WITHOUT ADDING] info is None или пустой!")
+            bot_instance.send_message(chat_id, "❌ Произошла ошибка: информация о фильме не получена.")
+            return
+        
         is_series = info.get('is_series', False)
         type_emoji = "📺" if is_series else "🎬"
+        logger.info(f"[SHOW FILM INFO WITHOUT ADDING] is_series={is_series}, type_emoji={type_emoji}, title={info.get('title')}")
         
         # Формируем текст описания
         text = f"{type_emoji} <b>{info['title']}</b> ({info['year'] or '—'})\n"
+        logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Текст начала формироваться")
         if info.get('director'):
             text += f"<i>Режиссёр:</i> {info['director']}\n"
         if info.get('genres'):
@@ -1619,14 +1627,21 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
                 markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
         # Отправляем сообщение
-        msg = bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-        logger.info(f"[SHOW FILM INFO] Описание фильма отправлено БЕЗ добавления в базу: {info.get('title')}, kp_id={kp_id}")
-        return msg
+        logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Отправка сообщения: chat_id={chat_id}, text_length={len(text)}, has_markup={markup is not None}")
+        try:
+            msg = bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+            logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Описание фильма отправлено БЕЗ добавления в базу: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
+            return msg
+        except Exception as send_e:
+            logger.error(f"[SHOW FILM INFO WITHOUT ADDING] Ошибка отправки сообщения: {send_e}", exc_info=True)
+            raise  # Пробрасываем ошибку дальше
         
     except Exception as e:
-        logger.error(f"[SHOW FILM INFO] Ошибка: {e}", exc_info=True)
+        logger.error(f"[SHOW FILM INFO WITHOUT ADDING] Ошибка: {e}", exc_info=True)
         try:
             bot_instance.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
         except:
             pass
+        finally:
+            logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== КОНЕЦ =====")
         return None
