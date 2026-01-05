@@ -2452,6 +2452,33 @@ def register_payment_callbacks(bot_instance):
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                             return
+                        elif len(existing_plan_types) == 2:
+                            # Если у пользователя уже есть 2 подписки из 3, предлагаем пакетную
+                            # ВАЖНО: Эта проверка должна быть ДО проверки plan_type in existing_plan_types
+                            can_add = False
+                            plan_names = {
+                                'notifications': 'Уведомления о сериалах',
+                                'recommendations': 'Рекомендации',
+                                'tickets': 'Билеты'
+                            }
+                            existing_sub_names = [plan_names.get(pt, pt) for pt in existing_plan_types]
+                            text = f"⚠️ <b>У вас уже есть подписки: \"{', '.join(existing_sub_names)}\"</b>\n\n"
+                            text += "У вас есть 2/3 функционала бота. Оформите пакетную подписку для полного функционала."
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            # Кнопки для оформления пакетных подписок
+                            all_month_price = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
+                            all_3months_price = SUBSCRIPTION_PRICES['personal']['all'].get('3months', 0)
+                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_month_price}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
+                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_3months_price}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
+                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                            
+                            try:
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                            return
                         elif plan_type in existing_plan_types:
                             # Если пытаются добавить подписку, которая уже есть
                             can_add = False
@@ -2465,32 +2492,6 @@ def register_payment_callbacks(bot_instance):
                             text += "Если вы хотите изменить подписку, сначала отмените текущую."
                             markup = InlineKeyboardMarkup(row_width=1)
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                            return
-                        elif len(existing_plan_types) == 2:
-                            # Если у пользователя уже есть 2 подписки из 3, предлагаем пакетную
-                            can_add = False
-                            plan_names = {
-                                'notifications': 'Уведомления о сериалах',
-                                'recommendations': 'Рекомендации',
-                                'tickets': 'Билеты'
-                            }
-                            existing_sub_names = [plan_names.get(pt, pt) for pt in existing_plan_types]
-                            text = f"⚠️ <b>У вас уже есть подписки: \"{', '.join(existing_sub_names)}\"</b>\n\n"
-                            text += "У вас есть 2/3 функционала бота, оформите пакетную подписку для полного функционала"
-                            
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            # Кнопки для оформления пакетных подписок
-                            all_month_price = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
-                            all_3months_price = SUBSCRIPTION_PRICES['personal']['all'].get('3months', 0)
-                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_month_price}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
-                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_3months_price}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            
                             try:
                                 bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
