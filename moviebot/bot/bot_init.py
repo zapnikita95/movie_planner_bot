@@ -4,17 +4,22 @@
 import telebot
 from telebot.types import BotCommand
 import logging
+from moviebot.config import TOKEN
 
 logger = logging.getLogger(__name__)
+
+# Создаем экземпляр бота
+bot = telebot.TeleBot(TOKEN)
 
 # BOT_ID будет установлен при инициализации бота
 BOT_ID = None
 
-def init_bot_id(bot_instance):
+def init_bot_id(bot_instance=None):
     """Инициализирует BOT_ID из bot.get_me()"""
     global BOT_ID
+    bot_to_use = bot_instance if bot_instance is not None else bot
     try:
-        bot_info = bot_instance.get_me()
+        bot_info = bot_to_use.get_me()
         BOT_ID = bot_info.id
         logger.info(f"[BOT INIT] ID бота: {BOT_ID}")
     except Exception as e:

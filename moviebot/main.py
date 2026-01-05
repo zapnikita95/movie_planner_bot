@@ -31,15 +31,13 @@ from moviebot.bot.bot_init import setup_bot_commands, sync_commands_periodically
 init_database()
 
 # Импорты для бота
-import telebot
 from apscheduler.schedulers.background import BackgroundScheduler
 
-# Создание бота
-bot = telebot.TeleBot(TOKEN)
+# Импортируем бота из bot_init (он уже создан там)
+from moviebot.bot.bot_init import bot, init_bot_id
 
 # Получаем ID бота и инициализируем его в bot_init
-from moviebot.bot.bot_init import init_bot_id
-BOT_ID = init_bot_id(bot)
+BOT_ID = init_bot_id()  # Использует глобальный bot из bot_init
 
 # Очищаем старые webhook
 try:
