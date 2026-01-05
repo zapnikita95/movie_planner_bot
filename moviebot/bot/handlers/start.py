@@ -123,7 +123,8 @@ def register_start_handlers(bot):
             from moviebot.bot.handlers.seasons import seasons_command
             from moviebot.bot.handlers.plan import show_schedule
             from moviebot.bot.handlers.payment import payment_command
-            from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, settings_command, help_command
+            from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
+            from moviebot.bot.handlers.settings import settings_command
             
             # Используем существующее сообщение и устанавливаем текст команды
             message = call.message
