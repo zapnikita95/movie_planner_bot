@@ -688,25 +688,34 @@ def register_series_handlers(bot_param):
     def handle_rand_mode_locked(call):
         """Обработчик заблокированных режимов рандомайзера"""
         try:
+            bot_instance.answer_callback_query(call.id)
             mode = call.data.split(":")[1]  # kinopoisk, my_votes, group_votes
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            
+            # Сначала проверяем наличие подписки
+            has_rec_access = has_recommendations_access(chat_id, user_id)
             
             if mode == "kinopoisk":
                 message_text = "🎬 Рандом по Кинопоиску доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
             elif mode == "group_votes":
                 message_text = "⭐ Режим \"По оценкам в базе\" доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
             elif mode == "my_votes":
-                # Проверяем количество оценок
-                with db_lock:
-                    cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-                    user_ratings_count = cursor.fetchone()
-                    user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
-                
-                if user_ratings < 50:
-                    message_text = "⭐ Режим \"По моим оценкам\" откроется после добавления 50 оценок в базу. Оцените больше фильмов!"
-                else:
+                # Если нет подписки - показываем сообщение о подписке
+                if not has_rec_access:
                     message_text = "⭐ Режим \"По моим оценкам\" доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
+                else:
+                    # Если подписка есть, но оценок недостаточно - показываем сообщение о количестве оценок
+                    with db_lock:
+                        cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                        user_ratings_count = cursor.fetchone()
+                        user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+                    
+                    if user_ratings < 50:
+                        message_text = "⭐ Режим \"По моим оценкам\" откроется после добавления 50 оценок в базу. Оцените больше фильмов!"
+                    else:
+                        # Это не должно произойти, но на всякий случай
+                        message_text = "⭐ Режим \"По моим оценкам\" доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
             else:
                 message_text = "🔒 Этот режим недоступен. Подключите подписку через /payment"
             
@@ -3099,3 +3108,233 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
     finally:
         logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== КОНЕЦ =====")
         return None
+
+
+def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
+    """Импортирует оценки из Кинопоиска"""
+    headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
+    base_url = f"https://kinopoiskapiunofficial.tech/api/v1/kp_users/{kp_user_id}/votes"
+    
+    imported_count = 0
+    page = 1
+    max_pages = min(75, (max_count + 19) // 20)  # Максимум 75 страниц, по 20 фильмов на странице
+    
+    try:
+        while imported_count < max_count and page <= max_pages:
+            url = f"{base_url}?page={page}"
+            logger.info(f"[IMPORT] Запрос страницы {page}: {url}")
+            
+            response = requests.get(url, headers=headers, timeout=15)
+            if response.status_code != 200:
+                logger.error(f"[IMPORT] Ошибка {response.status_code}: {response.text[:200]}")
+                break
+            
+            data = response.json()
+            items = data.get('items', [])
+            
+            if not items or len(items) == 0:
+                logger.info(f"[IMPORT] Нет больше фильмов на странице {page}")
+                break
+            
+            # Обрабатываем фильмы на странице
+            for item in items:
+                if imported_count >= max_count:
+                    break
+                
+                kp_id = str(item.get('kinopoiskId'))
+                if not kp_id:
+                    continue
+                
+                # Проверяем тип - только FILM
+                if item.get('type') != 'FILM':
+                    continue
+                
+                user_rating = item.get('userRating')
+                if not user_rating or user_rating < 1 or user_rating > 10:
+                    continue
+                
+                link = f"https://kinopoisk.ru/film/{kp_id}/"
+                
+                # Импортированные оценки НЕ добавляют фильмы в базу группы
+                # Они существуют только как оценки в таблице ratings с is_imported = TRUE
+                # Для импортированных оценок используем film_id = NULL или создаем виртуальный film_id
+                try:
+                    with db_lock:
+                        # Проверяем, есть ли фильм в базе группы (добавлен через бота)
+                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        film_row = cursor.fetchone()
+                        
+                        if film_row:
+                            # Фильм уже есть в базе группы - можем добавить импортированную оценку
+                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                            logger.debug(f"[IMPORT] Фильм {kp_id} уже существует в базе группы, film_id={film_id}")
+                            
+                            # Проверяем, есть ли уже оценка у этого пользователя для этого фильма
+                            cursor.execute('''
+                                SELECT rating FROM ratings 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                            ''', (chat_id, film_id, user_id))
+                            existing_rating = cursor.fetchone()
+                            
+                            if existing_rating:
+                                # Оценка уже есть, пропускаем
+                                cursor.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
+                                title_row = cursor.fetchone()
+                                title = title_row.get('title') if isinstance(title_row, dict) else (title_row[0] if title_row else 'Неизвестно')
+                                logger.debug(f"[IMPORT] Фильм {title} уже имеет оценку, пропускаем")
+                                continue
+                            
+                            # Добавляем импортированную оценку для существующего фильма
+                            cursor.execute('''
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id)
+                                VALUES (%s, %s, %s, %s, TRUE, %s)
+                                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE, kp_id = EXCLUDED.kp_id
+                            ''', (chat_id, film_id, user_id, user_rating, kp_id))
+                            conn.commit()
+                            
+                            imported_count += 1
+                            cursor.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
+                            title_row = cursor.fetchone()
+                            title = title_row.get('title') if isinstance(title_row, dict) else (title_row[0] if title_row else 'Неизвестно')
+                            logger.info(f"[IMPORT] Импортирован фильм {title} с оценкой {user_rating}")
+                        else:
+                            # Фильма нет в базе группы - создаем импортированную оценку БЕЗ добавления фильма в movies
+                            # Используем film_id = NULL и kp_id для хранения импортированных оценок
+                            title = item.get('nameRu') or item.get('nameEn') or 'Без названия'
+                            
+                            # Проверяем, есть ли уже импортированная оценка для этого kp_id и пользователя
+                            cursor.execute('''
+                                SELECT rating FROM ratings 
+                                WHERE chat_id = %s AND kp_id = %s AND user_id = %s AND film_id IS NULL
+                            ''', (chat_id, kp_id, user_id))
+                            existing_imported_rating = cursor.fetchone()
+                            
+                            if existing_imported_rating:
+                                logger.debug(f"[IMPORT] Импортированная оценка для фильма {kp_id} ({title}) уже существует, пропускаем")
+                                continue
+                            
+                            # Добавляем импортированную оценку БЕЗ film_id (film_id = NULL)
+                            cursor.execute('''
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id)
+                                VALUES (%s, NULL, %s, %s, TRUE, %s)
+                            ''', (chat_id, user_id, user_rating, kp_id))
+                            conn.commit()
+                            
+                            imported_count += 1
+                            logger.info(f"[IMPORT] Импортирован фильм {title} (kp_id={kp_id}) с оценкой {user_rating} (без добавления в базу группы)")
+                except Exception as db_error:
+                    logger.error(f"[IMPORT] Ошибка при работе с БД для фильма {kp_id}: {db_error}", exc_info=True)
+                    continue
+            
+            # Если получили меньше 20 фильмов, значит страницы закончились
+            if len(items) < 20:
+                logger.info(f"[IMPORT] Получено меньше 20 фильмов, заканчиваем")
+                break
+            
+            page += 1
+        
+        return imported_count
+    except Exception as e:
+        logger.error(f"[IMPORT] Ошибка при импорте: {e}", exc_info=True)
+        return imported_count
+
+
+def handle_import_user_id_internal(message, state):
+    """Обрабатывает ввод user_id для импорта"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    
+    kp_user_id = extract_kp_user_id(text)
+    
+    if not kp_user_id:
+        bot_instance.reply_to(message, "❌ Не удалось извлечь ID пользователя. Отправьте ID или ссылку на профиль Кинопоиска.")
+        return
+    
+    state['kp_user_id'] = kp_user_id
+    state['step'] = 'waiting_count'
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    markup.add(InlineKeyboardButton("50", callback_data=f"import_count:50"))
+    markup.add(InlineKeyboardButton("100", callback_data=f"import_count:100"))
+    markup.add(InlineKeyboardButton("300", callback_data=f"import_count:300"))
+    markup.add(InlineKeyboardButton("500", callback_data=f"import_count:500"))
+    markup.add(InlineKeyboardButton("1000", callback_data=f"import_count:1000"))
+    markup.add(InlineKeyboardButton("1500", callback_data=f"import_count:1500"))
+    
+    bot_instance.reply_to(message, 
+        f"✅ ID пользователя: <code>{kp_user_id}</code>\n\n"
+        f"Сколько фильмов загрузить?",
+        reply_markup=markup, parse_mode='HTML')
+
+
+# Обработчик выбора количества фильмов для импорта - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("import_count:"))
+def handle_import_count_callback(call):
+    """Обработчик выбора количества фильмов для импорта"""
+    try:
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        count = int(call.data.split(":")[1])
+        
+        if user_id not in user_import_state:
+            bot_instance.answer_callback_query(call.id, "❌ Состояние импорта потеряно", show_alert=True)
+            return
+        
+        state = user_import_state[user_id]
+        kp_user_id = state.get('kp_user_id')
+        
+        if not kp_user_id:
+            bot_instance.answer_callback_query(call.id, "❌ ID пользователя не найден", show_alert=True)
+            return
+        
+        bot_instance.answer_callback_query(call.id, f"⏳ Начинаю импорт {count} фильмов...")
+        status_msg = bot_instance.edit_message_text(
+            f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
+            f"ID пользователя: <code>{kp_user_id}</code>\n"
+            f"Количество: {count}\n\n"
+            f"⏳ Импорт начат в фоновом режиме, это может занять некоторое время...\n"
+            f"Вы получите уведомление по завершении.",
+            chat_id, call.message.message_id, parse_mode='HTML'
+        )
+        
+        # Удаляем состояние
+        del user_import_state[user_id]
+        
+        # Запускаем импорт в фоновом потоке
+        import threading
+        
+        def background_import():
+            try:
+                imported = import_kp_ratings(kp_user_id, chat_id, user_id, count)
+                
+                # Отправляем результат
+                bot_instance.edit_message_text(
+                    f"✅ <b>Импорт завершён!</b>\n\n"
+                    f"ID пользователя: <code>{kp_user_id}</code>\n"
+                    f"Загружено новых оценок: <b>{imported}</b>\n\n"
+                    f"Оценки загружены в базу! 🎉",
+                    chat_id, status_msg.message_id, parse_mode='HTML'
+                )
+                
+                logger.info(f"[IMPORT] Импорт завершён для user_id={user_id}, kp_user_id={kp_user_id}, imported={imported}")
+            except Exception as e:
+                logger.error(f"[IMPORT] Ошибка в фоновом импорте: {e}", exc_info=True)
+                try:
+                    bot_instance.edit_message_text(
+                        f"❌ <b>Ошибка при импорте</b>\n\n"
+                        f"Произошла ошибка: {str(e)[:200]}",
+                        chat_id, status_msg.message_id, parse_mode='HTML'
+                    )
+                except:
+                    pass
+        
+        # Запускаем в отдельном потоке
+        import_thread = threading.Thread(target=background_import, daemon=True)
+        import_thread.start()
+    except Exception as e:
+        logger.error(f"[IMPORT] Ошибка в handle_import_count_callback: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при импорте", show_alert=True)
+        except:
+            pass
