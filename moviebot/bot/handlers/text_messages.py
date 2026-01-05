@@ -1544,7 +1544,21 @@ def main_text_handler(message):
         state = user_unsubscribe_state[user_id]
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_unsubscribe_state")
         
-        # Обрабатываем ID независимо от наличия реплая
+        state_chat_id = state.get('chat_id')
+        if state_chat_id and message.chat.id != state_chat_id:
+            return
+        
+        # Проверяем, что сообщение является реплаем на сообщение бота
+        is_reply = (message.reply_to_message and 
+                   message.reply_to_message.from_user and 
+                   message.reply_to_message.from_user.id == BOT_ID)
+        
+        state_message_id = state.get('message_id')
+        if not is_reply or (state_message_id and message.reply_to_message.message_id != state_message_id):
+            bot_instance.reply_to(message, "❌ Пожалуйста, отправьте ID пользователя или группы в ответ на сообщение бота.")
+            return
+        
+        # Обрабатываем ID
         target_id_str = text.strip()
         if target_id_str:
             try:

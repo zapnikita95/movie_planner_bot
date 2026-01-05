@@ -89,7 +89,11 @@ def unsubscribe_command(message):
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
         
         msg = bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
-        user_unsubscribe_state[user_id] = {'message_id': msg.message_id}
+        user_unsubscribe_state[user_id] = {
+            'chat_id': message.chat.id,
+            'message_id': msg.message_id if msg else None
+        }
+        logger.info(f"[UNSUBSCRIBE] Ожидаем ввод ID от пользователя {user_id}, message_id={msg.message_id if msg else None}")
         
     except Exception as e:
         logger.error(f"[UNSUBSCRIBE] Ошибка в unsubscribe_command: {e}", exc_info=True)
