@@ -3231,8 +3231,6 @@ def handle_kinopoisk_link(message):
     # Обработчик settings: перенесен в handlers/settings.py
 
     # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-            
-            if action == "notifications":
                 # Проверяем доступ к настройкам напоминаний
                 if not has_notifications_access(chat_id, user_id):
                     bot_instance.answer_callback_query(
