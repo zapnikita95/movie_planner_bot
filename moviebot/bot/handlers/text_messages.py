@@ -206,13 +206,47 @@ def handle_rate_list_reply(message):
         logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии (plan={user_id in user_plan_state}, promo={user_id in user_promo_state}, promo_admin={user_id in user_promo_admin_state})")
         return
     
-    # Пропускаем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages
+    # Обрабатываем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages
     text_stripped = message.text.strip() if message.text else ""
     if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
        (len(text_stripped) == 2 and text_stripped == "10"):
-        # Это оценка - пропускаем, пусть обрабатывается через rating_messages
-        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения с оценкой: {text_stripped}")
-        return
+        # Это оценка - обрабатываем через rating_messages
+        rating = int(text_stripped)
+        logger.info(f"[HANDLE RATE LIST REPLY] Обнаружена оценка: {rating}, обрабатываем")
+        
+        # Проверяем, есть ли реплай и находится ли сообщение в rating_messages
+        if message.reply_to_message:
+            reply_msg_id = message.reply_to_message.message_id
+            from moviebot.states import rating_messages
+            if reply_msg_id in rating_messages:
+                logger.info(f"[HANDLE RATE LIST REPLY] ✅ Найдено сообщение в rating_messages: reply_msg_id={reply_msg_id}")
+                try:
+                    from moviebot.bot.handlers.rate import handle_rating_internal
+                    handle_rating_internal(message, rating)
+                    logger.info(f"[HANDLE RATE LIST REPLY] handle_rating_internal завершен")
+                except Exception as rating_e:
+                    logger.error(f"[HANDLE RATE LIST REPLY] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                return
+            else:
+                # Если реплай есть, но не в rating_messages, все равно пробуем обработать
+                logger.info(f"[HANDLE RATE LIST REPLY] Реплай есть, но не в rating_messages, пробуем обработать оценку")
+                try:
+                    from moviebot.bot.handlers.rate import handle_rating_internal
+                    handle_rating_internal(message, rating)
+                    logger.info(f"[HANDLE RATE LIST REPLY] handle_rating_internal завершен")
+                except Exception as rating_e:
+                    logger.error(f"[HANDLE RATE LIST REPLY] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                return
+        else:
+            # Если нет реплая, но это число от 1 до 10, пробуем обработать как оценку
+            logger.info(f"[HANDLE RATE LIST REPLY] Нет реплая, но это число от 1 до 10, пробуем обработать как оценку")
+            try:
+                from moviebot.bot.handlers.rate import handle_rating_internal
+                handle_rating_internal(message, rating)
+                logger.info(f"[HANDLE RATE LIST REPLY] handle_rating_internal завершен")
+            except Exception as rating_e:
+                logger.error(f"[HANDLE RATE LIST REPLY] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+            return
     
     chat_id = message.chat.id
     

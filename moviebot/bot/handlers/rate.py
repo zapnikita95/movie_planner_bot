@@ -412,6 +412,44 @@ def handle_rating_internal(message, rating):
                         rating_messages[reply_msg.message_id] = film_id
                 else:
                     bot_instance.reply_to(message, f"✅ Оценка {rating}/10 сохранена!\nСредняя: {avg_str}/10")
+                
+                # Обновляем кнопку "Оценить" в сообщении с описанием фильма, если оно есть
+                if kp_id:
+                    try:
+                        # Ищем сообщение с описанием фильма в bot_messages
+                        from moviebot.states import bot_messages
+                        film_message_id = None
+                        for msg_id, link_value in bot_messages.items():
+                            if link_value and kp_id in str(link_value):
+                                film_message_id = msg_id
+                                logger.info(f"[RATE INTERNAL] Найдено сообщение с описанием фильма: message_id={film_message_id}")
+                                break
+                        
+                        # Если нашли сообщение, обновляем его
+                        if film_message_id:
+                            from moviebot.bot.handlers.series import show_film_info_with_buttons
+                            from moviebot.api.kinopoisk_api import extract_movie_info
+                            
+                            # Получаем информацию о фильме
+                            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                            info = extract_movie_info(link)
+                            if info:
+                                # Получаем existing для передачи в show_film_info_with_buttons
+                                with db_lock:
+                                    cursor.execute('SELECT id, title, watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                                    existing_row = cursor.fetchone()
+                                    existing = None
+                                    if existing_row:
+                                        if isinstance(existing_row, dict):
+                                            existing = (existing_row.get('id'), existing_row.get('title'), existing_row.get('watched'))
+                                        else:
+                                            existing = (existing_row[0], existing_row[1], existing_row[2])
+                                
+                                # Обновляем сообщение с описанием фильма
+                                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
+                                logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено: message_id={film_message_id}")
+                    except Exception as update_e:
+                        logger.warning(f"[RATE INTERNAL] Не удалось обновить сообщение с описанием фильма: {update_e}", exc_info=True)
                     
         except Exception as e:
             logger.error(f"[RATE INTERNAL] Ошибка при сохранении оценки: {e}", exc_info=True)
