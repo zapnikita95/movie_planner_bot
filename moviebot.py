@@ -1753,7 +1753,7 @@ def update_dice_game_message(chat_id, game_state, message_id):
                     text += f"🏆 <b>Победитель: {user_display}</b> (выбросил {max_value})\n\n"
                     text += f"🎬 {user_display} выбирает фильм для вашей компании!\n"
                 elif len(winners) > 1:
-                    # Ничья
+                    # Ничья - показываем, что идет перекидывание
                     winner_names = []
                     for winner_id in winners:
                         winner_info = game_state['participants'][winner_id]
@@ -1767,7 +1767,7 @@ def update_dice_game_message(chat_id, game_state, message_id):
                     text += f"🤝 <b>Ничья!</b> У {len(winners)} участников выпало {max_value}:\n"
                     for name in winner_names:
                         text += f"• {name}\n"
-                    text += "\nПерекидываем кубик!\n"
+                    text += "\n🎲 Перекидываем кубик для определения победителя!\n"
         elif remaining_count > 0:
             text += f"⏳ Осталось бросить кубик: <b>{remaining_count}</b> участник(ов)\n\n"
         elif len(participants_without_results) > 0:
@@ -2004,20 +2004,47 @@ def handle_dice_result(message):
                         if chat_id in dice_game_state:
                             del dice_game_state[chat_id]
                     elif len(winners) > 1:
-                        # Ничья - обновляем сообщение и перекидываем
+                        # Ничья - только участники с максимальным значением перекидывают кубик
                         if 'message_id' in game_state:
                             update_dice_game_message(chat_id, game_state, game_state['message_id'])
                         
+                        # Формируем список имен участников с ничьей
+                        winner_names = []
+                        for winner_id in winners:
+                            winner_info = game_state['participants'][winner_id]
+                            winner_name = winner_info.get('username', 'участник')
+                            try:
+                                user_info = bot.get_chat_member(chat_id, winner_id)
+                                user_display = user_info.user.first_name or winner_name
+                            except:
+                                user_display = winner_name if winner_name and not winner_name.startswith('user_') else "участник"
+                            winner_names.append(user_display)
+                        
+                        winner_names_str = ", ".join(winner_names)
                         bot.send_message(
                             chat_id,
-                            f"🤝 Ничья! У {len(winners)} участников выпало {max_value}. Перекидываем кубик!",
+                            f"🤝 Ничья! У {len(winners)} участников выпало {max_value}:\n{winner_names_str}\n\n🎲 Перекидываем кубик только для них!",
                             parse_mode='HTML'
                         )
-                        # Сбрасываем результаты для перекидывания
-                        game_state['participants'] = {}
+                        
+                        # Оставляем только участников с ничьей, остальных удаляем
+                        new_participants = {}
+                        for winner_id in winners:
+                            # Сохраняем username, но удаляем value и dice_message_id для нового броска
+                            winner_info = game_state['participants'][winner_id]
+                            new_participants[winner_id] = {
+                                'username': winner_info.get('username', f"user_{winner_id}"),
+                                'user_id': winner_id
+                            }
+                        
+                        game_state['participants'] = new_participants
                         game_state['start_time'] = datetime.now(plans_tz)
                         game_state['dice_messages'] = {}
                         game_state['last_dice_time'] = datetime.now(plans_tz)
+                        
+                        # Обновляем сообщение, чтобы показать, что идет перекидывание
+                        if 'message_id' in game_state:
+                            update_dice_game_message(chat_id, game_state, game_state['message_id'])
     except Exception as e:
         logger.error(f"[RANDOM EVENTS] Ошибка в handle_dice_result: {e}", exc_info=True)
 
