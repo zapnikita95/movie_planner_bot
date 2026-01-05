@@ -696,17 +696,27 @@ def main_text_handler(message):
                     if len(results_text) > 50:
                         results_text += "\n\n⚠️ Произошла ошибка при обработке некоторых результатов."
                 
+                logger.info(f"[SEARCH] После цикла обработки фильмов, начинаем добавлять кнопки")
+                
                 # Добавляем пагинацию, если нужно
-                if total_pages > 1:
-                    pagination_row = []
-                    query_encoded = query.replace(' ', '_')
-                    pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+                try:
                     if total_pages > 1:
-                        pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
-                    markup.row(*pagination_row)
+                        pagination_row = []
+                        query_encoded = query.replace(' ', '_')
+                        pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+                        if total_pages > 1:
+                            pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                        markup.row(*pagination_row)
+                        logger.info(f"[SEARCH] Пагинация добавлена: {total_pages} страниц")
+                except Exception as pag_e:
+                    logger.error(f"[SEARCH] Ошибка добавления пагинации: {pag_e}", exc_info=True)
                 
                 # Добавляем кнопку "Назад в меню"
-                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                try:
+                    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                    logger.info(f"[SEARCH] Кнопка 'Назад в меню' добавлена")
+                except Exception as btn_e:
+                    logger.error(f"[SEARCH] Ошибка добавления кнопки 'Назад в меню': {btn_e}", exc_info=True)
                 
                 # Добавляем пояснение про эмодзи
                 results_text += "\n\n🎬 - фильм\n📺 - сериал"
