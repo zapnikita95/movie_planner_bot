@@ -594,6 +594,175 @@ def register_series_handlers(bot_instance):
         except Exception as e:
             logger.error(f"[TICKET LOCKED] Ошибка: {e}", exc_info=True)
 
+    @bot_instance.callback_query_handler(func=lambda call: call.data == "random_event:close")
+    def handle_random_event_close(call):
+        """Обработчик кнопки 'Закрыть' для случайных уведомлений"""
+        try:
+            bot_instance.answer_callback_query(call.id)
+            chat_id = call.message.chat.id
+            message_id = call.message.message_id
+            
+            # Удаляем сообщение
+            try:
+                bot_instance.delete_message(chat_id, message_id)
+                logger.info(f"[RANDOM EVENTS] Сообщение {message_id} закрыто пользователем {call.from_user.id}")
+            except Exception as e:
+                logger.warning(f"[RANDOM EVENTS] Не удалось удалить сообщение {message_id}: {e}")
+                # Если не удалось удалить, просто отвечаем на callback
+                bot_instance.answer_callback_query(call.id, "Сообщение закрыто")
+        except Exception as e:
+            logger.error(f"[RANDOM EVENTS] Ошибка при закрытии случайного события: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+            except:
+                pass
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data == "dice_game:start")
+    def handle_dice_game_start(call):
+        """Обработчик кнопки 'Бросить кубик' для игры в кубик"""
+        try:
+            from moviebot.bot.bot_init import BOT_ID
+            from moviebot.utils.random_events import update_dice_game_message
+            from datetime import datetime, timedelta
+            
+            bot_instance.answer_callback_query(call.id)
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            message_id = call.message.message_id
+            
+            # Проверяем, что это групповой чат
+            try:
+                chat_info = bot_instance.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    bot_instance.answer_callback_query(call.id, "Игра в кубик работает только в групповых чатах", show_alert=True)
+                    return
+            except Exception as e:
+                logger.warning(f"[DICE GAME] Не удалось получить информацию о чате {chat_id}: {e}")
+            
+            # Если состояние игры не инициализировано, инициализируем его
+            if chat_id not in dice_game_state:
+                logger.info(f"[DICE GAME] Инициализация состояния игры для чата {chat_id}")
+                dice_game_state[chat_id] = {
+                    'participants': {},
+                    'message_id': message_id,
+                    'start_time': datetime.now(PLANS_TZ),
+                    'dice_messages': {}
+                }
+            
+            game_state = dice_game_state[chat_id]
+            
+            # Проверяем, не истекло ли время игры (24 часа)
+            if (datetime.now(PLANS_TZ) - game_state['start_time']).total_seconds() > 86400:
+                del dice_game_state[chat_id]
+                bot_instance.answer_callback_query(call.id, "Время игры истекло", show_alert=True)
+                return
+            
+            # Проверяем, не бросил ли уже пользователь кубик
+            if user_id in game_state.get('participants', {}) and 'dice_message_id' in game_state['participants'][user_id]:
+                bot_instance.answer_callback_query(call.id, "Вы уже бросили кубик!", show_alert=True)
+                return
+            
+            # Отправляем стикер игральной кости
+            try:
+                logger.info(f"[DICE GAME] Попытка отправить кубик для chat_id={chat_id}, user_id={user_id}")
+                try:
+                    dice_msg = bot_instance.send_dice(chat_id, emoji='🎲')
+                    logger.info(f"[DICE GAME] Кубик отправлен с emoji, message_id={dice_msg.message_id if dice_msg else None}")
+                except TypeError as e:
+                    # Если emoji не поддерживается, используем стандартный кубик
+                    logger.warning(f"[DICE GAME] emoji не поддерживается, используем стандартный кубик: {e}")
+                    dice_msg = bot_instance.send_dice(chat_id)
+                    logger.info(f"[DICE GAME] Стандартный кубик отправлен, message_id={dice_msg.message_id if dice_msg else None}")
+                except Exception as e:
+                    logger.error(f"[DICE GAME] Ошибка при отправке кубика: {e}", exc_info=True)
+                    raise
+                
+                if dice_msg:
+                    # Сохраняем message_id для получения значения позже
+                    game_state['dice_messages'] = game_state.get('dice_messages', {})
+                    game_state['dice_messages'][dice_msg.message_id] = user_id
+                    
+                    # Сохраняем информацию об участнике
+                    username = call.from_user.username or call.from_user.first_name or f"user_{user_id}"
+                    game_state['participants'][user_id] = {
+                        'username': username,
+                        'dice_message_id': dice_msg.message_id,
+                        'user_id': user_id
+                    }
+                    
+                    # Фиксируем в БД, кто бросил кубик
+                    with db_lock:
+                        cursor.execute('''
+                            INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
+                            VALUES (%s, %s, %s, %s, %s)
+                        ''', (
+                            user_id,
+                            username,
+                            'dice_game:thrown',
+                            datetime.now(PLANS_TZ).isoformat(),
+                            chat_id
+                        ))
+                        conn.commit()
+                    
+                    logger.info(f"[DICE GAME] Пользователь {user_id} ({username}) бросил кубик в чате {chat_id}, message_id={dice_msg.message_id}")
+                    
+                    # Обновляем сообщение с результатами
+                    message_id_to_update = game_state.get('message_id', message_id)
+                    update_dice_game_message(chat_id, game_state, message_id_to_update, BOT_ID)
+                else:
+                    raise Exception("Не удалось отправить кубик")
+            except Exception as e:
+                logger.error(f"[DICE GAME] Ошибка при отправке кубика: {e}", exc_info=True)
+                bot_instance.answer_callback_query(call.id, "Ошибка при отправке кубика", show_alert=True)
+        except Exception as e:
+            logger.error(f"[DICE GAME] Ошибка в handle_dice_game_start: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+            except:
+                pass
+
+    @bot_instance.message_handler(content_types=['dice'])
+    def handle_dice_result(message):
+        """Обработчик получения значения кубика"""
+        try:
+            from moviebot.bot.bot_init import BOT_ID
+            from moviebot.utils.random_events import update_dice_game_message
+            from datetime import datetime, timedelta
+            
+            if not message.dice or message.dice.emoji != '🎲':
+                return
+            
+            chat_id = message.chat.id
+            if chat_id not in dice_game_state:
+                return
+            
+            game_state = dice_game_state[chat_id]
+            dice_message_id = message.message_id
+            dice_value = message.dice.value
+            
+            # Находим пользователя по message_id кубика
+            user_id = game_state.get('dice_messages', {}).get(dice_message_id)
+            if not user_id:
+                # Пробуем найти по участникам
+                for uid, p in game_state.get('participants', {}).items():
+                    if p.get('dice_message_id') == dice_message_id:
+                        user_id = uid
+                        break
+            
+            if not user_id:
+                return
+            
+            # Сохраняем значение кубика
+            if user_id in game_state['participants']:
+                game_state['participants'][user_id]['value'] = dice_value
+                game_state['last_dice_time'] = datetime.now(PLANS_TZ)  # Обновляем время последнего броска
+                
+                # Обновляем сообщение с результатами
+                if 'message_id' in game_state:
+                    update_dice_game_message(chat_id, game_state, game_state['message_id'], BOT_ID)
+        except Exception as e:
+            logger.error(f"[DICE GAME] Ошибка в handle_dice_result: {e}", exc_info=True)
+
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("timezone:"))
     def handle_timezone_callback(call):
         """Обработчик выбора часового пояса"""
@@ -1059,6 +1228,36 @@ def register_series_handlers(bot_instance):
                     bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 else:
                     # Пример события без участника (игра в кубик)
+                    # Проверяем количество участников (исключая бота)
+                    from moviebot.bot.bot_init import BOT_ID
+                    from moviebot.database.db_operations import is_bot_participant
+                    
+                    with db_lock:
+                        if BOT_ID:
+                            cursor.execute('''
+                                SELECT COUNT(DISTINCT user_id) 
+                                FROM stats 
+                                WHERE chat_id = %s 
+                                AND user_id != %s
+                            ''', (chat_id, BOT_ID))
+                        else:
+                            cursor.execute('''
+                                SELECT COUNT(DISTINCT user_id) 
+                                FROM stats 
+                                WHERE chat_id = %s
+                            ''', (chat_id,))
+                        participants_count_row = cursor.fetchone()
+                        participants_count = participants_count_row.get('count') if isinstance(participants_count_row, dict) else (participants_count_row[0] if participants_count_row else 0)
+                    
+                    # Если в группе только 1 участник (человек) + бот = всего 2, то недостаточно
+                    if participants_count < 2:
+                        bot_instance.answer_callback_query(
+                            call.id,
+                            "Не хватает еще хотя бы одного человека в группе. Для игры в кубик нужно минимум 2 участника (исключая бота).",
+                            show_alert=True
+                        )
+                        return
+                    
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
                     markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
@@ -1066,7 +1265,7 @@ def register_series_handlers(bot_instance):
                     
                     text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
                     text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
-                    text += "⏳ Осталось бросить кубик: 2 участник(ов)"
+                    text += f"⏳ Осталось бросить кубик: {participants_count} участник(ов)"
                     
                     sent_msg = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                     
