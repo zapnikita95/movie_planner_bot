@@ -982,19 +982,20 @@ def get_plan_link_internal(message, state):
         logger.info(f"[PLAN LINK] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
         return
     
-    # Сначала проверяем текст самого сообщения (даже если есть реплай)
+    # Извлекаем ссылку или ID из текста сообщения
     message_text = message.text or ''
+    kp_id = None
+    
     if message_text:
-        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message_text)
-        if link_match:
-            link = link_match.group(0)
-            logger.info(f"[PLAN] Найдена ссылка в тексте сообщения: {link}")
-        
-        # Также проверяем ID в тексте сообщения
-        if not link:
-            id_match = re.search(r'\b(\d{4,})\b', message_text)
-            if id_match:
-                kp_id = id_match.group(1)
+        # Используем extract_kp_id_from_text для извлечения ID
+        kp_id = extract_kp_id_from_text(message_text)
+        if kp_id:
+            # Если это ссылка, извлекаем её
+            if message_text.strip().startswith('http'):
+                link = message_text.strip()
+                logger.info(f"[PLAN] Найдена ссылка в тексте сообщения: {link}")
+            else:
+                # Это ID, проверяем в базе или создаем ссылку
                 with db_lock:
                     cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                     row = cursor.fetchone()
@@ -1002,33 +1003,8 @@ def get_plan_link_internal(message, state):
                         link = row.get('link') if isinstance(row, dict) else row[0]
                         logger.info(f"[PLAN] Найден фильм по ID {kp_id} в тексте сообщения (из базы): {link}")
                     else:
-                        if len(kp_id) >= 4:
-                            link = f"https://kinopoisk.ru/film/{kp_id}"
-                            logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
-    
-    # Если не нашли в тексте сообщения, проверяем реплай
-    if not link and message.reply_to_message:
-        reply_text = message.reply_to_message.text or ''
-        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', reply_text)
-        if link_match:
-            link = link_match.group(0)
-            logger.info(f"[PLAN] Найдена ссылка в реплае: {link}")
-        
-        # Также проверяем ID в реплае
-        if not link:
-            id_match = re.search(r'\b(\d{4,})\b', reply_text)
-            if id_match:
-                kp_id = id_match.group(1)
-                with db_lock:
-                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                    row = cursor.fetchone()
-                    if row:
-                        link = row.get('link') if isinstance(row, dict) else row[0]
-                        logger.info(f"[PLAN] Найден фильм по ID {kp_id} в реплае (из базы): {link}")
-                    else:
-                        if len(kp_id) >= 4:
-                            link = f"https://kinopoisk.ru/film/{kp_id}"
-                            logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
+                        link = f"https://kinopoisk.ru/film/{kp_id}/"
+                        logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
         bot_instance.reply_to(message, "❌ Не найдена ссылка на фильм. Пришлите ссылку или ID фильма.")
