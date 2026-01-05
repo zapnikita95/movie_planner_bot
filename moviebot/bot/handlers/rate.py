@@ -253,24 +253,24 @@ def handle_rating_internal(message, rating):
             kp_id = rating_msg_value.split(":")[1]
             logger.info(f"[RATE INTERNAL] Найден kp_id из rating_messages: {kp_id}")
         else:
-            # Проверяем все возможные источники film_id: rating_messages, bot_messages (цепочка реплаев)
-            # Сначала проверяем прямое сообщение
-            film_id = rating_messages.get(reply_msg_id)
-            
+        # Проверяем все возможные источники film_id: rating_messages, bot_messages (цепочка реплаев)
+        # Сначала проверяем прямое сообщение
+        film_id = rating_messages.get(reply_msg_id)
+        
             # Если film_id - это строка "kp_id:...", извлекаем kp_id
             if isinstance(film_id, str) and film_id.startswith("kp_id:"):
                 kp_id = film_id.split(":")[1]
                 film_id = None
                 logger.info(f"[RATE INTERNAL] Найден kp_id из rating_messages (прямая проверка): {kp_id}")
             else:
-                # Если не найдено, проверяем цепочку реплаев рекурсивно
-                if not film_id:
-                    current_msg = message.reply_to_message
-                    checked_ids = set()  # Чтобы избежать циклов
-                    while current_msg and current_msg.message_id not in checked_ids:
-                        checked_ids.add(current_msg.message_id)
-                        # Проверяем rating_messages
-                        if current_msg.message_id in rating_messages:
+        # Если не найдено, проверяем цепочку реплаев рекурсивно
+        if not film_id:
+            current_msg = message.reply_to_message
+            checked_ids = set()  # Чтобы избежать циклов
+            while current_msg and current_msg.message_id not in checked_ids:
+                checked_ids.add(current_msg.message_id)
+                # Проверяем rating_messages
+                if current_msg.message_id in rating_messages:
                             rating_value = rating_messages[current_msg.message_id]
                             # Проверяем, это kp_id или film_id
                             if isinstance(rating_value, str) and rating_value.startswith("kp_id:"):
@@ -279,23 +279,23 @@ def handle_rating_internal(message, rating):
                                 break
                             elif isinstance(rating_value, int):
                                 film_id = rating_value
-                                break
-                        # Проверяем bot_messages (сообщения с фильмами)
-                        if current_msg.message_id in bot_messages:
-                            reply_link = bot_messages[current_msg.message_id]
-                            if reply_link:
-                                # Извлекаем kp_id из ссылки для поиска
-                                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
-                                if match:
-                                    kp_id = match.group(2)
-                                    with db_lock:
-                                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                                        row = cursor.fetchone()
-                                        if row:
-                                            film_id = row.get('id') if isinstance(row, dict) else row[0]
-                                            break
-                        # Переходим к родительскому сообщению
-                        current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
+                    break
+                # Проверяем bot_messages (сообщения с фильмами)
+                if current_msg.message_id in bot_messages:
+                    reply_link = bot_messages[current_msg.message_id]
+                    if reply_link:
+                        # Извлекаем kp_id из ссылки для поиска
+                        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                        if match:
+                            kp_id = match.group(2)
+                            with db_lock:
+                                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                                row = cursor.fetchone()
+                                if row:
+                                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                                    break
+                # Переходим к родительскому сообщению
+                current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
     
     # Если film_id не найден, но есть kp_id, добавляем фильм в базу
     if not film_id and kp_id:
@@ -497,10 +497,10 @@ def handle_rating_internal(message, rating):
                                 logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено из БД: message_id={film_message_id}")
                             else:
                                 logger.warning(f"[RATE INTERNAL] Не удалось получить данные из БД, делаю API запрос")
-                                from moviebot.api.kinopoisk_api import extract_movie_info
-                                info = extract_movie_info(link)
-                                if info:
-                                    show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
+                            from moviebot.api.kinopoisk_api import extract_movie_info
+                            info = extract_movie_info(link)
+                            if info:
+                                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
                                     logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено через API: message_id={film_message_id}")
                     except Exception as update_e:
                         logger.warning(f"[RATE INTERNAL] Не удалось обновить сообщение с описанием фильма: {update_e}", exc_info=True)

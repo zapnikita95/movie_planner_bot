@@ -1204,69 +1204,57 @@ def register_series_handlers(bot_param):
                 pass
     
     def _show_genre_step_kinopoisk(call, chat_id, user_id):
-        """Показывает шаг выбора жанра для режима kinopoisk - только жанры фильмов из выбранных годов в базе"""
+        """Показывает шаг выбора жанра для режима kinopoisk - жанры из API Кинопоиска"""
         try:
             logger.info(f"[RANDOM] Showing genre step for kinopoisk mode, user {user_id}")
             
             state = user_random_state.get(user_id, {})
             selected_genres = state.get('genres', [])
             selected_periods = state.get('periods', [])
+            content_type = state.get('content_type', 'ALL')
             
-            # Получаем жанры фильмов из выбранных годов в базе
-            available_genres = set()
-            with db_lock:
-                base_query = """
-                    SELECT DISTINCT m.genres
-                    FROM movies m
-                    WHERE m.chat_id = %s AND m.genres IS NOT NULL AND m.genres != ''
-                """
-                params = [chat_id]
-                
-                # Добавляем фильтр по периодам, если они выбраны
-                if selected_periods:
-                    period_conditions = []
-                    for p in selected_periods:
-                        if p == "До 1980":
-                            period_conditions.append("m.year < 1980")
-                        elif p == "1980–1990":
-                            period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
-                        elif p == "1990–2000":
-                            period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
-                        elif p == "2000–2010":
-                            period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
-                        elif p == "2010–2020":
-                            period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
-                        elif p == "2020–сейчас":
-                            period_conditions.append("m.year >= 2020")
-                    if period_conditions:
-                        base_query += " AND (" + " OR ".join(period_conditions) + ")"
-                
-                cursor.execute(base_query, tuple(params))
-                genre_rows = cursor.fetchall()
-                
-                # Извлекаем жанры из строк (могут быть через запятую)
-                for row in genre_rows:
-                    genres_str = row.get('genres') if isinstance(row, dict) else row[0]
-                    if genres_str:
-                        # Разбиваем строку жанров на отдельные жанры
-                        genres_list = [g.strip().lower() for g in genres_str.split(',')]
-                        available_genres.update(genres_list)
+            # Получаем жанры из API Кинопоиска
+            from moviebot.api.kinopoisk_api import get_film_filters
+            api_genres = get_film_filters()
             
-            # Сортируем жанры для удобства
-            all_genres = sorted(list(available_genres))
-            
-            if not all_genres:
-                # Если нет жанров, показываем стандартный список
+            if not api_genres:
+                # Если не удалось получить жанры из API, показываем стандартный список
                 all_genres = [
-                    'драма', 'комедия', 'боевик', 'триллер', 'ужасы', 'фантастика',
-                    'детектив', 'мелодрама', 'приключения', 'фэнтези', 'криминал',
-                    'военный', 'семейный', 'биография', 'история', 'мультфильм'
+                    {'id': 1, 'genre': 'триллер'}, {'id': 2, 'genre': 'драма'}, {'id': 3, 'genre': 'криминал'},
+                    {'id': 4, 'genre': 'мелодрама'}, {'id': 5, 'genre': 'детектив'}, {'id': 6, 'genre': 'фантастика'},
+                    {'id': 7, 'genre': 'приключения'}, {'id': 11, 'genre': 'боевик'}, {'id': 12, 'genre': 'фэнтези'},
+                    {'id': 13, 'genre': 'комедия'}, {'id': 17, 'genre': 'ужасы'}, {'id': 18, 'genre': 'мультфильм'},
+                    {'id': 19, 'genre': 'семейный'}, {'id': 14, 'genre': 'военный'}, {'id': 15, 'genre': 'история'}
                 ]
+            else:
+                all_genres = api_genres
+            
+            # Ограничиваем до 3 выбранных жанров
+            max_selected = 3
+            if len(selected_genres) >= max_selected:
+                # Показываем только выбранные жанры
+                display_genres = [g for g in all_genres if str(g.get('id', '')) in selected_genres or g.get('genre', '').lower() in selected_genres]
+            else:
+                display_genres = all_genres
             
             markup = InlineKeyboardMarkup(row_width=2)
-            for genre in all_genres:
-                label = f"✓ {genre}" if genre in selected_genres else genre
-                markup.add(InlineKeyboardButton(label, callback_data=f"rand_genre:{genre}"))
+            for genre_item in display_genres:
+                genre_id = str(genre_item.get('id', ''))
+                genre_name = genre_item.get('genre', '')
+                
+                # Проверяем, выбран ли жанр (по id или по названию)
+                is_selected = genre_id in selected_genres or genre_name.lower() in [g.lower() for g in selected_genres]
+                
+                if is_selected:
+                    label = f"✓ {genre_name}"
+                else:
+                    label = genre_name
+                
+                # Если уже выбрано 3 жанра, неактивные жанры не добавляем
+                if len(selected_genres) >= max_selected and not is_selected:
+                    continue
+                
+                markup.add(InlineKeyboardButton(label, callback_data=f"rand_genre:{genre_id}"))
             
             nav_buttons = []
             nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="rand_genre:back"))
@@ -1278,15 +1266,31 @@ def register_series_handlers(bot_param):
             
             # Формируем текст с выбранными фильтрами
             filter_parts = []
+            content_type_text = {
+                'FILM': '🎬 Фильм',
+                'TV_SERIES': '📺 Сериал',
+                'ALL': '🎬 Фильм и Сериал'
+            }.get(content_type, '')
+            if content_type_text:
+                filter_parts.append(f"Тип: {content_type_text}")
             if selected_periods:
                 filter_parts.append(f"Период: {', '.join(selected_periods)}")
             if selected_genres:
-                filter_parts.append(f"Жанр: {', '.join(selected_genres)}")
+                # Получаем названия жанров по id
+                selected_genre_names = []
+                for g_id in selected_genres:
+                    for g_item in all_genres:
+                        if str(g_item.get('id', '')) == g_id or g_item.get('genre', '').lower() == g_id.lower():
+                            selected_genre_names.append(g_item.get('genre', g_id))
+                            break
+                if selected_genre_names:
+                    filter_parts.append(f"Жанр: {', '.join(selected_genre_names)}")
             
             selected_text = f"\n\nВыбрано: {'; '.join(filter_parts)}" if filter_parts else ""
             mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм на Кинопоиске по заданным фильтрам.'
             
-            text = f"{mode_description}\n\n🎬 <b>Шаг 2/2: Выберите жанр</b>\n\n(можно выбрать несколько или пропустить){selected_text}"
+            genre_limit_text = f"\n\n(можно выбрать до {max_selected} жанров или пропустить)" if len(selected_genres) < max_selected else f"\n\n(выбрано {len(selected_genres)}/{max_selected} жанров)"
+            text = f"{mode_description}\n\n🎬 <b>Шаг 3/3: Выберите жанр</b>{genre_limit_text}{selected_text}"
             
             try:
                 bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -3327,47 +3331,93 @@ def register_series_handlers(bot_param):
             except:
                 pass
 
-    @bot_instance.message_handler(content_types=['dice'])
-    def handle_dice_result(message):
-        """Обработчик получения значения кубика"""
+    def _process_dice_message(message, is_edited=False):
+        """Внутренняя функция для обработки dice сообщений (новых и обновленных)"""
         try:
             from moviebot.bot.bot_init import BOT_ID
             from moviebot.utils.random_events import update_dice_game_message
             from datetime import datetime, timedelta
             
-            if not message.dice or message.dice.emoji != '🎲':
+            edit_prefix = "[EDITED] " if is_edited else ""
+            logger.info(f"[DICE GAME RESULT] {edit_prefix}===== START: message_id={message.message_id}, chat_id={message.chat.id}, user_id={message.from_user.id if message.from_user else None}")
+            
+            # Проверяем наличие dice и эмодзи
+            if not message.dice:
+                logger.warning(f"[DICE GAME RESULT] {edit_prefix}Сообщение {message.message_id} не содержит dice")
+                return
+            
+            logger.info(f"[DICE GAME RESULT] {edit_prefix}dice.emoji={message.dice.emoji}, dice.value={message.dice.value}")
+            
+            if message.dice.emoji != '🎲':
+                logger.info(f"[DICE GAME RESULT] {edit_prefix}Пропуск: эмодзи {message.dice.emoji} не является 🎲")
                 return
             
             chat_id = message.chat.id
             if chat_id not in dice_game_state:
+                logger.warning(f"[DICE GAME RESULT] {edit_prefix}Чат {chat_id} не найден в dice_game_state")
                 return
             
             game_state = dice_game_state[chat_id]
             dice_message_id = message.message_id
             dice_value = message.dice.value
             
+            # Проверяем, что значение кубика определено (не 0 и не None)
+            if dice_value is None or dice_value == 0:
+                logger.info(f"[DICE GAME RESULT] {edit_prefix}Значение кубика еще не определено (value={dice_value}), ожидаем обновление")
+                return
+            
+            logger.info(f"[DICE GAME RESULT] {edit_prefix}Получено значение кубика: {dice_value} для message_id={dice_message_id}")
+            
             # Находим пользователя по message_id кубика
             user_id = game_state.get('dice_messages', {}).get(dice_message_id)
             if not user_id:
                 # Пробуем найти по участникам
+                logger.info(f"[DICE GAME RESULT] {edit_prefix}Поиск пользователя по dice_message_id в participants...")
                 for uid, p in game_state.get('participants', {}).items():
                     if p.get('dice_message_id') == dice_message_id:
                         user_id = uid
+                        logger.info(f"[DICE GAME RESULT] {edit_prefix}Пользователь найден в participants: user_id={user_id}")
                         break
             
             if not user_id:
+                logger.warning(f"[DICE GAME RESULT] {edit_prefix}Пользователь не найден для dice_message_id={dice_message_id}")
+                logger.info(f"[DICE GAME RESULT] {edit_prefix}dice_messages keys: {list(game_state.get('dice_messages', {}).keys())}")
+                logger.info(f"[DICE GAME RESULT] {edit_prefix}participants: {list(game_state.get('participants', {}).keys())}")
                 return
+            
+            logger.info(f"[DICE GAME RESULT] {edit_prefix}Найден пользователь: user_id={user_id}, значение кубика={dice_value}")
             
             # Сохраняем значение кубика
             if user_id in game_state['participants']:
+                old_value = game_state['participants'][user_id].get('value')
                 game_state['participants'][user_id]['value'] = dice_value
                 game_state['last_dice_time'] = datetime.now(PLANS_TZ)  # Обновляем время последнего броска
                 
+                username = game_state['participants'][user_id].get('username', f'user_{user_id}')
+                logger.info(f"[DICE GAME RESULT] {edit_prefix}✅ Сохранено значение кубика для {username} (user_id={user_id}): {dice_value} (было: {old_value})")
+                
                 # Обновляем сообщение с результатами
                 if 'message_id' in game_state:
+                    logger.info(f"[DICE GAME RESULT] {edit_prefix}Обновление сообщения с результатами, message_id={game_state['message_id']}")
                     update_dice_game_message(chat_id, game_state, game_state['message_id'], BOT_ID)
+                else:
+                    logger.warning(f"[DICE GAME RESULT] {edit_prefix}message_id не найден в game_state")
+            else:
+                logger.warning(f"[DICE GAME RESULT] {edit_prefix}user_id={user_id} не найден в participants")
+                
+            logger.info(f"[DICE GAME RESULT] {edit_prefix}===== END =====")
         except Exception as e:
-            logger.error(f"[DICE GAME] Ошибка в handle_dice_result: {e}", exc_info=True)
+            logger.error(f"[DICE GAME RESULT] {edit_prefix}❌ Ошибка в _process_dice_message: {e}", exc_info=True)
+    
+    @bot_instance.message_handler(content_types=['dice'])
+    def handle_dice_result(message):
+        """Обработчик получения значения кубика (новое сообщение)"""
+        _process_dice_message(message, is_edited=False)
+    
+    @bot_instance.edited_message_handler(content_types=['dice'])
+    def handle_dice_result_edited(message):
+        """Обработчик обновления сообщения с кубиком (после завершения анимации)"""
+        _process_dice_message(message, is_edited=True)
 
     # Обработчик ссылок на Кинопоиск вынесен на уровень модуля для правильной регистрации
     pass
