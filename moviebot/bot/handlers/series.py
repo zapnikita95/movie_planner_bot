@@ -632,10 +632,15 @@ def register_series_handlers(bot_instance):
             
             logger.info(f"[KINOPOISK LINK] Получена ссылка от {user_id}: {text[:100]}")
             
-            # Ищем ссылки на Кинопоиск
-            links = re.findall(r'(https?://[\w\./-]*(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+)', text)
+            # Ищем ссылки на Кинопоиск (расширенный паттерн для разных форматов)
+            # Поддерживаем: kinopoisk.ru, www.kinopoisk.ru, kinopoisk.com, www.kinopoisk.com
+            # Поддерживаем: /film/, /series/, /film, /series (с слешем в конце или без)
+            links = re.findall(r'(https?://(?:www\.)?(?:kinopoisk\.ru|kinopoisk\.com)/(?:film|series)/\d+/?\??)', text, re.IGNORECASE)
             if not links:
+                logger.warning(f"[KINOPOISK LINK] Ссылки не найдены в тексте: {text[:200]}")
                 return
+            
+            logger.info(f"[KINOPOISK LINK] Найдено ссылок: {len(links)}, links={links}")
             
             # Обрабатываем первую ссылку
             link = links[0]
@@ -645,13 +650,23 @@ def register_series_handlers(bot_instance):
             kp_id = extract_kp_id_from_text(link)
             if not kp_id:
                 logger.warning(f"[KINOPOISK LINK] Не удалось извлечь kp_id из ссылки: {link}")
+                bot_instance.reply_to(message, f"❌ Не удалось извлечь ID из ссылки: {link}")
                 return
             
+            logger.info(f"[KINOPOISK LINK] Извлечен kp_id={kp_id} из ссылки: {link}")
+            
             # Получаем информацию о фильме/сериале
-            info = extract_movie_info(link)
-            if not info:
-                logger.warning(f"[KINOPOISK LINK] Не удалось получить информацию о фильме: {link}")
-                bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме/сериале.")
+            logger.info(f"[KINOPOISK LINK] Вызов extract_movie_info для link={link}")
+            try:
+                info = extract_movie_info(link)
+                if not info:
+                    logger.warning(f"[KINOPOISK LINK] extract_movie_info вернул None для link={link}")
+                    bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме/сериале.")
+                    return
+                logger.info(f"[KINOPOISK LINK] extract_movie_info успешно, title={info.get('title')}, is_series={info.get('is_series')}")
+            except Exception as api_e:
+                logger.error(f"[KINOPOISK LINK] Ошибка extract_movie_info: {api_e}", exc_info=True)
+                bot_instance.reply_to(message, f"❌ Ошибка при получении информации о фильме/сериале: {str(api_e)}")
                 return
             
             is_series = info.get('is_series', False)
