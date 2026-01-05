@@ -124,7 +124,12 @@ def register_start_handlers(bot):
             from moviebot.bot.handlers.plan import show_schedule
             from moviebot.bot.handlers.payment import payment_command
             from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
-            from moviebot.bot.handlers.settings import settings_command
+            # Используем importlib для обхода конфликта имен (есть и файл settings.py, и директория settings/)
+            import importlib.util
+            settings_spec = importlib.util.spec_from_file_location("settings_module", "moviebot/bot/handlers/settings.py")
+            settings_module = importlib.util.module_from_spec(settings_spec)
+            settings_spec.loader.exec_module(settings_module)
+            settings_command = settings_module.settings_command
             
             # Используем существующее сообщение и устанавливаем текст команды
             message = call.message
