@@ -10767,7 +10767,12 @@ def settings_command(message):
         else:
             markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
         
-        markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
+        # Проверяем, является ли чат личным (случайные события доступны только в группах)
+        is_private = message.chat.type == 'private'
+        if is_private:
+            markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
+        else:
+            markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
         markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
         markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
         markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
@@ -21831,7 +21836,25 @@ def handle_settings_callback(call):
             )
             return
         
+        if action == "random_events_locked":
+            # Показываем сообщение о том, что раздел доступен только в групповых чатах
+            bot.answer_callback_query(
+                call.id,
+                "Раздел доступен только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
+                show_alert=True
+            )
+            return
+        
         if action == "random_events":
+            # Проверяем, что это не личный чат
+            if call.message.chat.type == 'private':
+                bot.answer_callback_query(
+                    call.id,
+                    "Раздел доступен только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
+                    show_alert=True
+                )
+                return
+            
             # Показываем настройку случайных событий
             with db_lock:
                 cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
