@@ -5,8 +5,10 @@ import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request
-from moviebot.states import user_list_state, list_messages
+from moviebot.states import user_list_state, list_messages, user_view_film_state, user_plan_state
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import bot as bot_instance
+from moviebot.api.kinopoisk_api import extract_movie_info
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -61,6 +63,55 @@ def register_list_handlers(bot):
     def handle_noop(call):
         """Обработчик для неактивных кнопок (noop)"""
         bot.answer_callback_query(call.id)
+    
+    @bot.callback_query_handler(func=lambda call: call.data == "plan_from_list")
+    def plan_from_list_callback(call):
+        """Обработчик кнопки 'Запланировать просмотр' из /list"""
+        try:
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            logger.info(f"[PLAN FROM LIST] Пользователь {user_id} хочет запланировать фильм из /list")
+            
+            # Устанавливаем состояние для планирования
+            user_plan_state[user_id] = {
+                'step': 1,
+                'chat_id': chat_id
+            }
+            
+            bot_instance.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+            bot_instance.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+            logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}")
+        except Exception as e:
+            logger.error(f"[PLAN FROM LIST] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
+    @bot.callback_query_handler(func=lambda call: call.data == "view_film_from_list")
+    def view_film_from_list_callback(call):
+        """Обработчик кнопки 'Посмотреть страницу фильма' из /list"""
+        try:
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            logger.info(f"[VIEW FILM FROM LIST] Пользователь {user_id} хочет посмотреть страницу фильма из /list")
+            
+            # Устанавливаем состояние для просмотра фильма
+            user_view_film_state[user_id] = {
+                'chat_id': chat_id
+            }
+            
+            bot_instance.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+            bot_instance.send_message(chat_id, "Пришлите в ответном сообщении ссылку или ID фильма, чье описание хотите посмотреть")
+            logger.info(f"[VIEW FILM FROM LIST] Состояние установлено для пользователя {user_id}")
+        except Exception as e:
+            logger.error(f"[VIEW FILM FROM LIST] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
 
 
 def show_list_page(bot, chat_id, user_id, page=1, message_id=None):

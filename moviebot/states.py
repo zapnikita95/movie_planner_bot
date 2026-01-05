@@ -33,6 +33,7 @@ user_random_state = {}  # user_id: {'step': str, 'mode': str, ...}
 
 # Состояния списка
 user_list_state = {}  # user_id: {'chat_id': int, 'page': int}
+user_view_film_state = {}  # user_id: {'chat_id': int} - состояние ожидания ответного сообщения для просмотра страницы фильма
 
 # Сообщения "Добавлено в базу" для обработки реплаев с оценками
 added_movie_messages = {}  # message_id: {'chat_id': int, 'film_id': int, 'kp_id': str, 'link': str, 'title': str}

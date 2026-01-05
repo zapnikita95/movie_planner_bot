@@ -469,7 +469,19 @@ def register_series_handlers(bot_instance):
                 logger.info(f"Часовой пояс установлен для user_id={user_id}: {timezone_name}")
                 
                 # Проверяем, есть ли сохраненный текст для продолжения планирования
-                from moviebot.states import user_plan_state
+                from moviebot.states import user_plan_state, user_view_film_state
+                # Проверяем user_view_film_state
+                if user_id in user_view_film_state:
+                    state = user_view_film_state[user_id]
+                    chat_id = state.get('chat_id', message.chat.id)
+                    
+                    logger.info(f"[VIEW FILM REPLY] Пользователь {user_id} в user_view_film_state, chat_id={chat_id}")
+                    
+                    # Обработка ответного сообщения для просмотра фильма
+                    handle_view_film_reply_internal(message, state)
+                    return
+                
+                # Проверяем user_plan_state
                 if user_id in user_plan_state:
                     state = user_plan_state[user_id]
                     pending_text = state.get('pending_text')
