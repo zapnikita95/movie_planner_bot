@@ -1943,18 +1943,18 @@ def handle_kinopoisk_link(message):
                 from moviebot.bot.handlers.edit import edit_command
                 
                 # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                class FakeMessage:
-                    def __init__(self, call):
-                        self.message_id = call.message.message_id
-                        self.from_user = call.from_user
-                        self.chat = call.message.chat
-                        self.date = call.message.date
-                        self.text = '/edit'
-                    
-                    def reply_to(self, text, **kwargs):
-                        return bot_instance.send_message(self.chat.id, text, **kwargs)
+                fake_message = telebot.types.Message()
+                fake_message.from_user = call.from_user
+                fake_message.chat = call.message.chat
+                fake_message.message_id = call.message.message_id
+                fake_message.date = call.message.date
+                fake_message.text = '/edit'
                 
-                fake_message = FakeMessage(call)
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
+                
                 edit_command(fake_message)
                 # answer_callback_query уже вызван выше
                 return
@@ -1964,18 +1964,18 @@ def handle_kinopoisk_link(message):
                 from moviebot.bot.handlers.clean import clean_command
                 
                 # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                class FakeMessage:
-                    def __init__(self, call):
-                        self.message_id = call.message.message_id
-                        self.from_user = call.from_user
-                        self.chat = call.message.chat
-                        self.date = call.message.date
-                        self.text = '/clean'
-                    
-                    def reply_to(self, text, **kwargs):
-                        return bot_instance.send_message(self.chat.id, text, **kwargs)
+                fake_message = telebot.types.Message()
+                fake_message.from_user = call.from_user
+                fake_message.chat = call.message.chat
+                fake_message.message_id = call.message.message_id
+                fake_message.date = call.message.date
+                fake_message.text = '/clean'
                 
-                fake_message = FakeMessage(call)
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
+                
                 clean_command(fake_message)
                 bot_instance.answer_callback_query(call.id)
                 return
@@ -1985,18 +1985,18 @@ def handle_kinopoisk_link(message):
                 from moviebot.bot.handlers.join import join_command
                 
                 # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                class FakeMessage:
-                    def __init__(self, call):
-                        self.message_id = call.message.message_id
-                        self.from_user = call.from_user
-                        self.chat = call.message.chat
-                        self.date = call.message.date
-                        self.text = '/join'
-                    
-                    def reply_to(self, text, **kwargs):
-                        return bot_instance.send_message(self.chat.id, text, **kwargs)
+                fake_message = telebot.types.Message()
+                fake_message.from_user = call.from_user
+                fake_message.chat = call.message.chat
+                fake_message.message_id = call.message.message_id
+                fake_message.date = call.message.date
+                fake_message.text = '/join'
                 
-                fake_message = FakeMessage(call)
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
+                
                 join_command(fake_message)
                 bot_instance.answer_callback_query(call.id)
                 return
