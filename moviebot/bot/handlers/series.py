@@ -542,6 +542,58 @@ def register_series_handlers(bot_instance):
         """Обертка для регистрации команды /help"""
         help_command(message)
 
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
+    def handle_rand_mode_locked(call):
+        """Обработчик заблокированных режимов рандомайзера"""
+        try:
+            mode = call.data.split(":")[1]  # kinopoisk, my_votes, group_votes
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            if mode == "kinopoisk":
+                message_text = "🎬 Рандом по Кинопоиску доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
+            elif mode == "my_votes":
+                # Проверяем количество оценок
+                with db_lock:
+                    cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    user_ratings_count = cursor.fetchone()
+                    user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+                
+                if user_ratings < 50:
+                    message_text = "⭐ Режим \"По моим оценкам\" откроется после добавления 50 оценок в базу. Оцените больше фильмов!"
+                else:
+                    message_text = "⭐ Режим \"По моим оценкам\" доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
+            else:
+                message_text = "🔒 Этот режим недоступен. Подключите подписку через /payment"
+            
+            bot_instance.answer_callback_query(
+                call.id,
+                message_text,
+                show_alert=True
+            )
+        except Exception as e:
+            logger.error(f"[RAND MODE LOCKED] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(
+                    call.id,
+                    "🔒 Функционал можно подключить через /payment",
+                    show_alert=True
+                )
+            except:
+                pass
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_locked:"))
+    def handle_ticket_locked(call):
+        """Обработчик заблокированных кнопок билетов"""
+        try:
+            bot_instance.answer_callback_query(
+                call.id,
+                "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
+                show_alert=True
+            )
+        except Exception as e:
+            logger.error(f"[TICKET LOCKED] Ошибка: {e}", exc_info=True)
+
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("timezone:"))
     def handle_timezone_callback(call):
         """Обработчик выбора часового пояса"""
@@ -760,6 +812,44 @@ def register_series_handlers(bot_instance):
             
             logger.info(f"[SETTINGS CALLBACK] Получен callback от {user_id}, action={action}, chat_id={chat_id}, is_private={is_private}, callback_data={call.data}")
             
+            # Обрабатываем заблокированные кнопки ПЕРЕД общим answer_callback_query
+            if action == "notifications_locked":
+                # Заблокированная кнопка настроек напоминаний
+                try:
+                    bot_instance.answer_callback_query(
+                        call.id,
+                        "⏰ Настройки напоминаний доступны с подпиской 🔔 Уведомления или 📦 Все режимы. Подключите подписку через /payment",
+                        show_alert=True
+                    )
+                except Exception as e:
+                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для notifications_locked: {e}")
+                return
+            
+            if action == "import_locked":
+                # Заблокированная кнопка импорта базы
+                try:
+                    bot_instance.answer_callback_query(
+                        call.id,
+                        "📥 Импорт базы из Кинопоиска доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment",
+                        show_alert=True
+                    )
+                except Exception as e:
+                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для import_locked: {e}")
+                return
+            
+            if action == "random_events_locked":
+                # Показываем сообщение о том, что раздел доступен только в групповых чатах
+                try:
+                    bot_instance.answer_callback_query(
+                        call.id,
+                        "🎲 Случайные события доступны только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
+                        show_alert=True
+                    )
+                except Exception as e:
+                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для random_events_locked: {e}")
+                return
+            
+            # Для остальных действий вызываем обычный answer_callback_query
             bot_instance.answer_callback_query(call.id)
             
             if action == "emoji":
@@ -797,30 +887,6 @@ def register_series_handlers(bot_instance):
                     'action': 'add',
                     'chat_id': chat_id
                 }
-                return
-            
-            if action == "notifications_locked":
-                # Заблокированная кнопка настроек напоминаний
-                try:
-                    bot_instance.answer_callback_query(
-                        call.id,
-                        "⏰ Настройки напоминаний доступны с подпиской 🔔 Уведомления или 📦 Все режимы. Подключите подписку через /payment",
-                        show_alert=True
-                    )
-                except Exception as e:
-                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для notifications_locked: {e}")
-                return
-            
-            if action == "import_locked":
-                # Заблокированная кнопка импорта базы
-                try:
-                    bot_instance.answer_callback_query(
-                        call.id,
-                        "📥 Импорт базы из Кинопоиска доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment",
-                        show_alert=True
-                    )
-                except Exception as e:
-                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для import_locked: {e}")
                 return
             
             if action == "notifications":
@@ -889,18 +955,6 @@ def register_series_handlers(bot_instance):
                     parse_mode='HTML'
                 )
                 logger.info(f"[SETTINGS] Импорт базы - TODO: реализовать полностью")
-                return
-            
-            if action == "random_events_locked":
-                # Показываем сообщение о том, что раздел доступен только в групповых чатах
-                try:
-                    bot_instance.answer_callback_query(
-                        call.id,
-                        "Раздел доступен только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
-                        show_alert=True
-                    )
-                except Exception as e:
-                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для random_events_locked: {e}")
                 return
             
             if action == "random_events":

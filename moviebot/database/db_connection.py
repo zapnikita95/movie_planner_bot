@@ -517,6 +517,35 @@ def init_database():
         logger.error(f"Ошибка при создании таблиц промокодов: {e}", exc_info=True)
         conn.rollback()
     
+    # Таблица для администраторов
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admins (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT UNIQUE NOT NULL,
+                added_by BIGINT NOT NULL,
+                added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                is_active BOOLEAN DEFAULT TRUE
+            )
+        ''')
+        
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_admins_user_id ON admins (user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_admins_active ON admins (is_active)')
+        
+        # Добавляем владельца бота (301810276) как администратора, если его еще нет
+        cursor.execute('SELECT id FROM admins WHERE user_id = %s', (301810276,))
+        if not cursor.fetchone():
+            cursor.execute('''
+                INSERT INTO admins (user_id, added_by, is_active)
+                VALUES (%s, %s, TRUE)
+            ''', (301810276, 301810276))
+            logger.info("Владелец бота добавлен в таблицу администраторов")
+        
+        logger.info("Таблица администраторов создана")
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблицы администраторов: {e}", exc_info=True)
+        conn.rollback()
+    
     conn.commit()
     logger.info("База данных инициализирована")
 

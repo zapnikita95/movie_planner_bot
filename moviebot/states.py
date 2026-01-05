@@ -58,3 +58,7 @@ user_refund_state = {}  # user_id: {'chat_id': int} - состояние ожи�
 user_promo_state = {}  # user_id: {'chat_id': int, 'message_id': int, 'sub_type': str, 'plan_type': str, 'period_type': str, 'group_size': int or None, 'payment_id': str, 'original_price': float} - состояние ожидания ввода промокода
 user_promo_admin_state = {}  # user_id: {} - состояние ожидания ввода промокода для /promo
 
+# Состояния админских команд
+user_unsubscribe_state = {}  # user_id: {'message_id': int} - состояние ожидания ввода ID для /unsubscribe
+user_add_admin_state = {}  # user_id: {'message_id': int} - состояние ожидания ввода ID для /add_admin
+

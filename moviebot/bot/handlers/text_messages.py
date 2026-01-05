@@ -15,6 +15,7 @@ from moviebot.states import (
     user_settings_state, user_edit_state, user_view_film_state,
     user_import_state, user_clean_state, user_cancel_subscription_state,
     user_refund_state, user_promo_state, user_promo_admin_state,
+    user_unsubscribe_state, user_add_admin_state,
     bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
@@ -816,6 +817,96 @@ def main_text_handler(message):
                 # Обрабатываем возврат
                 from moviebot.bot.handlers.stats import _process_refund
                 _process_refund(message, charge_id)
+                return
+    
+    # === user_unsubscribe_state ===
+    if user_id in user_unsubscribe_state:
+        state = user_unsubscribe_state[user_id]
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_unsubscribe_state")
+        
+        # Проверяем, что это ответ на сообщение бота
+        if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
+            target_id_str = text.strip()
+            
+            try:
+                target_id = int(target_id_str)
+                is_group = target_id < 0  # Отрицательные ID обычно группы
+                
+                # Отменяем подписку
+                from moviebot.bot.handlers.admin import cancel_subscription_by_id
+                success, result_message, count = cancel_subscription_by_id(target_id, is_group)
+                
+                if success:
+                    text_result = f"✅ {result_message}\n\n"
+                    text_result += f"ID: <code>{target_id}</code>\n"
+                    text_result += f"Тип: {'Группа' if is_group else 'Пользователь'}"
+                    
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
+                    
+                    bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                else:
+                    bot_instance.reply_to(message, f"❌ {result_message}")
+                
+                # Удаляем состояние
+                del user_unsubscribe_state[user_id]
+                return
+            except ValueError:
+                bot_instance.reply_to(message, "❌ Неверный формат ID. Введите число.")
+                return
+    
+    # === user_add_admin_state ===
+    if user_id in user_add_admin_state:
+        state = user_add_admin_state[user_id]
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_add_admin_state")
+        
+        # Проверяем, что это ответ на сообщение бота
+        if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
+            admin_id_str = text.strip()
+            
+            try:
+                admin_id = int(admin_id_str)
+                
+                # Добавляем администратора
+                from moviebot.utils.admin import add_admin
+                success, result_message = add_admin(admin_id, user_id)
+                
+                if success:
+                    # Отправляем уведомление новому администратору
+                    admin_text = "👑 <b>Вам выдан админский доступ</b>\n\n"
+                    admin_text += "Доступные команды:\n\n"
+                    admin_text += "<b>/unsubscribe</b> - Отменить подписку пользователя или группы\n"
+                    admin_text += "   Введите ID пользователя или группы в ответном сообщении\n\n"
+                    admin_text += "<b>/admin_stats</b> - Статистика бота\n"
+                    admin_text += "   Показывает статистику пользователей, групп, подписок и т.д.\n\n"
+                    admin_text += "<b>/refund_stars</b> - Возврат звезд\n"
+                    admin_text += "   Введите charge_id платежа в ответном сообщении для возврата\n\n"
+                    admin_text += "Все команды доступны только в личных сообщениях боту."
+                    
+                    try:
+                        bot_instance.send_message(admin_id, admin_text, parse_mode='HTML')
+                        logger.info(f"[ADD_ADMIN] Уведомление отправлено новому администратору: {admin_id}")
+                    except Exception as e:
+                        logger.warning(f"[ADD_ADMIN] Не удалось отправить уведомление администратору {admin_id}: {e}")
+                    
+                    text_result = f"✅ {result_message}\n\n"
+                    text_result += f"ID администратора: <code>{admin_id}</code>\n\n"
+                    text_result += "Уведомление отправлено новому администратору."
+                    
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back_to_list"))
+                    
+                    bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                else:
+                    bot_instance.reply_to(message, f"❌ {result_message}")
+                
+                # Удаляем состояние
+                del user_add_admin_state[user_id]
+                return
+            except ValueError:
+                bot_instance.reply_to(message, "❌ Неверный формат ID. Введите число.")
                 return
     
     # 2. Обработка реплаев

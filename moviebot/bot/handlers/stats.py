@@ -690,10 +690,10 @@ def register_stats_handlers(bot_instance):
     @bot_instance.message_handler(commands=['admin_stats'])
     def admin_stats_command(message):
         """Команда /admin_stats - статистика для администратора"""
-        # ID создателя бота
-        CREATOR_ID = 301810276
+        from moviebot.utils.admin import is_admin
         
-        if message.from_user.id != CREATOR_ID:
+        user_id = message.from_user.id
+        if not is_admin(user_id):
             bot_instance.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
         
