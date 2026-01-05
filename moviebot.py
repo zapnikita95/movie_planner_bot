@@ -18876,7 +18876,6 @@ def handle_payment_callback(call):
             if has_all:
                 text += "\n\n⚠️ <b>У вас уже есть подписка \"Все режимы\".</b>\n"
                 text += "Вы не можете добавить дополнительные подписки к пакетной."
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
             else:
                 # Показываем только те тарифы, которых у пользователя НЕТ
                 if 'notifications' not in existing_plan_types:
