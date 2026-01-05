@@ -50,6 +50,73 @@ def search_films_with_type(query, page=1, search_type='mixed'):
     return films, total_pages
 
 
+# Обработчик выбора типа поиска (фильм/сериал) - вынесен на уровень модуля для правильной регистрации
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
+def search_type_callback(call):
+    """Обработчик выбора типа поиска (фильм или сериал)"""
+    logger.info("=" * 80)
+    logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}")
+    try:
+        bot_instance.answer_callback_query(call.id, text="⏳ Обновляю...")
+        logger.info(f"[SEARCH TYPE] answer_callback_query вызван, callback_id={call.id}")
+        
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        search_type = call.data.split(":")[1]  # 'film' или 'series'
+        
+        logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}, chat_id={chat_id}")
+        
+        # Обновляем состояние поиска
+        if user_id in user_search_state:
+            # Обновляем только тип поиска, сохраняя существующий message_id
+            user_search_state[user_id]['search_type'] = search_type
+            logger.info(f"[SEARCH TYPE] Обновлен search_type для существующего состояния: message_id={user_search_state[user_id].get('message_id')}")
+        else:
+            # Если состояния нет, создаем новое с message_id текущего сообщения
+            user_search_state[user_id] = {
+                'chat_id': chat_id,
+                'message_id': call.message.message_id,
+                'search_type': search_type
+            }
+            logger.info(f"[SEARCH TYPE] Создано новое состояние: message_id={call.message.message_id}")
+        
+        # Обновляем кнопки, чтобы показать выбранный тип
+        markup = InlineKeyboardMarkup(row_width=2)
+        if search_type == 'film':
+            markup.add(
+                InlineKeyboardButton("🎬 Найти фильм ✅", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+            )
+        else:  # series
+            markup.add(
+                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Найти сериал ✅", callback_data="search_type:series")
+            )
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        
+        search_type_text = "фильм" if search_type == 'film' else "сериал"
+        # Обновляем сообщение с новым текстом
+        bot_instance.edit_message_text(
+            f"🔍 Укажите запрос для поиска {search_type_text}а в ответном сообщении, например: джон уик",
+            chat_id,
+            call.message.message_id,
+            reply_markup=markup
+        )
+        # Обновляем message_id в состоянии (при edit_message_text message_id не меняется, но обновляем для ясности)
+        if user_id in user_search_state:
+            user_search_state[user_id]['message_id'] = call.message.message_id
+        logger.info(f"[SEARCH TYPE] Состояние обновлено для user_id={user_id}, search_type={search_type}, message_id={call.message.message_id}")
+        logger.info(f"[SEARCH TYPE] Сообщение обновлено успешно")
+    except Exception as e:
+        logger.error(f"[SEARCH TYPE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except Exception as answer_e:
+            logger.error(f"[SEARCH TYPE] Не удалось вызвать answer_callback_query: {answer_e}")
+    finally:
+        logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
+
+
 def handle_search(message):
     """Команда /search - поиск фильмов и сериалов"""
     logger.info(f"[HANDLER] /search вызван от {message.from_user.id}")
@@ -2285,74 +2352,8 @@ def handle_kinopoisk_link(message):
         finally:
             logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 
-    # Обработчик выбора типа поиска (фильм/сериал)
-    # ВАЖНО: Этот обработчик должен быть зарегистрирован ДО других обработчиков, которые могут перехватить callback
-    logger.info(f"[REGISTER SERIES HANDLERS] Регистрация search_type_callback...")
-    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
-    def search_type_callback(call):
-        """Обработчик выбора типа поиска (фильм или сериал)"""
-        logger.info("=" * 80)
-        logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}")
-        try:
-            bot_instance.answer_callback_query(call.id, text="⏳ Обновляю...")
-            logger.info(f"[SEARCH TYPE] answer_callback_query вызван, callback_id={call.id}")
-            
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            search_type = call.data.split(":")[1]  # 'film' или 'series'
-            
-            logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}, chat_id={chat_id}")
-            
-            # Обновляем состояние поиска
-            if user_id in user_search_state:
-                # Обновляем только тип поиска, сохраняя существующий message_id
-                user_search_state[user_id]['search_type'] = search_type
-                logger.info(f"[SEARCH TYPE] Обновлен search_type для существующего состояния: message_id={user_search_state[user_id].get('message_id')}")
-            else:
-                # Если состояния нет, создаем новое с message_id текущего сообщения
-                user_search_state[user_id] = {
-                    'chat_id': chat_id,
-                    'message_id': call.message.message_id,
-                    'search_type': search_type
-                }
-                logger.info(f"[SEARCH TYPE] Создано новое состояние: message_id={call.message.message_id}")
-            
-            # Обновляем кнопки, чтобы показать выбранный тип
-            markup = InlineKeyboardMarkup(row_width=2)
-            if search_type == 'film':
-                markup.add(
-                    InlineKeyboardButton("🎬 Найти фильм ✅", callback_data="search_type:film"),
-                    InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
-                )
-            else:  # series
-                markup.add(
-                    InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
-                    InlineKeyboardButton("📺 Найти сериал ✅", callback_data="search_type:series")
-                )
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            
-            search_type_text = "фильм" if search_type == 'film' else "сериал"
-            # Обновляем сообщение с новым текстом
-            bot_instance.edit_message_text(
-                f"🔍 Укажите запрос для поиска {search_type_text}а в ответном сообщении, например: джон уик",
-                chat_id,
-                call.message.message_id,
-                reply_markup=markup
-            )
-            # Обновляем message_id в состоянии (при edit_message_text message_id не меняется, но обновляем для ясности)
-            if user_id in user_search_state:
-                user_search_state[user_id]['message_id'] = call.message.message_id
-            logger.info(f"[SEARCH TYPE] Состояние обновлено для user_id={user_id}, search_type={search_type}, message_id={call.message.message_id}")
-            logger.info(f"[SEARCH TYPE] Сообщение обновлено успешно")
-        except Exception as e:
-            logger.error(f"[SEARCH TYPE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
-            try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except Exception as answer_e:
-                logger.error(f"[SEARCH TYPE] Не удалось вызвать answer_callback_query: {answer_e}")
-        finally:
-            logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
-    
+    # Обработчик search_type_callback вынесен на уровень модуля для правильной регистрации
+    logger.info(f"[REGISTER SERIES HANDLERS] ✅ search_type_callback уже зарегистрирован на уровне модуля")
     logger.info(f"[REGISTER SERIES HANDLERS] Все обработчики сериалов зарегистрированы (включая search_type_callback)")
     logger.info(f"[REGISTER SERIES HANDLERS] ===== END =====")
     logger.info("=" * 80)
