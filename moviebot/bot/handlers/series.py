@@ -1091,11 +1091,18 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
     logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
     try:
         logger.info(f"[SHOW FILM INFO] info keys: {list(info.keys()) if info else 'None'}")
+        if not info:
+            logger.error(f"[SHOW FILM INFO] info is None или пустой!")
+            bot_instance.send_message(chat_id, "❌ Произошла ошибка: информация о фильме не получена.")
+            return
+        
         is_series = info.get('is_series', False)
         type_emoji = "📺" if is_series else "🎬"
+        logger.info(f"[SHOW FILM INFO] is_series={is_series}, type_emoji={type_emoji}")
         
         # Формируем текст описания
         text = f"{type_emoji} <b>{info['title']}</b> ({info['year'] or '—'})\n"
+        logger.info(f"[SHOW FILM INFO] Текст начала формироваться, title={info.get('title')}")
         if info.get('director'):
             text += f"<i>Режиссёр:</i> {info['director']}\n"
         if info.get('genres'):
