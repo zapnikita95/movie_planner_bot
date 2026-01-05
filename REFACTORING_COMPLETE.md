@@ -43,10 +43,14 @@
 #### Handlers (`moviebot/bot/handlers/`)
 - **`start.py`** - команда `/start`, меню
 - **`list.py`** - команда `/list`, список фильмов
-- **`seasons.py`** - команда `/seasons`, сериалы
+- **`seasons.py`** - команда `/seasons`, сериалы, обработка `seasons_kp:` callback
+  - Обработчик `seasons_kp:` добавляет сериал в базу только если пользователь отметил хотя бы одну серию
 - **`plan.py`** - команда `/plan`, планирование
 - **`payment.py`** - команда `/payment`, оплата
 - **`series.py`** - команды `/search`, `/random`, `/premieres`, `/ticket`, `/settings`, `/help`
+  - Обработчик текстовых сообщений со ссылками на Кинопоиск (`handle_kinopoisk_link`)
+  - Функция `show_film_info_without_adding()` - показывает описание с кнопками БЕЗ добавления в базу
+  - Функция `ensure_movie_in_database()` - добавляет фильм/сериал в базу, если его еще нет
 - **`rate.py`** - команда `/rate`, оценка фильмов
 - **`stats.py`** - команды `/stats`, `/total`, `/admin_stats`
 
@@ -55,6 +59,9 @@
   - Один большой обработчик `handle_payment_callback` (~3750 строк)
   - Обрабатывает: reminder_ok, active, active:personal, active:group, tariffs, subscribe, pay, pay_stars, modify, expand, upgrade_plan, cancel и т.д.
 - **`series_callbacks.py`** - все callback'и для сериалов
+  - `series_subscribe:` - подписка на новые серии (добавляет сериал в базу при нажатии)
+  - `series_unsubscribe:` - отписка от новых серий
+  - `series_track:` - отметка просмотренных серий (добавляет сериал в базу при нажатии)
 
 ### Database (`moviebot/database/`)
 

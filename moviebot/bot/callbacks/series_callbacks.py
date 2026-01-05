@@ -25,6 +25,62 @@ cursor = get_db_cursor()
 def register_series_callbacks(bot_instance):
     """Регистрирует callback handlers для сериалов"""
     
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
+    def series_track_callback(call):
+        """Обработчик для отметки сезонов/серий как просмотренных"""
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        try:
+            logger.info(f"[SERIES TRACK] ===== START: callback_id={call.id}, user_id={user_id}, chat_id={chat_id}")
+            
+            data = call.data.split(':')
+            kp_id = data[1]
+            logger.info(f"[SERIES TRACK] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
+            
+            # Проверяем доступ к функциям уведомлений
+            if not has_notifications_access(chat_id, user_id):
+                logger.warning(f"[SERIES TRACK] Нет доступа: user_id={user_id}, chat_id={chat_id}")
+                bot_instance.answer_callback_query(
+                    call.id, 
+                    "🔒 Функционал можно подключить через /payment", 
+                    show_alert=True
+                )
+                return
+            
+            # Получаем film_id (добавляем в базу, если нет)
+            from moviebot.bot.handlers.series import ensure_movie_in_database
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            info = extract_movie_info(link)
+            if not info:
+                logger.error(f"[SERIES TRACK] Не удалось получить информацию о сериале для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                return
+            
+            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            if not film_id:
+                logger.error(f"[SERIES TRACK] Не удалось добавить сериал в базу для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                return
+            
+            title = info.get('title', 'Сериал')
+            
+            # Если сериал был добавлен, отправляем уведомление
+            if was_inserted:
+                bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                logger.info(f"[SERIES TRACK] Сериал добавлен в базу: film_id={film_id}, title={title}")
+            
+            # TODO: Перенести остальную логику из moviebot.py (строки 16401-16600)
+            # Пока просто отвечаем на callback
+            bot_instance.answer_callback_query(call.id, "✅ Функция в разработке")
+            
+        except Exception as e:
+            logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_subscribe:"))
     def series_subscribe_callback(call):
         """Обработчик подписки на новые серии сериала"""
@@ -48,17 +104,27 @@ def register_series_callbacks(bot_instance):
                 )
                 return
             
-            # Получение film_id и title
-            with db_lock:
-                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                row = cursor.fetchone()
-                if row:
-                    film_id = row[0] if isinstance(row, tuple) else row.get('id')
-                    title = row[1] if isinstance(row, tuple) else row.get('title')
-                    logger.info(f"[SERIES SUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
-                else:
-                    logger.error(f"[SERIES SUBSCRIBE] Сериал не найден для kp_id={kp_id}")
-                    raise ValueError("Сериал не найден в БД")
+            # Получение film_id и title (добавляем в базу, если нет)
+            from moviebot.bot.handlers.series import ensure_movie_in_database
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            info = extract_movie_info(link)
+            if not info:
+                logger.error(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                return
+            
+            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            if not film_id:
+                logger.error(f"[SERIES SUBSCRIBE] Не удалось добавить сериал в базу для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                return
+            
+            title = info.get('title', 'Сериал')
+            
+            # Если сериал был добавлен, отправляем уведомление
+            if was_inserted:
+                bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен в базу: film_id={film_id}, title={title}")
             
             # Добавление подписки
             with db_lock:

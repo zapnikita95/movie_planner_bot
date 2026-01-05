@@ -9,6 +9,7 @@ from moviebot.database.db_operations import log_request
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.utils.helpers import has_notifications_access
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
+from moviebot.bot.bot_init import bot as bot_instance
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -301,30 +302,63 @@ def register_seasons_handlers(bot):
             logger.info(f"[SHOW SEASONS] Начало: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}")
             
             # Отвечаем на callback_query сразу для улучшения отзывчивости
-            bot.answer_callback_query(call.id)
+            bot_instance.answer_callback_query(call.id)
             
-            # Получаем информацию о сериале из базы
+            # Получаем информацию о сериале из базы (или добавляем, если пользователь отметил хотя бы одну серию)
             with db_lock:
                 cursor.execute("SELECT id, title, link FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
                 row = cursor.fetchone()
+                
                 if not row:
-                    bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
-                    return
-                
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                title = row.get('title') if isinstance(row, dict) else row[1]
-                link = row.get('link') if isinstance(row, dict) else row[2]
-                
-                # Проверяем, просмотрен ли сериал
-                cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                watched_row = cursor.fetchone()
-                watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                    # Сериал не в базе - проверяем, есть ли отметки в series_tracking
+                    # Если есть хотя бы одна отметка, добавляем в базу
+                    cursor.execute('''
+                        SELECT COUNT(*) FROM series_tracking 
+                        WHERE chat_id = %s AND kp_id = %s AND user_id = %s AND watched = TRUE
+                    ''', (chat_id, kp_id, user_id))
+                    count_row = cursor.fetchone()
+                    has_watched_episodes = count_row and (count_row.get('count', 0) if isinstance(count_row, dict) else count_row[0]) > 0
+                    
+                    if has_watched_episodes:
+                        # Есть отметки - добавляем в базу
+                        from moviebot.bot.handlers.series import ensure_movie_in_database
+                        link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                        info = extract_movie_info(link)
+                        if info:
+                            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                            if was_inserted:
+                                bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                            if film_id:
+                                # Получаем данные о сериале
+                                cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
+                                movie_row = cursor.fetchone()
+                                title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
+                                watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
+                            else:
+                                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                                return
+                        else:
+                            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                            return
+                    else:
+                        # Нет отметок - не добавляем в базу, просто показываем сообщение
+                        bot_instance.answer_callback_query(call.id, "ℹ️ Отметьте хотя бы одну серию как просмотренную, чтобы добавить сериал в базу", show_alert=True)
+                        return
+                else:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
+                    link = row.get('link') if isinstance(row, dict) else row[2]
+                    
+                    # Проверяем, просмотрен ли сериал
+                    cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                    watched_row = cursor.fetchone()
+                    watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
             
             # Получаем информацию о сериале через API
             info = extract_movie_info(link)
             
             if not info:
-                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
                 return
             
             # Формируем existing для передачи в show_film_info_with_buttons
@@ -354,20 +388,20 @@ def register_seasons_handlers(bot):
                 
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
-                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             
         except Exception as e:
             logger.error(f"[SEASONS] Ошибка: {e}", exc_info=True)
             try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot.callback_query_handler(func=lambda call: call.data == "seasons_list")
+    @bot_instance.callback_query_handler(func=lambda call: call.data == "seasons_list")
     def seasons_list_callback(call):
         """Обработчик возврата к списку сериалов"""
         try:
-            bot.answer_callback_query(call.id)
+            bot_instance.answer_callback_query(call.id)
             chat_id = call.message.chat.id
             message_id = call.message.message_id
             
