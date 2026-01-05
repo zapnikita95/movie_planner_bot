@@ -6,7 +6,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.api.kinopoisk_api import extract_movie_info, get_facts
+from moviebot.api.kinopoisk_api import get_facts
 from moviebot.states import user_plan_state
 
 logger = logging.getLogger(__name__)
@@ -29,64 +29,85 @@ def add_to_database_callback(call):
         
         logger.info(f"[ADD TO DATABASE] Пользователь {user_id} хочет добавить фильм kp_id={kp_id} в базу, chat_id={chat_id}")
         
-        # Получаем информацию о фильме/сериале
-        # Проверяем, фильм это или сериал
-        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        logger.info(f"[ADD TO DATABASE] Вызываю extract_movie_info для link={link}")
-        try:
-            info = extract_movie_info(link)
-            logger.info(f"[ADD TO DATABASE] extract_movie_info завершен, info={'получен' if info else 'None'}")
-        except Exception as api_e:
-            logger.error(f"[ADD TO DATABASE] Ошибка в extract_movie_info: {api_e}", exc_info=True)
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении информации о фильме", show_alert=True)
-            return
+        # Проверяем, есть ли фильм уже в базе
+        with db_lock:
+            cursor.execute('SELECT id, title, link, watched, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            row = cursor.fetchone()
         
-        if not info:
-            logger.error(f"[ADD TO DATABASE] Не удалось получить информацию о фильме для kp_id={kp_id}")
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-            return
-        
-        logger.info(f"[ADD TO DATABASE] Информация получена, title={info.get('title', 'N/A')}, is_series={info.get('is_series', False)}")
-        
-        # Если это сериал, используем правильную ссылку
-        if info.get('is_series') or info.get('type') == 'TV_SERIES':
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            logger.info(f"[ADD TO DATABASE] Это сериал, обновлена ссылка: {link}")
-        
-        # Добавляем фильм в базу
-        from moviebot.bot.handlers.series import ensure_movie_in_database, show_film_info_with_buttons
-        logger.info(f"[ADD TO DATABASE] Вызываю ensure_movie_in_database: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
-        try:
-            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-            logger.info(f"[ADD TO DATABASE] ensure_movie_in_database завершен: film_id={film_id}, was_inserted={was_inserted}")
-        except Exception as db_e:
-            logger.error(f"[ADD TO DATABASE] Ошибка в ensure_movie_in_database: {db_e}", exc_info=True)
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
-            return
-        if not film_id:
-            logger.error(f"[ADD TO DATABASE] Не удалось добавить фильм в базу для kp_id={kp_id}")
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
-            return
-        
-        title = info.get('title', 'Фильм')
-        
-        if was_inserted:
-            bot_instance.answer_callback_query(call.id, f"✅ {title} добавлен в базу!", show_alert=False)
-            logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title}")
+        if row:
+            # Фильм уже в базе
+            film_id = row.get('id') if isinstance(row, dict) else row[0]
+            title_db = row.get('title') if isinstance(row, dict) else row[1]
+            link = row.get('link') if isinstance(row, dict) else row[2]
+            watched = row.get('watched') if isinstance(row, dict) else row[3]
             
-            # Обновляем сообщение, показывая что фильм теперь в базе
-            # Получаем обновленные данные из базы
-            with db_lock:
-                cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
-                movie_row = cursor.fetchone()
-                title_db = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
-                watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
+            logger.info(f"[ADD TO DATABASE] Фильм уже в базе: film_id={film_id}, title={title_db}")
+            bot_instance.answer_callback_query(call.id, f"ℹ️ {title_db} уже в базе", show_alert=False)
             
-            # Показываем описание с кнопками (теперь фильм в базе)
+            # Обновляем сообщение, показывая что фильм в базе
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            # Получаем минимальную информацию из базы для обновления карточки
+            # Не делаем запрос к API - используем данные из базы
+            info = {
+                'title': title_db,
+                'year': None,  # Можно получить из базы, но не обязательно
+                'is_series': bool(row.get('is_series') if isinstance(row, dict) else row[4]) if len(row) > 4 else False
+            }
             show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title_db, watched), message_id=call.message.message_id)
+            return
+        
+        # Фильма нет в базе - добавляем с минимальной информацией из текста сообщения
+        # НЕ ДЕЛАЕМ ЗАПРОС К API - используем информацию из сообщения
+        message_text = call.message.text or ""
+        logger.info(f"[ADD TO DATABASE] Фильм не найден в базе, извлекаю информацию из сообщения")
+        
+        # Извлекаем название из текста сообщения (обычно первая строка после эмодзи)
+        import re
+        title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
+        if title_match:
+            title = title_match.group(1)
         else:
-            bot_instance.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
-            logger.info(f"[ADD TO DATABASE] Фильм уже был в базе: film_id={film_id}, title={title}")
+            # Пробуем без HTML тегов
+            title_match = re.search(r'[📺🎬]\s*(.+?)\s*\(', message_text)
+            if title_match:
+                title = title_match.group(1).strip()
+            else:
+                # Если не нашли - используем kp_id как заглушку
+                title = f"Фильм {kp_id}"
+        
+        # Определяем, фильм это или сериал по эмодзи в сообщении
+        is_series = '📺' in message_text
+        link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        logger.info(f"[ADD TO DATABASE] Добавляю фильм в базу: title={title}, is_series={is_series}, link={link}")
+        
+        # Добавляем фильм в базу с минимальной информацией
+        with db_lock:
+            cursor.execute('''
+                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
+                VALUES (%s, %s, %s, %s, NULL, NULL, NULL, NULL, NULL, %s, %s, NOW(), 'button')
+                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                RETURNING id, title, watched
+            ''', (chat_id, link, kp_id, title, 1 if is_series else 0, user_id))
+            
+            result = cursor.fetchone()
+            film_id = result.get('id') if isinstance(result, dict) else result[0]
+            title_db = result.get('title') if isinstance(result, dict) else result[1]
+            watched = result.get('watched') if isinstance(result, dict) else result[2]
+            conn.commit()
+        
+        logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title_db}")
+        bot_instance.answer_callback_query(call.id, f"✅ {title_db} добавлен в базу!", show_alert=False)
+        
+        # Обновляем сообщение, показывая что фильм теперь в базе
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        info = {
+            'title': title_db,
+            'year': None,
+            'is_series': is_series
+        }
+        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title_db, watched), message_id=call.message.message_id)
+        
     except Exception as e:
         logger.error(f"[ADD TO DATABASE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
@@ -111,8 +132,7 @@ def plan_from_added_callback(call):
         
         logger.info(f"[PLAN FROM ADDED] Пользователь {user_id} хочет запланировать фильм kp_id={kp_id}")
         
-        # Проверяем, есть ли фильм в базе, если нет - добавляем
-        from moviebot.bot.handlers.series import ensure_movie_in_database
+        # Проверяем, есть ли фильм в базе, если нет - добавляем с минимальной информацией
         
         link = None
         film_id = None
@@ -125,20 +145,44 @@ def plan_from_added_callback(call):
                 logger.info(f"[PLAN FROM ADDED] Фильм найден в базе: film_id={film_id}, link={link}")
         
         if not film_id:
-            # Фильм не в базе - добавляем
-            if not link:
-                link = f"https://kinopoisk.ru/film/{kp_id}/"
-            info = extract_movie_info(link)
-            if info:
-                film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-                if was_inserted:
-                    logger.info(f"[PLAN FROM ADDED] Фильм добавлен в базу при планировании: kp_id={kp_id}, film_id={film_id}")
-                if not film_id:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
-                    return
+            # Фильм не в базе - добавляем с минимальной информацией из сообщения
+            # НЕ ДЕЛАЕМ ЗАПРОС К API - используем информацию из сообщения
+            message_text = call.message.text or ""
+            import re
+            title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
+            if title_match:
+                title = title_match.group(1)
             else:
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                title_match = re.search(r'[📺🎬]\s*(.+?)\s*\(', message_text)
+                if title_match:
+                    title = title_match.group(1).strip()
+                else:
+                    title = f"Фильм {kp_id}"
+            
+            is_series = '📺' in message_text
+            if not link:
+                link = f"https://kinopoisk.ru/series/{kp_id}/" if is_series else f"https://kinopoisk.ru/film/{kp_id}/"
+            
+            logger.info(f"[PLAN FROM ADDED] Добавляю фильм в базу при планировании: title={title}, kp_id={kp_id}")
+            
+            # Добавляем фильм в базу с минимальной информацией
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
+                    VALUES (%s, %s, %s, %s, NULL, NULL, NULL, NULL, NULL, %s, %s, NOW(), 'plan_button')
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
+                    RETURNING id
+                ''', (chat_id, link, kp_id, title, 1 if is_series else 0, user_id))
+                
+                result = cursor.fetchone()
+                film_id = result.get('id') if isinstance(result, dict) else result[0]
+                conn.commit()
+            
+            if not film_id:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
                 return
+            
+            logger.info(f"[PLAN FROM ADDED] Фильм добавлен в базу при планировании: kp_id={kp_id}, film_id={film_id}")
         
         if not link:
             link = f"https://kinopoisk.ru/film/{kp_id}/"
