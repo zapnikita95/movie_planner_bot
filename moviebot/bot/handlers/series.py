@@ -1553,6 +1553,55 @@ def handle_kinopoisk_link(message):
                 return
             
             # Для остальных действий вызываем обычный answer_callback_query
+            # НО сначала проверяем random_events, чтобы не вызывать answer_callback_query для личных чатов
+            if action == "random_events":
+                # Проверяем, что это не личный чат
+                if is_private:
+                    bot_instance.answer_callback_query(
+                        call.id,
+                        "Раздел доступен только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
+                        show_alert=True
+                    )
+                    return
+                
+                # Для групповых чатов вызываем answer_callback_query
+                bot_instance.answer_callback_query(call.id)
+                
+                # Показываем настройку случайных событий
+                with db_lock:
+                    cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+                    row = cursor.fetchone()
+                    is_enabled = True
+                    if row:
+                        value = row.get('value') if isinstance(row, dict) else row[0]
+                        is_enabled = value == 'true'
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                if is_enabled:
+                    markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
+                else:
+                    markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
+                markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
+                markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+                
+                status_text = "включены" if is_enabled else "выключены"
+                bot_instance.edit_message_text(
+                    f"🎲 <b>Случайные события</b>\n\n"
+                    f"Текущий статус: <b>{status_text}</b>\n\n"
+                    f"Случайные события включают:\n"
+                    f"• Предложение рандомного фильма, если на выходных нет планов\n"
+                    f"• Выбор случайного участника для выбора фильма (раз в 2 недели)\n"
+                    f"• Игра в кубик для выбора фильма (раз в 2 недели)\n"
+                    f"• Напоминание о премьерах, если давно не добавляли фильмы в кино",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
+            
+            # Для остальных действий вызываем обычный answer_callback_query
             bot_instance.answer_callback_query(call.id)
             
             if action == "emoji":
@@ -1669,49 +1718,6 @@ def handle_kinopoisk_link(message):
                 logger.info(f"[SETTINGS] Импорт базы - TODO: реализовать полностью")
                 return
             
-            if action == "random_events":
-                # Проверяем, что это не личный чат
-                if is_private:
-                    bot_instance.answer_callback_query(
-                        call.id,
-                        "Раздел доступен только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
-                        show_alert=True
-                    )
-                    return
-                
-                # Показываем настройку случайных событий
-                with db_lock:
-                    cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
-                    row = cursor.fetchone()
-                    is_enabled = True
-                    if row:
-                        value = row.get('value') if isinstance(row, dict) else row[0]
-                        is_enabled = value == 'true'
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                if is_enabled:
-                    markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
-                else:
-                    markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
-                markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
-                markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
-                
-                status_text = "включены" if is_enabled else "выключены"
-                bot_instance.edit_message_text(
-                    f"🎲 <b>Случайные события</b>\n\n"
-                    f"Текущий статус: <b>{status_text}</b>\n\n"
-                    f"Случайные события включают:\n"
-                    f"• Предложение рандомного фильма, если на выходных нет планов\n"
-                    f"• Выбор случайного участника для выбора фильма (раз в 2 недели)\n"
-                    f"• Игра в кубик для выбора фильма (раз в 2 недели)\n"
-                    f"• Напоминание о премьерах, если давно не добавляли фильмы в кино",
-                    call.message.chat.id,
-                    call.message.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                return
             
             if action.startswith("random_events:example:"):
                 # Отправка примера случайного события
@@ -1903,7 +1909,7 @@ def handle_kinopoisk_link(message):
                 
                 fake_message = FakeMessage(call)
                 edit_command(fake_message)
-                bot_instance.answer_callback_query(call.id)
+                # answer_callback_query уже вызван выше
                 return
             
             if action == "clean":
@@ -1924,7 +1930,7 @@ def handle_kinopoisk_link(message):
                 
                 fake_message = FakeMessage(call)
                 clean_command(fake_message)
-                bot_instance.answer_callback_query(call.id)
+                # answer_callback_query уже вызван выше
                 return
             
             if action == "join":
@@ -1945,7 +1951,7 @@ def handle_kinopoisk_link(message):
                 
                 fake_message = FakeMessage(call)
                 join_command(fake_message)
-                bot_instance.answer_callback_query(call.id)
+                # answer_callback_query уже вызван выше
                 return
             
             if action == "back":
