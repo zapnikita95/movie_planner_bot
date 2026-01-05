@@ -299,6 +299,51 @@ def handle_rating_internal(message, rating):
             bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
             return
     
+    # Если film_id все еще не найден и нет реплая, пытаемся найти последнее сообщение бота с запросом на оценку
+    if not film_id and not message.reply_to_message:
+        logger.info(f"[RATE INTERNAL] Нет реплая, ищем последнее сообщение бота с запросом на оценку в rating_messages")
+        # Пробуем найти последнее сообщение в rating_messages для этого чата
+        # Для этого нужно получить последние сообщения бота в этом чате
+        # Но так как мы не можем получить историю, попробуем другой подход:
+        # Ищем в rating_messages все значения, которые являются film_id (числа) или kp_id (строки "kp_id:...")
+        # и проверяем, есть ли такой фильм в базе для этого чата
+        
+        # Сначала пробуем найти последний добавленный film_id из rating_messages
+        # Для этого ищем все значения в rating_messages и проверяем, есть ли такой film_id в базе
+        found_film_id = None
+        found_kp_id = None
+        
+        # Проходим по всем значениям в rating_messages
+        for msg_id, value in rating_messages.items():
+            if isinstance(value, int):
+                # Это film_id - проверяем, есть ли такой фильм в базе для этого чата
+                with db_lock:
+                    cursor.execute('SELECT id, kp_id FROM movies WHERE id = %s AND chat_id = %s', (value, chat_id))
+                    row = cursor.fetchone()
+                    if row:
+                        found_film_id = value
+                        found_kp_id = row.get('kp_id') if isinstance(row, dict) else row[1]
+                        logger.info(f"[RATE INTERNAL] Найден film_id={found_film_id} из rating_messages для chat_id={chat_id}")
+                        break
+            elif isinstance(value, str) and value.startswith("kp_id:"):
+                # Это kp_id - проверяем, есть ли такой фильм в базе для этого чата
+                kp_id_candidate = value.split(":")[1]
+                with db_lock:
+                    cursor.execute('SELECT id FROM movies WHERE kp_id = %s AND chat_id = %s', (kp_id_candidate, chat_id))
+                    row = cursor.fetchone()
+                    if row:
+                        found_film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        found_kp_id = kp_id_candidate
+                        logger.info(f"[RATE INTERNAL] Найден kp_id={found_kp_id} из rating_messages для chat_id={chat_id}, film_id={found_film_id}")
+                        break
+        
+        if found_film_id:
+            film_id = found_film_id
+            if found_kp_id:
+                kp_id = found_kp_id
+        else:
+            logger.warning(f"[RATE INTERNAL] Не найдено подходящего film_id в rating_messages для chat_id={chat_id}")
+    
     # Если film_id все еще не найден, пытаемся найти через kp_id из сообщения
     if not film_id:
         # Пытаемся извлечь kp_id из текста сообщения или ссылки

@@ -695,6 +695,49 @@ def main_text_handler(message):
         handle_view_film_reply_internal(message, state)
         return
     
+    # === Обработка оценок ПЕРЕД user_plan_state (чтобы оценка обрабатывалась даже если пользователь планирует) ===
+    if message.text:
+        text_stripped = message.text.strip()
+        # Проверяем, является ли сообщение числом от 1 до 10
+        if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
+           (len(text_stripped) == 2 and text_stripped == "10"):
+            rating = int(text_stripped)
+            logger.info(f"[MAIN TEXT HANDLER] Обнаружена оценка: {rating}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
+            
+            # Проверяем, есть ли реплай и находится ли сообщение в rating_messages
+            if message.reply_to_message:
+                reply_msg_id = message.reply_to_message.message_id
+                from moviebot.states import rating_messages
+                if reply_msg_id in rating_messages:
+                    logger.info(f"[MAIN TEXT HANDLER] ✅ Найдено сообщение в rating_messages: reply_msg_id={reply_msg_id}")
+                    try:
+                        from moviebot.bot.handlers.rate import handle_rating_internal
+                        handle_rating_internal(message, rating)
+                        logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+                    except Exception as rating_e:
+                        logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                    return
+                else:
+                    # Если реплай есть, но не в rating_messages, все равно пробуем обработать
+                    logger.info(f"[MAIN TEXT HANDLER] Реплай есть, но не в rating_messages, пробуем обработать оценку")
+                    try:
+                        from moviebot.bot.handlers.rate import handle_rating_internal
+                        handle_rating_internal(message, rating)
+                        logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+                    except Exception as rating_e:
+                        logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                    return
+            else:
+                # Если нет реплая, но это число от 1 до 10, пробуем обработать как оценку
+                logger.info(f"[MAIN TEXT HANDLER] Нет реплая, но это число от 1 до 10, пробуем обработать как оценку")
+                try:
+                    from moviebot.bot.handlers.rate import handle_rating_internal
+                    handle_rating_internal(message, rating)
+                    logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+                except Exception as rating_e:
+                    logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                return
+    
     # === user_plan_state ===
     if user_id in user_plan_state:
         state = user_plan_state[user_id]
@@ -1074,49 +1117,6 @@ def main_text_handler(message):
         handle_plan_error_reply_internal(message)
         return
     
-    # Обработка оценок (работает и с реплаем, и без реплая)
-    if message.text:
-        text_stripped = message.text.strip()
-        # Проверяем, является ли сообщение числом от 1 до 10
-        if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
-           (len(text_stripped) == 2 and text_stripped == "10"):
-            rating = int(text_stripped)
-            logger.info(f"[MAIN TEXT HANDLER] Обнаружена оценка: {rating}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
-            
-            # Проверяем, есть ли реплай и находится ли сообщение в rating_messages
-            if message.reply_to_message:
-                reply_msg_id = message.reply_to_message.message_id
-                from moviebot.states import rating_messages
-                if reply_msg_id in rating_messages:
-                    logger.info(f"[MAIN TEXT HANDLER] ✅ Найдено сообщение в rating_messages: reply_msg_id={reply_msg_id}")
-                    try:
-                        from moviebot.bot.handlers.rate import handle_rating_internal
-                        handle_rating_internal(message, rating)
-                        logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
-                    except Exception as rating_e:
-                        logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
-                    return
-                else:
-                    # Если реплай есть, но не в rating_messages, все равно пробуем обработать
-                    logger.info(f"[MAIN TEXT HANDLER] Реплай есть, но не в rating_messages, пробуем обработать оценку")
-                    try:
-                        from moviebot.bot.handlers.rate import handle_rating_internal
-                        handle_rating_internal(message, rating)
-                        logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
-                    except Exception as rating_e:
-                        logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
-                    return
-            else:
-                # Если нет реплая, но это число от 1 до 10, пробуем обработать как оценку
-                logger.info(f"[MAIN TEXT HANDLER] Нет реплая, но это число от 1 до 10, пробуем обработать как оценку")
-                try:
-                    from moviebot.bot.handlers.rate import handle_rating_internal
-                    handle_rating_internal(message, rating)
-                    logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
-                except Exception as rating_e:
-                    logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
-                return
-    
     # Реплай на сообщение бота с оценками (для списка фильмов)
     if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
         reply_text = message.reply_to_message.text or ""
@@ -1235,7 +1235,15 @@ def main_file_handler(message):
                     cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (file_id, plan_id))
                     conn.commit()
                 logger.info(f"[TICKET FILE] Билет сохранен в БД для plan_id={plan_id}, file_id={file_id}")
-                bot_instance.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿")
+                
+                # Добавляем кнопки после сохранения билета
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("✏️ Изменить время", callback_data=f"ticket_edit_time:{plan_id}"))
+                markup.add(InlineKeyboardButton("➕ Добавить еще билет к сеансу", callback_data=f"add_ticket:{plan_id}"))
+                markup.add(InlineKeyboardButton("🎟️ Вернуться к билетам", callback_data="ticket_new"))
+                
+                bot_instance.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿", reply_markup=markup)
                 # Очищаем состояние пользователя, завершаем цикл работы с билетами
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
@@ -1245,7 +1253,13 @@ def main_file_handler(message):
         # Сохраняем file_id для последующей обработки
         file_id = message.photo[-1].file_id if message.photo else message.document.file_id
         state['file_id'] = file_id
-        bot_instance.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿")
+        
+        # Добавляем кнопки после получения файла
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🎟️ Вернуться к билетам", callback_data="ticket_new"))
+        
+        bot_instance.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿", reply_markup=markup)
         # Очищаем состояние пользователя, завершаем цикл работы с билетами
         if user_id in user_ticket_state:
             del user_ticket_state[user_id]
