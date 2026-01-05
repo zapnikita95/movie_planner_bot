@@ -209,105 +209,155 @@ else:
         except Exception as e:
             logger.warning(f"Ошибка при подготовке к polling: {e}")
     
-    # Запуск polling с обработкой ошибок
-    # ВАЖНО: НЕ используем бесконечный цикл, чтобы избежать конфликтов при ошибке 409
-    # Если возникает 409, это означает, что уже запущен другой экземпляр polling
-    # и нужно остановить текущий процесс, а не пытаться запустить новый
+    # Запуск polling с автоматическим перезапуском при ошибке 409
+    # ВАЖНО: При ошибке 409 нужно правильно остановить старый polling перед запуском нового
+    # чтобы избежать конфликта нескольких экземпляров
     
-    try:
-        # Подготовка к запуску
-        prepare_for_polling()
-        
-        logger.info("✅ Запуск polling...")
-        logger.info(f"✅ Используется правильный entry point: moviebot.main")
-        
-        # Запускаем polling
-        # none_stop=True означает, что polling будет продолжать работать даже при ошибках
-        # но это НЕ означает, что он будет перезапускаться при 409
-        bot.polling(none_stop=True, interval=0, timeout=20, long_polling_timeout=20)
-        
-        # Если polling завершился без ошибки (например, KeyboardInterrupt), выходим
-        logger.info("Polling завершен")
-        
-    except KeyboardInterrupt:
-        logger.info("Остановка бота по запросу пользователя...")
-        scheduler.shutdown()
-        if watchdog:
-            watchdog.stop()
-    except ApiTelegramException as e:
-        error_code = getattr(e, 'error_code', None)
-        error_str = str(e)
-        
-        # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
-        if error_code == 409 or "409" in error_str or "Conflict" in error_str or "terminated by other getUpdates" in error_str:
-            logger.error(f"❌ ОШИБКА 409: Обнаружен конфликт - запущено несколько экземпляров бота!")
-            logger.error(f"   Возможные причины:")
-            logger.error(f"   1. Запущен другой экземпляр бота (проверьте процессы)")
-            logger.error(f"   2. Активный webhook конфликтует с polling (проверьте через get_webhook_info)")
-            logger.error(f"   3. Старый процесс бота не завершился полностью")
-            logger.error(f"")
-            logger.error(f"   РЕШЕНИЕ:")
-            logger.error(f"   - Остановите ВСЕ процессы бота")
-            logger.error(f"   - Убедитесь, что webhook удален: bot.remove_webhook()")
-            logger.error(f"   - Подождите 5-10 секунд")
-            logger.error(f"   - Запустите бота заново")
-            logger.error(f"")
-            logger.error(f"   Бот завершает работу для предотвращения конфликта.")
+    max_retries = 5  # Максимальное количество попыток перезапуска
+    retry_count = 0
+    base_delay = 5  # Базовая задержка между попытками (секунды)
+    
+    while retry_count < max_retries:
+        try:
+            # Подготовка к запуску
+            prepare_for_polling()
             
-            # Пытаемся остановить polling перед завершением
+            logger.info(f"✅ Запуск polling (попытка {retry_count + 1}/{max_retries})...")
+            logger.info(f"✅ Используется правильный entry point: moviebot.main")
+            
+            # Запускаем polling
+            # none_stop=True означает, что polling будет продолжать работать даже при ошибках
+            bot.polling(none_stop=True, interval=0, timeout=20, long_polling_timeout=20)
+            
+            # Если polling завершился без ошибки (например, KeyboardInterrupt), выходим
+            logger.info("Polling завершен нормально")
+            break
+            
+        except KeyboardInterrupt:
+            logger.info("Остановка бота по запросу пользователя...")
             try:
                 bot.stop_polling()
-                logger.info("Polling остановлен")
             except:
                 pass
-            
             scheduler.shutdown()
             if watchdog:
                 watchdog.stop()
-            sys.exit(1)  # Завершаем процесс, чтобы не создавать конфликт
-        else:
-            # Другие ошибки Telegram API - логируем и пробрасываем дальше
-            logger.error(f"❌ Telegram API ошибка: {e}", exc_info=True)
-            logger.error(f"   error_code={error_code}, result_json={getattr(e, 'result_json', {})}")
-            scheduler.shutdown()
-            if watchdog:
-                watchdog.stop()
-            raise
+            break
             
-    except Exception as e:
-        error_str = str(e)
-        # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
-        if "409" in error_str or "Conflict" in error_str or "terminated by other getUpdates" in error_str:
-            logger.error(f"❌ ОШИБКА 409: Обнаружен конфликт - запущено несколько экземпляров бота!")
-            logger.error(f"   Возможные причины:")
-            logger.error(f"   1. Запущен другой экземпляр бота (проверьте процессы)")
-            logger.error(f"   2. Активный webhook конфликтует с polling (проверьте через get_webhook_info)")
-            logger.error(f"   3. Старый процесс бота не завершился полностью")
-            logger.error(f"")
-            logger.error(f"   РЕШЕНИЕ:")
-            logger.error(f"   - Остановите ВСЕ процессы бота")
-            logger.error(f"   - Убедитесь, что webhook удален: bot.remove_webhook()")
-            logger.error(f"   - Подождите 5-10 секунд")
-            logger.error(f"   - Запустите бота заново")
-            logger.error(f"")
-            logger.error(f"   Бот завершает работу для предотвращения конфликта.")
+        except ApiTelegramException as e:
+            error_code = getattr(e, 'error_code', None)
+            error_str = str(e)
             
-            # Пытаемся остановить polling перед завершением
-            try:
-                bot.stop_polling()
-                logger.info("Polling остановлен")
-            except:
-                pass
-            
-            scheduler.shutdown()
-            if watchdog:
-                watchdog.stop()
-            sys.exit(1)  # Завершаем процесс, чтобы не создавать конфликт
-        else:
-            # Другие ошибки - логируем и пробрасываем дальше
-            logger.error(f"❌ Критическая ошибка при запуске polling: {e}", exc_info=True)
-            scheduler.shutdown()
-            if watchdog:
-                watchdog.stop()
-            raise
+            # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
+            if error_code == 409 or "409" in error_str or "Conflict" in error_str or "terminated by other getUpdates" in error_str:
+                retry_count += 1
+                logger.error(f"❌ ОШИБКА 409 (попытка {retry_count}/{max_retries}): Обнаружен конфликт!")
+                logger.error(f"   Возможные причины:")
+                logger.error(f"   1. Активный webhook конфликтует с polling")
+                logger.error(f"   2. Старый процесс polling не завершился полностью")
+                logger.error(f"   3. Другой экземпляр бота запущен")
+                
+                # КРИТИЧЕСКИ ВАЖНО: Останавливаем текущий polling перед повторной попыткой
+                try:
+                    logger.info("Останавливаю текущий polling...")
+                    bot.stop_polling()
+                    logger.info("Polling остановлен")
+                except Exception as stop_e:
+                    logger.warning(f"Не удалось остановить polling явно: {stop_e}")
+                
+                # Увеличиваем задержку с каждой попыткой
+                delay = base_delay * retry_count
+                logger.info(f"⏳ Ожидание {delay} секунд перед повторной попыткой (для полной остановки старого polling)...")
+                time.sleep(delay)
+                
+                # Агрессивная очистка webhook перед повторной попыткой
+                try:
+                    bot.remove_webhook()
+                    time.sleep(2)
+                    webhook_info = bot.get_webhook_info()
+                    if webhook_info.url:
+                        logger.warning(f"⚠️ Webhook все еще активен: {webhook_info.url}, удаляю еще раз...")
+                        bot.remove_webhook()
+                        time.sleep(3)
+                except Exception as webhook_e:
+                    logger.warning(f"Ошибка при очистке webhook: {webhook_e}")
+                
+                if retry_count >= max_retries:
+                    logger.error(f"❌ Достигнуто максимальное количество попыток ({max_retries}). Бот завершает работу.")
+                    scheduler.shutdown()
+                    if watchdog:
+                        watchdog.stop()
+                    sys.exit(1)
+                else:
+                    logger.info(f"🔄 Повторная попытка запуска polling...")
+                    continue  # Продолжаем цикл
+            else:
+                # Другие ошибки Telegram API - логируем и пробрасываем дальше
+                logger.error(f"❌ Telegram API ошибка: {e}", exc_info=True)
+                logger.error(f"   error_code={error_code}, result_json={getattr(e, 'result_json', {})}")
+                try:
+                    bot.stop_polling()
+                except:
+                    pass
+                scheduler.shutdown()
+                if watchdog:
+                    watchdog.stop()
+                raise
+                
+        except Exception as e:
+            error_str = str(e)
+            # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
+            if "409" in error_str or "Conflict" in error_str or "terminated by other getUpdates" in error_str:
+                retry_count += 1
+                logger.error(f"❌ ОШИБКА 409 (попытка {retry_count}/{max_retries}): Обнаружен конфликт!")
+                logger.error(f"   Возможные причины:")
+                logger.error(f"   1. Активный webhook конфликтует с polling")
+                logger.error(f"   2. Старый процесс polling не завершился полностью")
+                logger.error(f"   3. Другой экземпляр бота запущен")
+                
+                # КРИТИЧЕСКИ ВАЖНО: Останавливаем текущий polling перед повторной попыткой
+                try:
+                    logger.info("Останавливаю текущий polling...")
+                    bot.stop_polling()
+                    logger.info("Polling остановлен")
+                except Exception as stop_e:
+                    logger.warning(f"Не удалось остановить polling явно: {stop_e}")
+                
+                # Увеличиваем задержку с каждой попыткой
+                delay = base_delay * retry_count
+                logger.info(f"⏳ Ожидание {delay} секунд перед повторной попыткой (для полной остановки старого polling)...")
+                time.sleep(delay)
+                
+                # Агрессивная очистка webhook перед повторной попыткой
+                try:
+                    bot.remove_webhook()
+                    time.sleep(2)
+                    webhook_info = bot.get_webhook_info()
+                    if webhook_info.url:
+                        logger.warning(f"⚠️ Webhook все еще активен: {webhook_info.url}, удаляю еще раз...")
+                        bot.remove_webhook()
+                        time.sleep(3)
+                except Exception as webhook_e:
+                    logger.warning(f"Ошибка при очистке webhook: {webhook_e}")
+                
+                if retry_count >= max_retries:
+                    logger.error(f"❌ Достигнуто максимальное количество попыток ({max_retries}). Бот завершает работу.")
+                    scheduler.shutdown()
+                    if watchdog:
+                        watchdog.stop()
+                    sys.exit(1)
+                else:
+                    logger.info(f"🔄 Повторная попытка запуска polling...")
+                    continue  # Продолжаем цикл
+            else:
+                # Другие ошибки - логируем и пробрасываем дальше
+                logger.error(f"❌ Критическая ошибка при запуске polling: {e}", exc_info=True)
+                try:
+                    bot.stop_polling()
+                except:
+                    pass
+                scheduler.shutdown()
+                if watchdog:
+                    watchdog.stop()
+                raise
 
