@@ -553,34 +553,8 @@ def create_web_app(bot_instance):
                     
                     # Старый блок отправки подробного уведомления удален - теперь используется send_successful_payment_notification
                     
-                    # Добавляем информацию о чеке, если он был создан
-                            if check_url:
-                                text += f"📄 <b>Чек от самозанятого:</b>\n"
-                                text += f"{check_url}\n"
-                                if pdf_url:
-                                    text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
-                            
-                            text += "\nПриятного просмотра!"
-                            
-                            # Отправляем сообщение для личной подписки
-                            logger.info(f"[YOOKASSA] ===== НАЧАЛО ОТПРАВКИ УВЕДОМЛЕНИЯ =====")
-                            logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в chat_id={target_chat_id}, user_id={user_id}")
-                            logger.info(f"[YOOKASSA] Текст сообщения (первые 500 символов): {text[:500]}")
-                            try:
-                                result = bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
-                                logger.info(f"[YOOKASSA] ✅✅✅ УВЕДОМЛЕНИЕ УСПЕШНО ОТПРАВЛЕНО! ✅✅✅")
-                                logger.info(f"[YOOKASSA] message_id={result.message_id if result else 'None'}")
-                                logger.info(f"[YOOKASSA] chat_id={result.chat.id if result and hasattr(result, 'chat') else 'None'}")
-                                logger.info(f"[YOOKASSA] ===== ОТПРАВКА УВЕДОМЛЕНИЯ ЗАВЕРШЕНА УСПЕШНО =====")
-                            except Exception as send_error:
-                                logger.error(f"[YOOKASSA] ❌❌❌ ОШИБКА ОТПРАВКИ УВЕДОМЛЕНИЯ! ❌❌❌")
-                                logger.error(f"[YOOKASSA] Тип ошибки: {type(send_error).__name__}")
-                                logger.error(f"[YOOKASSA] Сообщение ошибки: {str(send_error)}")
-                                logger.error(f"[YOOKASSA] Traceback:", exc_info=True)
-                                # Не прерываем выполнение, просто логируем ошибку
-                                logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения")
-                            
-                        elif subscription_type == 'group':
+                    # Обработка групповых подписок
+                    if subscription_type == 'group':
                             # Для групповой подписки отправляем в группу и в личку
                             from moviebot.database.db_operations import get_active_group_users, get_subscription_members
                             
