@@ -1726,7 +1726,49 @@ def update_dice_game_message(chat_id, game_state, message_id):
         remaining_participants = [uid for uid in all_participants if uid not in participants_who_threw]
         remaining_count = len(remaining_participants)
         
-        if remaining_count > 0:
+        # Проверяем, все ли участники бросили и получили результаты
+        all_threw = remaining_count == 0
+        all_have_results = len(participants_without_results) == 0 and len(participants_with_results) > 0
+        
+        if all_threw and all_have_results:
+            # Все бросили и получили результаты - определяем победителя
+            participants_with_values_dict = {uid: p['value'] for uid, p in game_state.get('participants', {}).items() if 'value' in p}
+            if participants_with_values_dict:
+                max_value = max(participants_with_values_dict.values())
+                winners = [uid for uid, val in participants_with_values_dict.items() if val == max_value]
+                
+                if len(winners) == 1:
+                    # Есть победитель
+                    winner_id = winners[0]
+                    winner_info = game_state['participants'][winner_id]
+                    winner_name = winner_info.get('username', 'участник')
+                    
+                    # Формируем имя пользователя для отображения
+                    try:
+                        user_info = bot.get_chat_member(chat_id, winner_id)
+                        user_display = user_info.user.first_name or winner_name
+                    except:
+                        user_display = winner_name if winner_name and not winner_name.startswith('user_') else "участник"
+                    
+                    text += f"🏆 <b>Победитель: {user_display}</b> (выбросил {max_value})\n\n"
+                    text += f"🎬 {user_display} выбирает фильм для вашей компании!\n"
+                elif len(winners) > 1:
+                    # Ничья
+                    winner_names = []
+                    for winner_id in winners:
+                        winner_info = game_state['participants'][winner_id]
+                        winner_name = winner_info.get('username', 'участник')
+                        try:
+                            user_info = bot.get_chat_member(chat_id, winner_id)
+                            user_display = user_info.user.first_name or winner_name
+                        except:
+                            user_display = winner_name if winner_name and not winner_name.startswith('user_') else "участник"
+                        winner_names.append(user_display)
+                    text += f"🤝 <b>Ничья!</b> У {len(winners)} участников выпало {max_value}:\n"
+                    for name in winner_names:
+                        text += f"• {name}\n"
+                    text += "\nПерекидываем кубик!\n"
+        elif remaining_count > 0:
             text += f"⏳ Осталось бросить кубик: <b>{remaining_count}</b> участник(ов)\n\n"
         elif len(participants_without_results) > 0:
             text += f"⏳ Ожидаем результаты бросков...\n\n"
@@ -1892,68 +1934,80 @@ def handle_dice_result(message):
             if 'message_id' in game_state:
                 update_dice_game_message(chat_id, game_state, game_state['message_id'])
             
-            # Проверяем, все ли участники бросили кубик
+            # Проверяем, все ли участники бросили кубик и получили результаты
             with db_lock:
-                cursor.execute('''
-                    SELECT DISTINCT user_id 
-                    FROM stats 
-                    WHERE chat_id = %s 
-                    AND timestamp >= %s
-                ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat()))
+                if BOT_ID:
+                    cursor.execute('''
+                        SELECT DISTINCT user_id 
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND timestamp >= %s
+                        AND user_id != %s
+                    ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat(), BOT_ID))
+                else:
+                    cursor.execute('''
+                        SELECT DISTINCT user_id 
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND timestamp >= %s
+                    ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat()))
                 all_participants = [row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()]
             
             # Проверяем, есть ли значения у всех участников
             participants_with_values = [uid for uid, p in game_state['participants'].items() if 'value' in p]
+            participants_who_threw = set(game_state.get('participants', {}).keys())
+            remaining_participants = [uid for uid in all_participants if uid not in participants_who_threw]
             
-            # Ждем 5 секунд после последнего броска (чтобы кубик успел остановиться) или если все участники бросили
-            # Также проверяем, что прошло достаточно времени с начала игры (минимум 5 секунд)
-            time_since_start = (datetime.now(plans_tz) - game_state['start_time']).total_seconds()
+            # Проверяем, все ли бросили и получили результаты
+            all_threw = len(remaining_participants) == 0
+            all_have_results = len(participants_with_values) == len(game_state.get('participants', {})) and len(participants_with_values) > 0
+            
+            # Ждем 3 секунды после последнего броска (чтобы кубик успел остановиться)
             last_dice_time = game_state.get('last_dice_time', game_state['start_time'])
             time_since_last_dice = (datetime.now(plans_tz) - last_dice_time).total_seconds()
             
-            if (len(participants_with_values) >= len(all_participants) and time_since_last_dice >= 5) or time_since_start > 300:
-                # Определяем победителя
+            if all_threw and all_have_results and time_since_last_dice >= 3:
+                # Все бросили и получили результаты - определяем победителя
                 participants_with_values_dict = {uid: p['value'] for uid, p in game_state['participants'].items() if 'value' in p}
                 if participants_with_values_dict:
                     max_value = max(participants_with_values_dict.values())
                     winners = [uid for uid, val in participants_with_values_dict.items() if val == max_value]
                     
                     if len(winners) == 1:
-                        # Есть победитель
+                        # Есть победитель - обновляем сообщение с итогами
                         winner_id = winners[0]
                         winner_info = game_state['participants'][winner_id]
                         winner_name = winner_info.get('username', 'участник')
                         
                         # Формируем имя пользователя для отображения
-                        if winner_name and winner_name.startswith('@'):
-                            user_display = winner_name
-                        elif winner_name:
-                            try:
-                                user_info = bot.get_chat_member(chat_id, winner_id)
-                                user_display = user_info.user.first_name or winner_name
-                            except:
-                                user_display = winner_name
-                        else:
-                            try:
-                                user_info = bot.get_chat_member(chat_id, winner_id)
-                                user_display = user_info.user.first_name or "участник"
-                            except:
-                                user_display = "участник"
+                        try:
+                            user_info = bot.get_chat_member(chat_id, winner_id)
+                            user_display = user_info.user.first_name or winner_name
+                        except:
+                            user_display = winner_name if winner_name and not winner_name.startswith('user_') else "участник"
                         
-                        # Отправляем сообщение победителю
+                        # Обновляем сообщение с итогами (победитель уже будет показан в update_dice_game_message)
+                        if 'message_id' in game_state:
+                            update_dice_game_message(chat_id, game_state, game_state['message_id'])
+                        
+                        # Отправляем отдельное сообщение победителю
                         markup = InlineKeyboardMarkup(row_width=1)
                         markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
                         bot.send_message(
                             chat_id,
-                            f"<b>{user_display}</b> выбросил больше на костях. Можете выбрать фильм для вашей компании!",
+                            f"🏆 <b>{user_display}</b> выбросил больше всех ({max_value})! Выбирайте фильм для вашей компании!",
                             reply_markup=markup,
                             parse_mode='HTML'
                         )
                         
                         # Удаляем состояние игры
-                        del dice_game_state[chat_id]
+                        if chat_id in dice_game_state:
+                            del dice_game_state[chat_id]
                     elif len(winners) > 1:
-                        # Ничья - перекидываем
+                        # Ничья - обновляем сообщение и перекидываем
+                        if 'message_id' in game_state:
+                            update_dice_game_message(chat_id, game_state, game_state['message_id'])
+                        
                         bot.send_message(
                             chat_id,
                             f"🤝 Ничья! У {len(winners)} участников выпало {max_value}. Перекидываем кубик!",
@@ -1963,6 +2017,7 @@ def handle_dice_result(message):
                         game_state['participants'] = {}
                         game_state['start_time'] = datetime.now(plans_tz)
                         game_state['dice_messages'] = {}
+                        game_state['last_dice_time'] = datetime.now(plans_tz)
     except Exception as e:
         logger.error(f"[RANDOM EVENTS] Ошибка в handle_dice_result: {e}", exc_info=True)
 
