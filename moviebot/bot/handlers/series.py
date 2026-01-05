@@ -241,6 +241,7 @@ def ticket_command(message):
             
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
             return

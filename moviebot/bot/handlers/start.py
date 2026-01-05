@@ -153,6 +153,7 @@ def register_start_handlers(bot):
                     
                     markup = InlineKeyboardMarkup()
                     markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+                    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                     
                     bot.edit_message_text(
                         text,
@@ -174,6 +175,7 @@ def register_start_handlers(bot):
                 
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                 
                 bot.edit_message_text(
                     text,
