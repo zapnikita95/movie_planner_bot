@@ -68,11 +68,12 @@ def register_payment_handlers(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("payment:") and (
         call.data == "payment:active" or 
         call.data == "payment:tariffs" or 
-        call.data.startswith("payment:back") or 
+        call.data == "payment:back" or 
+        call.data == "payment:back_from_promo" or
         call.data.startswith("payment:cancel") or 
         call.data.startswith("payment:reminder_ok") or
         call.data.startswith("payment:modify")
-        # payment:subscribe обрабатывается в payment_callbacks.py
+        # payment:subscribe, payment:promo, payment:back_from_promo обрабатываются в payment_callbacks.py
     ))
     def handle_payment_menu_callback(call):
         """Обработчик callback для меню оплаты (active, tariffs, back, cancel)"""
@@ -178,6 +179,14 @@ def register_payment_handlers(bot_instance):
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
+            
+            if action == "back_from_promo":
+                # Возврат к сообщению с кнопками оплаты после промокода
+                # Обработка полностью в payment_callbacks.py, здесь только отвечаем на callback
+                # чтобы избежать предупреждения
+                bot_instance.answer_callback_query(call.id)
+                # Передаем управление в payment_callbacks.py (он обработает этот callback)
                 return
             
             # TODO: Добавить обработку остальных действий в payment_callbacks.py:

@@ -671,8 +671,19 @@ def main_text_handler(message):
                 # Добавляем пояснение про эмодзи
                 results_text += "\n\n🎬 - фильм\n📺 - сериал"
                 
-                bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
-                logger.info(f"✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов")
+                # Проверяем длину сообщения (лимит Telegram - 4096 символов)
+                if len(results_text) > 4096:
+                    logger.warning(f"[SEARCH] Сообщение слишком длинное ({len(results_text)} символов), обрезаем")
+                    # Обрезаем текст и оставляем только первые результаты
+                    max_length = 4000  # Оставляем запас для HTML-тегов
+                    results_text = results_text[:max_length] + "\n\n... (показаны не все результаты)"
+                
+                try:
+                    bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов")
+                except Exception as e:
+                    logger.error(f"[SEARCH] Ошибка отправки результатов поиска: {e}", exc_info=True)
+                    bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
             else:
                 logger.warning(f"[SEARCH] Пустой запрос от пользователя {user_id}")
             return
@@ -999,7 +1010,8 @@ def main_text_handler(message):
                 
                 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                 markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:back_from_promo:{state['sub_type']}:{state.get('group_size', '')}:{state['plan_type']}:{state['period_type']}:{state.get('payment_id', '')}:{state['original_price']}"))
+                # Используем короткий callback_data (данные уже в user_promo_state)
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
                 
                 bot_instance.reply_to(message, error_text, reply_markup=markup)
                 # Не удаляем состояние, чтобы пользователь мог попробовать другой промокод
