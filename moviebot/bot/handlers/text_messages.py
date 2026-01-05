@@ -1312,11 +1312,11 @@ def main_text_handler(message):
                 markup = InlineKeyboardMarkup(row_width=1)
                 
                 # Всегда создаем платеж YooKassa с учетом скидки, если YooKassa доступна
-                from moviebot.config import YOOKASSA_AVAILABLE, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+                from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
                 import os
                 import uuid as uuid_module
                 
-                if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
+                if YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
                     # Создаем новый платеж YooKassa с учетом скидки
                     from yookassa import Configuration, Payment
                     
