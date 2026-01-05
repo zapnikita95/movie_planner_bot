@@ -478,6 +478,7 @@ def register_series_handlers(bot_instance):
                     logger.info(f"[VIEW FILM REPLY] Пользователь {user_id} в user_view_film_state, chat_id={chat_id}")
                     
                     # Обработка ответного сообщения для просмотра фильма
+                    from moviebot.bot.handlers.list import handle_view_film_reply_internal
                     handle_view_film_reply_internal(message, state)
                     return
                 
