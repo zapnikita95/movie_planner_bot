@@ -1198,24 +1198,25 @@ def check_settings_message(message):
     if user_id not in user_settings_state:
         return False
     
-    if not message.text or not message.text.strip():
-        return False
-    
     state = user_settings_state.get(user_id)
     
     # Проверяем различные типы ожиданий в настройках
     if state.get('waiting_notify_time'):
         # Ожидаем время в формате ЧЧ:ММ
+        if not message.text or not message.text.strip():
+            return False
         time_str = message.text.strip()
         if ':' in time_str:
             return True
     
     if state.get('adding_reactions'):
-        # Ожидаем эмодзи
+        # Ожидаем эмодзи - может быть только эмодзи, без текста
         if message.reply_to_message:
             settings_msg_id = state.get('settings_msg_id')
             if settings_msg_id and message.reply_to_message.message_id == settings_msg_id:
-                return True
+                # Проверяем, что есть текст (даже если только эмодзи)
+                if message.text and message.text.strip():
+                    return True
     
     return False
 
