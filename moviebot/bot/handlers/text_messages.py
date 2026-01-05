@@ -198,10 +198,14 @@ def handle_rate_list_reply(message):
         logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии промокода (promo={user_id in user_promo_state}, promo_admin={user_id in user_promo_admin_state}), передаем в main_text_handler")
         return
     
+    # ВАЖНО: Проверяем user_search_state ПЕРВЫМ, так как поиск должен обрабатываться в main_text_handler
+    if user_id in user_search_state:
+        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии поиска, передаем в main_text_handler")
+        return
+    
     # Проверяем остальные состояния - ВАЖНО: проверяем ДО обработки, чтобы не перехватывать сообщения из состояний
     if (user_id in user_plan_state or 
         user_id in user_ticket_state or
-        user_id in user_search_state or
         user_id in user_settings_state or
         user_id in user_edit_state or
         user_id in user_view_film_state or
@@ -211,7 +215,7 @@ def handle_rate_list_reply(message):
         user_id in user_refund_state or
         user_id in user_unsubscribe_state or
         user_id in user_add_admin_state):
-        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии (plan={user_id in user_plan_state}, search={user_id in user_search_state}, ticket={user_id in user_ticket_state}), передаем в main_text_handler")
+        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии (plan={user_id in user_plan_state}, ticket={user_id in user_ticket_state}), передаем в main_text_handler")
         return
     
     # Обрабатываем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages

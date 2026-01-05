@@ -2301,13 +2301,21 @@ def handle_kinopoisk_link(message):
             
             logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}, chat_id={chat_id}")
             
-            # Обновляем состояние поиска
+            # Обновляем или создаем состояние поиска
             logger.info(f"[SEARCH TYPE] Проверка состояния: user_id={user_id}, user_search_state keys={list(user_search_state.keys())}")
             if user_id in user_search_state:
                 # Обновляем только тип поиска, сохраняя существующий message_id и chat_id
                 old_state = user_search_state[user_id].copy()
                 user_search_state[user_id]['search_type'] = search_type
                 # Обновляем message_id на случай, если пользователь нажал кнопку в другом сообщении
+            else:
+                # Если состояния нет, создаем его
+                user_search_state[user_id] = {
+                    'chat_id': chat_id,
+                    'message_id': call.message.message_id,
+                    'search_type': search_type
+                }
+                logger.info(f"[SEARCH TYPE] Состояние поиска СОЗДАНО для user_id={user_id}: {user_search_state[user_id]}")
                 user_search_state[user_id]['message_id'] = call.message.message_id
                 logger.info(f"[SEARCH TYPE] ✅ Обновлен search_type для существующего состояния: {old_state} -> {user_search_state[user_id]}")
             else:
