@@ -511,14 +511,8 @@ def handle_settings_callback(call):
                     pass
                 return
             
-            # Удаляем сообщение перед вызовом команды (как в рабочей версии)
-            try:
-                bot_instance.delete_message(chat_id, call.message.message_id)
-                logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено")
-            except Exception as e:
-                logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение: {e}")
-            
             # Создаем полноценный fake_message с всеми необходимыми атрибутами
+            # НЕ удаляем сообщение до вызова команды, чтобы reply_to работал
             class FakeMessage:
                 def __init__(self, call):
                     self.message_id = call.message.message_id
@@ -528,21 +522,26 @@ def handle_settings_callback(call):
                     self.text = '/edit'
                     # Сохраняем оригинальное сообщение для reply_to
                     self._original_message = call.message
-                
-                def reply_to(self, text, **kwargs):
-                    # reply_to должен отправлять сообщение с reply_to_message_id
-                    # Но так как мы удалили сообщение, просто отправляем в чат
-                    # Убираем reply_to_message_id из kwargs, если он есть
-                    kwargs.pop('reply_to_message_id', None)
-                    return bot_instance.send_message(self.chat.id, text, **kwargs)
             
             try:
                 fake_message = FakeMessage(call)
                 logger.info(f"[SETTINGS CALLBACK] Вызов edit_command для user_id={user_id}, chat_id={chat_id}")
                 edit_command(fake_message)
                 logger.info(f"[SETTINGS CALLBACK] edit_command успешно выполнен")
+                
+                # Удаляем сообщение после успешного выполнения команды
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено после выполнения команды")
+                except Exception as e:
+                    logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение после выполнения: {e}")
             except Exception as e:
                 logger.error(f"[SETTINGS CALLBACK] Ошибка при вызове edit_command: {e}", exc_info=True)
+                # Удаляем сообщение даже при ошибке
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
                 try:
                     bot_instance.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /edit. Попробуйте вызвать её напрямую: /edit")
                 except:
@@ -574,14 +573,8 @@ def handle_settings_callback(call):
                     pass
                 return
             
-            # Удаляем сообщение перед вызовом команды (как в рабочей версии)
-            try:
-                bot_instance.delete_message(chat_id, call.message.message_id)
-                logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено")
-            except Exception as e:
-                logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение: {e}")
-            
             # Создаем полноценный fake_message с всеми необходимыми атрибутами
+            # НЕ удаляем сообщение до вызова команды, чтобы reply_to работал
             class FakeMessage:
                 def __init__(self, call):
                     self.message_id = call.message.message_id
@@ -591,21 +584,26 @@ def handle_settings_callback(call):
                     self.text = '/clean'
                     # Сохраняем оригинальное сообщение для reply_to
                     self._original_message = call.message
-                
-                def reply_to(self, text, **kwargs):
-                    # reply_to должен отправлять сообщение с reply_to_message_id
-                    # Но так как мы удалили сообщение, просто отправляем в чат
-                    # Убираем reply_to_message_id из kwargs, если он есть
-                    kwargs.pop('reply_to_message_id', None)
-                    return bot_instance.send_message(self.chat.id, text, **kwargs)
             
             try:
                 fake_message = FakeMessage(call)
                 logger.info(f"[SETTINGS CALLBACK] Вызов clean_command для user_id={user_id}, chat_id={chat_id}")
                 clean_command(fake_message)
                 logger.info(f"[SETTINGS CALLBACK] clean_command успешно выполнен")
+                
+                # Удаляем сообщение после успешного выполнения команды
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено после выполнения команды")
+                except Exception as e:
+                    logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение после выполнения: {e}")
             except Exception as e:
                 logger.error(f"[SETTINGS CALLBACK] Ошибка при вызове clean_command: {e}", exc_info=True)
+                # Удаляем сообщение даже при ошибке
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
                 try:
                     bot_instance.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /clean. Попробуйте вызвать её напрямую: /clean")
                 except:
@@ -637,14 +635,8 @@ def handle_settings_callback(call):
                     pass
                 return
             
-            # Удаляем сообщение перед вызовом команды (как в рабочей версии)
-            try:
-                bot_instance.delete_message(chat_id, call.message.message_id)
-                logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено")
-            except Exception as e:
-                logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение: {e}")
-            
             # Создаем полноценный fake_message с всеми необходимыми атрибутами
+            # НЕ удаляем сообщение до вызова команды, чтобы reply_to работал
             class FakeMessage:
                 def __init__(self, call):
                     self.message_id = call.message.message_id
@@ -654,21 +646,26 @@ def handle_settings_callback(call):
                     self.text = '/join'
                     # Сохраняем оригинальное сообщение для reply_to
                     self._original_message = call.message
-                
-                def reply_to(self, text, **kwargs):
-                    # reply_to должен отправлять сообщение с reply_to_message_id
-                    # Но так как мы удалили сообщение, просто отправляем в чат
-                    # Убираем reply_to_message_id из kwargs, если он есть
-                    kwargs.pop('reply_to_message_id', None)
-                    return bot_instance.send_message(self.chat.id, text, **kwargs)
             
             try:
                 fake_message = FakeMessage(call)
                 logger.info(f"[SETTINGS CALLBACK] Вызов join_command для user_id={user_id}, chat_id={chat_id}")
                 join_command(fake_message)
                 logger.info(f"[SETTINGS CALLBACK] join_command успешно выполнен")
+                
+                # Удаляем сообщение после успешного выполнения команды
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено после выполнения команды")
+                except Exception as e:
+                    logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение после выполнения: {e}")
             except Exception as e:
                 logger.error(f"[SETTINGS CALLBACK] Ошибка при вызове join_command: {e}", exc_info=True)
+                # Удаляем сообщение даже при ошибке
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
                 try:
                     bot_instance.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /join. Попробуйте вызвать её напрямую: /join")
                 except:

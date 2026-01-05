@@ -253,18 +253,18 @@ def handle_rating_internal(message, rating):
             kp_id = rating_msg_value.split(":")[1]
             logger.info(f"[RATE INTERNAL] Найден kp_id из rating_messages: {kp_id}")
         else:
-        # Проверяем все возможные источники film_id: rating_messages, bot_messages (цепочка реплаев)
-        # Сначала проверяем прямое сообщение
-        film_id = rating_messages.get(reply_msg_id)
-        
+            # Проверяем все возможные источники film_id: rating_messages, bot_messages (цепочка реплаев)
+            # Сначала проверяем прямое сообщение
+            film_id = rating_messages.get(reply_msg_id)
+            
             # Если film_id - это строка "kp_id:...", извлекаем kp_id
             if isinstance(film_id, str) and film_id.startswith("kp_id:"):
                 kp_id = film_id.split(":")[1]
                 film_id = None
                 logger.info(f"[RATE INTERNAL] Найден kp_id из rating_messages (прямая проверка): {kp_id}")
             else:
-        # Если не найдено, проверяем цепочку реплаев рекурсивно
-        if not film_id:
+                # Если не найдено, проверяем цепочку реплаев рекурсивно
+                if not film_id:
             current_msg = message.reply_to_message
             checked_ids = set()  # Чтобы избежать циклов
             while current_msg and current_msg.message_id not in checked_ids:
