@@ -824,8 +824,10 @@ def plan_type_callback(call):
             }
             
             bot_instance.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
-            bot_instance.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
-            logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}")
+            prompt_msg = bot_instance.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+            # Сохраняем message_id промпта в состояние
+            user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
+            logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}, prompt_message_id={prompt_msg.message_id}")
         except Exception as e:
             logger.error(f"[PLAN FROM LIST] Ошибка: {e}", exc_info=True)
             try:

@@ -137,6 +137,156 @@ def add_reactions(message):
         del user_settings_state[user_id]
 
 
+# ==================== ОТДЕЛЬНЫЕ HANDLERS ДЛЯ КОНКРЕТНЫХ СЦЕНАРИЕВ ====================
+
+def check_list_mark_watched_reply(message):
+    """Проверка для handler ответа на сообщение из /list с ID фильмов для отметки как просмотренные"""
+    if not message.reply_to_message:
+        return False
+    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+        return False
+    reply_text = message.reply_to_message.text or ""
+    if "В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные" not in reply_text:
+        return False
+    if not message.text or not message.text.strip():
+        return False
+    return True
+
+
+@bot_instance.message_handler(func=check_list_mark_watched_reply)
+def handle_list_mark_watched_reply(message):
+    """Обработчик ответа на сообщение из /list с ID фильмов для отметки как просмотренные"""
+    logger.info(f"[LIST MARK WATCHED REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        text = message.text.strip()
+        
+        # Извлекаем ID фильмов из текста
+        import re
+        kp_ids = re.findall(r'\b(\d{4,})\b', text)
+        
+        if not kp_ids:
+            bot_instance.reply_to(message, "❌ Не найдено ID фильмов в сообщении. Укажите ID фильмов (например: 1234567 7654321)")
+            return
+        
+        # Отмечаем фильмы как просмотренные
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        
+        marked_count = 0
+        errors = []
+        
+        with db_lock:
+            for kp_id in kp_ids:
+                try:
+                    cursor.execute('''
+                        UPDATE movies 
+                        SET watched = 1 
+                        WHERE chat_id = %s AND kp_id = %s AND watched = 0
+                    ''', (chat_id, kp_id))
+                    if cursor.rowcount > 0:
+                        marked_count += 1
+                except Exception as e:
+                    errors.append(f"{kp_id}: {e}")
+                    logger.error(f"[LIST MARK WATCHED] Ошибка при отметке фильма {kp_id}: {e}")
+            
+            conn.commit()
+        
+        # Формируем ответ
+        response_text = f"✅ Отмечено как просмотренные: {marked_count} фильм(ов)"
+        if errors:
+            response_text += f"\n⚠️ Ошибки: {len(errors)}"
+        
+        bot_instance.reply_to(message, response_text)
+        logger.info(f"[LIST MARK WATCHED REPLY] ✅ Завершено: отмечено {marked_count} фильмов")
+    except Exception as e:
+        logger.error(f"[LIST MARK WATCHED REPLY] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+        except:
+            pass
+
+
+def check_list_plan_reply(message):
+    """Проверка для handler ответа на промпт планирования из /list"""
+    if not message.reply_to_message:
+        return False
+    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+        return False
+    reply_text = message.reply_to_message.text or ""
+    if "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!" not in reply_text:
+        return False
+    if not message.text or not message.text.strip():
+        return False
+    return True
+
+
+@bot_instance.message_handler(func=check_list_plan_reply)
+def handle_list_plan_reply(message):
+    """Обработчик ответа на промпт планирования из /list"""
+    logger.info(f"[LIST PLAN REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    try:
+        from moviebot.bot.handlers.plan import get_plan_link_internal
+        from moviebot.states import user_plan_state
+        
+        user_id = message.from_user.id
+        if user_id not in user_plan_state:
+            user_plan_state[user_id] = {'step': 1, 'chat_id': message.chat.id}
+        
+        state = user_plan_state[user_id]
+        state['prompt_message_id'] = message.reply_to_message.message_id
+        
+        get_plan_link_internal(message, state)
+        logger.info(f"[LIST PLAN REPLY] ✅ Завершено")
+    except Exception as e:
+        logger.error(f"[LIST PLAN REPLY] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+        except:
+            pass
+
+
+def check_list_view_film_reply(message):
+    """Проверка для handler ответа на промпт просмотра описания из /list"""
+    if not message.reply_to_message:
+        return False
+    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+        return False
+    reply_text = message.reply_to_message.text or ""
+    if "Пришлите в ответном сообщении ссылку или ID фильма, чье описание хотите посмотреть" not in reply_text:
+        return False
+    if not message.text or not message.text.strip():
+        return False
+    return True
+
+
+@bot_instance.message_handler(func=check_list_view_film_reply)
+def handle_list_view_film_reply(message):
+    """Обработчик ответа на промпт просмотра описания из /list"""
+    logger.info(f"[LIST VIEW FILM REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    try:
+        from moviebot.bot.handlers.list import handle_view_film_reply_internal
+        from moviebot.states import user_view_film_state
+        
+        user_id = message.from_user.id
+        if user_id not in user_view_film_state:
+            user_view_film_state[user_id] = {'chat_id': message.chat.id}
+        
+        state = user_view_film_state[user_id]
+        state['prompt_message_id'] = message.reply_to_message.message_id
+        
+        handle_view_film_reply_internal(message, state)
+        logger.info(f"[LIST VIEW FILM REPLY] ✅ Завершено")
+    except Exception as e:
+        logger.error(f"[LIST VIEW FILM REPLY] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+        except:
+            pass
+
+
 @bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in added_movie_messages and m.text and m.text.strip().isdigit() and 1 <= int(m.text.strip()) <= 10)
 def handle_added_movie_rating_reply(message):
     """Обрабатывает реплай на сообщение 'Добавлено в базу' с числом от 1 до 10"""
@@ -1135,9 +1285,19 @@ def main_text_handler(message):
                     return
     
     # === user_view_film_state ===
+    # Обработка перенесена в отдельный handler handle_list_view_film_reply
+    # Оставляем здесь только для обратной совместимости, если handler не сработал
     if user_id in user_view_film_state:
         state = user_view_film_state[user_id]
-        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_view_film_state")
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_view_film_state (fallback)")
+        # Проверяем, что это реплай на правильное сообщение
+        is_reply = (message.reply_to_message and 
+                   message.reply_to_message.from_user and 
+                   message.reply_to_message.from_user.id == BOT_ID)
+        prompt_message_id = state.get('prompt_message_id')
+        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+            logger.info(f"[MAIN TEXT HANDLER] Сообщение не является ответом на нужное сообщение бота, игнорируем")
+            return
         handle_view_film_reply_internal(message, state)
         return
     
@@ -1185,6 +1345,8 @@ def main_text_handler(message):
                 return
     
     # === user_plan_state ===
+    # Обработка step=1 перенесена в отдельный handler handle_list_plan_reply
+    # Оставляем здесь только для step=3 и других случаев
     if user_id in user_plan_state:
         state = user_plan_state[user_id]
         step = state.get('step')
@@ -1201,9 +1363,9 @@ def main_text_handler(message):
             logger.info(f"[PLAN] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
             return
         
+        # step=1 обрабатывается в handle_list_plan_reply, здесь только step=3
         if step == 1:
-            from moviebot.bot.handlers.plan import get_plan_link_internal
-            get_plan_link_internal(message, state)
+            logger.info(f"[MAIN TEXT HANDLER] step=1 должен обрабатываться в handle_list_plan_reply, пропускаем")
             return
         
         if step == 3:

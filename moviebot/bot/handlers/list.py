@@ -80,8 +80,10 @@ def register_list_handlers(bot):
             }
             
             bot_instance.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
-            bot_instance.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
-            logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}")
+            prompt_msg = bot_instance.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+            # Сохраняем message_id промпта в состояние
+            user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
+            logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}, prompt_message_id={prompt_msg.message_id}")
         except Exception as e:
             logger.error(f"[PLAN FROM LIST] Ошибка: {e}", exc_info=True)
             try:
@@ -104,8 +106,10 @@ def register_list_handlers(bot):
             }
             
             bot_instance.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
-            bot_instance.send_message(chat_id, "Пришлите в ответном сообщении ссылку или ID фильма, чье описание хотите посмотреть")
-            logger.info(f"[VIEW FILM FROM LIST] Состояние установлено для пользователя {user_id}")
+            prompt_msg = bot_instance.send_message(chat_id, "Пришлите в ответном сообщении ссылку или ID фильма, чье описание хотите посмотреть")
+            # Сохраняем message_id промпта в состояние
+            user_view_film_state[user_id]['prompt_message_id'] = prompt_msg.message_id
+            logger.info(f"[VIEW FILM FROM LIST] Состояние установлено для пользователя {user_id}, prompt_message_id={prompt_msg.message_id}")
         except Exception as e:
             logger.error(f"[VIEW FILM FROM LIST] Ошибка: {e}", exc_info=True)
             try:
@@ -265,11 +269,24 @@ def handle_view_film_reply_internal(message, state):
     """Обработка ответного сообщения для просмотра страницы фильма"""
     try:
         import re
+        from moviebot.bot.bot_init import BOT_ID
+        
         user_id = message.from_user.id
         chat_id = state.get('chat_id', message.chat.id)
         text = message.text or ""
         
         logger.info(f"[VIEW FILM REPLY] Обработка ответного сообщения от {user_id}, текст: {text[:100]}")
+        
+        # Проверяем, что сообщение является реплаем на сообщение бота
+        is_reply = (message.reply_to_message and 
+                   message.reply_to_message.from_user and 
+                   message.reply_to_message.from_user.id == BOT_ID)
+        
+        prompt_message_id = state.get('prompt_message_id')
+        # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
+        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+            logger.info(f"[VIEW FILM REPLY] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+            return
         
         # Удаляем состояние
         if user_id in user_view_film_state:
