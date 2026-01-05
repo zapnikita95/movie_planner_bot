@@ -509,8 +509,14 @@ def show_schedule(message):
         """Обертка для регистрации команды /schedule"""
         show_schedule(message)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
-    def show_film_description_callback(call):
+    logger.info(f"[REGISTER PLAN HANDLERS] Все обработчики планирования зарегистрированы")
+    logger.info(f"[REGISTER PLAN HANDLERS] ===== END =====")
+    logger.info("=" * 80)
+
+
+# Callback handlers на уровне модуля (как в старом moviebot.py)
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
+def show_film_description_callback(call):
         """Обработчик кнопки показа описания фильма из /schedule"""
         logger.info("=" * 80)
         logger.info(f"[SHOW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
@@ -633,8 +639,9 @@ def show_schedule(message):
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
-    def plan_type_callback(call):
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
+def plan_type_callback(call):
         """Обработчик выбора типа плана"""
         logger.info("=" * 80)
         logger.info(f"[PLAN TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
@@ -683,8 +690,9 @@ def show_schedule(message):
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "plan:cancel")
-    def plan_cancel_callback(call):
+
+@bot_instance.callback_query_handler(func=lambda call: call.data == "plan:cancel")
+def plan_cancel_callback(call):
         """Обработчик отмены плана"""
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -697,8 +705,9 @@ def show_schedule(message):
         bot_instance.edit_message_text("✅ Режим планирования отменён. Можете использовать другие команды.", 
                              chat_id, call.message.message_id)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "plan_from_list")
-    def plan_from_list_callback(call):
+
+@bot_instance.callback_query_handler(func=lambda call: call.data == "plan_from_list")
+def plan_from_list_callback(call):
         """Обработчик планирования из списка"""
         # TODO: Извлечь из moviebot.py строки 10886-10909
         try:
@@ -722,8 +731,9 @@ def show_schedule(message):
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
-    def plan_from_added_callback(call):
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
+def plan_from_added_callback(call):
         """Обработчик планирования из добавленного фильма"""
         logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
         logger.info(f"[PLAN FROM ADDED] Получен callback: call.data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
@@ -794,8 +804,9 @@ def show_schedule(message):
         finally:
             logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
-    def add_ticket_from_plan_callback(call):
+
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
+def add_ticket_from_plan_callback(call):
         """Обработчик кнопки 'Добавить билеты' из подтверждения /plan"""
         try:
             from moviebot.utils.helpers import has_tickets_access
