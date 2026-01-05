@@ -1404,13 +1404,21 @@ def streaming_select_callback(call):
                         # Сохраняем выбор кинотеатра в базу
                         cursor.execute('''
                             UPDATE plans 
-                            SET streaming_service = %s, streaming_url = %s 
+                            SET streaming_service = %s, streaming_url = %s, streaming_done = FALSE
                             WHERE id = %s AND chat_id = %s
                         ''', (platform, url, plan_id, chat_id))
                         conn.commit()
                         
                         bot_instance.answer_callback_query(call.id, f"✅ Выбран {platform}")
                         logger.info(f"[STREAMING SELECT] Кинотеатр {platform} сохранен для плана {plan_id}")
+                        
+                        # Отправляем сообщение-подтверждение в чат
+                        bot_instance.send_message(
+                            chat_id,
+                            f"✅ Онлайн-кинотеатр выбран: <b>{platform}</b>",
+                            parse_mode='HTML'
+                        )
+                        logger.info(f"[STREAMING SELECT] Сообщение-подтверждение отправлено для плана {plan_id}")
                         
                         # Удаляем сообщение с выбором кинотеатра
                         try:
@@ -1433,21 +1441,32 @@ def streaming_select_callback(call):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_done:"))
 def streaming_done_callback(call):
-    """Обработчик кнопки 'Завершить' - удаляет сообщение с кинотеатрами"""
+    """Обработчик кнопки 'Завершить' - сохраняет флаг и удаляет сообщение с кинотеатрами"""
     logger.info(f"[STREAMING DONE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
         plan_id = int(call.data.split(":")[1])
         chat_id = call.message.chat.id
         message_id = call.message.message_id
+        user_id = call.from_user.id
+        
+        # Сохраняем флаг "Завершить" в базу
+        with db_lock:
+            cursor.execute('''
+                UPDATE plans 
+                SET streaming_done = TRUE 
+                WHERE id = %s AND chat_id = %s
+            ''', (plan_id, chat_id))
+            conn.commit()
+            logger.info(f"[STREAMING DONE] Флаг streaming_done установлен для плана {plan_id}")
+        
+        bot_instance.answer_callback_query(call.id, "✅")
         
         # Удаляем сообщение
         try:
             bot_instance.delete_message(chat_id, message_id)
-            bot_instance.answer_callback_query(call.id, "✅ Сообщение удалено")
             logger.info(f"[STREAMING DONE] Сообщение {message_id} удалено")
         except Exception as e:
             logger.warning(f"[STREAMING DONE] Не удалось удалить сообщение: {e}")
-            bot_instance.answer_callback_query(call.id, "✅")
     except Exception as e:
         logger.error(f"[STREAMING DONE] Ошибка: {e}", exc_info=True)
         try:

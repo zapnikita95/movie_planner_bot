@@ -44,14 +44,87 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
     """Отправляет уведомление о запланированном просмотре"""
 
     try:
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        from moviebot.api.kinopoisk_api import get_external_sources
+        import json
 
         plan_type_text = "дома" if plan_type == 'home' else "в кино"
 
         text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
 
         text += f"<b>{title}</b>\n{link}"
+        
+        markup = None
+        
+        # Для планов "дома" проверяем онлайн-кинотеатры
+        if plan_type == 'home' and plan_id:
+            with db_lock:
+                cursor.execute('''
+                    SELECT streaming_service, streaming_url, streaming_done, ticket_file_id
+                    FROM plans 
+                    WHERE id = %s AND chat_id = %s
+                ''', (plan_id, chat_id))
+                plan_row = cursor.fetchone()
+                
+                if plan_row:
+                    if isinstance(plan_row, dict):
+                        streaming_service = plan_row.get('streaming_service')
+                        streaming_url = plan_row.get('streaming_url')
+                        streaming_done = plan_row.get('streaming_done', False)
+                        ticket_file_id = plan_row.get('ticket_file_id')
+                    else:
+                        streaming_service = plan_row[0]
+                        streaming_url = plan_row[1]
+                        streaming_done = plan_row[2] if len(plan_row) > 2 else False
+                        ticket_file_id = plan_row[3] if len(plan_row) > 3 else None
+                    
+                    # Если пользователь нажал "Завершить", не показываем кинотеатры
+                    if streaming_done:
+                        logger.info(f"[PLAN NOTIFICATION] streaming_done=True для плана {plan_id}, кинотеатры не показываем")
+                    # Если выбран кинотеатр, показываем ссылку
+                    elif streaming_service and streaming_url:
+                        text += f"\n\n📺 <b>Онлайн-кинотеатр:</b> <a href='{streaming_url}'>{streaming_service}</a>"
+                        logger.info(f"[PLAN NOTIFICATION] Показываем ссылку на кинотеатр {streaming_service} для плана {plan_id}")
+                    # Если кинотеатр не выбран и не нажато "Завершить", показываем кнопки
+                    else:
+                        # Получаем kp_id из фильма
+                        cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        movie_row = cursor.fetchone()
+                        kp_id = None
+                        if movie_row:
+                            kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+                        
+                        # Пробуем получить источники из сохраненных данных или из API
+                        sources_dict = {}
+                        if ticket_file_id:
+                            try:
+                                sources_dict = json.loads(ticket_file_id)
+                            except:
+                                pass
+                        
+                        # Если нет сохраненных источников, получаем из API
+                        if not sources_dict and kp_id:
+                            sources = get_external_sources(kp_id)
+                            if sources:
+                                sources_dict = {platform: url for platform, url in sources[:6]}
+                                # Сохраняем в базу
+                                sources_json = json.dumps(sources_dict, ensure_ascii=False)
+                                cursor.execute('''
+                                    UPDATE plans 
+                                    SET ticket_file_id = %s 
+                                    WHERE id = %s AND chat_id = %s
+                                ''', (sources_json, plan_id, chat_id))
+                                conn.commit()
+                        
+                        # Показываем кнопки с кинотеатрами
+                        if sources_dict:
+                            markup = InlineKeyboardMarkup(row_width=2)
+                            for platform, url in list(sources_dict.items())[:6]:
+                                markup.add(InlineKeyboardButton(platform, url=url))
+                            text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
+                            logger.info(f"[PLAN NOTIFICATION] Показываем кнопки с кинотеатрами для плана {plan_id}")
 
-        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False)
+        msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
 
         # Сохраняем message_id для обработки реакций (сохраняем link, film_id и plan_id)
 

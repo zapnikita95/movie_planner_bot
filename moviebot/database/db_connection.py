@@ -402,6 +402,17 @@ def init_database():
         logger.warning(f"Ошибка при добавлении поля notification_sent: {e}")
         conn.rollback()
     
+    # Миграция: добавление полей для онлайн-кинотеатров
+    try:
+        cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS streaming_service TEXT")
+        cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS streaming_url TEXT")
+        cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS streaming_done BOOLEAN DEFAULT FALSE")
+        conn.commit()
+        logger.info("Поля streaming_service, streaming_url и streaming_done добавлены в таблицу plans")
+    except Exception as e:
+        logger.warning(f"Ошибка при добавлении полей streaming_*: {e}")
+        conn.rollback()
+    
     try:
         cursor.execute('ALTER TABLE movies ADD COLUMN IF NOT EXISTS is_series INTEGER DEFAULT 0')
         conn.commit()
