@@ -623,13 +623,11 @@ def main_text_handler(message):
         # Обрабатываем ЛЮБОЙ текст от пользователя в состоянии поиска
         if text and text.strip():
             logger.info(f"[SEARCH STATE] ✅ Обрабатываем запрос поиска: '{text.strip()}'")
-            query = text
-            if query:
-                # Получаем тип поиска из состояния
-                search_type = state.get('search_type', 'mixed')
-                # ВАЖНО: НЕ удаляем состояние ДО отправки результата, чтобы другие обработчики не перехватили сообщение
-                # Удалим состояние только после успешной отправки результата
-                logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}, состояние сохранено: {user_id in user_search_state}")
+            query = text.strip()
+            # Получаем тип поиска из состояния
+            search_type = state.get('search_type', 'mixed')
+            # ВАЖНО: НЕ удаляем состояние ДО отправки результата, чтобы другие обработчики не перехватили сообщение
+            logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}, chat_id={chat_id}")
                 try:
                     films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
                     logger.info(f"[SEARCH] ✅ Поиск завершен: найдено {len(films) if films else 0} результатов, страниц: {total_pages}")
