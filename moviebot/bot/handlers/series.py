@@ -1128,6 +1128,100 @@ def register_series_handlers(bot_instance):
         finally:
             logger.info(f"[SETTINGS CALLBACK] ===== КОНЕЦ ОБРАБОТКИ =====")
 
+    # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
+    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.reply_to_message, priority=5)
+    def handle_search_reply(message):
+        """Обработчик ответных сообщений для поиска"""
+        try:
+            user_id = message.from_user.id
+            chat_id = message.chat.id
+            query = message.text.strip()
+            
+            # Проверяем, находится ли пользователь в состоянии поиска
+            if user_id not in user_search_state:
+                return  # Не обрабатываем, если пользователь не в состоянии поиска
+            
+            state = user_search_state[user_id]
+            reply_to_message = message.reply_to_message
+            
+            # Проверяем, что ответ на правильное сообщение (сообщение поиска)
+            if reply_to_message and reply_to_message.message_id == state.get('message_id'):
+                logger.info(f"[SEARCH REPLY] Получен запрос поиска от {user_id}: {query}")
+                
+                # Получаем тип поиска из состояния
+                search_type = state.get('search_type', 'mixed')
+                
+                # Выполняем поиск
+                films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
+                
+                if not films:
+                    bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+                    # Очищаем состояние
+                    del user_search_state[user_id]
+                    return
+                
+                # Формируем сообщение с результатами
+                results_text = f"🔍 Результаты поиска '{query}':\n\n"
+                markup = InlineKeyboardMarkup(row_width=1)
+                
+                for film in films[:10]:  # Показываем максимум 10 результатов на странице
+                    title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                    year = film.get('year') or film.get('releaseYear') or 'N/A'
+                    rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                    kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                    
+                    # Определяем тип (сериал или фильм)
+                    film_type = film.get('type', '').upper()
+                    is_series = film_type == 'TV_SERIES'
+                    
+                    if kp_id:
+                        type_indicator = "📺" if is_series else "🎬"
+                        button_text = f"{type_indicator} {title} ({year})"
+                        if len(button_text) > 50:
+                            button_text = button_text[:47] + "..."
+                        results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                        if rating != 'N/A':
+                            results_text += f" ⭐ {rating}"
+                        results_text += "\n"
+                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+                
+                # Добавляем пагинацию, если нужно
+                if total_pages > 1:
+                    pagination_row = []
+                    query_encoded = query.replace(' ', '_')
+                    pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+                    if total_pages > 1:
+                        pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                    markup.row(*pagination_row)
+                
+                # Добавляем кнопку "Назад в меню"
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                
+                # Добавляем пояснение про эмодзи
+                results_text += "\n\n🎬 - фильм\n📺 - сериал"
+                
+                results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                
+                # Обновляем состояние
+                if results_msg:
+                    user_search_state[user_id] = {
+                        'chat_id': chat_id,
+                        'message_id': results_msg.message_id,
+                        'search_type': search_type,
+                        'query': query,
+                        'results_text': results_text,
+                        'films': films[:10],
+                        'total_pages': total_pages
+                    }
+                
+                logger.info(f"[SEARCH REPLY] Результаты поиска отправлены пользователю {user_id}, найдено {len(films)} результатов")
+        except Exception as e:
+            logger.error(f"[SEARCH REPLY] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса поиска")
+            except:
+                pass
+
     # Обработчик выбора типа поиска (фильм/сериал)
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("search_type:"))
     def search_type_callback(call):
