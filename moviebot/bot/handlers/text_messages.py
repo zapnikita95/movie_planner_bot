@@ -176,6 +176,14 @@ def handle_rate_list_reply(message):
     if message.text and message.text.startswith('/'):
         return
     
+    # Пропускаем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages
+    text_stripped = message.text.strip() if message.text else ""
+    if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
+       (len(text_stripped) == 2 and text_stripped == "10"):
+        # Это оценка - пропускаем, пусть обрабатывается через rating_messages
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения с оценкой: {text_stripped}")
+        return
+    
     chat_id = message.chat.id
     user_id = message.from_user.id
     
