@@ -3653,9 +3653,10 @@ def ensure_movie_in_database(kp_id, title=None):
                 logger.warning(f"[ENSURE MOVIE] Не удалось получить информацию о фильме {kp_id}")
         
         return existing or cursor.lastrowid
-    # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
-    def handle_search_reply(message):
+
+# Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
+@bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
+def handle_search_reply(message):
         """Обработчик ответных сообщений для поиска"""
         logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
         logger.info(f"[SEARCH REPLY] Получено сообщение: user_id={message.from_user.id}, text={message.text[:50] if message.text else 'None'}, has_reply={message.reply_to_message is not None}")
