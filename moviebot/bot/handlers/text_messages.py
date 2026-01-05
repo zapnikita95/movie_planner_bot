@@ -1003,14 +1003,14 @@ def main_text_handler(message):
                 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                 markup = InlineKeyboardMarkup(row_width=1)
                 
-                # Если есть payment_id, создаем новый платеж с учетом скидки
-                if payment_id and len(payment_id) > 8:
+                # Всегда создаем платеж YooKassa с учетом скидки, если YooKassa доступна
+                from moviebot.config import YOOKASSA_AVAILABLE, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+                import os
+                import uuid as uuid_module
+                
+                if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
                     # Создаем новый платеж YooKassa с учетом скидки
-                    from moviebot.bot.callbacks.payment_callbacks import calculate_discounted_price
                     from yookassa import Configuration, Payment
-                    from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
-                    import os
-                    import uuid as uuid_module
                     
                     Configuration.account_id = YOOKASSA_SHOP_ID.strip()
                     Configuration.secret_key = YOOKASSA_SECRET_KEY.strip()
@@ -1063,7 +1063,8 @@ def main_text_handler(message):
                         )
                         
                         confirmation_url = payment.confirmation.confirmation_url
-                        markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+                        markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", url=confirmation_url))
+                        logger.info(f"[PROMO] Платеж YooKassa создан: payment_id={new_payment_id}, amount={discounted_price}")
                     except Exception as e:
                         logger.error(f"[PROMO] Ошибка создания платежа YooKassa: {e}", exc_info=True)
                 
