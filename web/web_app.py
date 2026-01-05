@@ -467,10 +467,17 @@ def create_web_app(bot_instance):
                                 logger.warning(f"[YOOKASSA CHECK] ⚠️ create_check вернул check_url=None (чек не создан)")
                                 logger.warning(f"[YOOKASSA CHECK] Возможные причины: ошибка API nalog.ru, неверные настройки, или другая проблема")
                     except Exception as check_error:
+                        error_type = type(check_error).__name__
+                        error_msg = str(check_error)
                         logger.error(f"[YOOKASSA CHECK] ❌❌❌ ИСКЛЮЧЕНИЕ ПРИ СОЗДАНИИ ЧЕКА! ❌❌❌")
-                        logger.error(f"[YOOKASSA CHECK] Тип ошибки: {type(check_error).__name__}")
-                        logger.error(f"[YOOKASSA CHECK] Сообщение: {str(check_error)}")
+                        logger.error(f"[YOOKASSA CHECK] Тип ошибки: {error_type}")
+                        logger.error(f"[YOOKASSA CHECK] Сообщение: {error_msg}")
                         logger.error(f"[YOOKASSA CHECK] Traceback:", exc_info=True)
+                        
+                        # Проверяем, является ли это таймаутом или сетевой ошибкой
+                        is_timeout = 'timeout' in error_msg.lower() or 'timed out' in error_msg.lower() or 'ConnectTimeoutError' in error_type
+                        if is_timeout:
+                            logger.warning(f"[YOOKASSA CHECK] ⚠️ Таймаут при создании чека - это нормально, чек можно создать позже вручную")
                         # Продолжаем выполнение даже если чек не создан
                     
                     logger.info(f"[YOOKASSA CHECK] ===== ЗАВЕРШЕНИЕ СОЗДАНИЯ ЧЕКА =====")

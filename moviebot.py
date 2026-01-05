@@ -17824,8 +17824,15 @@ def handle_payment_callback(call):
                 if group_size:
                     text += f"👥 Количество участников: <b>{group_size}</b>\n"
                     if subscription_id and subscription_id > 0:
-                        members = get_subscription_members(subscription_id, BOT_ID)
-                        text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                        try:
+                            members = get_subscription_members(subscription_id)
+                            # Исключаем бота из списка участников
+                            if BOT_ID and BOT_ID in members:
+                                members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
+                            text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                        except Exception as members_error:
+                            logger.error(f"[PAYMENT] Ошибка получения участников подписки: {members_error}")
+                            text += f"✅ Участников в подписке: <b>?</b>\n"
                 if activated:
                     text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
                 if next_payment:
@@ -17914,7 +17921,10 @@ def handle_payment_callback(call):
                 # Показываем кнопку "Отписаться" только для реальных подписок (id > 0) и только для активных участников
                 if subscription_id and subscription_id > 0:
                     from database.db_operations import get_subscription_members
-                    members = get_subscription_members(subscription_id, BOT_ID)
+                    members = get_subscription_members(subscription_id)
+                    # Исключаем бота из списка участников
+                    if BOT_ID and BOT_ID in members:
+                        members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
                     # Проверяем, является ли пользователь активным участником подписки
                     if members and user_id in members:
                         markup.add(InlineKeyboardButton("❌ Отписаться", callback_data=f"payment:cancel:{subscription_id}"))
@@ -17938,8 +17948,14 @@ def handle_payment_callback(call):
             # Показываем список участников подписки
             subscription_id = int(action.split(":")[1])
             from database.db_operations import get_subscription_members, get_active_group_users
-            members = get_subscription_members(subscription_id, BOT_ID)
-            active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
+            members = get_subscription_members(subscription_id)
+            # Исключаем бота из списка участников
+            if BOT_ID and BOT_ID in members:
+                members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
+            active_users = get_active_group_users(chat_id)
+            # Исключаем бота из списка активных пользователей
+            if active_users and BOT_ID:
+                active_users = {uid: uname for uid, uname in active_users.items() if uid != BOT_ID}
             
             text = "👥 <b>Список участников</b>\n\n"
             text += "💸 - участник в подписке\n\n"
@@ -18020,7 +18036,10 @@ def handle_payment_callback(call):
                 for user_id_member, username in list(active_users.items())[:20]:  # Ограничение на 20 кнопок
                     # Проверяем, уже ли участник в подписке
                     from database.db_operations import get_subscription_members
-                    existing_members = get_subscription_members(subscription_id, BOT_ID)
+                    existing_members = get_subscription_members(subscription_id)
+                    # Исключаем бота из списка участников
+                    if BOT_ID and BOT_ID in existing_members:
+                        existing_members = {uid: uname for uid, uname in existing_members.items() if uid != BOT_ID}
                     is_selected = user_id_member in existing_members
                     prefix = "✅" if is_selected else "⬜"
                     markup.add(InlineKeyboardButton(
@@ -18035,6 +18054,9 @@ def handle_payment_callback(call):
                 # Проверяем, нужно ли предложить добавить участников
                 from database.db_operations import get_subscription_members
                 existing_members = get_subscription_members(subscription_id)
+                # Исключаем бота из списка участников
+                if BOT_ID and BOT_ID in existing_members:
+                    existing_members = {uid: uname for uid, uname in existing_members.items() if uid != BOT_ID}
                 members_count = len(existing_members) if existing_members else 0
                 
                 # Обновляем подписку
@@ -18217,7 +18239,10 @@ def handle_payment_callback(call):
             
             # Получаем активных пользователей и текущих участников подписки
             active_users = get_active_group_users(group_chat_id, bot_id=BOT_ID)
-            existing_members_dict = get_subscription_members(subscription_id, BOT_ID)
+            existing_members_dict = get_subscription_members(subscription_id)
+            # Исключаем бота из списка участников
+            if BOT_ID and BOT_ID in existing_members_dict:
+                existing_members_dict = {uid: uname for uid, uname in existing_members_dict.items() if uid != BOT_ID}
             # get_subscription_members возвращает dict {user_id: username}
             existing_member_ids = set(existing_members_dict.keys()) if existing_members_dict else set()
             
@@ -18288,7 +18313,10 @@ def handle_payment_callback(call):
             group_size = sub.get('group_size')
             
             active_users = get_active_group_users(group_chat_id, bot_id=BOT_ID)
-            existing_members_dict = get_subscription_members(subscription_id, BOT_ID)
+            existing_members_dict = get_subscription_members(subscription_id)
+            # Исключаем бота из списка участников
+            if BOT_ID and BOT_ID in existing_members_dict:
+                existing_members_dict = {uid: uname for uid, uname in existing_members_dict.items() if uid != BOT_ID}
             # get_subscription_members возвращает dict {user_id: username}
             existing_member_ids = set(existing_members_dict.keys()) if existing_members_dict else set()
             
@@ -18356,7 +18384,10 @@ def handle_payment_callback(call):
                 bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                 return
             
-            members = get_subscription_members(subscription_id, BOT_ID)
+            members = get_subscription_members(subscription_id)
+            # Исключаем бота из списка участников
+            if BOT_ID and BOT_ID in members:
+                members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
             members_count = len(members) if members else 0
             
             text = f"✅ <b>Участники сохранены</b>\n\n"
@@ -18434,7 +18465,10 @@ def handle_payment_callback(call):
             # Обновляем размер подписки
             update_subscription_group_size(subscription_id, new_size, diff_price)
             
-            members = get_subscription_members(subscription_id, BOT_ID)
+            members = get_subscription_members(subscription_id)
+            # Исключаем бота из списка участников
+            if BOT_ID and BOT_ID in members:
+                members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
             members_count = len(members) if members else 0
             
             text = f"✅ <b>Подписка расширена</b>\n\n"
@@ -18584,8 +18618,15 @@ def handle_payment_callback(call):
                 if group_size:
                     text += f"👥 Количество участников: <b>{group_size}</b>\n"
                     if subscription_id and subscription_id > 0:
-                        members = get_subscription_members(subscription_id, BOT_ID)
-                        text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                        try:
+                            members = get_subscription_members(subscription_id)
+                            # Исключаем бота из списка участников
+                            if BOT_ID and BOT_ID in members:
+                                members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
+                            text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                        except Exception as members_error:
+                            logger.error(f"[PAYMENT] Ошибка получения участников подписки: {members_error}")
+                            text += f"✅ Участников в подписке: <b>?</b>\n"
                 if activated:
                     text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
                 if next_payment:
@@ -18714,8 +18755,15 @@ def handle_payment_callback(call):
                         if group_size:
                             text += f"👥 Количество участников: <b>{group_size}</b>\n"
                             if subscription_id and subscription_id > 0:
-                                members = get_subscription_members(subscription_id, BOT_ID)
-                                text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                                try:
+                                    members = get_subscription_members(subscription_id)
+                                    # Исключаем бота из списка участников
+                                    if BOT_ID and BOT_ID in members:
+                                        members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
+                                    text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                                except Exception as members_error:
+                                    logger.error(f"[PAYMENT] Ошибка получения участников подписки: {members_error}")
+                                    text += f"✅ Участников в подписке: <b>?</b>\n"
                         if activated:
                             text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
                         if next_payment:
@@ -21483,7 +21531,7 @@ def handle_payment_username(message):
                     text += f"👥 Количество участников: <b>{group_size}</b>\n"
                     if subscription_id and subscription_id > 0:
                         from database.db_operations import get_subscription_members
-                        members = get_subscription_members(subscription_id, BOT_ID)
+                        members = get_subscription_members(subscription_id)
                         text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
                 if activated:
                     text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
