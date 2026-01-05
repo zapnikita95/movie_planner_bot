@@ -2238,7 +2238,6 @@ def register_payment_callbacks(bot_instance):
                         
                         # Создаем новую подписку с той же датой следующего списания
                         from moviebot.database.db_operations import create_subscription
-                        from datetime import datetime, timedelta
                     
                         next_payment_date = next_sub.get('next_payment_date')
                         if not next_payment_date:
