@@ -309,180 +309,180 @@ def register_plan_handlers(bot_instance):
                 pass
 
 def show_schedule(message):
-        """Команда /schedule - показ расписания"""
-        logger.info(f"[SCHEDULE COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
-        logger.info(f"[SCHEDULE COMMAND] /schedule вызван от {message.from_user.id}")
-        try:
-            username = message.from_user.username or f"user_{message.from_user.id}"
-            log_request(message.from_user.id, username, '/schedule', message.chat.id)
-            logger.info(f"Команда /schedule от пользователя {message.from_user.id}")
+    """Команда /schedule - показ расписания"""
+    logger.info(f"[SCHEDULE COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+    logger.info(f"[SCHEDULE COMMAND] /schedule вызван от {message.from_user.id}")
+    try:
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/schedule', message.chat.id)
+        logger.info(f"Команда /schedule от пользователя {message.from_user.id}")
+        
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        user_tz = get_user_timezone_or_default(user_id)
+        
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket,
+                       m.watched
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s AND m.watched = 0
+                ORDER BY p.plan_type DESC, p.plan_datetime ASC
+            ''', (chat_id,))
+            rows = cursor.fetchall()
+        
+        if not rows:
+            empty_markup = InlineKeyboardMarkup(row_width=1)
+            empty_markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
+            empty_markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+            empty_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            bot_instance.reply_to(
+                message,
+                "В расписании нет фильмов, используйте /search, чтобы найти и добавить фильмы или сериалы, посмотрите, какие премьеры сейчас идут в кино, или просто пришлите ссылку на Кинопоиск на фильм или сериал",
+                reply_markup=empty_markup
+            )
+            return
+        
+        # Разделяем на секции: сначала кино, потом дома
+        cinema_plans = []
+        home_plans = []
+        
+        for row in rows:
+            if isinstance(row, dict):
+                plan_id = row.get('id')
+                title = row.get('title')
+                kp_id = row.get('kp_id')
+                link = row.get('link')
+                plan_dt_value = row.get('plan_datetime')
+                plan_type = row.get('plan_type')
+                has_ticket = row.get('has_ticket', 0)
+            else:
+                plan_id = row[0]
+                title = row[1]
+                kp_id = row[2]
+                link = row[3]
+                plan_dt_value = row[4]
+                plan_type = row[5]
+                has_ticket = row[6] if len(row) > 6 else 0
             
-            chat_id = message.chat.id
-            user_id = message.from_user.id
-            user_tz = get_user_timezone_or_default(user_id)
-            
-            with db_lock:
-                cursor.execute('''
-                    SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
-                           CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket,
-                           m.watched
-                    FROM plans p
-                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                    WHERE p.chat_id = %s AND m.watched = 0
-                    ORDER BY p.plan_type DESC, p.plan_datetime ASC
-                ''', (chat_id,))
-                rows = cursor.fetchall()
-            
-            if not rows:
-                empty_markup = InlineKeyboardMarkup(row_width=1)
-                empty_markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
-                empty_markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
-                empty_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                bot_instance.reply_to(
-                    message,
-                    "В расписании нет фильмов, используйте /search, чтобы найти и добавить фильмы или сериалы, посмотрите, какие премьеры сейчас идут в кино, или просто пришлите ссылку на Кинопоиск на фильм или сериал",
-                    reply_markup=empty_markup
-                )
-                return
-            
-            # Разделяем на секции: сначала кино, потом дома
-            cinema_plans = []
-            home_plans = []
-            
-            for row in rows:
-                if isinstance(row, dict):
-                    plan_id = row.get('id')
-                    title = row.get('title')
-                    kp_id = row.get('kp_id')
-                    link = row.get('link')
-                    plan_dt_value = row.get('plan_datetime')
-                    plan_type = row.get('plan_type')
-                    has_ticket = row.get('has_ticket', 0)
-                else:
-                    plan_id = row[0]
-                    title = row[1]
-                    kp_id = row[2]
-                    link = row[3]
-                    plan_dt_value = row[4]
-                    plan_type = row[5]
-                    has_ticket = row[6] if len(row) > 6 else 0
-                
-                # Преобразуем TIMESTAMP в дату в часовом поясе пользователя
-                try:
-                    if isinstance(plan_dt_value, datetime):
-                        if plan_dt_value.tzinfo is None:
-                            plan_dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
-                        else:
-                            plan_dt = plan_dt_value.astimezone(user_tz)
-                    elif isinstance(plan_dt_value, str):
-                        plan_dt_iso = plan_dt_value
-                        if plan_dt_iso.endswith('Z'):
-                            plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(user_tz)
-                        elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
-                            plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(user_tz)
-                        else:
-                            plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(user_tz)
-                    else:
-                        logger.warning(f"Неожиданный тип plan_datetime: {type(plan_dt_value)}")
-                        continue
-                    
-                    date_str = plan_dt.strftime('%d.%m %H:%M')
-                    plan_info = (plan_id, title, kp_id, link, date_str, has_ticket)
-                    
-                    if plan_type == 'cinema':
-                        cinema_plans.append(plan_info)
-                    else:  # home
-                        home_plans.append(plan_info)
-                except Exception as e:
-                    logger.error(f"Ошибка при обработке даты {plan_dt_value}: {e}")
-                    if isinstance(plan_dt_value, str):
-                        date_str = plan_dt_value[:10] if len(plan_dt_value) >= 10 else plan_dt_value
-                    else:
-                        date_str = datetime.now(user_tz).strftime('%d.%m')
-                    plan_info = (plan_id, title, kp_id, link, date_str, has_ticket)
-                    
-                    if plan_type == 'cinema':
-                        cinema_plans.append(plan_info)
-                    else:  # home
-                        home_plans.append(plan_info)
-            
-            # Отправляем два отдельных сообщения: одно для кино, другое для дома
-            cinema_message_id = None
-            home_message_id = None
-            
-            # Сообщение 1: Премьеры в кино
-            if cinema_plans:
-                cinema_markup = InlineKeyboardMarkup(row_width=1)
-                for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
-                    ticket_emoji = "🎟️ " if has_ticket else ""
-                    button_text = f"{ticket_emoji}{title} | {date_str}"
-                    
-                    if len(button_text) > 30:
-                        button_text = button_text[:27] + "..."
-                    cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
-                
-                if not home_plans:
-                    cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
-                
-                cinema_text = "🎬 <b>Премьеры в кино:</b>\n\n"
-                for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
-                    ticket_emoji = "🎟️ " if has_ticket else ""
-                    cinema_text += f"{ticket_emoji}<b>{title}</b> — {date_str}\n"
-                
-                cinema_msg = bot_instance.reply_to(message, cinema_text, reply_markup=cinema_markup, parse_mode='HTML')
-                cinema_message_id = cinema_msg.message_id
-            
-            # Сообщение 2: Просмотры дома
-            if home_plans:
-                home_markup = InlineKeyboardMarkup(row_width=1)
-                for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
-                    button_text = f"{title} | {date_str}"
-                    if len(button_text) > 30:
-                        button_text = button_text[:27] + "..."
-                    home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
-                
-                home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
-                
-                home_text = "🏠 <b>Просмотры дома:</b>\n\n"
-                for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
-                    home_text += f"<b>{title}</b> — {date_str}\n"
-                
-                if cinema_plans:
-                    home_msg = bot_instance.send_message(chat_id, home_text, reply_markup=home_markup, parse_mode='HTML')
-                else:
-                    home_msg = bot_instance.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
-                home_message_id = home_msg.message_id
-            
-            # Сохраняем message_id обоих сообщений для удаления при нажатии "Назад"
-            if cinema_message_id and home_message_id:
-                if not hasattr(show_schedule, '_schedule_messages'):
-                    show_schedule._schedule_messages = {}
-                show_schedule._schedule_messages[chat_id] = {
-                    'cinema_message_id': cinema_message_id,
-                    'home_message_id': home_message_id
-                }
-            elif cinema_message_id:
-                if not hasattr(show_schedule, '_schedule_messages'):
-                    show_schedule._schedule_messages = {}
-                show_schedule._schedule_messages[chat_id] = {
-                    'cinema_message_id': cinema_message_id,
-                    'home_message_id': None
-                }
-            elif home_message_id:
-                if not hasattr(show_schedule, '_schedule_messages'):
-                    show_schedule._schedule_messages = {}
-                show_schedule._schedule_messages[chat_id] = {
-                    'cinema_message_id': None,
-                    'home_message_id': home_message_id
-                }
-            
-            logger.info(f"✅ Ответ на /schedule отправлен пользователю {user_id}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в /schedule: {e}", exc_info=True)
+            # Преобразуем TIMESTAMP в дату в часовом поясе пользователя
             try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /schedule")
-            except:
-                pass
+                if isinstance(plan_dt_value, datetime):
+                    if plan_dt_value.tzinfo is None:
+                        plan_dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                    else:
+                        plan_dt = plan_dt_value.astimezone(user_tz)
+                elif isinstance(plan_dt_value, str):
+                    plan_dt_iso = plan_dt_value
+                    if plan_dt_iso.endswith('Z'):
+                        plan_dt = datetime.fromisoformat(plan_dt_iso.replace('Z', '+00:00')).astimezone(user_tz)
+                    elif '+' in plan_dt_iso or plan_dt_iso.count('-') > 2:
+                        plan_dt = datetime.fromisoformat(plan_dt_iso).astimezone(user_tz)
+                    else:
+                        plan_dt = datetime.fromisoformat(plan_dt_iso + '+00:00').astimezone(user_tz)
+                else:
+                    logger.warning(f"Неожиданный тип plan_datetime: {type(plan_dt_value)}")
+                    continue
+                
+                date_str = plan_dt.strftime('%d.%m %H:%M')
+                plan_info = (plan_id, title, kp_id, link, date_str, has_ticket)
+                
+                if plan_type == 'cinema':
+                    cinema_plans.append(plan_info)
+                else:  # home
+                    home_plans.append(plan_info)
+            except Exception as e:
+                logger.error(f"Ошибка при обработке даты {plan_dt_value}: {e}")
+                if isinstance(plan_dt_value, str):
+                    date_str = plan_dt_value[:10] if len(plan_dt_value) >= 10 else plan_dt_value
+                else:
+                    date_str = datetime.now(user_tz).strftime('%d.%m')
+                plan_info = (plan_id, title, kp_id, link, date_str, has_ticket)
+                
+                if plan_type == 'cinema':
+                    cinema_plans.append(plan_info)
+                else:  # home
+                    home_plans.append(plan_info)
+        
+        # Отправляем два отдельных сообщения: одно для кино, другое для дома
+        cinema_message_id = None
+        home_message_id = None
+        
+        # Сообщение 1: Премьеры в кино
+        if cinema_plans:
+            cinema_markup = InlineKeyboardMarkup(row_width=1)
+            for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
+                ticket_emoji = "🎟️ " if has_ticket else ""
+                button_text = f"{ticket_emoji}{title} | {date_str}"
+                
+                if len(button_text) > 30:
+                    button_text = button_text[:27] + "..."
+                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
+            
+            if not home_plans:
+                cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
+            
+            cinema_text = "🎬 <b>Премьеры в кино:</b>\n\n"
+            for plan_id, title, kp_id, link, date_str, has_ticket in cinema_plans:
+                ticket_emoji = "🎟️ " if has_ticket else ""
+                cinema_text += f"{ticket_emoji}<b>{title}</b> — {date_str}\n"
+            
+            cinema_msg = bot_instance.reply_to(message, cinema_text, reply_markup=cinema_markup, parse_mode='HTML')
+            cinema_message_id = cinema_msg.message_id
+        
+        # Сообщение 2: Просмотры дома
+        if home_plans:
+            home_markup = InlineKeyboardMarkup(row_width=1)
+            for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
+                button_text = f"{title} | {date_str}"
+                if len(button_text) > 30:
+                    button_text = button_text[:27] + "..."
+                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
+            
+            home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
+            
+            home_text = "🏠 <b>Просмотры дома:</b>\n\n"
+            for plan_id, title, kp_id, link, date_str, has_ticket in home_plans:
+                home_text += f"<b>{title}</b> — {date_str}\n"
+            
+            if cinema_plans:
+                home_msg = bot_instance.send_message(chat_id, home_text, reply_markup=home_markup, parse_mode='HTML')
+            else:
+                home_msg = bot_instance.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
+            home_message_id = home_msg.message_id
+        
+        # Сохраняем message_id обоих сообщений для удаления при нажатии "Назад"
+        if cinema_message_id and home_message_id:
+            if not hasattr(show_schedule, '_schedule_messages'):
+                show_schedule._schedule_messages = {}
+            show_schedule._schedule_messages[chat_id] = {
+                'cinema_message_id': cinema_message_id,
+                'home_message_id': home_message_id
+            }
+        elif cinema_message_id:
+            if not hasattr(show_schedule, '_schedule_messages'):
+                show_schedule._schedule_messages = {}
+            show_schedule._schedule_messages[chat_id] = {
+                'cinema_message_id': cinema_message_id,
+                'home_message_id': None
+            }
+        elif home_message_id:
+            if not hasattr(show_schedule, '_schedule_messages'):
+                show_schedule._schedule_messages = {}
+            show_schedule._schedule_messages[chat_id] = {
+                'cinema_message_id': None,
+                'home_message_id': home_message_id
+            }
+        
+        logger.info(f"✅ Ответ на /schedule отправлен пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /schedule: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /schedule")
+        except:
+            pass
 
     @bot_instance.message_handler(commands=['schedule'])
     def _show_schedule_handler(message):
