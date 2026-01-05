@@ -5605,7 +5605,13 @@ def get_plan_day_or_date_internal(message, state):
     day_or_date_str = plan_dt.strftime('%d.%m.%Y %H:%M') if plan_dt else None
     result = process_plan(user_id, message.chat.id, link, plan_type, day_or_date_str, message_date_utc)
     if result == 'NEEDS_TIMEZONE':
+        # Сохраняем введенный текст в состоянии планирования для продолжения после выбора часового пояса
+        state['pending_text'] = message.text.strip()
+        state['pending_plan_dt'] = day_or_date_str
+        state['pending_message_date_utc'] = message_date_utc
+        logger.info(f"[PLAN DAY/DATE INTERNAL] Сохранен текст для продолжения планирования: '{state['pending_text']}'")
         show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+        # НЕ удаляем состояние - оно нужно для продолжения планирования после выбора часового пояса
     elif result:
         del user_plan_state[user_id]
 
@@ -10816,6 +10822,43 @@ def handle_timezone_callback(call):
                 parse_mode='HTML'
             )
             logger.info(f"Часовой пояс установлен для user_id={user_id}: {timezone_name}")
+            
+            # Проверяем, есть ли сохраненный текст для продолжения планирования
+            if user_id in user_plan_state:
+                state = user_plan_state[user_id]
+                pending_text = state.get('pending_text')
+                if pending_text:
+                    logger.info(f"[TIMEZONE CALLBACK] Продолжаем планирование с сохраненным текстом: '{pending_text}'")
+                    # Создаем фейковое сообщение для продолжения планирования
+                    fake_message = telebot.types.Message()
+                    fake_message.from_user = call.from_user
+                    fake_message.chat = call.message.chat
+                    fake_message.text = pending_text
+                    fake_message.date = int(datetime.now().timestamp())
+                    
+                    # Продолжаем планирование с сохраненными данными
+                    link = state.get('link')
+                    plan_type = state.get('type')
+                    pending_plan_dt = state.get('pending_plan_dt')
+                    pending_message_date_utc = state.get('pending_message_date_utc')
+                    
+                    if link and plan_type and pending_plan_dt:
+                        # Вызываем process_plan с сохраненными данными
+                        result = process_plan(user_id, chat_id, link, plan_type, pending_plan_dt, pending_message_date_utc)
+                        if result:
+                            # Очищаем сохраненные данные
+                            if 'pending_text' in state:
+                                del state['pending_text']
+                            if 'pending_plan_dt' in state:
+                                del state['pending_plan_dt']
+                            if 'pending_message_date_utc' in state:
+                                del state['pending_message_date_utc']
+                            del user_plan_state[user_id]
+                            logger.info(f"[TIMEZONE CALLBACK] Планирование успешно завершено")
+                        else:
+                            logger.warning(f"[TIMEZONE CALLBACK] Ошибка при продолжении планирования")
+                    else:
+                        logger.warning(f"[TIMEZONE CALLBACK] Недостаточно данных для продолжения планирования: link={link}, plan_type={plan_type}, pending_plan_dt={pending_plan_dt}")
         else:
             bot.answer_callback_query(call.id, "Ошибка сохранения часового пояса", show_alert=True)
     except Exception as e:
