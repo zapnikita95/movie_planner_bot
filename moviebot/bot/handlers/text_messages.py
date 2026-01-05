@@ -1104,8 +1104,12 @@ def save_movie_message(message):
 
 @bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
-    """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
-    logger.info(f"[MAIN TEXT HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else ''}'")
+    """
+    Fallback handler для текстовых сообщений (исключая команды)
+    Все состояния теперь обрабатываются отдельными handlers в state_handlers.py
+    Этот handler обрабатывает только специальные случаи и реплаи, которые не попали в другие handlers
+    """
+    logger.info(f"[MAIN TEXT HANDLER] ===== START (FALLBACK): message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else ''}'")
     
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -1122,7 +1126,28 @@ def main_text_handler(message):
             logger.info(f"[MAIN TEXT HANDLER] Пропускаем сообщение со ссылкой на Кинопоиск (будет обработано handle_kinopoisk_link)")
             return
     
-    # 1. Проверяем состояния (ticket, settings, plan, edit, search, view_film)
+    # Проверяем, не обрабатывается ли это сообщение одним из специализированных handlers
+    # Если пользователь в каком-то состоянии, пропускаем - пусть специализированный handler обработает
+    from moviebot.states import (
+        user_ticket_state, user_search_state, user_import_state,
+        user_edit_state, user_settings_state, user_plan_state,
+        user_clean_state, user_promo_state, user_promo_admin_state,
+        user_cancel_subscription_state, user_refund_state,
+        user_unsubscribe_state, user_add_admin_state, user_view_film_state
+    )
+    
+    # Если пользователь в любом из состояний, пропускаем - специализированные handlers обработают
+    if (user_id in user_ticket_state or user_id in user_search_state or 
+        user_id in user_import_state or user_id in user_edit_state or 
+        user_id in user_settings_state or user_id in user_plan_state or
+        user_id in user_clean_state or user_id in user_promo_state or 
+        user_id in user_promo_admin_state or user_id in user_cancel_subscription_state or
+        user_id in user_refund_state or user_id in user_unsubscribe_state or
+        user_id in user_add_admin_state or user_id in user_view_film_state):
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в состоянии, пропускаем (обработает специализированный handler)")
+        return
+    
+    # Обработка реплаев и специальных случаев (fallback для необработанных сообщений)
     
     # === user_ticket_state ===
     if user_id in user_ticket_state:
