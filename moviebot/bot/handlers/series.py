@@ -636,8 +636,21 @@ def register_series_handlers(bot_param):
     # Но обработчик search_type_callback уже зарегистрирован на верхнем уровне модуля с bot_instance
     # Проверяем, что это один и тот же объект
     if bot_param != bot_instance:
-        logger.warning(f"[REGISTER SERIES HANDLERS] ⚠️ ВНИМАНИЕ: bot_param != bot_instance! Это может вызвать проблемы!")
-        logger.warning(f"[REGISTER SERIES HANDLERS] bot_param id: {id(bot_param)}, bot_instance id: {id(bot_instance)}")
+        logger.error(f"[REGISTER SERIES HANDLERS] ❌ КРИТИЧЕСКАЯ ОШИБКА: bot_param != bot_instance!")
+        logger.error(f"[REGISTER SERIES HANDLERS] bot_param id: {id(bot_param)}, bot_instance id: {id(bot_instance)}")
+        logger.error(f"[REGISTER SERIES HANDLERS] Это означает, что search_type_callback зарегистрирован на другом экземпляре бота!")
+        logger.error(f"[REGISTER SERIES HANDLERS] Перерегистрируем search_type_callback на правильном экземпляре...")
+        
+        # Перерегистрируем обработчик на правильном экземпляре бота
+        @bot_param.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
+        def search_type_callback_fixed(call):
+            """Перерегистрированный обработчик выбора типа поиска"""
+            # Вызываем оригинальный обработчик
+            search_type_callback(call)
+        
+        logger.info(f"[REGISTER SERIES HANDLERS] ✅ search_type_callback перерегистрирован на bot_param")
+    else:
+        logger.info(f"[REGISTER SERIES HANDLERS] ✅ bot_param == bot_instance, обработчик search_type_callback зарегистрирован правильно")
     
     @bot_param.message_handler(commands=['search'])
     def _handle_search_handler(message):
