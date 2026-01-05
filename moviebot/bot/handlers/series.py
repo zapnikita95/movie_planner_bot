@@ -3099,21 +3099,49 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             logger.info(f"[SHOW FILM INFO] film_id из existing: {film_id}")
         else:
             logger.info(f"[SHOW FILM INFO] Запрос film_id из БД...")
-            with db_lock:
-                cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                film_row = cursor.fetchone()
-                if film_row:
-                    film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+            try:
+                import threading
+                lock_acquired = db_lock.acquire(timeout=1.0)
+                if lock_acquired:
+                    try:
+                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                        film_row = cursor.fetchone()
+                        if film_row:
+                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                        logger.info(f"[SHOW FILM INFO] Запрос film_id выполнен, film_id={film_id}")
+                    finally:
+                        db_lock.release()
+                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после запроса film_id")
+                else:
+                    logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос film_id (не критично)")
+                    film_id = None
+            except Exception as film_id_e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка при запросе film_id (не критично): {film_id_e}")
+                film_id = None
             logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}")
         
         # Проверяем, есть ли уже план для этого фильма
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         has_plan = False
         if film_id:
-            with db_lock:
-                cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
-                plan_row = cursor.fetchone()
-                has_plan = plan_row is not None
+            try:
+                import threading
+                lock_acquired = db_lock.acquire(timeout=1.0)
+                if lock_acquired:
+                    try:
+                        cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
+                        plan_row = cursor.fetchone()
+                        has_plan = plan_row is not None
+                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен, has_plan={has_plan}")
+                    finally:
+                        db_lock.release()
+                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов")
+                else:
+                    logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем проверку планов (не критично)")
+                    has_plan = False
+            except Exception as plan_e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка при проверке планов (не критично): {plan_e}")
+                has_plan = False
         logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}")
         
         # Если фильм не в базе, добавляем кнопку "➕ Добавить в базу"
@@ -3129,46 +3157,59 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if film_id:
             # Получаем информацию об оценках
             logger.info(f"[SHOW FILM INFO] Запрос оценок из БД...")
-            with db_lock:
-                # Получаем среднюю оценку
-                cursor.execute('''
-                    SELECT AVG(rating) as avg FROM ratings 
-                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                ''', (chat_id, film_id))
-                avg_result = cursor.fetchone()
-                avg_rating = None
-                if avg_result:
-                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                    avg_rating = float(avg) if avg is not None else None
-                
-                # Получаем активных пользователей
-                cursor.execute('''
-                    SELECT DISTINCT user_id
-                    FROM stats
-                    WHERE chat_id = %s AND user_id IS NOT NULL
-                ''', (chat_id,))
-                active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
-                
-                # Получаем всех, кто оценил этот фильм
-                cursor.execute('''
-                    SELECT DISTINCT user_id FROM ratings
-                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                ''', (chat_id, film_id))
-                rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
-                
-                # Определяем текст и эмодзи кнопки
-                # Показываем среднюю оценку, если есть хотя бы одна оценка
-                if avg_rating is not None:
-                    rating_int = int(round(avg_rating))
-                    if 1 <= rating_int <= 4:
-                        emoji = "💩"
-                    elif 5 <= rating_int <= 7:
-                        emoji = "💬"
-                    else:  # 8-10
-                        emoji = "🏆"
-                    rating_text = f"{emoji} {avg_rating:.0f}/10"
+            avg_rating = None
+            rating_text = "💬 Оценить"
+            try:
+                import threading
+                lock_acquired = db_lock.acquire(timeout=1.0)
+                if lock_acquired:
+                    try:
+                        # Получаем среднюю оценку
+                        cursor.execute('''
+                            SELECT AVG(rating) as avg FROM ratings 
+                            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                        ''', (chat_id, film_id))
+                        avg_result = cursor.fetchone()
+                        if avg_result:
+                            avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                            avg_rating = float(avg) if avg is not None else None
+                        
+                        # Получаем активных пользователей
+                        cursor.execute('''
+                            SELECT DISTINCT user_id
+                            FROM stats
+                            WHERE chat_id = %s AND user_id IS NOT NULL
+                        ''', (chat_id,))
+                        active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                        
+                        # Получаем всех, кто оценил этот фильм
+                        cursor.execute('''
+                            SELECT DISTINCT user_id FROM ratings
+                            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                        ''', (chat_id, film_id))
+                        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                        
+                        # Определяем текст и эмодзи кнопки
+                        # Показываем среднюю оценку, если есть хотя бы одна оценка
+                        if avg_rating is not None:
+                            rating_int = int(round(avg_rating))
+                            if 1 <= rating_int <= 4:
+                                emoji = "💩"
+                            elif 5 <= rating_int <= 7:
+                                emoji = "💬"
+                            else:  # 8-10
+                                emoji = "🏆"
+                            rating_text = f"{emoji} {avg_rating:.0f}/10"
+                        logger.info(f"[SHOW FILM INFO] Запрос оценок выполнен, avg_rating={avg_rating}, rating_text={rating_text}")
+                    finally:
+                        db_lock.release()
+                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после запроса оценок")
                 else:
+                    logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос оценок (не критично)")
                     rating_text = "💬 Оценить"
+            except Exception as rating_e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка при запросе оценок (не критично): {rating_e}")
+                rating_text = "💬 Оценить"
             logger.info(f"[SHOW FILM INFO] Оценки получены, rating_text={rating_text}")
             
             markup.row(
@@ -3274,15 +3315,30 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         
         # Проверяем, есть ли план для этого фильма (дома)
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
+        plan_row = None
         if film_id:
-            with db_lock:
-                cursor.execute('''
-                    SELECT id, plan_type FROM plans 
-                    WHERE film_id = %s AND chat_id = %s
-                    ORDER BY plan_datetime ASC
-                    LIMIT 1
-                ''', (film_id, chat_id))
-                plan_row = cursor.fetchone()
+            try:
+                import threading
+                lock_acquired = db_lock.acquire(timeout=1.0)
+                if lock_acquired:
+                    try:
+                        cursor.execute('''
+                            SELECT id, plan_type FROM plans 
+                            WHERE film_id = %s AND chat_id = %s
+                            ORDER BY plan_datetime ASC
+                            LIMIT 1
+                        ''', (film_id, chat_id))
+                        plan_row = cursor.fetchone()
+                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен, plan_row={plan_row is not None}")
+                    finally:
+                        db_lock.release()
+                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов")
+                else:
+                    logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем проверку планов (не критично)")
+                    plan_row = None
+            except Exception as plan_e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка при проверке планов (не критично): {plan_e}")
+                plan_row = None
             
             if plan_row:
                 plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
@@ -3291,11 +3347,25 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 # Проверяем наличие билетов для планов "в кино"
                 ticket_file_id = None
                 if plan_type == 'cinema':
-                    with db_lock:
-                        cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
-                        ticket_row = cursor.fetchone()
-                        if ticket_row:
-                            ticket_file_id = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else ticket_row[0]
+                    try:
+                        import threading
+                        lock_acquired = db_lock.acquire(timeout=1.0)
+                        if lock_acquired:
+                            try:
+                                cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
+                                ticket_row = cursor.fetchone()
+                                if ticket_row:
+                                    ticket_file_id = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else ticket_row[0]
+                                logger.info(f"[SHOW FILM INFO] Запрос билетов выполнен, ticket_file_id={ticket_file_id is not None}")
+                            finally:
+                                db_lock.release()
+                                logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки билетов")
+                        else:
+                            logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем проверку билетов (не критично)")
+                            ticket_file_id = None
+                    except Exception as ticket_e:
+                        logger.warning(f"[SHOW FILM INFO] Ошибка при проверке билетов (не критично): {ticket_e}")
+                        ticket_file_id = None
                 
                 if plan_type == 'home':
                     # Кнопка "Отметить просмотренным" (если фильм еще не просмотрен)
