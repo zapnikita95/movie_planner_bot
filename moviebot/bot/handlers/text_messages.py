@@ -712,11 +712,11 @@ def main_text_handler(message):
                 # Удаляем состояние ТОЛЬКО после успешной отправки
                 if user_id in user_search_state:
                     del user_search_state[user_id]
-                        logger.info(f"[SEARCH] Состояние user_search_state удалено для user_id={user_id}")
-                except Exception as e:
-                    logger.error(f"[SEARCH] ❌ Ошибка отправки результатов поиска: {e}", exc_info=True)
-                    try:
-                        bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
+                    logger.info(f"[SEARCH] Состояние user_search_state удалено для user_id={user_id}")
+            except Exception as e:
+                logger.error(f"[SEARCH] ❌ Ошибка отправки результатов поиска: {e}", exc_info=True)
+                try:
+                    bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
                     except:
                         pass
                     # Удаляем состояние даже при ошибке
