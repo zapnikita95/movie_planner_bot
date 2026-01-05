@@ -160,7 +160,7 @@ def register_rate_handlers(bot):
         text += "\n<i>Нажмите на фильм, чтобы открыть его описание и оценить</i>"
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
-            bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_rating:"))
     def handle_confirm_rating(call):
