@@ -32,6 +32,12 @@ cursor = get_db_cursor()
 
 
 # Обработчик выбора типа поиска (фильм/сериал) - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
+# КРИТИЧЕСКИ ВАЖНО: Этот обработчик регистрируется при импорте модуля
+logger.info("=" * 80)
+logger.info(f"[SEARCH TYPE HANDLER] Регистрация обработчика search_type_callback")
+logger.info(f"[SEARCH TYPE HANDLER] bot_instance={bot_instance}, type={type(bot_instance)}")
+logger.info("=" * 80)
+
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
 def search_type_callback(call):
     """Обработчик выбора типа поиска (фильм или сериал)"""
