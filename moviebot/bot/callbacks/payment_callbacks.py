@@ -4459,7 +4459,9 @@ def register_payment_callbacks(bot_instance):
             if action.startswith("cancel_confirm:"):
                 # Финальное подтверждение отмены подписки
                 subscription_id = int(action.split(":")[1])
-                from moviebot.database.db_operations import get_subscription_by_id, cancel_subscription
+                from moviebot.database.db_operations import get_subscription_by_id, cancel_subscription, get_user_personal_subscriptions
+                import pytz
+                from datetime import datetime
             
                 sub = get_subscription_by_id(subscription_id)
                 if not sub or sub.get('user_id') != user_id:
@@ -4473,19 +4475,116 @@ def register_payment_callbacks(bot_instance):
                     logger.info(f"[PAYMENT CANCEL CONFIRM] Подписка {subscription_id} успешно отменена для user_id={user_id}")
                     
                     # Обновляем сообщение с информацией о подписках
-                    # Вызываем обработчик payment:active для обновления информации
                     try:
-                        # Создаем фейковый callback для вызова обработчика active
-                        from telebot.types import CallbackQuery, Message, User, Chat
-                        fake_call = CallbackQuery(
-                            id=call.id,
-                            from_user=call.from_user,
-                            message=call.message,
-                            data=f"payment:active:{subscription_type}",
-                            chat_instance=call.chat_instance
-                        )
-                        # Рекурсивно вызываем обработчик для обновления информации
-                        handle_payment_callback(fake_call)
+                        # Получаем обновленный список подписок
+                        all_subs = get_user_personal_subscriptions(user_id)
+                        
+                        # Фильтруем только активные подписки
+                        active_subs = []
+                        seen_plan_types = set()
+                        now = datetime.now(pytz.UTC)
+                        total_price = 0
+                        
+                        for active_sub in all_subs:
+                            expires_at = active_sub.get('expires_at')
+                            plan_type = active_sub.get('plan_type')
+                            
+                            # Проверяем, что подписка активна
+                            is_active = False
+                            if not expires_at:
+                                is_active = True
+                            elif isinstance(expires_at, datetime):
+                                if expires_at.tzinfo is None:
+                                    expires_at = pytz.UTC.localize(expires_at)
+                                if expires_at.tzinfo != pytz.UTC:
+                                    expires_at = expires_at.astimezone(pytz.UTC)
+                                is_active = expires_at > now
+                            else:
+                                try:
+                                    if isinstance(expires_at, str):
+                                        expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                        if expires_dt.tzinfo is None:
+                                            expires_dt = pytz.UTC.localize(expires_dt)
+                                        if expires_dt.tzinfo != pytz.UTC:
+                                            expires_dt = expires_dt.astimezone(pytz.UTC)
+                                        is_active = expires_dt > now
+                                    else:
+                                        is_active = True
+                                except:
+                                    is_active = True
+                            
+                            # Добавляем только активные и уникальные по plan_type
+                            if is_active and plan_type and plan_type not in seen_plan_types:
+                                active_subs.append(active_sub)
+                                seen_plan_types.add(plan_type)
+                                total_price += active_sub.get('price', 0)
+                        
+                        # Формируем сообщение
+                        plan_names = {
+                            'notifications': 'Уведомления о сериалах',
+                            'recommendations': 'Рекомендации',
+                            'tickets': 'Билеты',
+                            'all': 'Все режимы'
+                        }
+                        
+                        if active_subs:
+                            if len(active_subs) == 1:
+                                plan_type = active_subs[0].get('plan_type', 'all')
+                                plan_name = plan_names.get(plan_type, plan_type)
+                                sub = active_subs[0]
+                                expires_at = sub.get('expires_at')
+                                next_payment = sub.get('next_payment_date')
+                                activated = sub.get('activated_at')
+                                
+                                text = f"👤 <b>Личная подписка</b>\n\n"
+                                text += f"📋 <b>Название подписки:</b> {plan_name}\n\n"
+                                text += f"💰 <b>Общая сумма платежа: {total_price}₽</b>\n"
+                                if activated:
+                                    text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                                if next_payment:
+                                    text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                                if expires_at:
+                                    text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                                else:
+                                    text += f"⏰ Действует: <b>Навсегда</b>\n"
+                                
+                                markup = InlineKeyboardMarkup(row_width=1)
+                                subscription_id_new = sub.get('id')
+                                if subscription_id_new and subscription_id_new > 0:
+                                    markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id_new}"))
+                                    markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id_new}"))
+                                else:
+                                    markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:personal"))
+                                    markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:personal"))
+                                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                            else:
+                                text = f"👤 <b>Личная подписка</b>\n\n"
+                                text += f"📋 <b>Активные подписки:</b>\n"
+                                for active_sub in active_subs:
+                                    sub_plan_type = active_sub.get('plan_type', 'all')
+                                    sub_plan_name = plan_names.get(sub_plan_type, sub_plan_type)
+                                    sub_price = active_sub.get('price', 0)
+                                    text += f"• {sub_plan_name} ({sub_price}₽)\n"
+                                text += "\n"
+                                text += f"💰 <b>Общая сумма платежа: {total_price}₽</b>\n"
+                                
+                                markup = InlineKeyboardMarkup(row_width=1)
+                                markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:modify:all"))
+                                for active_sub in active_subs:
+                                    sub_id = active_sub.get('id')
+                                    if sub_id and sub_id > 0:
+                                        sub_plan_type = active_sub.get('plan_type', 'all')
+                                        sub_plan_name = plan_names.get(sub_plan_type, sub_plan_type)
+                                        markup.add(InlineKeyboardButton(f"❌ Отменить: {sub_plan_name}", callback_data=f"payment:cancel:{sub_id}"))
+                                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                        else:
+                            text = "👤 <b>Личная подписка</b>\n\n"
+                            text += "❌ Активная подписка отсутствует, выберите тариф для подключения"
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
+                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                        
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as update_e:
                         logger.error(f"[PAYMENT CANCEL CONFIRM] Ошибка обновления информации о подписках: {update_e}", exc_info=True)
                         # Если не удалось обновить, показываем простое сообщение
