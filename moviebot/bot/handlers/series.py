@@ -1152,12 +1152,18 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         
         # Если это сериал, добавляем информацию о статусе выхода серий
         if is_series:
-            is_airing, next_episode = get_series_airing_status(kp_id)
-            if is_airing and next_episode:
-                text += f"\n🟢 <b>Сериал выходит сейчас</b>\n"
-                text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
-            else:
-                text += f"\n🔴 <b>Сериал не выходит</b>\n"
+            logger.info(f"[SHOW FILM INFO] Получение статуса выхода серий для kp_id={kp_id}")
+            try:
+                is_airing, next_episode = get_series_airing_status(kp_id)
+                logger.info(f"[SHOW FILM INFO] is_airing={is_airing}, next_episode={next_episode}")
+                if is_airing and next_episode:
+                    text += f"\n🟢 <b>Сериал выходит сейчас</b>\n"
+                    text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
+                else:
+                    text += f"\n🔴 <b>Сериал не выходит</b>\n"
+            except Exception as airing_e:
+                logger.error(f"[SHOW FILM INFO] Ошибка get_series_airing_status: {airing_e}", exc_info=True)
+                # Продолжаем без информации о статусе выхода
         
         text += f"\n<a href='{link}'>Кинопоиск</a>"
         
