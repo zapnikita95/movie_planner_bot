@@ -851,3 +851,231 @@ def add_ticket_from_plan_callback(call):
     # - remove_from_calendar
     # - edit_plan handlers
     # и другие из moviebot.py
+
+
+def get_plan_day_or_date_internal(message, state):
+    """Внутренняя функция для получения дня/даты в /plan"""
+    user_id = message.from_user.id
+    text = message.text.lower().strip() if message.text else ""
+    plan_type = state.get('type')
+    link = state.get('link')
+    
+    logger.info(f"[PLAN DAY/DATE INTERNAL] Обработка: text='{text}', plan_type={plan_type}, link={link}")
+    
+    if not plan_type or not link:
+        logger.warning(f"[PLAN DAY/DATE INTERNAL] Отсутствует plan_type или link: plan_type={plan_type}, link={link}")
+        bot_instance.reply_to(message, "❌ Ошибка: не указан тип просмотра или ссылка. Начните заново.")
+        if user_id in user_plan_state:
+            del user_plan_state[user_id]
+        return
+    
+    user_tz = get_user_timezone_or_default(user_id)
+    now = datetime.now(user_tz)
+    plan_dt = None
+    
+    # Сначала пробуем использовать parse_session_time для более полной обработки дат
+    parsed_dt = parse_session_time(message.text.strip() if message.text else "", user_tz)
+    if parsed_dt:
+        plan_dt = parsed_dt
+        logger.info(f"[PLAN DAY/DATE INTERNAL] Использован parse_session_time: {plan_dt}")
+    
+    extracted_time = None
+    if not plan_dt:
+        # Пробуем найти время отдельно (например, "завтра 10:00", "в субботу 15:00", "10.01 20:30")
+        # Ищем формат ЧЧ:ММ (два цифры, двоеточие, две цифры)
+        time_match = re.search(r'\b(\d{1,2}):(\d{2})\b', text)
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                extracted_time = (hour, minute)
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Найдено время в тексте: {hour}:{minute:02d}")
+    
+    if not plan_dt:
+        target_weekday = None
+        for phrase, wd in days_full.items():
+            if phrase in text:
+                target_weekday = wd
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
+                break
+        
+        if target_weekday is not None:
+            current_wd = now.weekday()
+            delta = (target_weekday - current_wd + 7) % 7
+            if delta == 0:
+                delta = 7
+            plan_date = now.date() + timedelta(days=delta)
+            
+            # Используем извлеченное время, если есть, иначе стандартное
+            if extracted_time:
+                hour, minute = extracted_time
+            elif plan_type == 'home':
+                hour = 19 if target_weekday < 5 else 10
+                minute = 0
+            else:
+                hour = 9
+                minute = 0
+            
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+            plan_dt = user_tz.localize(plan_dt)
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата по дню недели: {plan_dt}")
+        else:
+            # Обработка специальных форматов: "завтра", "следующая неделя"
+            if 'завтра' in text:
+                plan_date = (now.date() + timedelta(days=1))
+                # Используем извлеченное время, если есть, иначе стандартное
+                if extracted_time:
+                    hour, minute = extracted_time
+                elif plan_type == 'home':
+                    hour = 19 if plan_date.weekday() < 5 else 10
+                    minute = 0
+                else:
+                    hour = 9
+                    minute = 0
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                plan_dt = user_tz.localize(plan_dt)
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'завтра': {plan_dt}")
+            elif 'следующая неделя' in text or 'след неделя' in text or 'след. неделя' in text or 'на следующей неделе' in text:
+                if plan_type == 'home':
+                    # Для дома - суббота следующей недели в 10:00
+                    current_wd = now.weekday()
+                    days_until_next_saturday = (5 - current_wd + 7) % 7
+                    if days_until_next_saturday == 0:
+                        days_until_next_saturday = 7
+                    else:
+                        days_until_next_saturday += 7
+                    plan_date = now.date() + timedelta(days=days_until_next_saturday)
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=10))
+                    plan_dt = user_tz.localize(plan_dt)
+                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (дом): {plan_dt}")
+                else:
+                    # Для кино - четверг следующей недели
+                    current_wd = now.weekday()
+                    days_until_thursday = (3 - current_wd + 7) % 7
+                    if days_until_thursday == 0:
+                        days_until_thursday = 7
+                    else:
+                        days_until_thursday += 7
+                    plan_date = now.date() + timedelta(days=days_until_thursday)
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
+                    plan_dt = user_tz.localize(plan_dt)
+                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (кино): {plan_dt}")
+            else:
+                # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
+                # Сначала пробуем формат с временем: "15 января 17:00" или "10 января 20:30"
+                date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2}):(\d{2})', text)
+                if date_time_match:
+                    day_num = int(date_time_match.group(1))
+                    month_str = date_time_match.group(2)
+                    hour = int(date_time_match.group(3))
+                    minute = int(date_time_match.group(4))
+                    month = months_map.get(month_str.lower())
+                    if month:
+                        try:
+                            year = now.year
+                            candidate = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                            if candidate < now:
+                                year += 1
+                            plan_dt = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата с временем: {plan_dt}")
+                        except ValueError as e:
+                            logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга даты с временем: {e}")
+                else:
+                    # Парсинг "15 января" или "14 апреля"
+                    date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+                    if date_match:
+                        day = int(date_match.group(1))
+                        month_str = date_match.group(2).lower()
+                        month = months_map.get(month_str)
+                        if month:
+                            year = now.year
+                            try:
+                                candidate = user_tz.localize(datetime(year, month, day))
+                                if candidate < now:
+                                    year += 1
+                                # Используем извлеченное время, если есть, иначе стандартное
+                                if extracted_time:
+                                    hour, minute = extracted_time
+                                elif plan_type == 'home':
+                                    hour = 19 if datetime(year, month, day).weekday() < 5 else 10
+                                    minute = 0
+                                else:
+                                    hour = 9
+                                    minute = 0
+                                plan_dt = user_tz.localize(datetime(year, month, day, hour, minute))
+                                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата текстовым форматом: {plan_dt}")
+                            except ValueError as e:
+                                logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга текстовой даты: {e}")
+                    else:
+                        # Парсинг "10.01" или "06.01", возможно с временем "10.01 20:30"
+                        # Сначала пробуем формат с временем: "10.01 20:30"
+                        date_time_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\s+(\d{1,2}):(\d{2})', text)
+                        if date_time_match:
+                            day_num = int(date_time_match.group(1))
+                            month_num = int(date_time_match.group(2))
+                            year_str = date_time_match.group(3)
+                            hour = int(date_time_match.group(4))
+                            minute = int(date_time_match.group(5))
+                            if 1 <= month_num <= 12 and 1 <= day_num <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59:
+                                try:
+                                    year = now.year
+                                    if year_str:
+                                        year_part = int(year_str)
+                                        if year_part < 100:
+                                            year = 2000 + year_part
+                                        else:
+                                            year = year_part
+                                    candidate = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
+                                    if candidate < now:
+                                        year += 1
+                                    plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
+                                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом с временем: {plan_dt}")
+                                except ValueError as e:
+                                    logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты с временем: {e}")
+                        else:
+                            # Парсинг "10.01" или "06.01" без времени
+                            date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                            if date_match:
+                                day_num = int(date_match.group(1))
+                                month_num = int(date_match.group(2))
+                                if 1 <= month_num <= 12 and 1 <= day_num <= 31:
+                                    try:
+                                        year = now.year
+                                        if date_match.group(3):
+                                            year_part = int(date_match.group(3))
+                                            if year_part < 100:
+                                                year = 2000 + year_part
+                                            else:
+                                                year = year_part
+                                        candidate = user_tz.localize(datetime(year, month_num, day_num))
+                                        if candidate < now:
+                                            year += 1
+                                        # Используем извлеченное время, если есть, иначе стандартное
+                                        if extracted_time:
+                                            hour, minute = extracted_time
+                                        elif plan_type == 'home':
+                                            hour = 19 if datetime(year, month_num, day_num).weekday() < 5 else 10
+                                            minute = 0
+                                        else:
+                                            hour = 9
+                                            minute = 0
+                                        plan_dt = user_tz.localize(datetime(year, month_num, day_num, hour, minute))
+                                        logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата числовым форматом: {plan_dt}")
+                                    except ValueError as e:
+                                        logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
+    
+    if not plan_dt:
+        logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать дату из текста: '{text}'")
+        bot_instance.reply_to(message, "Не удалось распознать день/дату. Попробуйте снова.")
+        return
+    
+    # Вызываем process_plan
+    message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
+    # Преобразуем plan_dt обратно в строку для process_plan
+    day_or_date_str = plan_dt.strftime('%d.%m.%Y %H:%M') if plan_dt else None
+    result = process_plan(bot_instance, user_id, message.chat.id, link, plan_type, day_or_date_str, message_date_utc)
+    if result == 'NEEDS_TIMEZONE':
+        show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+    elif result:
+        if user_id in user_plan_state:
+            del user_plan_state[user_id]
