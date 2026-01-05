@@ -497,7 +497,7 @@ def premiere_add_to_db(call):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premiere_notify:"))
 def premiere_notify_handler(call):
-    """Обработчик уведомления о выходе премьеры - добавляет в базу и ставит в schedule"""
+    """Обработчик уведомления о выходе премьеры - добавляет в расписание, затем в базу"""
     try:
         bot_instance.answer_callback_query(call.id)
         parts = call.data.split(":")
@@ -514,8 +514,16 @@ def premiere_notify_handler(call):
             bot_instance.answer_callback_query(call.id, "❌ Ошибка парсинга даты", show_alert=True)
             return
         
-        # Проверяем, есть ли фильм уже в базе
+        # Получаем информацию о фильме (но НЕ добавляем в базу пока)
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        if not info:
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        title = info.get('title', 'Фильм')
+        
+        # Проверяем, есть ли фильм уже в базе
         with db_lock:
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             existing = cursor.fetchone()
@@ -523,19 +531,11 @@ def premiere_notify_handler(call):
             if existing:
                 film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
                 title = existing.get('title') if isinstance(existing, dict) else existing[1]
+                film_already_in_db = True
             else:
-                # Добавляем фильм в базу
-                info = extract_movie_info(link)
-                if not info:
-                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-                    return
-                
-                film_id, title = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-                if not film_id:
-                    bot_instance.answer_callback_query(call.id, "❌ Не удалось добавить фильм в базу", show_alert=True)
-                    return
+                film_id = None
+                film_already_in_db = False
         
-        # Добавляем в schedule "в кино" на дату выхода
         # Получаем часовой пояс пользователя
         user_tz = pytz.timezone('Europe/Moscow')  # По умолчанию
         try:
@@ -568,25 +568,69 @@ def premiere_notify_handler(call):
         session_dt = user_tz.localize(datetime.combine(premiere_date, session_time))
         plan_utc = session_dt.astimezone(pytz.utc)
         
-        # Проверяем, нет ли уже плана на эту дату
+        # Используем транзакцию: добавляем фильм в базу только если план успешно добавлен
+        plan_id = None
+        film_added = False
+        
         with db_lock:
-            cursor.execute('''
-                SELECT id FROM plans 
-                WHERE chat_id = %s AND film_id = %s AND plan_type = 'cinema' AND DATE(plan_datetime AT TIME ZONE 'UTC' AT TIME ZONE %s) = %s
-            ''', (chat_id, film_id, str(user_tz), premiere_date))
-            existing_plan = cursor.fetchone()
-            
-            if not existing_plan:
+            try:
+                # Если фильма нет в базе, добавляем его (но не коммитим пока)
+                if not film_already_in_db:
+                    cursor.execute('''
+                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'link')
+                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
+                        RETURNING id
+                    ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], info['description'], 
+                          info['director'], info['actors'], 1 if info.get('is_series') else 0, user_id))
+                    
+                    result = cursor.fetchone()
+                    film_id = result.get('id') if isinstance(result, dict) else result[0]
+                    film_added = True
+                    logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в транзакции: film_id={film_id}, title={title}")
+                
+                # Проверяем, нет ли уже плана на эту дату
                 cursor.execute('''
-                    INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
-                    VALUES (%s, %s, 'cinema', %s, %s)
-                    RETURNING id
-                ''', (chat_id, film_id, plan_utc, user_id))
-                conn.commit()
-                plan_row = cursor.fetchone()
-                plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
-            else:
-                plan_id = existing_plan.get('id') if isinstance(existing_plan, dict) else existing_plan[0]
+                    SELECT id FROM plans 
+                    WHERE chat_id = %s AND film_id = %s AND plan_type = 'cinema' AND DATE(plan_datetime AT TIME ZONE 'UTC' AT TIME ZONE %s) = %s
+                ''', (chat_id, film_id, str(user_tz), premiere_date))
+                existing_plan = cursor.fetchone()
+                
+                if not existing_plan:
+                    # Добавляем план в расписание
+                    cursor.execute('''
+                        INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
+                        VALUES (%s, %s, 'cinema', %s, %s)
+                        RETURNING id
+                    ''', (chat_id, film_id, plan_utc, user_id))
+                    
+                    plan_row = cursor.fetchone()
+                    if plan_row:
+                        plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                        # Коммитим транзакцию только если план успешно добавлен
+                        conn.commit()
+                        logger.info(f"[PREMIERE NOTIFY] План успешно добавлен: plan_id={plan_id}, film_id={film_id}")
+                        if film_added:
+                            logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в базу как следствие успешного добавления плана")
+                    else:
+                        logger.error(f"[PREMIERE NOTIFY] План не был создан, но ошибки не было")
+                        conn.rollback()
+                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
+                        return
+                else:
+                    plan_id = existing_plan.get('id') if isinstance(existing_plan, dict) else existing_plan[0]
+                    # Если план уже существует, коммитим только если фильм был добавлен
+                    if film_added:
+                        conn.commit()
+                        logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в базу, план уже существовал: plan_id={plan_id}")
+                    else:
+                        logger.info(f"[PREMIERE NOTIFY] План уже существует: plan_id={plan_id}")
+                    
+            except Exception as e:
+                conn.rollback()
+                logger.error(f"[PREMIERE NOTIFY] Ошибка в транзакции: {e}", exc_info=True)
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
+                return
         
         # Отправляем сообщение-подтверждение
         time_str = f"{int(hour):02d}:{int(minute):02d}"
@@ -602,7 +646,7 @@ def premiere_notify_handler(call):
         bot_instance.send_message(chat_id, confirm_text, parse_mode='HTML', reply_markup=markup)
         bot_instance.answer_callback_query(call.id, "✅ Уведомление установлено!")
         
-        logger.info(f"[PREMIERE NOTIFY] Уведомление установлено для фильма {title} (kp_id={kp_id}) пользователем {user_id}")
+        logger.info(f"[PREMIERE NOTIFY] Уведомление установлено для фильма {title} (kp_id={kp_id}) пользователем {user_id}, plan_id={plan_id}")
     except Exception as e:
         logger.error(f"[PREMIERE NOTIFY] Ошибка: {e}", exc_info=True)
         try:
