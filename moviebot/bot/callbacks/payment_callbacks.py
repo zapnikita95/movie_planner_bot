@@ -1333,6 +1333,16 @@ def register_payment_callbacks(bot_instance):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                     return
             
+                # Дедупликация по chat_id
+                seen_chat_ids = set()
+                unique_groups = []
+                for group in user_groups:
+                    chat_id = group.get('chat_id')
+                    if chat_id and chat_id not in seen_chat_ids:
+                        seen_chat_ids.add(chat_id)
+                        unique_groups.append(group)
+                user_groups = unique_groups
+            
                 # Показываем список групп для выбора
                 text = "👥 <b>Проверка групповой подписки</b>\n\n"
                 text += "Выберите группу из списка:"
@@ -1637,6 +1647,16 @@ def register_payment_callbacks(bot_instance):
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                         return
+                
+                    # Дедупликация по chat_id
+                    seen_chat_ids = set()
+                    unique_groups = []
+                    for group in user_groups:
+                        chat_id = group.get('chat_id')
+                        if chat_id and chat_id not in seen_chat_ids:
+                            seen_chat_ids.add(chat_id)
+                            unique_groups.append(group)
+                    user_groups = unique_groups
                 
                     # Показываем список групп для выбора
                     text = "👥 <b>Проверка групповой подписки</b>\n\n"
