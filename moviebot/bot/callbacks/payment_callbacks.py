@@ -4472,12 +4472,14 @@ def register_payment_callbacks(bot_instance):
                 
                 if cancel_subscription(subscription_id, user_id):
                     bot_instance.answer_callback_query(call.id, "Подписка отменена")
-                    logger.info(f"[PAYMENT CANCEL CONFIRM] Подписка {subscription_id} успешно отменена для user_id={user_id}")
+                    logger.info(f"[PAYMENT CANCEL CONFIRM] Подписка {subscription_id} успешно отменена для user_id={user_id}, subscription_type={subscription_type}")
                     
                     # Обновляем сообщение с информацией о подписках
                     try:
-                        # Получаем обновленный список подписок
-                        all_subs = get_user_personal_subscriptions(user_id)
+                        if subscription_type == 'personal':
+                            # Для личных подписок получаем обновленный список
+                            from moviebot.database.db_operations import get_user_personal_subscriptions
+                            all_subs = get_user_personal_subscriptions(user_id)
                         
                         # Фильтруем только активные подписки
                         active_subs = []

@@ -21,9 +21,6 @@ def payment_command(message):
         username = message.from_user.username or f"user_{user_id}"
         log_request(user_id, username, '/payment', chat_id)
         
-        is_private = message.chat.type == 'private'
-        
-        # Получаем активные подписки
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
