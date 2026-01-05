@@ -41,6 +41,39 @@ def register_random_callbacks(bot):
                     logger.warning(f"[RANDOM CALLBACK] Access denied for mode {mode}, user_id={user_id}")
                     return
             
+            # Для режима my_votes проверяем наличие импортированных оценок
+            if mode == 'my_votes':
+                from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                conn = get_db_connection()
+                cursor = get_db_cursor()
+                
+                with db_lock:
+                    cursor.execute("""
+                        SELECT COUNT(*) 
+                        FROM movies m
+                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                        WHERE m.chat_id = %s AND r.user_id = %s AND r.is_imported = TRUE
+                    """, (chat_id, user_id))
+                    imported_count = cursor.fetchone()
+                    imported_ratings = imported_count.get('count') if isinstance(imported_count, dict) else (imported_count[0] if imported_count else 0)
+                
+                if imported_ratings == 0:
+                    # Нет импортированных оценок - показываем сообщение с кнопкой на импорт
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
+                    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="rand_mode:back"))
+                    
+                    bot_instance.answer_callback_query(call.id)
+                    bot_instance.edit_message_text(
+                        "📥 <b>Загрузите ваши оценки из базы Кинопоиска</b>\n\n"
+                        "Для использования режима \"По моим оценкам\" необходимо импортировать ваши оценки с Кинопоиска.",
+                        chat_id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    return
+            
             if user_id not in user_random_state:
                 logger.error(f"[RANDOM CALLBACK] State not found for user_id={user_id}")
                 bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
@@ -54,9 +87,9 @@ def register_random_callbacks(bot):
             # Добавляем справку о режиме
             mode_descriptions = {
                 'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
-                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.',
+                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм на Кинопоиске по заданным фильтрам.',
                 'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
-                'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
+                'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
             }
             mode_description = mode_descriptions.get(mode, '')
             
@@ -218,8 +251,8 @@ def register_random_callbacks(bot):
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
             
             bot_instance.answer_callback_query(call.id)
-            # Для режима kinopoisk показываем Шаг 1/2, для остальных - Шаг 1/4
-            if mode == 'kinopoisk':
+            # Для режимов kinopoisk и group_votes показываем Шаг 1/2, для остальных - Шаг 1/4
+            if mode in ['kinopoisk', 'group_votes']:
                 step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
             else:
                 step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"

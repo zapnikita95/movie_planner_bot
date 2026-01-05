@@ -1380,6 +1380,47 @@ def send_successful_payment_notification(chat_id, subscription_id, subscription_
                     text += f"Действует до: {expires_at}"
         
         markup = InlineKeyboardMarkup()
+        
+        # Для групповых подписок проверяем, есть ли участники группы, которых можно добавить
+        if subscription_type == 'group' and chat_id < 0:
+            try:
+                from moviebot.database.db_operations import get_subscription_members, get_active_group_users
+                from moviebot.bot.bot_init import BOT_ID
+                
+                # Получаем участников подписки и активных пользователей группы
+                members = get_subscription_members(subscription_id)
+                if BOT_ID and BOT_ID in members:
+                    members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
+                
+                active_users = get_active_group_users(chat_id, BOT_ID)
+                
+                # Находим участников группы, которые не в подписке
+                not_in_subscription = []
+                for user_id, username in active_users.items():
+                    if user_id not in members:
+                        not_in_subscription.append({
+                            'user_id': user_id,
+                            'username': username
+                        })
+                
+                # Если есть участники для добавления, предлагаем их добавить
+                if not_in_subscription:
+                    text += "\n\n"
+                    text += "👥 <b>В вашей группе есть участники, которых можно добавить в подписку:</b>\n\n"
+                    
+                    # Добавляем кнопки для добавления участников (максимум 10)
+                    for member in not_in_subscription[:10]:
+                        display_name = member['username'] if member['username'].startswith('user_') else f"@{member['username']}"
+                        button_text = f"➕ {display_name}"
+                        if len(button_text) > 50:
+                            button_text = button_text[:47] + "..."
+                        markup.add(InlineKeyboardButton(button_text, callback_data=f"payment:add_member:{subscription_id}:{member['user_id']}"))
+                    
+                    if len(not_in_subscription) > 10:
+                        text += f"\n... и еще {len(not_in_subscription) - 10} участник(ов)"
+            except Exception as e:
+                logger.error(f"[SUCCESSFUL PAYMENT] Ошибка при получении участников для добавления: {e}")
+        
         markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))
         
         # Для личных подписок отправляем в личку, для групповых - в групповой чат

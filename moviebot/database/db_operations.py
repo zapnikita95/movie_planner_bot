@@ -962,8 +962,9 @@ def get_subscription_members(subscription_id):
         """, (subscription_id,))
         members = {}
         for row in cursor.fetchall():
-            user_id = row[0] if isinstance(row, dict) else row[0]
-            username = row[1] if isinstance(row, dict) else row[1]
+            # RealDictCursor возвращает словари с ключами-именами колонок
+            user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+            username = row.get('username') if isinstance(row, dict) else row[1]
             members[user_id] = username or f"user_{user_id}"
         return members
 
