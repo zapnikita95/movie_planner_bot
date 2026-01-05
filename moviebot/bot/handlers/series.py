@@ -2410,6 +2410,122 @@ def add_to_database_callback(call):
             logger.error(f"[ADD TO DATABASE] Не удалось вызвать answer_callback_query: {answer_e}")
     finally:
         logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
+
+
+def register_series_handlers(bot_param):
+    """Регистрирует обработчики команд связанных с сериалами"""
+    logger.info("=" * 80)
+    logger.info(f"[REGISTER SERIES HANDLERS] ===== START: регистрация обработчиков сериалов =====")
+    logger.info(f"[REGISTER SERIES HANDLERS] bot_param: {bot_param}")
+    logger.info(f"[REGISTER SERIES HANDLERS] bot_instance (из импорта): {bot_instance}")
+    logger.info(f"[REGISTER SERIES HANDLERS] bot_param == bot_instance: {bot_param == bot_instance}")
+    logger.info(f"[REGISTER SERIES HANDLERS] id(bot_param): {id(bot_param)}, id(bot_instance): {id(bot_instance)}")
+    
+    # КРИТИЧЕСКИ ВАЖНО: Используем bot_param (переданный параметр) для регистрации handlers внутри функции
+    # Но обработчик search_type_callback уже зарегистрирован на верхнем уровне модуля с bot_instance
+    # Проверяем, что это один и тот же объект
+    if bot_param != bot_instance:
+        logger.error(f"[REGISTER SERIES HANDLERS] ❌ КРИТИЧЕСКАЯ ОШИБКА: bot_param != bot_instance!")
+        logger.error(f"[REGISTER SERIES HANDLERS] bot_param id: {id(bot_param)}, bot_instance id: {id(bot_instance)}")
+        logger.error(f"[REGISTER SERIES HANDLERS] Это означает, что search_type_callback зарегистрирован на другом экземпляре бота!")
+        logger.error(f"[REGISTER SERIES HANDLERS] Перерегистрируем search_type_callback на правильном экземпляре...")
+        
+        # Перерегистрируем обработчик на правильном экземпляре бота
+        @bot_param.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
+        def search_type_callback_fixed(call):
+            """Перерегистрированный обработчик выбора типа поиска"""
+            # Вызываем оригинальный обработчик
+            search_type_callback(call)
+        
+        logger.info(f"[REGISTER SERIES HANDLERS] ✅ search_type_callback перерегистрирован на bot_param")
+    else:
+        logger.info(f"[REGISTER SERIES HANDLERS] ✅ bot_param == bot_instance, обработчик search_type_callback зарегистрирован правильно")
+    
+    @bot_param.message_handler(commands=['search'])
+    def _handle_search_handler(message):
+        """Обертка для регистрации команды /search"""
+        handle_search(message)
+    
+    @bot_param.message_handler(commands=['random'])
+    def _random_start_handler(message):
+        """Обертка для регистрации команды /random"""
+        random_start(message)
+    
+    @bot_param.message_handler(commands=['premieres'])
+    def _premieres_command_handler(message):
+        """Обертка для регистрации команды /premieres"""
+        premieres_command(message)
+    
+    @bot_param.message_handler(commands=['ticket'])
+    def _ticket_command_handler(message):
+        """Обертка для регистрации команды /ticket"""
+        ticket_command(message)
+    
+    @bot_param.message_handler(commands=['settings'])
+    def _settings_command_handler(message):
+        """Обертка для регистрации команды /settings"""
+        settings_command(message)
+    
+    @bot_param.message_handler(commands=['help'])
+    def _help_command_handler(message):
+        """Обертка для регистрации команды /help"""
+        help_command(message)
+
+    @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
+    def handle_rand_mode_locked(call):
+        """Обработчик заблокированных режимов рандомайзера"""
+        try:
+            mode = call.data.split(":")[1]  # kinopoisk, my_votes, group_votes
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            if mode == "kinopoisk":
+                message_text = "🎬 Рандом по Кинопоиску доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
+            elif mode == "my_votes":
+                # Проверяем количество оценок
+                with db_lock:
+                    cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                    user_ratings_count = cursor.fetchone()
+                    user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+                
+                if user_ratings < 50:
+                    message_text = "⭐ Режим \"По моим оценкам\" откроется после добавления 50 оценок в базу. Оцените больше фильмов!"
+                else:
+                    message_text = "⭐ Режим \"По моим оценкам\" доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
+            else:
+                message_text = "🔒 Этот режим недоступен. Подключите подписку через /payment"
+            
+            bot_instance.answer_callback_query(
+                call.id,
+                message_text,
+                show_alert=True
+            )
+        except Exception as e:
+            logger.error(f"[RAND MODE LOCKED] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(
+                    call.id,
+                    "🔒 Функционал можно подключить через /payment",
+                    show_alert=True
+                )
+            except:
+                pass
+
+    @bot_param.callback_query_handler(func=lambda call: call.data.startswith("ticket_locked:"))
+    def handle_ticket_locked(call):
+        """Обработчик заблокированных кнопок билетов"""
+        try:
+            bot_instance.answer_callback_query(
+                call.id,
+                "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
+                show_alert=True
+            )
+        except Exception as e:
+            logger.error(f"[TICKET LOCKED] Ошибка: {e}", exc_info=True)
+
+    # Обработчик search_type_callback уже зарегистрирован на верхнем уровне модуля (строки 34-112)
+    # НЕ ДУБЛИРУЕМ его здесь, иначе декоратор не сработает!
+    logger.info(f"[REGISTER SERIES HANDLERS] ✅ Обработчик search_type_callback уже зарегистрирован на верхнем уровне модуля")
     logger.info(f"[REGISTER SERIES HANDLERS] Все обработчики сериалов зарегистрированы (включая search_type_callback)")
     logger.info(f"[REGISTER SERIES HANDLERS] ===== END =====")
     logger.info("=" * 80)
