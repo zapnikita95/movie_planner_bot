@@ -54,21 +54,14 @@ def register_random_callbacks(bot):
             # Добавляем справку о режиме
             mode_descriptions = {
                 'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
-                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм по вашим фильтрам.',
+                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.',
                 'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
                 'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
             }
             mode_description = mode_descriptions.get(mode, '')
             
-            # Для режима kinopoisk пропускаем периоды и сразу переходим к выбору года и жанра
-            if mode == 'kinopoisk':
-                user_random_state[user_id]['step'] = 'year'
-                bot_instance.answer_callback_query(call.id)
-                logger.info(f"[RANDOM CALLBACK] Mode kinopoisk selected, moving to year selection")
-                # TODO: Вызвать _show_year_step
-                return
-            
             # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
+            # Для режима kinopoisk тоже показываем периоды на основе фильмов в базе
             all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
             available_periods = []
             
@@ -149,6 +142,39 @@ def register_random_callbacks(bot):
                         elif period == "2020–сейчас":
                             if any(y >= 2020 for y in years):
                                 available_periods.append(period)
+                elif mode == 'kinopoisk':
+                    # Для режима "Рандом по кинопоиску" - получаем годы из всех фильмов в базе
+                    cursor.execute("""
+                        SELECT DISTINCT m.year
+                        FROM movies m
+                        WHERE m.chat_id = %s AND m.year IS NOT NULL
+                        ORDER BY m.year
+                    """, (chat_id,))
+                    years_rows = cursor.fetchall()
+                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    
+                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for kinopoisk mode")
+                    
+                    # Определяем доступные периоды на основе найденных годов
+                    for period in all_periods:
+                        if period == "До 1980":
+                            if any(y < 1980 for y in years):
+                                available_periods.append(period)
+                        elif period == "1980–1990":
+                            if any(1980 <= y <= 1990 for y in years):
+                                available_periods.append(period)
+                        elif period == "1990–2000":
+                            if any(1990 <= y <= 2000 for y in years):
+                                available_periods.append(period)
+                        elif period == "2000–2010":
+                            if any(2000 <= y <= 2010 for y in years):
+                                available_periods.append(period)
+                        elif period == "2010–2020":
+                            if any(2010 <= y <= 2020 for y in years):
+                                available_periods.append(period)
+                        elif period == "2020–сейчас":
+                            if any(y >= 2020 for y in years):
+                                available_periods.append(period)
                 else:
                     # Для режима database - используем старую логику
                     base_query = """
@@ -192,7 +218,12 @@ def register_random_callbacks(bot):
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
             
             bot_instance.answer_callback_query(call.id)
-            text = f"{mode_description}\n\n🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)"
+            # Для режима kinopoisk показываем Шаг 1/2, для остальных - Шаг 1/4
+            if mode == 'kinopoisk':
+                step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
+            else:
+                step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
+            text = f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько или пропустить)"
             bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             logger.info(f"[RANDOM CALLBACK] ✅ Mode selected: {mode}, moving to period selection, user_id={user_id}")
         except Exception as e:

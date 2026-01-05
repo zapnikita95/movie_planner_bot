@@ -9,6 +9,7 @@ from moviebot.database.db_operations import (
     log_request, set_user_timezone,
     get_watched_emojis, get_user_timezone, get_notification_settings, set_notification_setting
 )
+import re
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.utils.helpers import has_recommendations_access, has_notifications_access
 from moviebot.bot.bot_init import bot as bot_instance, BOT_ID
