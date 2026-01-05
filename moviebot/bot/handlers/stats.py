@@ -319,50 +319,50 @@ def register_stats_handlers(bot_instance):
             
             # Формируем сообщение
             text = "📊 <b>Детальная статистика группы</b>\n\n"
-        
-        # Общая статистика
-        text += "📈 <b>Общая статистика:</b>\n"
-        text += f"• Всего фильмов: <b>{total_movies}</b>\n"
-        text += f"• Просмотрено: <b>{watched_movies}</b>\n"
-        text += f"• Всего оценок: <b>{total_ratings}</b>\n"
-        text += f"• Запланировано: <b>{total_plans}</b>\n"
-        
-        # Статистика по сериалам (только для групп)
-        if is_group:
-            text += f"• Сериалов просмотрено: <b>{watched_series_count}</b>\n"
-            text += f"• Сериалы в процессе и в ожидании: <b>{in_progress_series_count}</b>\n"
-        
-        text += "\n"
-        
-        # Статистика по участникам
-        if users_stats:
-            text += "👥 <b>Участники группы:</b>\n"
-            for idx, user_row in enumerate(users_stats[:10], 1):  # Показываем топ-10
-                # users_stats теперь список словарей
-                user_id = user_row.get('user_id')
-                username = user_row.get('username')
-                command_count = user_row.get('command_count', 0)
-                
-                user_display = username or f"user_{user_id}"
-                rating_info = ratings_by_user.get(user_id, {})
-                if rating_info:
-                    text += f"{idx}. <b>{user_display}</b>\n"
-                    text += f"   • Команд: {command_count}\n"
-                    text += f"   • Оценок: {rating_info.get('count', 0)}\n"
-                    if rating_info.get('avg'):
-                        text += f"   • Средняя оценка: {rating_info['avg']:.1f}/10\n"
-                else:
-                    text += f"{idx}. <b>{user_display}</b>\n"
-                    text += f"   • Команд: {command_count}\n"
-                text += "\n"
             
-            if len(users_stats) > 10:
-                text += f"<i>... и ещё {len(users_stats) - 10} участников</i>\n"
-        else:
-            text += "👥 <i>Нет данных об участниках</i>\n"
-        
-        bot_instance.reply_to(message, text, parse_mode='HTML')
-                logger.info(f"✅ Ответ на /stats отправлен пользователю {message.from_user.id}")
+            # Общая статистика
+            text += "📈 <b>Общая статистика:</b>\n"
+            text += f"• Всего фильмов: <b>{total_movies}</b>\n"
+            text += f"• Просмотрено: <b>{watched_movies}</b>\n"
+            text += f"• Всего оценок: <b>{total_ratings}</b>\n"
+            text += f"• Запланировано: <b>{total_plans}</b>\n"
+            
+            # Статистика по сериалам (только для групп)
+            if is_group:
+                text += f"• Сериалов просмотрено: <b>{watched_series_count}</b>\n"
+                text += f"• Сериалы в процессе и в ожидании: <b>{in_progress_series_count}</b>\n"
+            
+            text += "\n"
+            
+            # Статистика по участникам
+            if users_stats:
+                text += "👥 <b>Участники группы:</b>\n"
+                for idx, user_row in enumerate(users_stats[:10], 1):  # Показываем топ-10
+                    # users_stats теперь список словарей
+                    user_id = user_row.get('user_id')
+                    username = user_row.get('username')
+                    command_count = user_row.get('command_count', 0)
+                    
+                    user_display = username or f"user_{user_id}"
+                    rating_info = ratings_by_user.get(user_id, {})
+                    if rating_info:
+                        text += f"{idx}. <b>{user_display}</b>\n"
+                        text += f"   • Команд: {command_count}\n"
+                        text += f"   • Оценок: {rating_info.get('count', 0)}\n"
+                        if rating_info.get('avg'):
+                            text += f"   • Средняя оценка: {rating_info['avg']:.1f}/10\n"
+                    else:
+                        text += f"{idx}. <b>{user_display}</b>\n"
+                        text += f"   • Команд: {command_count}\n"
+                    text += "\n"
+                
+                if len(users_stats) > 10:
+                    text += f"<i>... и ещё {len(users_stats) - 10} участников</i>\n"
+            else:
+                text += "👥 <i>Нет данных об участниках</i>\n"
+            
+            bot_instance.reply_to(message, text, parse_mode='HTML')
+            logger.info(f"✅ Ответ на /stats отправлен пользователю {message.from_user.id}")
         except Exception as e:
             logger.error(f"❌ Ошибка в /stats: {e}", exc_info=True)
             try:
