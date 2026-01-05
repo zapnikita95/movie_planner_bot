@@ -1128,14 +1128,56 @@ def register_series_handlers(bot_instance):
         finally:
             logger.info(f"[SETTINGS CALLBACK] ===== КОНЕЦ ОБРАБОТКИ =====")
 
-    # TODO: Добавить остальные callback handlers:
-    # - search_type callback
-    # - search_back callback
-    # - add_film callbacks
-    # - random callbacks
-    # - premieres callbacks
-    # - ticket callbacks
-    # и другие из moviebot.py
+    # Обработчик выбора типа поиска (фильм/сериал)
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("search_type:"))
+    def search_type_callback(call):
+        """Обработчик выбора типа поиска (фильм или сериал)"""
+        try:
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            search_type = call.data.split(":")[1]  # 'film' или 'series'
+            
+            logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}")
+            
+            # Обновляем состояние поиска
+            if user_id in user_search_state:
+                user_search_state[user_id]['search_type'] = search_type
+            else:
+                user_search_state[user_id] = {
+                    'chat_id': chat_id,
+                    'message_id': call.message.message_id,
+                    'search_type': search_type
+                }
+            
+            # Обновляем кнопки, чтобы показать выбранный тип
+            markup = InlineKeyboardMarkup(row_width=2)
+            if search_type == 'film':
+                markup.add(
+                    InlineKeyboardButton("🎬 Найти фильм ✅", callback_data="search_type:film"),
+                    InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+                )
+            else:  # series
+                markup.add(
+                    InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+                    InlineKeyboardButton("📺 Найти сериал ✅", callback_data="search_type:series")
+                )
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            search_type_text = "фильм" if search_type == 'film' else "сериал"
+            bot_instance.edit_message_text(
+                f"🔍 Укажите запрос для поиска {search_type_text}а в ответном сообщении, например: джон уик",
+                chat_id,
+                call.message.message_id,
+                reply_markup=markup
+            )
+            logger.info(f"[SEARCH TYPE] Состояние обновлено для user_id={user_id}, search_type={search_type}")
+        except Exception as e:
+            logger.error(f"[SEARCH TYPE] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
 
 
 def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
