@@ -1213,6 +1213,19 @@ def main_text_handler(message):
     
     # === user_clean_state ===
     if user_id in user_clean_state:
+        state = user_clean_state[user_id]
+        
+        # Проверяем, что сообщение является реплаем на сообщение бота
+        is_reply = (message.reply_to_message and 
+                   message.reply_to_message.from_user and 
+                   message.reply_to_message.from_user.id == BOT_ID)
+        
+        prompt_message_id = state.get('prompt_message_id')
+        # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
+        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+            logger.info(f"[CLEAN] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+            return
+        
         if text.upper().strip() == 'ДА, УДАЛИТЬ':
             from moviebot.bot.handlers.series import handle_clean_confirm_internal
             handle_clean_confirm_internal(message)
