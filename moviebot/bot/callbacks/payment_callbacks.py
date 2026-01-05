@@ -4515,77 +4515,77 @@ def register_payment_callbacks(bot_instance):
                                 except:
                                     is_active = True
                             
-                            # Добавляем только активные и уникальные по plan_type
-                            if is_active and plan_type and plan_type not in seen_plan_types:
-                                active_subs.append(active_sub)
-                                seen_plan_types.add(plan_type)
-                                total_price += active_sub.get('price', 0)
-                        
-                        # Формируем сообщение
-                        plan_names = {
+                                # Добавляем только активные и уникальные по plan_type
+                                if is_active and plan_type and plan_type not in seen_plan_types:
+                                    active_subs.append(active_sub)
+                                    seen_plan_types.add(plan_type)
+                                    total_price += active_sub.get('price', 0)
+                            
+                            # Формируем сообщение
+                            plan_names = {
                             'notifications': 'Уведомления о сериалах',
                             'recommendations': 'Рекомендации',
                             'tickets': 'Билеты',
-                            'all': 'Все режимы'
-                        }
-                        
-                        if active_subs:
-                            if len(active_subs) == 1:
-                                plan_type = active_subs[0].get('plan_type', 'all')
-                                plan_name = plan_names.get(plan_type, plan_type)
-                                sub = active_subs[0]
-                                expires_at = sub.get('expires_at')
-                                next_payment = sub.get('next_payment_date')
-                                activated = sub.get('activated_at')
-                                
-                                text = f"👤 <b>Личная подписка</b>\n\n"
-                                text += f"📋 <b>Название подписки:</b> {plan_name}\n\n"
-                                text += f"💰 <b>Общая сумма платежа: {total_price}₽</b>\n"
-                                if activated:
-                                    text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
-                                if next_payment:
-                                    text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
-                                if expires_at:
-                                    text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                                'all': 'Все режимы'
+                            }
+                            
+                            if active_subs:
+                                if len(active_subs) == 1:
+                                    plan_type = active_subs[0].get('plan_type', 'all')
+                                    plan_name = plan_names.get(plan_type, plan_type)
+                                    sub = active_subs[0]
+                                    expires_at = sub.get('expires_at')
+                                    next_payment = sub.get('next_payment_date')
+                                    activated = sub.get('activated_at')
+                                    
+                                    text = f"👤 <b>Личная подписка</b>\n\n"
+                                    text += f"📋 <b>Название подписки:</b> {plan_name}\n\n"
+                                    text += f"💰 <b>Общая сумма платежа: {total_price}₽</b>\n"
+                                    if activated:
+                                        text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                                    if next_payment:
+                                        text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                                    if expires_at:
+                                        text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                                    else:
+                                        text += f"⏰ Действует: <b>Навсегда</b>\n"
+                                    
+                                    markup = InlineKeyboardMarkup(row_width=1)
+                                    subscription_id_new = sub.get('id')
+                                    if subscription_id_new and subscription_id_new > 0:
+                                        markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id_new}"))
+                                        markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id_new}"))
+                                    else:
+                                        markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:personal"))
+                                        markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:personal"))
+                                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                                 else:
-                                    text += f"⏰ Действует: <b>Навсегда</b>\n"
-                                
-                                markup = InlineKeyboardMarkup(row_width=1)
-                                subscription_id_new = sub.get('id')
-                                if subscription_id_new and subscription_id_new > 0:
-                                    markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id_new}"))
-                                    markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id_new}"))
-                                else:
-                                    markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:personal"))
-                                    markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:personal"))
-                                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                            else:
-                                text = f"👤 <b>Личная подписка</b>\n\n"
-                                text += f"📋 <b>Активные подписки:</b>\n"
-                                for active_sub in active_subs:
-                                    sub_plan_type = active_sub.get('plan_type', 'all')
-                                    sub_plan_name = plan_names.get(sub_plan_type, sub_plan_type)
-                                    sub_price = active_sub.get('price', 0)
-                                    text += f"• {sub_plan_name} ({sub_price}₽)\n"
-                                text += "\n"
-                                text += f"💰 <b>Общая сумма платежа: {total_price}₽</b>\n"
-                                
-                                markup = InlineKeyboardMarkup(row_width=1)
-                                markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:modify:all"))
-                                for active_sub in active_subs:
-                                    sub_id = active_sub.get('id')
-                                    if sub_id and sub_id > 0:
+                                    text = f"👤 <b>Личная подписка</b>\n\n"
+                                    text += f"📋 <b>Активные подписки:</b>\n"
+                                    for active_sub in active_subs:
                                         sub_plan_type = active_sub.get('plan_type', 'all')
                                         sub_plan_name = plan_names.get(sub_plan_type, sub_plan_type)
-                                        markup.add(InlineKeyboardButton(f"❌ Отменить: {sub_plan_name}", callback_data=f"payment:cancel:{sub_id}"))
+                                        sub_price = active_sub.get('price', 0)
+                                        text += f"• {sub_plan_name} ({sub_price}₽)\n"
+                                    text += "\n"
+                                    text += f"💰 <b>Общая сумма платежа: {total_price}₽</b>\n"
+                                    
+                                    markup = InlineKeyboardMarkup(row_width=1)
+                                    markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:modify:all"))
+                                    for active_sub in active_subs:
+                                        sub_id = active_sub.get('id')
+                                        if sub_id and sub_id > 0:
+                                            sub_plan_type = active_sub.get('plan_type', 'all')
+                                            sub_plan_name = plan_names.get(sub_plan_type, sub_plan_type)
+                                            markup.add(InlineKeyboardButton(f"❌ Отменить: {sub_plan_name}", callback_data=f"payment:cancel:{sub_id}"))
+                                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                            else:
+                                text = "👤 <b>Личная подписка</b>\n\n"
+                                text += "❌ Активная подписка отсутствует, выберите тариф для подключения"
+                                markup = InlineKeyboardMarkup(row_width=1)
+                                markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                        else:
-                            text = "👤 <b>Личная подписка</b>\n\n"
-                            text += "❌ Активная подписка отсутствует, выберите тариф для подключения"
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                        
+                            
                             bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         elif subscription_type == 'group':
                             # Для групповых подписок получаем информацию о групповой подписке

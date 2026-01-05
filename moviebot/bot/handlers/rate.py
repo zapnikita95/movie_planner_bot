@@ -247,44 +247,55 @@ def handle_rating_internal(message, rating):
     if message.reply_to_message:
         reply_msg_id = message.reply_to_message.message_id
         
-        # Проверяем все возможные источники film_id: rating_messages, bot_messages (цепочка реплаев)
-        # Сначала проверяем прямое сообщение
-        film_id = rating_messages.get(reply_msg_id)
-        
-        # Если не найдено, проверяем цепочку реплаев рекурсивно
-        if not film_id:
-            current_msg = message.reply_to_message
-            checked_ids = set()  # Чтобы избежать циклов
-            while current_msg and current_msg.message_id not in checked_ids:
-                checked_ids.add(current_msg.message_id)
-                # Проверяем rating_messages
-                if current_msg.message_id in rating_messages:
-                    film_id = rating_messages[current_msg.message_id]
-                    break
-                # Проверяем bot_messages (сообщения с фильмами)
-                if current_msg.message_id in bot_messages:
-                    reply_link = bot_messages[current_msg.message_id]
-                    if reply_link:
-                        # Извлекаем kp_id из ссылки для поиска
-                        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
-                        if match:
-                            kp_id = match.group(2)
-                            with db_lock:
-                                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                                row = cursor.fetchone()
-                                if row:
-                                    film_id = row.get('id') if isinstance(row, dict) else row[0]
-                                    break
-                # Переходим к родительскому сообщению
-                current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
-    
-    # Проверяем rating_messages на наличие kp_id (формат "kp_id:123")
-    if not film_id and message.reply_to_message:
-        reply_msg_id = message.reply_to_message.message_id
+        # Сначала проверяем rating_messages на наличие kp_id (формат "kp_id:123")
         rating_msg_value = rating_messages.get(reply_msg_id)
         if rating_msg_value and isinstance(rating_msg_value, str) and rating_msg_value.startswith("kp_id:"):
             kp_id = rating_msg_value.split(":")[1]
             logger.info(f"[RATE INTERNAL] Найден kp_id из rating_messages: {kp_id}")
+        else:
+            # Проверяем все возможные источники film_id: rating_messages, bot_messages (цепочка реплаев)
+            # Сначала проверяем прямое сообщение
+            film_id = rating_messages.get(reply_msg_id)
+            
+            # Если film_id - это строка "kp_id:...", извлекаем kp_id
+            if isinstance(film_id, str) and film_id.startswith("kp_id:"):
+                kp_id = film_id.split(":")[1]
+                film_id = None
+                logger.info(f"[RATE INTERNAL] Найден kp_id из rating_messages (прямая проверка): {kp_id}")
+            else:
+                # Если не найдено, проверяем цепочку реплаев рекурсивно
+                if not film_id:
+                    current_msg = message.reply_to_message
+                    checked_ids = set()  # Чтобы избежать циклов
+                    while current_msg and current_msg.message_id not in checked_ids:
+                        checked_ids.add(current_msg.message_id)
+                        # Проверяем rating_messages
+                        if current_msg.message_id in rating_messages:
+                            rating_value = rating_messages[current_msg.message_id]
+                            # Проверяем, это kp_id или film_id
+                            if isinstance(rating_value, str) and rating_value.startswith("kp_id:"):
+                                kp_id = rating_value.split(":")[1]
+                                logger.info(f"[RATE INTERNAL] Найден kp_id из rating_messages (цепочка реплаев): {kp_id}")
+                                break
+                            elif isinstance(rating_value, int):
+                                film_id = rating_value
+                                break
+                        # Проверяем bot_messages (сообщения с фильмами)
+                        if current_msg.message_id in bot_messages:
+                            reply_link = bot_messages[current_msg.message_id]
+                            if reply_link:
+                                # Извлекаем kp_id из ссылки для поиска
+                                match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', reply_link)
+                                if match:
+                                    kp_id = match.group(2)
+                                    with db_lock:
+                                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                                        row = cursor.fetchone()
+                                        if row:
+                                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+                                            break
+                        # Переходим к родительскому сообщению
+                        current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
     
     # Если film_id не найден, но есть kp_id, добавляем фильм в базу
     if not film_id and kp_id:
