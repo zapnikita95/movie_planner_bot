@@ -140,8 +140,13 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
                 for platform, url in sources[:6]:
                     markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id}:{platform}"))
                 markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
+            else:
+                # Если источники не найдены, создаем пустую разметку для кнопки "Перейти к описанию"
+                markup = InlineKeyboardMarkup()
         except Exception as e:
             logger.warning(f"[PROCESS PLAN] Не удалось получить онлайн-кинотеатры: {e}", exc_info=True)
+            # При ошибке создаем пустую разметку для кнопки "Перейти к описанию"
+            markup = InlineKeyboardMarkup()
     
     # Добавляем кнопку "Перейти к описанию" для обоих типов планов (если есть kp_id)
     if kp_id:
