@@ -169,6 +169,225 @@ def handle_added_movie_rating_reply(message):
         logger.error(f"[ADDED MOVIE REPLY] Ошибка: {e}", exc_info=True)
 
 
+@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "Введите промокод в ответном сообщении" in (m.reply_to_message.text or ""))
+def handle_promo_reply_direct(message):
+    """ОТДЕЛЬНЫЙ handler для реплаев на сообщение промокода - ВЫСОКИЙ ПРИОРИТЕТ"""
+    logger.info(f"[PROMO REPLY DIRECT] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        promo_code = message.text.strip().upper() if message.text else ""
+        
+        if not promo_code:
+            logger.warning(f"[PROMO REPLY DIRECT] Пустой промокод от пользователя {user_id}")
+            bot_instance.reply_to(message, "❌ Промокод не может быть пустым. Введите промокод.")
+            return
+        
+        logger.info(f"[PROMO REPLY DIRECT] Обрабатываем промокод: '{promo_code}' от пользователя {user_id}")
+        
+        # Получаем состояние промокода
+        from moviebot.states import user_promo_state
+        if user_id not in user_promo_state:
+            logger.warning(f"[PROMO REPLY DIRECT] Пользователь {user_id} не в состоянии промокода")
+            bot_instance.reply_to(message, "❌ Сессия истекла. Начните заново с /payment")
+            return
+        
+        state = user_promo_state[user_id]
+        logger.info(f"[PROMO REPLY DIRECT] Состояние: {state}")
+        
+        # Применяем промокод
+        from moviebot.utils.promo import apply_promocode
+        success, discounted_price, message_text, promocode_id = apply_promocode(
+            promo_code,
+            state['original_price'],
+            user_id,
+            chat_id
+        )
+        
+        logger.info(f"[PROMO REPLY DIRECT] Результат применения промокода: success={success}, discounted_price={discounted_price}, message='{message_text}'")
+        
+        if success:
+            # Промокод применен успешно - используем существующую логику из main_text_handler
+            sub_type = state['sub_type']
+            plan_type = state['plan_type']
+            period_type = state['period_type']
+            group_size = state.get('group_size')
+            payment_id = state.get('payment_id', '')
+            
+            # Обновляем цену в состоянии платежа
+            from moviebot.states import user_payment_state
+            if user_id in user_payment_state:
+                payment_state = user_payment_state[user_id]
+                payment_state['price'] = discounted_price
+                payment_state['promocode_id'] = promocode_id
+                payment_state['promocode'] = promo_code
+                payment_state['original_price'] = state['original_price']
+                
+                if 'payment_data' in payment_state:
+                    payment_state['payment_data']['amount'] = discounted_price
+                    logger.info(f"[PROMO REPLY DIRECT] Обновлен payment_data.amount на {discounted_price}")
+            
+            # Формируем сообщение с обновленной ценой (копируем логику из main_text_handler)
+            period_names = {
+                'month': 'месяц',
+                '3months': '3 месяца',
+                'year': 'год',
+                'lifetime': 'навсегда'
+            }
+            period_name = period_names.get(period_type, period_type)
+            
+            plan_names = {
+                'notifications': 'Уведомления о сериалах',
+                'recommendations': 'Персональные рекомендации',
+                'tickets': 'Билеты в кино',
+                'all': 'Все режимы'
+            }
+            plan_name = plan_names.get(plan_type, plan_type)
+            
+            subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+            
+            from moviebot.bot.callbacks.payment_callbacks import rubles_to_stars
+            stars_amount = rubles_to_stars(discounted_price)
+            
+            text_result = f"✅ {message_text}\n\n"
+            text_result += f"💳 <b>Оплата подписки</b>\n\n"
+            text_result += f"📋 <b>Выбранный тариф:</b>\n"
+            if sub_type == 'personal':
+                text_result += f"👤 Личная подписка\n"
+            else:
+                text_result += f"👥 Групповая подписка (на {group_size} участников)\n"
+            text_result += f"{plan_name}\n"
+            text_result += f"⏰ Период: {period_name}\n"
+            text_result += f"💰 Сумма: <b>{state['original_price']}₽</b> → <b>{discounted_price}₽</b>\n\n"
+            text_result += "Нажмите кнопку ниже для перехода к оплате:"
+            
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            # Создаем платеж YooKassa с учетом скидки (копируем логику из main_text_handler)
+            from moviebot.config import YOOKASSA_AVAILABLE, YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+            import os
+            import uuid as uuid_module
+            
+            if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
+                from yookassa import Configuration, Payment
+                Configuration.account_id = YOOKASSA_SHOP_ID.strip()
+                Configuration.secret_key = YOOKASSA_SECRET_KEY.strip()
+                
+                new_payment_id = str(uuid_module.uuid4())
+                return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
+                description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+                
+                metadata = {
+                    "user_id": str(user_id),
+                    "chat_id": str(chat_id),
+                    "subscription_type": sub_type,
+                    "plan_type": plan_type,
+                    "period_type": period_type,
+                    "payment_id": new_payment_id,
+                    "promocode": promo_code
+                }
+                if group_size:
+                    metadata["group_size"] = str(group_size)
+                
+                try:
+                    payment = Payment.create({
+                        "amount": {
+                            "value": f"{discounted_price:.2f}",
+                            "currency": "RUB"
+                        },
+                        "confirmation": {
+                            "type": "redirect",
+                            "return_url": return_url
+                        },
+                        "capture": True,
+                        "description": description,
+                        "metadata": metadata
+                    })
+                    
+                    from moviebot.database.db_operations import save_payment
+                    save_payment(
+                        payment_id=new_payment_id,
+                        yookassa_payment_id=payment.id,
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        subscription_type=sub_type,
+                        plan_type=plan_type,
+                        period_type=period_type,
+                        group_size=group_size,
+                        amount=discounted_price,
+                        status='pending'
+                    )
+                    
+                    confirmation_url = payment.confirmation.confirmation_url
+                    markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", url=confirmation_url))
+                    logger.info(f"[PROMO REPLY DIRECT] Платеж YooKassa создан: payment_id={new_payment_id}, amount={discounted_price}")
+                    payment_id = new_payment_id
+                except Exception as e:
+                    logger.error(f"[PROMO REPLY DIRECT] Ошибка создания платежа YooKassa: {e}", exc_info=True)
+            
+            # Обновляем состояние платежа
+            if user_id in user_payment_state:
+                payment_state = user_payment_state[user_id]
+                payment_state['payment_id'] = payment_id
+                payment_state['price'] = discounted_price
+                payment_state['promocode_id'] = promocode_id
+                payment_state['promocode'] = promo_code
+                payment_state['original_price'] = state['original_price']
+                
+                if 'payment_data' in payment_state:
+                    payment_state['payment_data']['payment_id'] = payment_id
+                    payment_state['payment_data']['amount'] = discounted_price
+                else:
+                    payment_state['payment_data'] = {
+                        'payment_id': payment_id,
+                        'amount': discounted_price,
+                        'sub_type': sub_type,
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'group_size': group_size,
+                        'chat_id': chat_id
+                    }
+            
+            # Добавляем кнопки оплаты
+            payment_id_short = payment_id[:8] if len(payment_id) > 8 else payment_id
+            callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
+            markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+            callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}:{discounted_price}"
+            markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
+            
+            logger.info(f"[PROMO REPLY DIRECT] Отправка сообщения с результатом применения промокода")
+            try:
+                sent_msg = bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"[PROMO REPLY DIRECT] ✅ Сообщение отправлено успешно: message_id={sent_msg.message_id if sent_msg else 'None'}")
+            except Exception as send_e:
+                logger.error(f"[PROMO REPLY DIRECT] ❌ Ошибка отправки сообщения: {send_e}", exc_info=True)
+                try:
+                    sent_msg = bot_instance.send_message(chat_id, text_result, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[PROMO REPLY DIRECT] ✅ Сообщение отправлено через send_message: message_id={sent_msg.message_id if sent_msg else 'None'}")
+                except Exception as send2_e:
+                    logger.error(f"[PROMO REPLY DIRECT] ❌ Ошибка отправки через send_message: {send2_e}", exc_info=True)
+            
+            # Удаляем состояние промокода
+            del user_promo_state[user_id]
+            return
+        else:
+            # Промокод недействителен
+            error_text = f"❌ {message_text}\n\n"
+            error_text += "Введите другой промокод или оплатите полную стоимость подписки."
+            
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
+            
+            bot_instance.reply_to(message, error_text, reply_markup=markup)
+            # Не удаляем состояние, чтобы пользователь мог попробовать другой промокод
+            return
+    except Exception as e:
+        logger.error(f"[PROMO REPLY DIRECT] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+
+
 @bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "🔍 Укажите запрос для поиска" in (m.reply_to_message.text or ""))
 def handle_search_reply_direct(message):
     """ОТДЕЛЬНЫЙ handler для реплаев на сообщение поиска - ВЫСОКИЙ ПРИОРИТЕТ"""
