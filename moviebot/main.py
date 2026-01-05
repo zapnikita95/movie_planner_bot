@@ -148,10 +148,8 @@ else:
     # Режим polling
     logger.info("Запуск бота в режиме polling...")
     
-    # Проверяем, не запущен ли уже polling
     import time
-    max_retries = 3
-    retry_delay = 5
+    from telebot.apihelper import ApiTelegramException
     
     # Дополнительная проверка: убеждаемся, что старый файл не запущен
     import sys
@@ -162,36 +160,81 @@ else:
     if __name__ != '__main__' and 'moviebot.main' not in sys.argv[0]:
         logger.warning(f"⚠️ Неожиданный entry point: {sys.argv[0]}")
     
-    for attempt in range(max_retries):
+    # Функция для очистки webhook и подготовки к запуску
+    def prepare_for_polling():
+        """Подготовка к запуску polling: очистка webhook и проверки"""
         try:
-            # Очищаем webhook перед запуском polling (на всякий случай)
+            # Агрессивная очистка webhook
             bot.remove_webhook()
-            logger.info("Webhook очищен перед запуском polling")
-            
-            # Небольшая задержка перед запуском polling, чтобы убедиться, что старые соединения закрыты
+            logger.info("Webhook очищен")
             time.sleep(2)
             
-            # Дополнительная проверка: убеждаемся, что нет активных webhook
+            # Проверяем, что webhook действительно удален
             try:
                 webhook_info = bot.get_webhook_info()
                 if webhook_info.url:
-                    logger.warning(f"⚠️ Обнаружен активный webhook: {webhook_info.url}")
+                    logger.warning(f"⚠️ Обнаружен активный webhook: {webhook_info.url}, удаляю...")
                     bot.remove_webhook()
-                    logger.info("Webhook удален")
-                    time.sleep(1)
+                    time.sleep(3)  # Увеличиваем задержку после удаления
+                    # Проверяем еще раз
+                    webhook_info = bot.get_webhook_info()
+                    if webhook_info.url:
+                        logger.error(f"❌ Webhook не удалось удалить: {webhook_info.url}")
+                    else:
+                        logger.info("✅ Webhook успешно удален")
             except Exception as webhook_check_e:
                 logger.warning(f"Не удалось проверить webhook: {webhook_check_e}")
+        except Exception as e:
+            logger.warning(f"Ошибка при подготовке к polling: {e}")
+    
+    # Бесконечный цикл с автоматическим перезапуском при ошибке 409
+    while True:
+        try:
+            # Подготовка к запуску
+            prepare_for_polling()
             
-            logger.info(f"Попытка запуска polling (попытка {attempt + 1}/{max_retries})...")
+            logger.info("✅ Запуск polling...")
             logger.info(f"✅ Используется правильный entry point: moviebot.main")
-            bot.polling(none_stop=True, interval=0, timeout=20)
-            break  # Если polling запустился успешно, выходим из цикла
+            
+            # Запускаем polling
+            bot.polling(none_stop=True, interval=0, timeout=20, long_polling_timeout=20)
+            
+            # Если polling завершился без ошибки (например, KeyboardInterrupt), выходим
+            logger.info("Polling завершен")
+            break
+            
         except KeyboardInterrupt:
-            logger.info("Остановка бота...")
+            logger.info("Остановка бота по запросу пользователя...")
             scheduler.shutdown()
             if watchdog:
                 watchdog.stop()
             break
+            
+        except ApiTelegramException as e:
+            error_code = getattr(e, 'error_code', None)
+            error_str = str(e)
+            
+            # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
+            if error_code == 409 or "409" in error_str or "Conflict" in error_str or "terminated by other getUpdates" in error_str:
+                logger.error(f"❌ ОШИБКА 409: Обнаружен конфликт - запущено несколько экземпляров бота!")
+                logger.error(f"   Это проблема ДЕПЛОЯ, а не кода.")
+                logger.error(f"   Убедитесь, что:")
+                logger.error(f"   1. Запущен только ОДИН экземпляр бота")
+                logger.error(f"   2. Все старые процессы бота остановлены")
+                logger.error(f"   3. Нет активных webhook, которые конфликтуют с polling")
+                logger.info(f"   ⏳ Ожидание 10 секунд перед повторной попыткой...")
+                time.sleep(10)  # Увеличиваем задержку до 10 секунд
+                logger.info(f"   🔄 Повторная попытка запуска polling...")
+                continue  # Продолжаем цикл и пытаемся снова
+            else:
+                # Другие ошибки Telegram API - логируем и пробрасываем дальше
+                logger.error(f"❌ Telegram API ошибка: {e}", exc_info=True)
+                logger.error(f"   error_code={error_code}, result_json={getattr(e, 'result_json', {})}")
+                scheduler.shutdown()
+                if watchdog:
+                    watchdog.stop()
+                raise
+                
         except Exception as e:
             error_str = str(e)
             # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
@@ -202,20 +245,13 @@ else:
                 logger.error(f"   1. Запущен только ОДИН экземпляр бота")
                 logger.error(f"   2. Все старые процессы бота остановлены")
                 logger.error(f"   3. Нет активных webhook, которые конфликтуют с polling")
-                
-                if attempt < max_retries - 1:
-                    logger.info(f"   Повторная попытка через {retry_delay} секунд...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2  # Увеличиваем задержку с каждой попыткой
-                else:
-                    logger.error(f"   Все попытки исчерпаны. Бот не может запуститься из-за конфликта.")
-                    scheduler.shutdown()
-                    if watchdog:
-                        watchdog.stop()
-                    raise
+                logger.info(f"   ⏳ Ожидание 10 секунд перед повторной попыткой...")
+                time.sleep(10)  # Увеличиваем задержку до 10 секунд
+                logger.info(f"   🔄 Повторная попытка запуска polling...")
+                continue  # Продолжаем цикл и пытаемся снова
             else:
                 # Другие ошибки - логируем и пробрасываем дальше
-                logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
+                logger.error(f"❌ Критическая ошибка при запуске polling: {e}", exc_info=True)
                 scheduler.shutdown()
                 if watchdog:
                     watchdog.stop()
