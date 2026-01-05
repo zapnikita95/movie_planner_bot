@@ -481,3 +481,58 @@ def handle_rating_internal(message, rating):
     else:
         logger.warning(f"[RATE INTERNAL] Не удалось найти film_id для сохранения оценки")
         bot_instance.reply_to(message, "❌ Не удалось найти фильм для оценки. Убедитесь, что вы отвечаете на сообщение с фильмом.")
+
+
+def handle_edit_rating_internal(message, state):
+    """Внутренняя функция для обработки изменения оценки"""
+    logger.info(f"[EDIT RATING INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        text = message.text.strip() if message.text else ""
+        film_id = state.get('film_id')
+        
+        logger.info(f"[EDIT RATING INTERNAL] Обработка: text='{text}', film_id={film_id}")
+        
+        if not film_id:
+            bot_instance.reply_to(message, "❌ Ошибка: фильм не найден.")
+            from moviebot.states import user_edit_state
+            if user_id in user_edit_state:
+                del user_edit_state[user_id]
+            return
+        
+        # Парсим оценку
+        try:
+            rating = int(text)
+            if not (1 <= rating <= 10):
+                bot_instance.reply_to(message, "❌ Оценка должна быть от 1 до 10")
+                return
+        except ValueError:
+            bot_instance.reply_to(message, "❌ Неверный формат оценки. Используйте число от 1 до 10")
+            return
+        
+        # Обновляем оценку
+        with db_lock:
+            cursor.execute('''
+                UPDATE ratings SET rating = %s, is_imported = FALSE
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s
+            ''', (rating, chat_id, film_id, user_id))
+            conn.commit()
+            
+            # Получаем информацию о фильме
+            cursor.execute('SELECT title FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            film_row = cursor.fetchone()
+            title = film_row.get('title') if isinstance(film_row, dict) else (film_row[0] if film_row else "Фильм")
+        
+        bot_instance.reply_to(message, f"✅ Оценка обновлена!\n\n<b>{title}</b>\nНовая оценка: {rating}/10", parse_mode='HTML')
+        logger.info(f"[EDIT RATING INTERNAL] Оценка обновлена для фильма {film_id}: {rating}/10")
+        
+        from moviebot.states import user_edit_state
+        if user_id in user_edit_state:
+            del user_edit_state[user_id]
+    except Exception as e:
+        logger.error(f"[EDIT RATING INTERNAL] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке.")
+        except:
+            pass
