@@ -178,8 +178,18 @@ from moviebot.bot.handlers.stats import register_stats_handlers
 register_stats_handlers(bot_instance)
 logger.info("✅ stats handlers зарегистрированы")
 
-from moviebot.bot.handlers.settings import register_settings_handlers
-register_settings_handlers(bot_instance)
+# Импортируем из файла settings.py (не из директории settings/)
+# Используем importlib для обхода конфликта имен (есть и файл settings.py, и директория settings/)
+import importlib.util
+import os
+# __file__ в main.py указывает на moviebot/main.py, поэтому dirname даст moviebot/
+# Нужно получить путь к moviebot/bot/handlers/settings.py
+base_dir = os.path.dirname(__file__)  # moviebot/
+settings_file_path = os.path.join(base_dir, 'bot', 'handlers', 'settings.py')
+spec = importlib.util.spec_from_file_location("settings_module", settings_file_path)
+settings_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(settings_module)
+settings_module.register_settings_handlers(bot_instance)
 logger.info("✅ settings handlers зарегистрированы")
 
 from moviebot.bot.handlers.settings.edit import register_edit_handlers
