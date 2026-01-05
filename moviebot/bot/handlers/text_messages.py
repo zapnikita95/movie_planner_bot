@@ -225,25 +225,129 @@ def check_list_plan_reply(message):
 
 @bot_instance.message_handler(func=check_list_plan_reply)
 def handle_list_plan_reply(message):
-    """Обработчик ответа на промпт планирования из /list"""
-    logger.info(f"[LIST PLAN REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    """Обработчик ответа на промпт планирования из /list (step=1) - ссылка/ID"""
+    user_id = message.from_user.id
+    text = message.text or ""
+    logger.info(f"[LIST PLAN REPLY] ===== START: message_id={message.message_id}, user_id={user_id}, text='{text}'")
     try:
         from moviebot.bot.handlers.plan import get_plan_link_internal
         from moviebot.states import user_plan_state
         
-        user_id = message.from_user.id
         if user_id not in user_plan_state:
             user_plan_state[user_id] = {'step': 1, 'chat_id': message.chat.id}
         
         state = user_plan_state[user_id]
         state['prompt_message_id'] = message.reply_to_message.message_id
         
+        logger.info(f"[LIST PLAN REPLY] Текст ответного сообщения: '{text}'")
         get_plan_link_internal(message, state)
         logger.info(f"[LIST PLAN REPLY] ✅ Завершено")
     except Exception as e:
         logger.error(f"[LIST PLAN REPLY] ❌ Ошибка: {e}", exc_info=True)
         try:
             bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+        except:
+            pass
+
+
+def check_plan_datetime_reply(message):
+    """Проверка для handler ответа на промпт даты/времени планирования (step=3)"""
+    if not message.reply_to_message:
+        return False
+    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+        return False
+    reply_text = message.reply_to_message.text or ""
+    if "Когда планируете смотреть" not in reply_text:
+        return False
+    if not message.text or not message.text.strip():
+        return False
+    
+    # Проверяем, что пользователь в состоянии планирования с step=3
+    from moviebot.states import user_plan_state
+    user_id = message.from_user.id
+    if user_id not in user_plan_state:
+        return False
+    state = user_plan_state[user_id]
+    if state.get('step') != 3:
+        return False
+    
+    # Проверяем, что это ответ на правильный промпт
+    prompt_message_id = state.get('prompt_message_id')
+    if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+        return False
+    
+    return True
+
+
+@bot_instance.message_handler(func=check_plan_datetime_reply)
+def handle_plan_datetime_reply(message):
+    """Обработчик ответа на промпт даты/времени планирования (step=3)"""
+    user_id = message.from_user.id
+    text = message.text or ""
+    logger.info(f"[PLAN DATETIME REPLY] ===== START: message_id={message.message_id}, user_id={user_id}, text='{text}'")
+    try:
+        from moviebot.bot.handlers.plan import get_plan_day_or_date_internal
+        from moviebot.states import user_plan_state
+        
+        state = user_plan_state[user_id]
+        logger.info(f"[PLAN DATETIME REPLY] Текст ответного сообщения: '{text}'")
+        get_plan_day_or_date_internal(message, state)
+        logger.info(f"[PLAN DATETIME REPLY] ✅ Завершено")
+    except Exception as e:
+        logger.error(f"[PLAN DATETIME REPLY] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке даты/времени")
+        except:
+            pass
+
+
+def check_plan_link_reply(message):
+    """Проверка для handler ответа на промпт ссылки/ID планирования (step=1)"""
+    if not message.reply_to_message:
+        return False
+    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+        return False
+    reply_text = message.reply_to_message.text or ""
+    if "Пришлите ссылку или ID фильма" not in reply_text:
+        return False
+    if not message.text or not message.text.strip():
+        return False
+    
+    # Проверяем, что пользователь в состоянии планирования с step=1
+    from moviebot.states import user_plan_state
+    user_id = message.from_user.id
+    if user_id not in user_plan_state:
+        return False
+    state = user_plan_state[user_id]
+    if state.get('step') != 1:
+        return False
+    
+    # Проверяем, что это ответ на правильный промпт
+    prompt_message_id = state.get('prompt_message_id')
+    if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+        return False
+    
+    return True
+
+
+@bot_instance.message_handler(func=check_plan_link_reply)
+def handle_plan_link_reply(message):
+    """Обработчик ответа на промпт ссылки/ID планирования (step=1) - только извлекает ID, не показывает описание"""
+    user_id = message.from_user.id
+    text = message.text or ""
+    logger.info(f"[PLAN LINK REPLY] ===== START: message_id={message.message_id}, user_id={user_id}, text='{text}'")
+    try:
+        from moviebot.bot.handlers.plan import get_plan_link_internal
+        from moviebot.states import user_plan_state
+        
+        state = user_plan_state[user_id]
+        logger.info(f"[PLAN LINK REPLY] Текст ответного сообщения: '{text}'")
+        get_plan_link_internal(message, state)
+        logger.info(f"[PLAN LINK REPLY] ✅ Завершено")
+    except Exception as e:
+        logger.error(f"[PLAN LINK REPLY] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке ссылки/ID")
         except:
             pass
 
@@ -1407,14 +1511,14 @@ def main_text_handler(message):
             logger.info(f"[PLAN] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
             return
         
-        # step=1 обрабатывается в handle_list_plan_reply, здесь только step=3
+        # step=1 обрабатывается в handle_plan_link_reply, здесь пропускаем
         if step == 1:
-            logger.info(f"[MAIN TEXT HANDLER] step=1 должен обрабатываться в handle_list_plan_reply, пропускаем")
+            logger.info(f"[MAIN TEXT HANDLER] step=1 должен обрабатываться в handle_plan_link_reply, пропускаем")
             return
         
+        # step=3 обрабатывается в handle_plan_datetime_reply, здесь пропускаем
         if step == 3:
-            from moviebot.bot.handlers.plan import get_plan_day_or_date_internal
-            get_plan_day_or_date_internal(message, state)
+            logger.info(f"[MAIN TEXT HANDLER] step=3 должен обрабатываться в handle_plan_datetime_reply, пропускаем")
             return
     
     # === user_clean_state ===
