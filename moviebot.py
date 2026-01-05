@@ -1380,13 +1380,21 @@ def choose_random_participant():
                 continue
             
             # Проверяем, что прошла неделя с начала участия для всех участников
-            # Получаем дату первого участия для каждого участника
-            cursor.execute('''
-                SELECT user_id, MIN(timestamp) as first_participation
-                FROM stats
-                WHERE chat_id = %s
-                GROUP BY user_id
-            ''', (chat_id,))
+            # Получаем дату первого участия для каждого участника (исключая бота)
+            if BOT_ID:
+                cursor.execute('''
+                    SELECT user_id, MIN(timestamp) as first_participation
+                    FROM stats
+                    WHERE chat_id = %s AND user_id != %s
+                    GROUP BY user_id
+                ''', (chat_id, BOT_ID))
+            else:
+                cursor.execute('''
+                    SELECT user_id, MIN(timestamp) as first_participation
+                    FROM stats
+                    WHERE chat_id = %s
+                    GROUP BY user_id
+                ''', (chat_id,))
             first_participations = {row.get('user_id') if isinstance(row, dict) else row[0]: 
                                    (row.get('first_participation') if isinstance(row, dict) else row[1])
                                    for row in cursor.fetchall()}
@@ -18888,8 +18896,8 @@ def handle_payment_callback(call):
                         markup.add(InlineKeyboardButton(f"🎫 Билеты ({prices['tickets']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:tickets:month:{chat_id}"))
                     # "Все режимы" всегда показываем, так как это замена текущих подписок
                     markup.add(InlineKeyboardButton(f"📦 Все режимы - месяц ({prices['all']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:month:{chat_id}"))
-                    markup.add(InlineKeyboardButton(f"📦 Все режимы - 3 месяца ({prices['all']['3months']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:3months:{chat_id}"))
-                    markup.add(InlineKeyboardButton(f"📦 Все режимы - год ({prices['all']['year']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:year:{chat_id}"))
+                    markup.add(InlineKeyboardButton(f"📦 Все режимы - 3 месяца ({prices['all']['3months']}₽/3 мес)", callback_data=f"payment:subscribe:group:{group_size}:all:3months:{chat_id}"))
+                    markup.add(InlineKeyboardButton(f"📦 Все режимы - год ({prices['all']['year']}₽/год)", callback_data=f"payment:subscribe:group:{group_size}:all:year:{chat_id}"))
                     markup.add(InlineKeyboardButton(f"📦 Все режимы - навсегда ({prices['all']['lifetime']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:lifetime:{chat_id}"))
                     # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
                     back_callback = "payment:active:group:current" if user_payment_state.get(user_id, {}).get('from_active') else "payment:tariffs:group"
@@ -20350,7 +20358,7 @@ def handle_payment_callback(call):
             return
         
         if action.startswith("modify:"):
-            # Изменение подписки - сразу переходим к тарифам нужного типа
+            # Изменение подписки - показываем варианты продления/расширения
             subscription_id = action.split(":")[1]
             try:
                 bot.answer_callback_query(call.id)
@@ -20361,30 +20369,28 @@ def handle_payment_callback(call):
             from database.db_operations import get_subscription_by_id
             sub = get_subscription_by_id(int(subscription_id)) if subscription_id.isdigit() else None
             
-            if sub:
-                subscription_type = sub.get('subscription_type', 'personal')
-                # Сохраняем информацию о том, что пришли из "Изменить подписку"
-                user_payment_state[user_id] = user_payment_state.get(user_id, {})
-                user_payment_state[user_id]['from_active'] = True
-                user_payment_state[user_id]['modify_subscription_id'] = subscription_id
+            if not sub:
+                bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                return
+            
+            subscription_type = sub.get('subscription_type', 'personal')
+            plan_type = sub.get('plan_type', 'all')
+            period_type = sub.get('period_type', 'month')
+            group_size = sub.get('group_size')
+            chat_id_sub = sub.get('chat_id')
+            
+            # Если подписка максимальная (all + lifetime), показываем сообщение
+            if plan_type == 'all' and period_type == 'lifetime':
+                text = "✅ <b>У вас куплен весь функционал бота</b>\n\n"
+                text += "📦 Пакетная подписка - Все режимы\n"
+                text += "⏰ Период: навсегда\n\n"
+                text += "Дополнительные опции недоступны."
                 
-                if subscription_type == 'personal':
-                    # Сразу переходим к тарифам для личных подписок
-                    action = "tariffs:personal"
-                    # Продолжаем выполнение ниже - обработается как tariffs:personal
-                else:
-                    # Для групповых подписок - переходим к групповым тарифам
-                    action = "tariffs:group"
-                    # Продолжаем выполнение ниже - обработается как tariffs:group
-                # Не делаем return здесь - продолжаем выполнение для обработки tariffs:personal или tariffs:group
-            else:
-                # Если подписка не найдена, просто показываем выбор типа подписки
-                text = "💰 <b>Тарифы</b>\n\n"
-                text += "Выберите тип подписки:"
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("👤 Личные", callback_data="payment:tariffs:personal"))
-                markup.add(InlineKeyboardButton("👥 Групповые", callback_data="payment:tariffs:group"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                if subscription_type == 'personal':
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
+                else:
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 
                 try:
                     bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -20392,6 +20398,127 @@ def handle_payment_callback(call):
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
+            
+            # Определяем доступные варианты продления
+            available_periods = []
+            if period_type == 'month':
+                available_periods = ['3months', 'year', 'lifetime']
+            elif period_type == '3months':
+                available_periods = ['year', 'lifetime']
+            elif period_type == 'year':
+                available_periods = ['lifetime']
+            
+            # Формируем текст и кнопки
+            plan_names = {
+                'notifications': '🔔 Уведомления о сериалах',
+                'recommendations': '🎯 Персональные рекомендации',
+                'tickets': '🎫 Билеты в кино',
+                'all': '📦 Все режимы'
+            }
+            
+            period_names = {
+                'month': 'месяц',
+                '3months': '3 месяца',
+                'year': 'год',
+                'lifetime': 'навсегда'
+            }
+            
+            text = f"✏️ <b>Изменение подписки</b>\n\n"
+            text += f"📋 <b>Текущая подписка:</b>\n"
+            if subscription_type == 'personal':
+                text += f"👤 Личная подписка\n"
+            else:
+                text += f"👥 Групповая подписка\n"
+            text += f"{plan_names.get(plan_type, plan_type)}\n"
+            text += f"⏰ Период: {period_names.get(period_type, period_type)}\n\n"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            # Добавляем кнопки для продления периода
+            if available_periods:
+                text += "📅 <b>Продлить подписку:</b>\n"
+                for period in available_periods:
+                    if subscription_type == 'personal':
+                        price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period, 0)
+                    else:
+                        group_size_str = str(group_size) if group_size else '2'
+                        price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get(period, 0)
+                    
+                    period_name = period_names.get(period, period)
+                    if period == '3months':
+                        price_text = f"{price}₽/3 мес"
+                    elif period == 'year':
+                        price_text = f"{price}₽/год"
+                    elif period == 'lifetime':
+                        price_text = f"{price}₽"
+                    else:
+                        price_text = f"{price}₽/мес"
+                    
+                    if subscription_type == 'personal':
+                        markup.add(InlineKeyboardButton(f"📅 {period_name.capitalize()} ({price_text})", callback_data=f"payment:subscribe:personal:{plan_type}:{period}"))
+                    else:
+                        markup.add(InlineKeyboardButton(f"📅 {period_name.capitalize()} ({price_text})", callback_data=f"payment:subscribe:group:{group_size}:{plan_type}:{period}:{chat_id_sub}"))
+            
+            # Для групповых подписок - проверяем возможность расширения
+            if subscription_type == 'group' and plan_type == 'all':
+                from database.db_operations import get_active_group_users
+                try:
+                    active_users = get_active_group_users(chat_id_sub)
+                    active_count = len(active_users) if active_users else 0
+                    current_size = group_size or 2
+                    
+                    # Предлагаем расширение, если в группе достаточно участников (минус бот)
+                    if active_count - 1 > current_size:
+                        if current_size == 2:
+                            # Можно расширить до 5 или 10
+                            if active_count - 1 >= 5:
+                                text += "\n👥 <b>Расширить подписку:</b>\n"
+                                for new_size in [5, 10]:
+                                    if active_count - 1 >= new_size:
+                                        current_price = SUBSCRIPTION_PRICES['group']['2'][plan_type].get(period_type, 0)
+                                        new_price = SUBSCRIPTION_PRICES['group'][str(new_size)][plan_type].get(period_type, 0)
+                                        diff = new_price - current_price
+                                        
+                                        # Применяем скидку, если есть личная подписка
+                                        from database.db_operations import get_user_personal_subscriptions
+                                        personal_subs = get_user_personal_subscriptions(user_id)
+                                        if personal_subs:
+                                            if new_size == 5:
+                                                diff = int(diff * 0.5)
+                                            elif new_size == 10:
+                                                diff = int(new_price * 0.5) - current_price
+                                        
+                                        markup.add(InlineKeyboardButton(f"👥 До {new_size} участников (+{diff}₽)", callback_data=f"payment:expand:{new_size}:{subscription_id}"))
+                        elif current_size == 5:
+                            # Можно расширить до 10
+                            if active_count - 1 >= 10:
+                                text += "\n👥 <b>Расширить подписку:</b>\n"
+                                current_price = SUBSCRIPTION_PRICES['group']['5'][plan_type].get(period_type, 0)
+                                new_price = SUBSCRIPTION_PRICES['group']['10'][plan_type].get(period_type, 0)
+                                diff = new_price - current_price
+                                
+                                # Применяем скидку, если есть личная подписка
+                                from database.db_operations import get_user_personal_subscriptions
+                                personal_subs = get_user_personal_subscriptions(user_id)
+                                if personal_subs:
+                                    diff = int(new_price * 0.5) - current_price
+                                
+                                markup.add(InlineKeyboardButton(f"👥 До 10 участников (+{diff}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
+                except Exception as e:
+                    logger.error(f"[PAYMENT] Ошибка проверки активных пользователей: {e}", exc_info=True)
+            
+            # Кнопка "Назад"
+            if subscription_type == 'personal':
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
+            else:
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+            
+            try:
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                if "message is not modified" not in str(e):
+                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+            return
         
         if action == "cancel":
             # Отмена подписки
