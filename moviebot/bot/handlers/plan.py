@@ -853,6 +853,67 @@ def add_ticket_from_plan_callback(call):
     # и другие из moviebot.py
 
 
+def get_plan_link_internal(message, state):
+    """Внутренняя функция для получения ссылки на фильм в /plan"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    link = None
+    
+    if message.reply_to_message:
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
+        if link_match:
+            link = link_match.group(0)
+        
+        # Также проверяем ID в реплае
+        if not link:
+            id_match = re.search(r'\b(\d{4,})\b', message.reply_to_message.text or '')
+            if id_match:
+                kp_id = id_match.group(1)
+                with db_lock:
+                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor.fetchone()
+                    if row:
+                        link = row.get('link') if isinstance(row, dict) else row[0]
+                        logger.info(f"[PLAN] Найден фильм по ID {kp_id} в реплае (из базы): {link}")
+                    else:
+                        if len(kp_id) >= 4:
+                            link = f"https://kinopoisk.ru/film/{kp_id}"
+                            logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
+    
+    if not link:
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.text or '')
+        if link_match:
+            link = link_match.group(0)
+    
+    if not link:
+        id_match = re.search(r'\b(\d{4,})\b', message.text or '')
+        if id_match:
+            kp_id = id_match.group(1)
+            with db_lock:
+                cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    link = row.get('link') if isinstance(row, dict) else row[0]
+                    logger.info(f"[PLAN] Найден фильм по ID {kp_id} (из базы): {link}")
+                else:
+                    if len(kp_id) >= 4:
+                        link = f"https://kinopoisk.ru/film/{kp_id}"
+                        logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
+    
+    if not link:
+        bot_instance.reply_to(message, "❌ Не найдена ссылка на фильм. Пришлите ссылку или ID фильма.")
+        if user_id in user_plan_state:
+            del user_plan_state[user_id]
+        return
+    
+    user_plan_state[user_id]['link'] = link
+    user_plan_state[user_id]['step'] = 2
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
+    markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
+    bot_instance.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
+
+
 def get_plan_day_or_date_internal(message, state):
     """Внутренняя функция для получения дня/даты в /plan"""
     user_id = message.from_user.id
