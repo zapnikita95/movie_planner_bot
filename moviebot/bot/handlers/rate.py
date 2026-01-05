@@ -265,12 +265,12 @@ def handle_rating_internal(message, rating):
             else:
                 # Если не найдено, проверяем цепочку реплаев рекурсивно
                 if not film_id:
-            current_msg = message.reply_to_message
-            checked_ids = set()  # Чтобы избежать циклов
-            while current_msg and current_msg.message_id not in checked_ids:
-                checked_ids.add(current_msg.message_id)
-                # Проверяем rating_messages
-                if current_msg.message_id in rating_messages:
+                    current_msg = message.reply_to_message
+                    checked_ids = set()  # Чтобы избежать циклов
+                    while current_msg and current_msg.message_id not in checked_ids:
+                        checked_ids.add(current_msg.message_id)
+                        # Проверяем rating_messages
+                        if current_msg.message_id in rating_messages:
                             rating_value = rating_messages[current_msg.message_id]
                             # Проверяем, это kp_id или film_id
                             if isinstance(rating_value, str) and rating_value.startswith("kp_id:"):
@@ -279,7 +279,7 @@ def handle_rating_internal(message, rating):
                                 break
                             elif isinstance(rating_value, int):
                                 film_id = rating_value
-                    break
+                                break
                 # Проверяем bot_messages (сообщения с фильмами)
                 if current_msg.message_id in bot_messages:
                     reply_link = bot_messages[current_msg.message_id]
@@ -501,7 +501,7 @@ def handle_rating_internal(message, rating):
                             info = extract_movie_info(link)
                             if info:
                                 show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
-                                    logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено через API: message_id={film_message_id}")
+                                logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено через API: message_id={film_message_id}")
                     except Exception as update_e:
                         logger.warning(f"[RATE INTERNAL] Не удалось обновить сообщение с описанием фильма: {update_e}", exc_info=True)
                 
