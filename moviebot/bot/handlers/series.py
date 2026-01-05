@@ -989,10 +989,13 @@ def register_series_handlers(bot_instance):
 @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower()), priority=10)
 def handle_kinopoisk_link(message):
     """Обработчик текстовых сообщений со ссылками на Кинопоиск"""
+    logger.info(f"[KINOPOISK LINK] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}")
     try:
         user_id = message.from_user.id
         chat_id = message.chat.id
         text = message.text.strip()
+        
+        logger.info(f"[KINOPOISK LINK] Текст сообщения: '{text[:100]}'")
         
         # Проверяем, не находится ли пользователь в состоянии планирования или просмотра фильма
         # Если да, то пропускаем обработку ссылки (она будет обработана соответствующим обработчиком)
@@ -1106,11 +1109,13 @@ def handle_kinopoisk_link(message):
         logger.info(f"[KINOPOISK LINK] show_film_info_without_adding завершена для kp_id={kp_id}")
         
     except Exception as e:
-        logger.error(f"[KINOPOISK LINK] Ошибка обработки ссылки: {e}", exc_info=True)
+        logger.error(f"[KINOPOISK LINK] ===== END: КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
             bot_instance.reply_to(message, "❌ Произошла ошибка при обработке ссылки.")
         except:
             pass
+    finally:
+        logger.info(f"[KINOPOISK LINK] ===== END: message_id={getattr(message, 'message_id', 'N/A')}")
 
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
     def handle_settings_callback(call):
