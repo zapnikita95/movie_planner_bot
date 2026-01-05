@@ -176,6 +176,15 @@ def handle_rate_list_reply(message):
     if message.text and message.text.startswith('/'):
         return
     
+    user_id = message.from_user.id
+    
+    # ВАЖНО: Пропускаем сообщения, если пользователь в состоянии планирования
+    # Эти сообщения должны обрабатываться через main_text_handler
+    from moviebot.states import user_plan_state
+    if user_id in user_plan_state:
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в user_plan_state")
+        return
+    
     # Пропускаем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages
     text_stripped = message.text.strip() if message.text else ""
     if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
@@ -185,7 +194,6 @@ def handle_rate_list_reply(message):
         return
     
     chat_id = message.chat.id
-    user_id = message.from_user.id
     
     # Проверяем, что это реплай на список фильмов
     reply_text = message.reply_to_message.text or ""
@@ -1046,21 +1054,41 @@ def main_text_handler(message):
         handle_plan_error_reply_internal(message)
         return
     
-    # Реплай на сообщение с оценкой
-    # ВАЖНО: Проверяем rating_messages ПЕРЕД другими проверками реплаев
-    if message.reply_to_message and message.text:
-        reply_msg_id = message.reply_to_message.message_id
+    # Обработка оценок (работает и с реплаем, и без реплая)
+    if message.text:
         text_stripped = message.text.strip()
-        logger.info(f"[MAIN TEXT HANDLER] Проверка ответного сообщения с оценкой: text_stripped='{text_stripped}', reply_to_message_id={reply_msg_id}")
-        
-        # Проверяем, есть ли это сообщение в rating_messages
-        from moviebot.states import rating_messages
-        if reply_msg_id in rating_messages:
-            logger.info(f"[MAIN TEXT HANDLER] ✅ Найдено сообщение в rating_messages: reply_msg_id={reply_msg_id}")
-            if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
-               (len(text_stripped) == 2 and text_stripped == "10"):
-                rating = int(text_stripped)
-                logger.info(f"[MAIN TEXT HANDLER] ✅ Обнаружена оценка: {rating}, вызов handle_rating_internal")
+        # Проверяем, является ли сообщение числом от 1 до 10
+        if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
+           (len(text_stripped) == 2 and text_stripped == "10"):
+            rating = int(text_stripped)
+            logger.info(f"[MAIN TEXT HANDLER] Обнаружена оценка: {rating}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
+            
+            # Проверяем, есть ли реплай и находится ли сообщение в rating_messages
+            if message.reply_to_message:
+                reply_msg_id = message.reply_to_message.message_id
+                from moviebot.states import rating_messages
+                if reply_msg_id in rating_messages:
+                    logger.info(f"[MAIN TEXT HANDLER] ✅ Найдено сообщение в rating_messages: reply_msg_id={reply_msg_id}")
+                    try:
+                        from moviebot.bot.handlers.rate import handle_rating_internal
+                        handle_rating_internal(message, rating)
+                        logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+                    except Exception as rating_e:
+                        logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                    return
+                else:
+                    # Если реплай есть, но не в rating_messages, все равно пробуем обработать
+                    logger.info(f"[MAIN TEXT HANDLER] Реплай есть, но не в rating_messages, пробуем обработать оценку")
+                    try:
+                        from moviebot.bot.handlers.rate import handle_rating_internal
+                        handle_rating_internal(message, rating)
+                        logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+                    except Exception as rating_e:
+                        logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                    return
+            else:
+                # Если нет реплая, но это число от 1 до 10, пробуем обработать как оценку
+                logger.info(f"[MAIN TEXT HANDLER] Нет реплая, но это число от 1 до 10, пробуем обработать как оценку")
                 try:
                     from moviebot.bot.handlers.rate import handle_rating_internal
                     handle_rating_internal(message, rating)
@@ -1068,18 +1096,22 @@ def main_text_handler(message):
                 except Exception as rating_e:
                     logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
                 return
-        else:
-            # Если не в rating_messages, но это число от 1 до 10, все равно пробуем обработать
-            if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
-               (len(text_stripped) == 2 and text_stripped == "10"):
-                rating = int(text_stripped)
-                logger.info(f"[MAIN TEXT HANDLER] ✅ Обнаружена оценка (не в rating_messages): {rating}, вызов handle_rating_internal")
-                try:
-                    from moviebot.bot.handlers.rate import handle_rating_internal
-                    handle_rating_internal(message, rating)
-                    logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
-                except Exception as rating_e:
-                    logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+    
+    # Реплай на сообщение бота с оценками (для списка фильмов)
+    if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
+        reply_text = message.reply_to_message.text or ""
+        
+        if "Список просмотренных фильмов для оценки" in reply_text:
+            from moviebot.bot.handlers.rate import handle_rate_list_reply_internal
+            handle_rate_list_reply_internal(message)
+            return
+        
+        reply_msg_id = message.reply_to_message.message_id
+        if reply_msg_id in bot_messages:
+            link = bot_messages.get(reply_msg_id)
+            if link:
+                from moviebot.bot.handlers.series import handle_random_plan_reply_internal
+                handle_random_plan_reply_internal(message, link)
                 return
     
     # Реплай на голосование "в кино"
