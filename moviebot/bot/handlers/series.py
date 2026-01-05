@@ -68,7 +68,13 @@ def handle_search(message):
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             reply_msg = bot_instance.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
             # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
-            user_search_state[message.from_user.id] = {'chat_id': message.chat.id, 'message_id': reply_msg.message_id, 'search_type': 'mixed'}
+            user_id = message.from_user.id
+            user_search_state[user_id] = {
+                'chat_id': message.chat.id, 
+                'message_id': reply_msg.message_id, 
+                'search_type': 'mixed'
+            }
+            logger.info(f"[SEARCH] Состояние поиска установлено для user_id={user_id}: {user_search_state[user_id]}")
             return
         
         logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
