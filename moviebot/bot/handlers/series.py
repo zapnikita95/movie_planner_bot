@@ -1488,25 +1488,20 @@ def handle_kinopoisk_link(message):
             if action == "edit":
                 # Вызываем команду /edit
                 from moviebot.bot.handlers.edit import edit_command
-                from telebot.types import Message
                 
                 # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                fake_message = Message(
-                    message_id=call.message.message_id,
-                    from_user=call.from_user,
-                    date=call.message.date,
-                    chat=call.message.chat,
-                    content_type='text',
-                    options={},
-                    json_string='{}'
-                )
-                fake_message.text = '/edit'
+                class FakeMessage:
+                    def __init__(self, call):
+                        self.message_id = call.message.message_id
+                        self.from_user = call.from_user
+                        self.chat = call.message.chat
+                        self.date = call.message.date
+                        self.text = '/edit'
+                    
+                    def reply_to(self, text, **kwargs):
+                        return bot_instance.send_message(self.chat.id, text, **kwargs)
                 
-                # Переопределяем reply_to для отправки в нужный чат
-                def reply_to_wrapper(text, **kwargs):
-                    return bot_instance.send_message(call.message.chat.id, text, **kwargs)
-                fake_message.reply_to = reply_to_wrapper
-                
+                fake_message = FakeMessage(call)
                 edit_command(fake_message)
                 bot_instance.answer_callback_query(call.id)
                 return
@@ -1514,25 +1509,20 @@ def handle_kinopoisk_link(message):
             if action == "clean":
                 # Вызываем команду /clean
                 from moviebot.bot.handlers.clean import clean_command
-                from telebot.types import Message
                 
                 # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                fake_message = Message(
-                    message_id=call.message.message_id,
-                    from_user=call.from_user,
-                    date=call.message.date,
-                    chat=call.message.chat,
-                    content_type='text',
-                    options={},
-                    json_string='{}'
-                )
-                fake_message.text = '/clean'
+                class FakeMessage:
+                    def __init__(self, call):
+                        self.message_id = call.message.message_id
+                        self.from_user = call.from_user
+                        self.chat = call.message.chat
+                        self.date = call.message.date
+                        self.text = '/clean'
+                    
+                    def reply_to(self, text, **kwargs):
+                        return bot_instance.send_message(self.chat.id, text, **kwargs)
                 
-                # Переопределяем reply_to для отправки в нужный чат
-                def reply_to_wrapper(text, **kwargs):
-                    return bot_instance.send_message(call.message.chat.id, text, **kwargs)
-                fake_message.reply_to = reply_to_wrapper
-                
+                fake_message = FakeMessage(call)
                 clean_command(fake_message)
                 bot_instance.answer_callback_query(call.id)
                 return
@@ -1540,25 +1530,20 @@ def handle_kinopoisk_link(message):
             if action == "join":
                 # Вызываем команду /join
                 from moviebot.bot.handlers.join import join_command
-                from telebot.types import Message
                 
                 # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                fake_message = Message(
-                    message_id=call.message.message_id,
-                    from_user=call.from_user,
-                    date=call.message.date,
-                    chat=call.message.chat,
-                    content_type='text',
-                    options={},
-                    json_string='{}'
-                )
-                fake_message.text = '/join'
+                class FakeMessage:
+                    def __init__(self, call):
+                        self.message_id = call.message.message_id
+                        self.from_user = call.from_user
+                        self.chat = call.message.chat
+                        self.date = call.message.date
+                        self.text = '/join'
+                    
+                    def reply_to(self, text, **kwargs):
+                        return bot_instance.send_message(self.chat.id, text, **kwargs)
                 
-                # Переопределяем reply_to для отправки в нужный чат
-                def reply_to_wrapper(text, **kwargs):
-                    return bot_instance.send_message(call.message.chat.id, text, **kwargs)
-                fake_message.reply_to = reply_to_wrapper
-                
+                fake_message = FakeMessage(call)
                 join_command(fake_message)
                 bot_instance.answer_callback_query(call.id)
                 return
