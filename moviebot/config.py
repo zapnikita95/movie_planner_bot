@@ -8,12 +8,8 @@ import pytz
 
 load_dotenv()
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+# Логирование уже настроено в main.py в самом начале
+# Не настраиваем здесь, чтобы избежать конфликтов
 logger = logging.getLogger(__name__)
 
 # Переменные окружения

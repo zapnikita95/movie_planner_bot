@@ -2,25 +2,42 @@
 Главная точка входа приложения
 Создает bot, запускает webhook/polling
 """
+# КРИТИЧЕСКИ ВАЖНО: Настройка logging ДО всех импортов
 import logging
 import sys
 import os
-from dotenv import load_dotenv
 
-# Загружаем переменные окружения
-load_dotenv()
+# Принудительно включаем unflushed вывод (критично для Railway)
+# Это гарантирует, что логи сразу попадают в stdout без буферизации
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(line_buffering=True)
 
-# Настройка логирования
+# Глобальная настройка logging (один раз, до всех импортов!)
+# force=True сбрасывает все предыдущие настройки
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler(sys.stdout)  # В stdout — Railway видит
     ],
-    force=True
+    force=True  # Сбрасывает все предыдущие настройки
 )
+
+# Принудительно INFO для всех логгеров
+logging.getLogger().setLevel(logging.INFO)
+
 logger = logging.getLogger(__name__)
+logger.info("=" * 80)
+logger.info("=== GLOBAL LOGGING НАСТРОЕН ===")
+logger.info("=== Railway должен видеть это ===")
+logger.info("=" * 80)
+
+# Теперь загружаем переменные окружения
+from dotenv import load_dotenv
+load_dotenv()
 
 # Импорты конфигурации
 from moviebot.config import TOKEN
