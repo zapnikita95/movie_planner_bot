@@ -313,6 +313,28 @@ def register_payment_callbacks(bot_instance):
                         else:
                             text += f"⏰ Действует: <b>Навсегда</b>\n"
                         
+                        # Показываем запланированные изменения
+                        for active_sub in active_subs:
+                            next_plan_type = active_sub.get('next_plan_type')
+                            next_period_type = active_sub.get('next_period_type')
+                            replacement_date = active_sub.get('replacement_date')
+                            replacement_type = active_sub.get('replacement_type')
+                            
+                            if next_plan_type and replacement_date:
+                                sub_plan_type = active_sub.get('plan_type', 'all')
+                                sub_plan_name = plan_names.get(sub_plan_type, sub_plan_type)
+                                new_plan_name = plan_names.get(next_plan_type, next_plan_type)
+                                
+                                if replacement_type == 'next_payment':
+                                    if isinstance(replacement_date, datetime):
+                                        replacement_date_str = replacement_date.strftime('%d.%m.%Y')
+                                    else:
+                                        replacement_date_str = str(replacement_date)
+                                    text += f"\n🔄 <b>Запланировано изменение:</b>\n"
+                                    text += f"• Текущая: {sub_plan_name}\n"
+                                    text += f"• Новая: {new_plan_name}\n"
+                                    text += f"• С даты: {replacement_date_str}\n"
+                        
                         markup = InlineKeyboardMarkup(row_width=1)
                         
                         # Если несколько подписок, показываем кнопку "Изменить подписку" и кнопки "Отменить" для каждой
