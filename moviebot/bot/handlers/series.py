@@ -986,7 +986,7 @@ def register_series_handlers(bot_instance):
     pass
 
 # Обработчик ссылок на Кинопоиск - вынесен на уровень модуля для правильной регистрации
-@bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower()), priority=10)
+@bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower()))
 def handle_kinopoisk_link(message):
     """Обработчик текстовых сообщений со ссылками на Кинопоиск"""
     logger.info(f"[KINOPOISK LINK] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}")
@@ -1725,7 +1725,7 @@ def handle_kinopoisk_link(message):
             logger.info(f"[SETTINGS CALLBACK] ===== КОНЕЦ ОБРАБОТКИ =====")
 
     # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state, priority=5)
+    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
     def handle_search_reply(message):
         """Обработчик ответных сообщений для поиска"""
         logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
