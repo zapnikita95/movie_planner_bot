@@ -2286,40 +2286,35 @@ def handle_kinopoisk_link(message):
             logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 
     # Обработчик выбора типа поиска (фильм/сериал)
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("search_type:"))
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
     def search_type_callback(call):
         """Обработчик выбора типа поиска (фильм или сериал)"""
         logger.info("=" * 80)
-        logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}")
+        logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
         try:
-            bot_instance.answer_callback_query(call.id, text="⏳ Обновляю...")
-            logger.info(f"[SEARCH TYPE] answer_callback_query вызван, callback_id={call.id}")
-            
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             search_type = call.data.split(":")[1]  # 'film' или 'series'
             
             logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}, chat_id={chat_id}")
             
-            # Обновляем или создаем состояние поиска
-            logger.info(f"[SEARCH TYPE] Проверка состояния: user_id={user_id}, user_search_state keys={list(user_search_state.keys())}")
+            # Обновляем состояние
             if user_id in user_search_state:
-                # Обновляем только тип поиска, сохраняя существующий message_id и chat_id
-                old_state = user_search_state[user_id].copy()
                 user_search_state[user_id]['search_type'] = search_type
-                # Обновляем message_id на случай, если пользователь нажал кнопку в другом сообщении
                 user_search_state[user_id]['message_id'] = call.message.message_id
-                logger.info(f"[SEARCH TYPE] ✅ Обновлен search_type для существующего состояния: {old_state} -> {user_search_state[user_id]}")
             else:
-                # Если состояния нет, создаем его
                 user_search_state[user_id] = {
                     'chat_id': chat_id,
                     'message_id': call.message.message_id,
                     'search_type': search_type
                 }
-                logger.info(f"[SEARCH TYPE] ✅ Состояние поиска СОЗДАНО для user_id={user_id}: {user_search_state[user_id]}")
+            logger.info(f"[SEARCH TYPE] ✅ Состояние обновлено: {user_search_state[user_id]}")
+            
+            # Обновляем сообщение с указанием выбранного типа (как в старом файле)
+            type_text = "🎬 фильмы" if search_type == 'film' else "📺 сериалы" if search_type == 'series' else "🎬📺 фильмы и сериалы"
             
             # Обновляем кнопки, чтобы показать выбранный тип
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             markup = InlineKeyboardMarkup(row_width=2)
             if search_type == 'film':
                 markup.add(
@@ -2333,35 +2328,32 @@ def handle_kinopoisk_link(message):
                 )
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
-            search_type_text = "🎬 фильмы" if search_type == 'film' else "📺 сериалы" if search_type == 'series' else "🎬📺 фильмы и сериалы"
-            # Обновляем сообщение с новым текстом
+            bot_instance.answer_callback_query(call.id, f"Выбран поиск: {type_text}")
+            logger.info(f"[SEARCH TYPE] answer_callback_query вызван с текстом: 'Выбран поиск: {type_text}'")
+            
             try:
                 bot_instance.edit_message_text(
-                    f"🔍 Укажите запрос для поиска {search_type_text} в ответном сообщении, например: джон уик",
+                    f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик",
                     chat_id,
                     call.message.message_id,
                     reply_markup=markup
                 )
-                logger.info(f"[SEARCH TYPE] Сообщение обновлено успешно")
+                logger.info(f"[SEARCH TYPE] ✅ Сообщение обновлено успешно")
             except Exception as edit_e:
                 logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
                 # Пробуем отправить новое сообщение
                 try:
                     bot_instance.send_message(
                         chat_id,
-                        f"🔍 Укажите запрос для поиска {search_type_text} в ответном сообщении, например: джон уик",
+                        f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик",
                         reply_markup=markup
                     )
-                    logger.info(f"[SEARCH TYPE] Новое сообщение отправлено")
+                    logger.info(f"[SEARCH TYPE] ✅ Новое сообщение отправлено")
                 except Exception as send_e:
-                    logger.error(f"[SEARCH TYPE] Ошибка отправки нового сообщения: {send_e}", exc_info=True)
-            # Обновляем message_id в состоянии (при edit_message_text message_id не меняется, но обновляем для ясности)
-            if user_id in user_search_state:
-                user_search_state[user_id]['message_id'] = call.message.message_id
-            logger.info(f"[SEARCH TYPE] Состояние обновлено для user_id={user_id}, search_type={search_type}, message_id={call.message.message_id}")
-            logger.info(f"[SEARCH TYPE] Сообщение обновлено успешно")
+                    logger.error(f"[SEARCH TYPE] ❌ Ошибка отправки нового сообщения: {send_e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except Exception as e:
-            logger.error(f"[SEARCH TYPE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+            logger.error(f"[SEARCH TYPE] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except Exception as answer_e:
