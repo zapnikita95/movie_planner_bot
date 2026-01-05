@@ -4586,7 +4586,7 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                         
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         elif subscription_type == 'group':
                             # Для групповых подписок получаем информацию о групповой подписке
                             from moviebot.database.db_operations import get_subscription_members, get_active_group_users, get_active_group_subscription_by_chat_id
