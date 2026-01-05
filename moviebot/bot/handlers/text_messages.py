@@ -1527,8 +1527,9 @@ def main_text_handler(message):
                        message.reply_to_message.from_user.id == BOT_ID)
             
             state_message_id = state.get('message_id')
+            # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
             if not is_reply or (state_message_id and message.reply_to_message.message_id != state_message_id):
-                bot_instance.reply_to(message, "❌ Пожалуйста, отправьте ID операции в ответ на сообщение бота.")
+                logger.info(f"[REFUND] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
                 return
             
             # Обрабатываем ввод charge_id
@@ -1558,8 +1559,9 @@ def main_text_handler(message):
                    message.reply_to_message.from_user.id == BOT_ID)
         
         state_message_id = state.get('message_id')
+        # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
         if not is_reply or (state_message_id and message.reply_to_message.message_id != state_message_id):
-            bot_instance.reply_to(message, "❌ Пожалуйста, отправьте ID пользователя или группы в ответ на сообщение бота.")
+            logger.info(f"[UNSUBSCRIBE] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
             return
         
         # Обрабатываем ID
