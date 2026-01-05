@@ -385,30 +385,24 @@ def register_seasons_handlers(bot):
             existing = (film_id, title, watched)
             
             # Показываем описание сериала со всеми кнопками
-            # TODO: Импортировать show_film_info_with_buttons из handlers/series.py когда будет реализовано
-            # Временно: используем прямой вызов через bot для отображения информации
-            # Функция show_film_info_with_buttons будет реализована в handlers/series.py
-            try:
-                # Пытаемся импортировать из handlers/series (когда будет реализовано)
-                from moviebot.bot.handlers.series import show_film_info_with_buttons
-                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
-            except (ImportError, AttributeError):
-                # Временная заглушка: показываем базовую информацию о сериале
-                logger.warning("[SEASONS] show_film_info_with_buttons не найден, используем временное отображение")
-                is_series = info.get('is_series', False)
-                type_emoji = "📺" if is_series else "🎬"
-                text = f"{type_emoji} <b>{info['title']}</b> ({info['year'] or '—'})\n"
-                if info.get('director'):
-                    text += f"<i>Режиссёр:</i> {info['director']}\n"
-                if info.get('genres'):
-                    text += f"<i>Жанры:</i> {info['genres']}\n"
-                if info.get('description'):
-                    text += f"\n<i>Кратко:</i> {info['description']}\n"
-                text += f"\n<a href='{link}'>Кинопоиск</a>"
-                
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
-                bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            
+            # Получаем message_thread_id из сообщения, если оно есть
+            message_thread_id = None
+            if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                message_thread_id = call.message.message_thread_id
+            
+            # Обновляем существующее сообщение с описанием сериала
+            show_film_info_with_buttons(
+                chat_id, 
+                user_id, 
+                info, 
+                link, 
+                kp_id, 
+                existing=existing,
+                message_id=call.message.message_id,
+                message_thread_id=message_thread_id
+            )
             
         except Exception as e:
             logger.error(f"[SEASONS] Ошибка: {e}", exc_info=True)
