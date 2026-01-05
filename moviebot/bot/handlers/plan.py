@@ -163,9 +163,9 @@ def register_plan_handlers(bot_instance):
     logger.info(f"[REGISTER PLAN HANDLERS] ===== START: регистрация обработчиков планирования =====")
     logger.info(f"[REGISTER PLAN HANDLERS] bot_instance: {bot_instance}")
     
-    @bot_instance.message_handler(commands=['plan'])
+    @bot_instance.message_handler(commands=['plan'], func=lambda m: not m.reply_to_message)
     def plan_handler(message):
-        """Команда /plan - планирование просмотра"""
+        """Команда /plan - планирование просмотра (только чистая команда без реплая)"""
         logger.info(f"[HANDLER] /plan вызван от {message.from_user.id}")
         try:
             username = message.from_user.username or f"user_{message.from_user.id}"

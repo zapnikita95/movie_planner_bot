@@ -2160,10 +2160,166 @@ def handle_kinopoisk_link(message):
                     handle_settings_callback(call)
                     return
                 
-                elif sub_action in ["home", "cinema", "regular_reminders"]:
-                    # TODO: Реализовать настройки времени для домашнего просмотра, кино и регулярных напоминаний
-                    logger.info(f"[SETTINGS] Настройка {sub_action} - TODO: реализовать")
-                    bot_instance.answer_callback_query(call.id, f"Настройка {sub_action} будет реализована позже")
+                elif sub_action == "home":
+                    # Настройка времени для домашнего просмотра
+                    separate = notify_settings.get('separate_weekdays', 'true') == 'true'
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    if separate:
+                        markup.add(InlineKeyboardButton("📅 Будни", callback_data="settings:notify:home:weekday"))
+                        markup.add(InlineKeyboardButton("🌴 Выходные", callback_data="settings:notify:home:weekend"))
+                    else:
+                        markup.add(InlineKeyboardButton("⏰ Установить время", callback_data="settings:notify:home:time"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
+                    
+                    home_weekday = f"{notify_settings.get('home_weekday_hour', 19):02d}:{notify_settings.get('home_weekday_minute', 0):02d}"
+                    home_weekend = f"{notify_settings.get('home_weekend_hour', 9):02d}:{notify_settings.get('home_weekend_minute', 0):02d}"
+                    
+                    text = f"🏠 <b>Настройка времени напоминаний для домашнего просмотра</b>\n\n"
+                    if separate:
+                        text += f"📅 Будни: <b>{home_weekday}</b>\n"
+                        text += f"🌴 Выходные: <b>{home_weekend}</b>\n"
+                    else:
+                        text += f"⏰ Время: <b>{home_weekday}</b>\n"
+                    text += f"\nОтправьте время в формате ЧЧ:ММ (например, 19:00 или 09:00)"
+                    
+                    bot_instance.edit_message_text(
+                        text,
+                        call.message.chat.id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    # Сохраняем состояние для обработки ввода времени
+                    if user_id not in user_settings_state:
+                        user_settings_state[user_id] = {}
+                    user_settings_state[user_id]['waiting_notify_time'] = 'home'
+                    user_settings_state[user_id]['notify_separate'] = separate
+                    return
+                
+                elif sub_action.startswith("home:"):
+                    # Обработка выбора будни/выходные для домашнего просмотра
+                    time_type = sub_action.split(":", 1)[1]  # "weekday" или "weekend"
+                    if user_id not in user_settings_state:
+                        user_settings_state[user_id] = {}
+                    user_settings_state[user_id]['waiting_notify_time'] = f'home_{time_type}'
+                    user_settings_state[user_id]['notify_separate'] = True
+                    
+                    bot_instance.answer_callback_query(call.id)
+                    bot_instance.edit_message_text(
+                        f"🏠 <b>Настройка времени для домашнего просмотра</b>\n\n"
+                        f"📅 {'Будни' if time_type == 'weekday' else 'Выходные'}\n\n"
+                        f"Отправьте время в формате ЧЧ:ММ (например, 19:00 или 09:00)",
+                        call.message.chat.id,
+                        call.message.message_id,
+                        parse_mode='HTML'
+                    )
+                    return
+                
+                elif sub_action == "cinema":
+                    # Настройка времени для кино
+                    separate = notify_settings.get('separate_weekdays', 'true') == 'true'
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    if separate:
+                        markup.add(InlineKeyboardButton("📅 Будни", callback_data="settings:notify:cinema:weekday"))
+                        markup.add(InlineKeyboardButton("🌴 Выходные", callback_data="settings:notify:cinema:weekend"))
+                    else:
+                        markup.add(InlineKeyboardButton("⏰ Установить время", callback_data="settings:notify:cinema:time"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
+                    
+                    cinema_weekday = f"{notify_settings.get('cinema_weekday_hour', 9):02d}:{notify_settings.get('cinema_weekday_minute', 0):02d}"
+                    cinema_weekend = f"{notify_settings.get('cinema_weekend_hour', 9):02d}:{notify_settings.get('cinema_weekend_minute', 0):02d}"
+                    
+                    text = f"🎬 <b>Настройка времени напоминаний для просмотра в кино</b>\n\n"
+                    if separate:
+                        text += f"📅 Будни: <b>{cinema_weekday}</b>\n"
+                        text += f"🌴 Выходные: <b>{cinema_weekend}</b>\n"
+                    else:
+                        text += f"⏰ Время: <b>{cinema_weekday}</b>\n"
+                    text += f"\nОтправьте время в формате ЧЧ:ММ (например, 09:00)"
+                    
+                    bot_instance.edit_message_text(
+                        text,
+                        call.message.chat.id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    if user_id not in user_settings_state:
+                        user_settings_state[user_id] = {}
+                    user_settings_state[user_id]['waiting_notify_time'] = 'cinema'
+                    user_settings_state[user_id]['notify_separate'] = separate
+                    return
+                
+                elif sub_action.startswith("cinema:"):
+                    # Обработка выбора будни/выходные для кино
+                    time_type = sub_action.split(":", 1)[1]  # "weekday" или "weekend"
+                    if user_id not in user_settings_state:
+                        user_settings_state[user_id] = {}
+                    user_settings_state[user_id]['waiting_notify_time'] = f'cinema_{time_type}'
+                    user_settings_state[user_id]['notify_separate'] = True
+                    
+                    bot_instance.answer_callback_query(call.id)
+                    bot_instance.edit_message_text(
+                        f"🎬 <b>Настройка времени для просмотра в кино</b>\n\n"
+                        f"📅 {'Будни' if time_type == 'weekday' else 'Выходные'}\n\n"
+                        f"Отправьте время в формате ЧЧ:ММ (например, 09:00)",
+                        call.message.chat.id,
+                        call.message.message_id,
+                        parse_mode='HTML'
+                    )
+                    return
+                
+                elif sub_action == "regular_reminders":
+                    # Показываем меню регулярных напоминаний
+                    with db_lock:
+                        # Проверяем статус каждого напоминания
+                        cursor.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
+                        reminder_rows = cursor.fetchall()
+                        
+                        reminders_status = {}
+                        for row in reminder_rows:
+                            key = row.get('key') if isinstance(row, dict) else row[0]
+                            value = row.get('value') if isinstance(row, dict) else row[1]
+                            reminders_status[key] = value
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    
+                    # Напоминание о фильмах на выходных
+                    weekend_films_disabled = reminders_status.get('reminder_weekend_films_disabled', 'false') == 'true'
+                    if weekend_films_disabled:
+                        markup.add(InlineKeyboardButton("⏰ Включить: Фильмы на выходных", callback_data="reminder:enable:weekend_films"))
+                    else:
+                        markup.add(InlineKeyboardButton("❌ Отменить: Фильмы на выходных", callback_data="reminder:disable:weekend_films"))
+                    
+                    # Напоминание о премьерах в кино
+                    cinema_premieres_disabled = reminders_status.get('reminder_cinema_premieres_disabled', 'false') == 'true'
+                    if cinema_premieres_disabled:
+                        markup.add(InlineKeyboardButton("⏰ Включить: Премьеры в кино", callback_data="reminder:enable:cinema_premieres"))
+                    else:
+                        markup.add(InlineKeyboardButton("❌ Отменить: Премьеры в кино", callback_data="reminder:disable:cinema_premieres"))
+                    
+                    # Случайные события (все сразу)
+                    random_events_enabled = reminders_status.get('random_events_enabled', 'true') == 'true'
+                    if not random_events_enabled:
+                        markup.add(InlineKeyboardButton("⏰ Включить: Случайные события", callback_data="reminder:enable:random_events"))
+                    else:
+                        markup.add(InlineKeyboardButton("❌ Отменить: Случайные события", callback_data="reminder:disable:random_events"))
+                    
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
+                    
+                    text = "📋 <b>Регулярные напоминания</b>\n\n"
+                    text += "Управление регулярными напоминаниями бота:\n\n"
+                    text += "• <b>Фильмы на выходных</b> — напоминание каждую субботу, если нет планов\n"
+                    text += "• <b>Премьеры в кино</b> — напоминание о премьерах, если давно не добавляли фильмы в кино\n"
+                    text += "• <b>Случайные события</b> — все случайные события (выбор участника, игра в кубик и т.д.)"
+                    
+                    bot_instance.edit_message_text(
+                        text,
+                        call.message.chat.id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                     return
             
             logger.warning(f"[SETTINGS CALLBACK] Необработанное действие: {action}, callback_data={call.data}")

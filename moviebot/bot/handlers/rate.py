@@ -18,9 +18,9 @@ cursor = get_db_cursor()
 def register_rate_handlers(bot):
     """Регистрирует обработчики команды /rate"""
     
-    @bot.message_handler(commands=['rate'])
+    @bot.message_handler(commands=['rate'], func=lambda m: not m.reply_to_message)
     def rate_movie(message):
-        """Команда /rate - оценить просмотренные фильмы"""
+        """Команда /rate - оценить просмотренные фильмы (только чистая команда без реплая)"""
         username = message.from_user.username or f"user_{message.from_user.id}"
         log_request(message.from_user.id, username, '/rate', message.chat.id)
         logger.info(f"Команда /rate от пользователя {message.from_user.id}")

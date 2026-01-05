@@ -18,8 +18,9 @@ cursor = get_db_cursor()
 def register_list_handlers(bot):
     """Регистрирует обработчики команды /list"""
     
-    @bot.message_handler(commands=['list'])
+    @bot.message_handler(commands=['list'], func=lambda m: not m.reply_to_message)
     def list_movies(message):
+        """Команда /list - только если это чистая команда без реплая"""
         logger.info(f"[HANDLER] /list вызван от {message.from_user.id}")
         try:
             username = message.from_user.username or f"user_{message.from_user.id}"
