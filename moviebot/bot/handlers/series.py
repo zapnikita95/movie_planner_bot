@@ -2333,14 +2333,28 @@ def handle_kinopoisk_link(message):
                 )
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
-            search_type_text = "фильм" if search_type == 'film' else "сериал"
+            search_type_text = "🎬 фильмы" if search_type == 'film' else "📺 сериалы" if search_type == 'series' else "🎬📺 фильмы и сериалы"
             # Обновляем сообщение с новым текстом
-            bot_instance.edit_message_text(
-                f"🔍 Укажите запрос для поиска {search_type_text}а в ответном сообщении, например: джон уик",
-                chat_id,
-                call.message.message_id,
-                reply_markup=markup
-            )
+            try:
+                bot_instance.edit_message_text(
+                    f"🔍 Укажите запрос для поиска {search_type_text} в ответном сообщении, например: джон уик",
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=markup
+                )
+                logger.info(f"[SEARCH TYPE] Сообщение обновлено успешно")
+            except Exception as edit_e:
+                logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
+                # Пробуем отправить новое сообщение
+                try:
+                    bot_instance.send_message(
+                        chat_id,
+                        f"🔍 Укажите запрос для поиска {search_type_text} в ответном сообщении, например: джон уик",
+                        reply_markup=markup
+                    )
+                    logger.info(f"[SEARCH TYPE] Новое сообщение отправлено")
+                except Exception as send_e:
+                    logger.error(f"[SEARCH TYPE] Ошибка отправки нового сообщения: {send_e}", exc_info=True)
             # Обновляем message_id в состоянии (при edit_message_text message_id не меняется, но обновляем для ясности)
             if user_id in user_search_state:
                 user_search_state[user_id]['message_id'] = call.message.message_id
