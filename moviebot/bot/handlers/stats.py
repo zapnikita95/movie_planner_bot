@@ -7,7 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request, get_admin_statistics
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import BOT_ID
+from moviebot.bot.bot_init import BOT_ID, bot as bot_instance
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -806,107 +806,6 @@ def register_stats_handlers(bot_instance):
                                   "Пример: stxwe_iXQAPRqkiZSjm9JxEiO0Ke03gNqoupstFOak10sj3ZSSeHbT2_3MukFRW4kGE-YBSssodFt05T9Szh1-N2m_FgDCvAAPloyRiqVDUp3tmzfl2I891zLP4VcZ6ul8I")
             logger.info(f"[REFUND] Ожидаем ввод charge_id от пользователя {user_id}")
             
-        except Exception as e:
-            logger.error(f"Ошибка в refundstars_command: {e}", exc_info=True)
-            try:
-                bot_instance.reply_to(message, f"❌ Ошибка обработки команды: {e}")
-            except:
-                pass
-    
-    def _process_refund(message, charge_id):
-        """Обрабатывает возврат звезд по charge_id"""
-        try:
-            logger.info(f"[REFUND] Запрос на возврат для charge_id: {charge_id}")
-            
-            # Ищем платеж в БД по telegram_payment_charge_id
-            with db_lock:
-                cursor.execute("""
-                    SELECT payment_id, user_id, chat_id, amount, status, telegram_payment_charge_id
-                    FROM payments 
-                    WHERE telegram_payment_charge_id = %s
-                """, (charge_id,))
-                row = cursor.fetchone()
-            
-            if not row:
-                bot_instance.reply_to(message, f"❌ Платеж с ID операции '{charge_id}' не найден в базе данных.")
-                logger.warning(f"[REFUND] Платеж не найден: charge_id={charge_id}")
-                return
-            
-            # Извлекаем данные платежа
-            if isinstance(row, dict):
-                payment_id = row.get('payment_id')
-                user_id = row.get('user_id')
-                chat_id = row.get('chat_id')
-                amount = row.get('amount')
-                status = row.get('status')
-                stored_charge_id = row.get('telegram_payment_charge_id')
-            else:
-                payment_id = row[0]
-                user_id = row[1]
-                chat_id = row[2]
-                amount = row[3]
-                status = row[4]
-                stored_charge_id = row[5] if len(row) > 5 else None
-            
-            logger.info(f"[REFUND] Найден платеж: payment_id={payment_id}, user_id={user_id}, amount={amount}, status={status}")
-            
-            # Проверяем, что платеж был успешным
-            if status != 'succeeded':
-                bot_instance.reply_to(message, f"⚠️ Платеж найден, но его статус: '{status}'. Возврат возможен только для успешных платежей.")
-                return
-            
-            # Выполняем возврат через Telegram API
-            try:
-                logger.info(f"[REFUND] Выполняем возврат через Telegram API: user_id={user_id}, charge_id={charge_id}")
-                
-                # Используем прямой вызов API, так как pyTelegramBotAPI может не поддерживать refundStarPayment
-                import requests
-                from moviebot.config import TOKEN
-                url = f"https://api.telegram.org/bot{TOKEN}/refundStarPayment"
-                data = {
-                    'user_id': user_id,
-                    'telegram_payment_charge_id': charge_id
-                }
-                
-                logger.info(f"[REFUND] Отправляем запрос: url={url}, data={data}")
-                response = requests.post(url, json=data, timeout=10)
-                result_data = response.json()
-                
-                logger.info(f"[REFUND] Ответ API: {result_data}")
-                
-                if result_data.get('ok'):
-                    # Обновляем статус платежа в БД на 'refunded'
-                    with db_lock:
-                        cursor.execute("""
-                            UPDATE payments 
-                            SET status = 'refunded'
-                            WHERE telegram_payment_charge_id = %s
-                        """, (charge_id,))
-                        conn.commit()
-                    
-                    bot_instance.reply_to(message, f"✅ Возврат выполнен успешно!\n\n"
-                                          f"📋 Детали:\n"
-                                          f"   • ID операции: {charge_id}\n"
-                                          f"   • User ID: {user_id}\n"
-                                          f"   • Сумма: {amount}₽\n"
-                                          f"   • Payment ID: {payment_id}\n\n"
-                                          f"Статус платежа обновлен на 'refunded'.")
-                    logger.info(f"[REFUND] ✅ Возврат успешно выполнен для user_id={user_id}, charge_id={charge_id}")
-                else:
-                    error_description = result_data.get('description', 'Неизвестная ошибка')
-                    error_code = result_data.get('error_code', 'N/A')
-                    bot_instance.reply_to(message, f"❌ Ошибка возврата: {error_description}\n\n"
-                                          f"Код ошибки: {error_code}\n\n"
-                                          f"Возможные причины:\n"
-                                          f"• Платеж уже был возвращен\n"
-                                          f"• Прошло более 90 дней с момента платежа\n"
-                                          f"• ID операции неверный")
-                    logger.error(f"[REFUND] ❌ API вернул ошибку: {result_data}")
-                    
-            except Exception as e:
-                logger.error(f"[REFUND] ❌ Ошибка при выполнении возврата: {e}", exc_info=True)
-                bot_instance.reply_to(message, f"❌ Ошибка при выполнении возврата: {e}")
-                
         except Exception as e:
             logger.error(f"Ошибка в refundstars_command: {e}", exc_info=True)
             try:

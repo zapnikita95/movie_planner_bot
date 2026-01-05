@@ -3054,6 +3054,9 @@ def register_payment_callbacks(bot_instance):
                     # Добавляем кнопку оплаты звездами
                     callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
                     markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                    # Добавляем кнопку промокода
+                    callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}:{final_price}"
+                    markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                 
                     try:
