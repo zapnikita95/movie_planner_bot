@@ -1154,74 +1154,79 @@ def register_series_handlers(bot_instance):
             # Если пользователь в состоянии поиска, обрабатываем его сообщение
             # Не требуем точного совпадения message_id, так как состояние может быть обновлено
             logger.info(f"[SEARCH REPLY] Пользователь {user_id} в состоянии поиска, обрабатываем запрос: {query}")
+            
+            # Получаем тип поиска из состояния
+            search_type = state.get('search_type', 'mixed')
+            logger.info(f"[SEARCH REPLY] Тип поиска: {search_type}")
+            
+            # Выполняем поиск
+            logger.info(f"[SEARCH REPLY] Вызов search_films_with_type для query={query}, search_type={search_type}")
+            films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
+            logger.info(f"[SEARCH REPLY] Поиск завершен: найдено {len(films)} результатов, страниц: {total_pages}")
+            
+            if not films:
+                logger.warning(f"[SEARCH REPLY] Ничего не найдено по запросу '{query}'")
+                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+                # Очищаем состояние
+                del user_search_state[user_id]
+                return
+            
+            # Формируем сообщение с результатами
+            results_text = f"🔍 Результаты поиска '{query}':\n\n"
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            for film in films[:10]:  # Показываем максимум 10 результатов на странице
+                title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                year = film.get('year') or film.get('releaseYear') or 'N/A'
+                rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                 
-                # Получаем тип поиска из состояния
-                search_type = state.get('search_type', 'mixed')
+                # Определяем тип (сериал или фильм)
+                film_type = film.get('type', '').upper()
+                is_series = film_type == 'TV_SERIES'
                 
-                # Выполняем поиск
-                films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
-                
-                if not films:
-                    bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
-                    # Очищаем состояние
-                    del user_search_state[user_id]
-                    return
-                
-                # Формируем сообщение с результатами
-                results_text = f"🔍 Результаты поиска '{query}':\n\n"
-                markup = InlineKeyboardMarkup(row_width=1)
-                
-                for film in films[:10]:  # Показываем максимум 10 результатов на странице
-                    title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
-                    year = film.get('year') or film.get('releaseYear') or 'N/A'
-                    rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
-                    kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
-                    
-                    # Определяем тип (сериал или фильм)
-                    film_type = film.get('type', '').upper()
-                    is_series = film_type == 'TV_SERIES'
-                    
-                    if kp_id:
-                        type_indicator = "📺" if is_series else "🎬"
-                        button_text = f"{type_indicator} {title} ({year})"
-                        if len(button_text) > 50:
-                            button_text = button_text[:47] + "..."
-                        results_text += f"• {type_indicator} <b>{title}</b> ({year})"
-                        if rating != 'N/A':
-                            results_text += f" ⭐ {rating}"
-                        results_text += "\n"
-                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
-                
-                # Добавляем пагинацию, если нужно
+                if kp_id:
+                    type_indicator = "📺" if is_series else "🎬"
+                    button_text = f"{type_indicator} {title} ({year})"
+                    if len(button_text) > 50:
+                        button_text = button_text[:47] + "..."
+                    results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                    if rating != 'N/A':
+                        results_text += f" ⭐ {rating}"
+                    results_text += "\n"
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+            
+            # Добавляем пагинацию, если нужно
+            if total_pages > 1:
+                pagination_row = []
+                query_encoded = query.replace(' ', '_')
+                pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
                 if total_pages > 1:
-                    pagination_row = []
-                    query_encoded = query.replace(' ', '_')
-                    pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
-                    if total_pages > 1:
-                        pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
-                    markup.row(*pagination_row)
-                
-                # Добавляем кнопку "Назад в меню"
-                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                
-                # Добавляем пояснение про эмодзи
-                results_text += "\n\n🎬 - фильм\n📺 - сериал"
-                
-                results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
-                
-                # Обновляем состояние
-                if results_msg:
-                    user_search_state[user_id] = {
-                        'chat_id': chat_id,
-                        'message_id': results_msg.message_id,
-                        'search_type': search_type,
-                        'query': query,
-                        'results_text': results_text,
-                        'films': films[:10],
-                        'total_pages': total_pages
-                    }
-                
-                logger.info(f"[SEARCH REPLY] Результаты поиска отправлены пользователю {user_id}, найдено {len(films)} результатов")
+                    pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                markup.row(*pagination_row)
+            
+            # Добавляем кнопку "Назад в меню"
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            # Добавляем пояснение про эмодзи
+            results_text += "\n\n🎬 - фильм\n📺 - сериал"
+            
+            logger.info(f"[SEARCH REPLY] Отправка результатов поиска пользователю {user_id}")
+            results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+            
+            # Обновляем состояние
+            if results_msg:
+                user_search_state[user_id] = {
+                    'chat_id': chat_id,
+                    'message_id': results_msg.message_id,
+                    'search_type': search_type,
+                    'query': query,
+                    'results_text': results_text,
+                    'films': films[:10],
+                    'total_pages': total_pages
+                }
+            
+            logger.info(f"[SEARCH REPLY] Результаты поиска отправлены пользователю {user_id}, найдено {len(films)} результатов")
         except Exception as e:
             logger.error(f"[SEARCH REPLY] Ошибка: {e}", exc_info=True)
             try:
