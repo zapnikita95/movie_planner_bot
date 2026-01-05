@@ -138,7 +138,7 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🔍 Найти сериалы", callback_data="search_series_from_seasons"))
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-        bot_instance.reply_to(
+            bot_instance.reply_to(
                 message,
                 "📺 Нет сериалов в базе. Используйте /search, чтобы найти и добавить сериалы, или просто пришлите ссылку на Кинопоиск на сериал",
                 reply_markup=markup
