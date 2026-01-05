@@ -737,10 +737,9 @@ def create_web_app(bot_instance):
                                 logger.warning(f"[YOOKASSA] Продолжаем выполнение несмотря на ошибку отправки сообщения в личку")
                             
                             logger.info(f"[YOOKASSA] Подписка создана для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
-                        
-                    except Exception as e:
-                        logger.error(f"[YOOKASSA] Ошибка отправки уведомления: {e}", exc_info=True)
-                        # Не прерываем выполнение, просто логируем ошибку
+                        except Exception as e:
+                            logger.error(f"[YOOKASSA] Ошибка отправки уведомления: {e}", exc_info=True)
+                            # Не прерываем выполнение, просто логируем ошибку
                 elif payment_status == 'succeeded' and db_status == 'succeeded':
                     # Платеж уже обработан, проверяем, есть ли подписка
                     logger.info(f"[YOOKASSA] Платеж уже обработан (статус: {db_status}), проверяем наличие подписки")
