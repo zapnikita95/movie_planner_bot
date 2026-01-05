@@ -1496,7 +1496,7 @@ def streaming_select_callback(call):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_done:"))
 def streaming_done_callback(call):
-    """Обработчик кнопки 'Завершить' - сохраняет флаг и удаляет сообщение с кинотеатрами"""
+    """Обработчик кнопки 'Завершить' - сохраняет флаг и обновляет сообщение с подтверждением планирования"""
     logger.info(f"[STREAMING DONE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
         plan_id = int(call.data.split(":")[1])
@@ -1504,8 +1504,33 @@ def streaming_done_callback(call):
         message_id = call.message.message_id
         user_id = call.from_user.id
         
-        # Сохраняем флаг "Завершить" в базу
+        # Сохраняем флаг "Завершить" в базу и получаем информацию о плане
         with db_lock:
+            # Получаем информацию о плане для отображения подтверждения
+            cursor.execute('''
+                SELECT p.film_id, p.plan_datetime, p.plan_type, m.title
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            plan_row = cursor.fetchone()
+            
+            if not plan_row:
+                bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                return
+            
+            if isinstance(plan_row, dict):
+                film_id = plan_row.get('film_id')
+                plan_datetime = plan_row.get('plan_datetime')
+                plan_type = plan_row.get('plan_type')
+                title = plan_row.get('title')
+            else:
+                film_id = plan_row[0]
+                plan_datetime = plan_row[1]
+                plan_type = plan_row[2]
+                title = plan_row[3]
+            
+            # Обновляем флаг "Завершить"
             cursor.execute('''
                 UPDATE plans 
                 SET streaming_done = TRUE 
@@ -1516,12 +1541,43 @@ def streaming_done_callback(call):
         
         bot_instance.answer_callback_query(call.id, "✅")
         
-        # Удаляем сообщение
+        # Формируем текст подтверждения с названием фильма и датой
+        if plan_datetime:
+            user_tz = get_user_timezone_or_default(user_id)
+            if isinstance(plan_datetime, str):
+                from datetime import datetime
+                import pytz
+                plan_datetime = datetime.fromisoformat(plan_datetime.replace('Z', '+00:00'))
+            if plan_datetime.tzinfo is None:
+                plan_datetime = pytz.utc.localize(plan_datetime)
+            plan_datetime_local = plan_datetime.astimezone(user_tz)
+            
+            # Форматируем дату
+            date_str = plan_datetime_local.strftime('%d.%m.%Y %H:%M')
+            tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+            date_str += f" {tz_name}"
+        else:
+            date_str = "дата не указана"
+        
+        type_text = "дома" if plan_type == 'home' else "в кино"
+        confirmation_text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
+        
+        # Обновляем сообщение вместо удаления
         try:
-            bot_instance.delete_message(chat_id, message_id)
-            logger.info(f"[STREAMING DONE] Сообщение {message_id} удалено")
+            bot_instance.edit_message_text(
+                confirmation_text,
+                chat_id,
+                message_id,
+                parse_mode='HTML'
+            )
+            logger.info(f"[STREAMING DONE] Сообщение {message_id} обновлено с подтверждением планирования")
         except Exception as e:
-            logger.warning(f"[STREAMING DONE] Не удалось удалить сообщение: {e}")
+            logger.warning(f"[STREAMING DONE] Не удалось обновить сообщение: {e}, пробуем отправить новое")
+            try:
+                bot_instance.send_message(chat_id, confirmation_text, parse_mode='HTML')
+                bot_instance.delete_message(chat_id, message_id)
+            except Exception as e2:
+                logger.error(f"[STREAMING DONE] Не удалось отправить новое сообщение: {e2}")
     except Exception as e:
         logger.error(f"[STREAMING DONE] Ошибка: {e}", exc_info=True)
         try:
