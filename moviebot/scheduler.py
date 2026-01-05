@@ -2,9 +2,10 @@
 Модуль для задач планировщика
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pytz
 import json
+import random
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.config import PLANS_TZ
 from moviebot.states import plan_notification_messages
@@ -1806,6 +1807,7 @@ def choose_random_participant():
                 continue
             
             # Выбираем случайного участника
+            import random
             participant = random.choice(participants)
             user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
             username = participant.get('username') if isinstance(participant, dict) else participant[1]

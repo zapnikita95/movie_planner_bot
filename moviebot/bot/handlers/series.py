@@ -2328,10 +2328,10 @@ def add_film_from_search_callback(call):
                 pass
         finally:
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
-    
-    # Обработчик кнопки "➕ Добавить в базу"
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
-    def add_to_database_callback(call):
+
+# Обработчик кнопки "➕ Добавить в базу" - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
+def add_to_database_callback(call):
         """Обработчик кнопки '➕ Добавить в базу'"""
         logger.info("=" * 80)
         logger.info(f"[ADD TO DATABASE] ===== START: callback_id={call.id}, callback_data={call.data}")

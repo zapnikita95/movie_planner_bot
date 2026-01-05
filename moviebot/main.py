@@ -96,7 +96,11 @@ from moviebot.scheduler import (
     start_cinema_votes,
     resolve_cinema_votes,
     check_subscription_payments,
-    process_recurring_payments
+    process_recurring_payments,
+    check_weekend_schedule,
+    check_premiere_reminder,
+    choose_random_participant,
+    start_dice_game
 )
 from moviebot.config import PLANS_TZ
 
@@ -115,6 +119,16 @@ scheduler.add_job(clean_home_plans, 'cron', hour=9, minute=0, timezone=PLANS_TZ,
 scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=PLANS_TZ, id='start_cinema_votes')
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=PLANS_TZ, id='resolve_cinema_votes')
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
+
+# Случайные события и уведомления
+# Проверка выходных без планов домашнего просмотра - каждую пятницу в 10:00
+scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri', hour=10, minute=0, timezone=PLANS_TZ, id='check_weekend_schedule')
+# Проверка премьер без планов - каждую пятницу в 10:30 (чтобы не конфликтовать с check_weekend_schedule)
+scheduler.add_job(check_premiere_reminder, 'cron', day_of_week='fri', hour=10, minute=30, timezone=PLANS_TZ, id='check_premiere_reminder')
+# Выбор случайного участника - каждый день в 12:00 (проверяет 14 дней)
+scheduler.add_job(choose_random_participant, 'cron', day_of_week='mon-sun', hour=12, minute=0, timezone=PLANS_TZ, id='choose_random_participant')
+# Игра в кубик - каждый день в 14:00 (проверяет 14 дней)
+scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minute=0, timezone=PLANS_TZ, id='start_dice_game')
 
 # Регистрация ВСЕХ хэндлеров (явно, в одном месте)
 logger.info("=" * 80)
