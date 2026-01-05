@@ -149,24 +149,54 @@ else:
     logger.info("Запуск бота в режиме polling...")
     
     # Проверяем, не запущен ли уже polling
-    try:
-        # Очищаем webhook перед запуском polling (на всякий случай)
-        bot.remove_webhook()
-        logger.info("Webhook очищен перед запуском polling")
-    except Exception as e:
-        logger.warning(f"Не удалось очистить webhook перед polling: {e}")
+    import time
+    max_retries = 3
+    retry_delay = 5
     
-    try:
-        bot.polling(none_stop=True, interval=0, timeout=20)
-    except KeyboardInterrupt:
-        logger.info("Остановка бота...")
-        scheduler.shutdown()
-        if watchdog:
-            watchdog.stop()
-    except Exception as e:
-        logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
-        scheduler.shutdown()
-        if watchdog:
-            watchdog.stop()
-        raise
+    for attempt in range(max_retries):
+        try:
+            # Очищаем webhook перед запуском polling (на всякий случай)
+            bot.remove_webhook()
+            logger.info("Webhook очищен перед запуском polling")
+            
+            # Небольшая задержка перед запуском polling, чтобы убедиться, что старые соединения закрыты
+            time.sleep(2)
+            
+            logger.info(f"Попытка запуска polling (попытка {attempt + 1}/{max_retries})...")
+            bot.polling(none_stop=True, interval=0, timeout=20)
+            break  # Если polling запустился успешно, выходим из цикла
+        except KeyboardInterrupt:
+            logger.info("Остановка бота...")
+            scheduler.shutdown()
+            if watchdog:
+                watchdog.stop()
+            break
+        except Exception as e:
+            error_str = str(e)
+            # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
+            if "409" in error_str or "Conflict" in error_str or "terminated by other getUpdates" in error_str:
+                logger.error(f"❌ ОШИБКА 409: Обнаружен конфликт - запущено несколько экземпляров бота!")
+                logger.error(f"   Это проблема ДЕПЛОЯ, а не кода.")
+                logger.error(f"   Убедитесь, что:")
+                logger.error(f"   1. Запущен только ОДИН экземпляр бота")
+                logger.error(f"   2. Все старые процессы бота остановлены")
+                logger.error(f"   3. Нет активных webhook, которые конфликтуют с polling")
+                
+                if attempt < max_retries - 1:
+                    logger.info(f"   Повторная попытка через {retry_delay} секунд...")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # Увеличиваем задержку с каждой попыткой
+                else:
+                    logger.error(f"   Все попытки исчерпаны. Бот не может запуститься из-за конфликта.")
+                    scheduler.shutdown()
+                    if watchdog:
+                        watchdog.stop()
+                    raise
+            else:
+                # Другие ошибки - логируем и пробрасываем дальше
+                logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
+                scheduler.shutdown()
+                if watchdog:
+                    watchdog.stop()
+                raise
 
