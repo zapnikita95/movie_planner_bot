@@ -14,7 +14,8 @@ from moviebot.database.db_operations import get_watched_emojis, get_watched_cust
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
 from moviebot.utils.helpers import has_notifications_access
 from moviebot.scheduler import send_series_notification, check_series_for_new_episodes
-from moviebot.states import user_episodes_state
+from moviebot.states import user_episodes_state, rating_messages, user_plan_state
+from moviebot.api.kinopoisk_api import get_facts
 # show_film_info_with_buttons больше не используется - обновляем только кнопку подписки без API запросов
 
 logger = logging.getLogger(__name__)
@@ -599,3 +600,131 @@ def register_series_callbacks(bot_instance):
             logger.info(f"[EPISODES BACK] Возврат к списку сериалов")
         except Exception as e:
             logger.error(f"[EPISODES BACK] Ошибка: {e}", exc_info=True)
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
+    def rate_film_callback(call):
+        """Обработчик кнопки 'Оценить'"""
+        try:
+            kp_id = call.data.split(":")[1]
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            logger.info(f"[RATE FILM] Пользователь {user_id} хочет оценить фильм kp_id={kp_id}")
+            
+            # Получаем film_id по kp_id (добавляем в базу, если нет)
+            from moviebot.bot.handlers.series import ensure_movie_in_database
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            info = extract_movie_info(link)
+            if not info:
+                logger.error(f"[RATE FILM] Не удалось получить информацию о фильме для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            if not film_id:
+                logger.error(f"[RATE FILM] Не удалось добавить фильм в базу для kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+                return
+            
+            title = info.get('title', 'Фильм')
+            
+            # Если фильм был добавлен, отправляем уведомление
+            if was_inserted:
+                bot_instance.send_message(chat_id, f"✅ Фильм добавлен в базу!")
+                logger.info(f"[RATE FILM] Фильм добавлен в базу: film_id={film_id}, title={title}")
+            
+            # Проверяем, есть ли уже оценка
+            with db_lock:
+                cursor.execute('''
+                    SELECT rating FROM ratings 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id, user_id))
+                existing_rating = cursor.fetchone()
+                
+                if existing_rating:
+                    rating = existing_rating.get('rating') if isinstance(existing_rating, dict) else existing_rating[0]
+                    bot_instance.reply_to(call.message, f"✅ Вы уже оценили этот фильм: {rating}/10\n\nЧтобы изменить оценку, ответьте на сообщение с фильмом числом от 1 до 10.")
+                else:
+                    # Отправляем сообщение с просьбой оценить и добавляем его в rating_messages
+                    msg = bot_instance.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.", parse_mode='Markdown')
+                    # Добавляем сообщение в rating_messages, чтобы при ответе можно было найти film_id
+                    rating_messages[msg.message_id] = film_id
+                    logger.info(f"[RATE FILM] Сообщение {msg.message_id} добавлено в rating_messages для film_id={film_id}")
+        except Exception as e:
+            logger.error(f"[RATE FILM] Ошибка: {e}", exc_info=True)
+        finally:
+            # ВСЕГДА отвечаем на callback!
+            try:
+                bot_instance.answer_callback_query(call.id)
+            except Exception as answer_e:
+                logger.error(f"[RATE FILM] Не удалось ответить на callback: {answer_e}", exc_info=True)
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
+    def facts_callback(call):
+        """Обработчик кнопки 'Интересные факты'"""
+        try:
+            kp_id = call.data.split(":")[1]
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            
+            logger.info(f"[FACTS] Пользователь {user_id} запросил факты для kp_id={kp_id}")
+            
+            # Получаем факты
+            facts = get_facts(kp_id)
+            if facts:
+                bot_instance.send_message(chat_id, facts, parse_mode='HTML')
+                bot_instance.answer_callback_query(call.id, "Факты отправлены")
+            else:
+                bot_instance.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
+        except Exception as e:
+            logger.error(f"[FACTS] Ошибка: {e}", exc_info=True)
+        finally:
+            # ВСЕГДА отвечаем на callback!
+            try:
+                bot_instance.answer_callback_query(call.id)
+            except Exception as answer_e:
+                logger.error(f"[FACTS] Не удалось ответить на callback: {answer_e}", exc_info=True)
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("plan_from_added:") or call.data.startswith("plan_film:"))
+    def plan_from_added_callback(call):
+        """Обработчик кнопки 'Запланировать просмотр' из сообщения о добавлении фильма"""
+        try:
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            kp_id = call.data.split(":")[1]
+            
+            logger.info(f"[PLAN FROM ADDED] Пользователь {user_id} хочет запланировать фильм kp_id={kp_id}")
+            
+            # Получаем link из базы или формируем его
+            link = None
+            with db_lock:
+                cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    link = row.get('link') if isinstance(row, dict) else row[0]
+            
+            if not link:
+                link = f"https://kinopoisk.ru/film/{kp_id}/"
+            
+            # Устанавливаем состояние для планирования
+            user_plan_state[user_id] = {
+                'step': 2,
+                'link': link,
+                'chat_id': chat_id
+            }
+            
+            # Показываем кнопки выбора типа просмотра
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
+            markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
+            
+            bot_instance.answer_callback_query(call.id, "Выберите тип просмотра")
+            bot_instance.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
+        except Exception as e:
+            logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
+        finally:
+            # ВСЕГДА отвечаем на callback!
+            try:
+                bot_instance.answer_callback_query(call.id)
+            except Exception as answer_e:
+                logger.error(f"[PLAN FROM ADDED] Не удалось ответить на callback: {answer_e}", exc_info=True)
