@@ -2368,6 +2368,10 @@ def handle_kinopoisk_link(message):
     
     # Логируем регистрацию обработчика
     logger.info(f"[REGISTER SERIES HANDLERS] ✅ Обработчик search_type_callback ЗАРЕГИСТРИРОВАН с priority=1")
+    logger.info(f"[REGISTER SERIES HANDLERS] Проверка регистрации: bot_instance.callback_query_handlers count={len(bot_instance.callback_query_handlers)}")
+    # Проверяем, что обработчик действительно зарегистрирован
+    search_type_handlers = [h for h in bot_instance.callback_query_handlers if 'search_type' in str(h.filters)]
+    logger.info(f"[REGISTER SERIES HANDLERS] Найдено обработчиков search_type: {len(search_type_handlers)}")
     logger.info(f"[REGISTER SERIES HANDLERS] Все обработчики сериалов зарегистрированы (включая search_type_callback)")
     logger.info(f"[REGISTER SERIES HANDLERS] ===== END =====")
     logger.info("=" * 80)
