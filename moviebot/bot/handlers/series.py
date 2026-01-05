@@ -2637,7 +2637,11 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             
             # Если это сериал, добавляем кнопки для сериалов
             if is_series and user_id:
-                if has_notifications_access(chat_id, user_id):
+                # Проверяем доступ к функциям уведомлений
+                has_access = has_notifications_access(chat_id, user_id)
+                logger.info(f"[SHOW FILM INFO] Сериал: is_series=True, user_id={user_id}, chat_id={chat_id}, has_notifications_access={has_access}")
+                
+                if has_access:
                     # Проверяем, все ли серии просмотрены
                     seasons_data = get_seasons_data(kp_id)
                     all_episodes_watched = False
@@ -2698,6 +2702,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     else:
                         markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
+                    # Нет доступа - показываем заблокированные кнопки
+                    logger.info(f"[SHOW FILM INFO] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}, показываем заблокированные кнопки")
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
