@@ -196,13 +196,23 @@ def register_payment_callbacks(bot_instance):
             if action == "active":
                 # Показываем действующие подписки
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("👤 Личная подписка", callback_data="payment:active:personal"))
+                
+                # В групповом чате скрываем кнопку "Личная подписка"
+                if is_private:
+                    markup.add(InlineKeyboardButton("👤 Личная подписка", callback_data="payment:active:personal"))
+                    text = "📋 <b>Действующая подписка</b>\n\nВыберите тип подписки:"
+                else:
+                    # В групповом чате показываем только групповую подписку
+                    text = "📋 <b>Действующая подписка</b>\n\n"
+                    text += "💡 <i>Личную подписку можно посмотреть в личных сообщениях бота</i>\n\n"
+                    text += "Выберите тип подписки:"
+                
                 markup.add(InlineKeyboardButton("👥 Групповая подписка", callback_data="payment:active:group"))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
             
                 try:
                     bot_instance.edit_message_text(
-                        "📋 <b>Действующая подписка</b>\n\nВыберите тип подписки:",
+                        text,
                         call.message.chat.id,
                         call.message.message_id,
                         reply_markup=markup,
