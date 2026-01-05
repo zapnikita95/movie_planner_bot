@@ -789,6 +789,107 @@ def register_payment_callbacks(bot_instance):
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
+            
+            if action.startswith("add_member:"):
+                # Добавление участника в подписку после оплаты
+                parts = action.split(":")
+                if len(parts) < 3:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
+                    return
+                
+                subscription_id = int(parts[1])
+                target_user_id = int(parts[2])
+                
+                from moviebot.database.db_operations import (
+                    get_subscription_by_id, add_subscription_member,
+                    get_subscription_members, get_active_group_users
+                )
+                from moviebot.bot.bot_init import BOT_ID
+                
+                # Проверяем, что подписка существует и принадлежит этому чату
+                sub = get_subscription_by_id(subscription_id)
+                if not sub or sub.get('chat_id') != chat_id:
+                    bot_instance.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
+                    return
+                
+                # Проверяем, что целевой пользователь в группе
+                active_users = get_active_group_users(chat_id, BOT_ID)
+                if target_user_id not in active_users:
+                    bot_instance.answer_callback_query(call.id, "❌ Пользователь не найден в группе", show_alert=True)
+                    return
+                
+                # Проверяем, что пользователь еще не в подписке
+                members = get_subscription_members(subscription_id)
+                if target_user_id in members:
+                    bot_instance.answer_callback_query(call.id, "✅ Этот пользователь уже в подписке")
+                    return
+                
+                # Добавляем участника
+                target_username = active_users.get(target_user_id, f"user_{target_user_id}")
+                add_subscription_member(subscription_id, target_user_id, target_username)
+                
+                bot_instance.answer_callback_query(call.id, f"✅ {target_username} добавлен в подписку")
+                
+                # Обновляем сообщение, удаляя кнопку добавленного участника
+                try:
+                    # Получаем обновленный список участников
+                    members = get_subscription_members(subscription_id)
+                    if BOT_ID and BOT_ID in members:
+                        members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
+                    
+                    active_users = get_active_group_users(chat_id, BOT_ID)
+                    not_in_subscription = []
+                    for uid, uname in active_users.items():
+                        if uid not in members:
+                            not_in_subscription.append({
+                                'user_id': uid,
+                                'username': uname
+                            })
+                    
+                    # Обновляем текст сообщения
+                    message_text = call.message.text or ""
+                    # Удаляем старую часть с участниками, если есть
+                    if "В вашей группе есть участники" in message_text:
+                        message_text = message_text.split("В вашей группе есть участники")[0].strip()
+                    
+                    markup = InlineKeyboardMarkup()
+                    
+                    # Если еще есть участники для добавления, показываем их
+                    if not_in_subscription:
+                        message_text += "\n\n"
+                        message_text += "👥 <b>В вашей группе есть участники, которых можно добавить в подписку:</b>\n\n"
+                        
+                        for member in not_in_subscription[:10]:
+                            display_name = member['username'] if member['username'].startswith('user_') else f"@{member['username']}"
+                            button_text = f"➕ {display_name}"
+                            if len(button_text) > 50:
+                                button_text = button_text[:47] + "..."
+                            markup.add(InlineKeyboardButton(button_text, callback_data=f"payment:add_member:{subscription_id}:{member['user_id']}"))
+                        
+                        if len(not_in_subscription) > 10:
+                            message_text += f"\n... и еще {len(not_in_subscription) - 10} участник(ов)"
+                    
+                    markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))
+                    
+                    bot_instance.edit_message_text(
+                        message_text,
+                        call.message.chat.id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    logger.error(f"[PAYMENT ADD MEMBER] Ошибка обновления сообщения: {e}")
+                return
+            
+            if action == "success_ok":
+                # Закрываем сообщение об успешной оплате
+                try:
+                    bot_instance.delete_message(call.message.chat.id, call.message.message_id)
+                except Exception as e:
+                    logger.warning(f"[PAYMENT] Не удалось удалить сообщение: {e}")
+                bot_instance.answer_callback_query(call.id)
+                return
         
             if action.startswith("expand:"):
                 # Расширение подписки
