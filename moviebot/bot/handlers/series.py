@@ -19,9 +19,9 @@ import requests
 from moviebot.states import (
     user_search_state, user_random_state, user_ticket_state,
     user_settings_state, settings_messages, bot_messages, added_movie_messages,
-    dice_game_state
+    dice_game_state, user_import_state
 )
-from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection
+from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection, extract_kp_user_id
 from datetime import datetime
 import pytz
 import telebot.types
@@ -274,8 +274,10 @@ def random_start(message):
             
             if has_rec_access:
                 markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+                markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
+                markup.add(InlineKeyboardButton("🔒 По оценкам в базе", callback_data="rand_mode_locked:group_votes"))
             
             # TODO: Добавить проверку количества оценок и групповых оценок
             # Проверяем, есть ли у пользователя больше 50 оценок
@@ -692,6 +694,8 @@ def register_series_handlers(bot_param):
             
             if mode == "kinopoisk":
                 message_text = "🎬 Рандом по Кинопоиску доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
+            elif mode == "group_votes":
+                message_text = "⭐ Режим \"По оценкам в базе\" доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
             elif mode == "my_votes":
                 # Проверяем количество оценок
                 with db_lock:
@@ -1734,7 +1738,12 @@ def handle_kinopoisk_link(message):
                 return
             
             if action == "import":
-                # Импорт базы из Кинопоиска - TODO: реализовать полностью
+                # Импорт базы из Кинопоиска
+                user_import_state[user_id] = {
+                    'step': 'waiting_user_id',
+                    'kp_user_id': None,
+                    'count': None
+                }
                 bot_instance.edit_message_text(
                     f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
                     f"Отправьте ID пользователя Кинопоиска или ссылку на профиль.\n\n"
@@ -1745,7 +1754,7 @@ def handle_kinopoisk_link(message):
                     call.message.message_id,
                     parse_mode='HTML'
                 )
-                logger.info(f"[SETTINGS] Импорт базы - TODO: реализовать полностью")
+                logger.info(f"[SETTINGS] Импорт базы - состояние установлено для user_id={user_id}")
                 return
             
             
