@@ -509,14 +509,8 @@ def show_schedule(message):
         """Обертка для регистрации команды /schedule"""
         show_schedule(message)
 
-    logger.info(f"[REGISTER PLAN HANDLERS] Все обработчики планирования зарегистрированы")
-    logger.info(f"[REGISTER PLAN HANDLERS] ===== END =====")
-    logger.info("=" * 80)
-
-
-# Callback handlers на уровне модуля (как в старом moviebot.py)
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
-def show_film_description_callback(call):
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
+    def show_film_description_callback(call):
     """Обработчик кнопки показа описания фильма из /schedule"""
     logger.info("=" * 80)
     logger.info(f"[SHOW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
@@ -572,9 +566,8 @@ def show_film_description_callback(call):
         except:
             pass
 
-
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
-def schedule_back_callback(call):
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
+    def schedule_back_callback(call):
     """Обработчик кнопки возврата из расписания - удаляет оба сообщения с планами"""
     try:
         bot_instance.answer_callback_query(call.id)
@@ -639,6 +632,10 @@ def schedule_back_callback(call):
             bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
         except:
             pass
+
+    logger.info(f"[REGISTER PLAN HANDLERS] Все обработчики планирования зарегистрированы (включая show_film_description и schedule_back)")
+    logger.info(f"[REGISTER PLAN HANDLERS] ===== END =====")
+    logger.info("=" * 80)
 
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))

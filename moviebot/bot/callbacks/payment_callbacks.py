@@ -1153,7 +1153,6 @@ def register_payment_callbacks(bot_instance):
                     active_users = get_active_group_users(group_chat_id, bot_id=BOT_ID)
                     if active_users:
                         # Создаем виртуальную подписку
-                        import pytz
                         now = datetime.now(pytz.UTC)
                         sub = {
                             'id': -1,
@@ -1492,7 +1491,6 @@ def register_payment_callbacks(bot_instance):
                 # Проверяем существующие подписки
                 from moviebot.database.db_operations import get_user_personal_subscriptions
                 from datetime import datetime
-                import pytz
                 existing_subs = get_user_personal_subscriptions(user_id)
             
                 # Фильтруем только активные подписки и убираем дубликаты по plan_type
@@ -1713,7 +1711,6 @@ def register_payment_callbacks(bot_instance):
                         # Проверяем активные групповые подписки для этой группы
                         from moviebot.database.db_operations import get_active_group_subscription_by_chat_id
                         from datetime import datetime
-                        import pytz
                         group_sub = get_active_group_subscription_by_chat_id(chat_id)
                         existing_group_plan_types = []
                     
@@ -2060,7 +2057,6 @@ def register_payment_callbacks(bot_instance):
                     # Создаем новую подписку с той же датой следующего списания
                     from moviebot.database.db_operations import create_subscription
                     from datetime import datetime, timedelta
-                    import pytz
                 
                     next_payment_date = next_sub.get('next_payment_date')
                     if not next_payment_date:
