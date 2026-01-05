@@ -253,6 +253,14 @@ else:
             logger.error(f"   - Запустите бота заново")
             logger.error(f"")
             logger.error(f"   Бот завершает работу для предотвращения конфликта.")
+            
+            # Пытаемся остановить polling перед завершением
+            try:
+                bot.stop_polling()
+                logger.info("Polling остановлен")
+            except:
+                pass
+            
             scheduler.shutdown()
             if watchdog:
                 watchdog.stop()
@@ -283,6 +291,14 @@ else:
             logger.error(f"   - Запустите бота заново")
             logger.error(f"")
             logger.error(f"   Бот завершает работу для предотвращения конфликта.")
+            
+            # Пытаемся остановить polling перед завершением
+            try:
+                bot.stop_polling()
+                logger.info("Polling остановлен")
+            except:
+                pass
+            
             scheduler.shutdown()
             if watchdog:
                 watchdog.stop()

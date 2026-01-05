@@ -31,25 +31,30 @@ def log_kinopoisk_api_request(endpoint, method='GET', status_code=None, user_id=
             pass
 
 def extract_movie_info(link):
-    match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
-    if not match:
-        logger.warning(f"Не распознана ссылка: {link}")
-        return None
-    kp_id = match.group(2)
-    is_series = match.group(1) == 'series'  # Определяем, сериал это или фильм
-
-    headers = {
-        'X-API-KEY': KP_TOKEN,
-        'Content-Type': 'application/json'
-    }
-
+    logger.info(f"[EXTRACT MOVIE] ===== START: link={link}")
+    
     try:
+        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+        if not match:
+            logger.warning(f"[EXTRACT MOVIE] Не распознана ссылка: {link}")
+            return None
+        kp_id = match.group(2)
+        is_series = match.group(1) == 'series'  # Определяем, сериал это или фильм
+        logger.info(f"[EXTRACT MOVIE] kp_id={kp_id}, is_series={is_series}")
+
+        headers = {
+            'X-API-KEY': KP_TOKEN,
+            'Content-Type': 'application/json'
+        }
+
         # Основные данные (название, год, жанры, описание)
         url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+        logger.info(f"[EXTRACT MOVIE] Запрос к {url_main}")
         response_main = requests.get(url_main, headers=headers, timeout=15)
         log_kinopoisk_api_request(f"/api/v2.2/films/{kp_id}", 'GET', response_main.status_code, None, None, kp_id)
+        logger.info(f"[EXTRACT MOVIE] Статус ответа: {response_main.status_code}")
         if response_main.status_code != 200:
-            logger.error(f"Основной запрос ошибка {response_main.status_code}")
+            logger.error(f"[EXTRACT MOVIE] Ошибка: {response_main.status_code}, текст: {response_main.text[:200]}")
             return None
         data_main = response_main.json()
 
