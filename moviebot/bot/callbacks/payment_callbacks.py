@@ -2161,10 +2161,9 @@ def register_payment_callbacks(bot_instance):
                 
                 elif combine_type == "add_to_next":
                     # Добавить к следующему списанию - обновляем сумму следующего списания
-                    plan_type = parts[2]
-                    period_type = parts[3]
+                    plan_type = parts[2] if len(parts) > 2 else ''
+                    period_type = parts[3] if len(parts) > 3 else 'month'
                     state = user_payment_state.get(user_id, {})
-                    combined_price = state.get('combined_price', 0)
                     existing_subs = state.get('existing_subs', [])
                     next_sub = state.get('next_sub')
                 
@@ -2172,48 +2171,96 @@ def register_payment_callbacks(bot_instance):
                         bot_instance.answer_callback_query(call.id, "Ошибка: не найдена подписка для обновления", show_alert=True)
                         return
                 
-                    # Обновляем цену следующего списания
-                    from moviebot.database.db_operations import update_subscription_price
-                    subscription_id = next_sub.get('id')
-                    if subscription_id:
-                        update_subscription_price(subscription_id, combined_price)
-                        logger.info(f"[PAYMENT] Обновлена цена подписки {subscription_id} на {combined_price}₽")
-                
-                    # Создаем новую подписку с той же датой следующего списания
-                    from moviebot.database.db_operations import create_subscription
-                    from datetime import datetime, timedelta
-                
-                    next_payment_date = next_sub.get('next_payment_date')
-                    if not next_payment_date:
-                        next_payment_date = datetime.now(pytz.UTC) + timedelta(days=30)
-                
-                    new_subscription_id = create_subscription(
-                        chat_id=chat_id,
-                        user_id=user_id,
-                        subscription_type='personal',
-                        plan_type=plan_type,
-                        period_type=period_type,
-                        price=state.get('new_price', 0),
-                        telegram_username=call.from_user.username,
-                        next_payment_date=next_payment_date
-                    )
-                
-                    logger.info(f"[PAYMENT] Создана новая подписка {new_subscription_id} с датой следующего списания {next_payment_date}")
-                
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты'
-                    }
-                    new_plan_name = plan_names.get(plan_type, plan_type)
-                
-                    text = "✅ <b>Подписка добавлена</b>\n\n"
-                    text += f"Подписка \"{new_plan_name}\" будет добавлена к следующему списанию.\n\n"
-                    text += f"💰 Следующее списание: <b>{combined_price}₽</b>\n"
-                    if isinstance(next_payment_date, datetime):
-                        text += f"📅 Дата: {next_payment_date.strftime('%d.%m.%Y')}"
+                    # Если переход на "Все режимы", отменяем все старые подписки
+                    if plan_type == 'all':
+                        from moviebot.database.db_operations import cancel_subscription
+                        for sub in existing_subs:
+                            sub_id = sub.get('id')
+                            if sub_id and sub_id != next_sub.get('id'):  # Не отменяем ту, которую обновляем
+                                cancel_subscription(sub_id, user_id)
+                                logger.info(f"[PAYMENT] Отменена подписка {sub_id} при переходе на 'Все режимы'")
+                        
+                        # Обновляем существующую подписку на "Все режимы"
+                        all_price = SUBSCRIPTION_PRICES['personal']['all'].get(period_type, 0)
+                        from moviebot.database.db_operations import update_subscription_price
+                        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                        subscription_id = next_sub.get('id')
+                        if subscription_id:
+                            update_subscription_price(subscription_id, all_price)
+                            # Обновляем plan_type и period_type
+                            conn = get_db_connection()
+                            cursor = get_db_cursor()
+                            with db_lock:
+                                cursor.execute(
+                                    'UPDATE subscriptions SET plan_type = %s, period_type = %s WHERE id = %s',
+                                    ('all', period_type, subscription_id)
+                                )
+                                conn.commit()
+                            logger.info(f"[PAYMENT] Обновлена подписка {subscription_id} на 'Все режимы', цена: {all_price}₽, period_type: {period_type}")
+                        
+                        next_payment_date = next_sub.get('next_payment_date')
+                        if not next_payment_date:
+                            from datetime import datetime, timedelta
+                            next_payment_date = datetime.now(pytz.UTC) + timedelta(days=30)
+                        
+                        text = "✅ <b>Переход на подписку \"Все режимы\"</b>\n\n"
+                        text += "Ваши текущие подписки отменены. Подписка \"Все режимы\" будет активирована со следующего списания.\n\n"
+                        text += f"💰 Следующее списание: <b>{all_price}₽</b>"
+                        if period_type != 'month':
+                            period_names = {'3months': '3 месяца', 'year': 'год', 'lifetime': 'навсегда'}
+                            period_name = period_names.get(period_type, period_type)
+                            text += f" за {period_name}"
+                        text += "\n"
+                        if isinstance(next_payment_date, datetime):
+                            text += f"📅 Дата: {next_payment_date.strftime('%d.%m.%Y')}"
+                        else:
+                            text += f"📅 Дата: {next_payment_date}"
                     else:
-                        text += f"📅 Дата: {next_payment_date}"
+                        # Обычное добавление подписки к следующему списанию
+                        combined_price = state.get('combined_price', 0)
+                        
+                        # Обновляем цену следующего списания
+                        from moviebot.database.db_operations import update_subscription_price
+                        subscription_id = next_sub.get('id')
+                        if subscription_id:
+                            update_subscription_price(subscription_id, combined_price)
+                            logger.info(f"[PAYMENT] Обновлена цена подписки {subscription_id} на {combined_price}₽")
+                        
+                        # Создаем новую подписку с той же датой следующего списания
+                        from moviebot.database.db_operations import create_subscription
+                        from datetime import datetime, timedelta
+                    
+                        next_payment_date = next_sub.get('next_payment_date')
+                        if not next_payment_date:
+                            next_payment_date = datetime.now(pytz.UTC) + timedelta(days=30)
+                        
+                        new_subscription_id = create_subscription(
+                            chat_id=chat_id,
+                            user_id=user_id,
+                            subscription_type='personal',
+                            plan_type=plan_type,
+                            period_type=period_type,
+                            price=state.get('new_price', 0),
+                            telegram_username=call.from_user.username,
+                            next_payment_date=next_payment_date
+                        )
+                        
+                        logger.info(f"[PAYMENT] Создана новая подписка {new_subscription_id} с датой следующего списания {next_payment_date}")
+                        
+                        plan_names = {
+                            'notifications': 'Уведомления о сериалах',
+                            'recommendations': 'Рекомендации',
+                            'tickets': 'Билеты'
+                        }
+                        new_plan_name = plan_names.get(plan_type, plan_type)
+                        
+                        text = "✅ <b>Подписка добавлена</b>\n\n"
+                        text += f"Подписка \"{new_plan_name}\" будет добавлена к следующему списанию.\n\n"
+                        text += f"💰 Следующее списание: <b>{combined_price}₽</b>\n"
+                        if isinstance(next_payment_date, datetime):
+                            text += f"📅 Дата: {next_payment_date.strftime('%d.%m.%Y')}"
+                        else:
+                            text += f"📅 Дата: {next_payment_date}"
                 
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
@@ -2683,7 +2730,13 @@ def register_payment_callbacks(bot_instance):
                             }
                             existing_sub_names = [plan_names.get(pt, pt) for pt in existing_plan_types]
                             text = f"⚠️ <b>У вас уже есть подписки: \"{', '.join(existing_sub_names)}\"</b>\n\n"
-                            text += "У вас есть 2/3 функционала бота. Оформите пакетную подписку для полного функционала."
+                            text += "У вас есть 2/3 функционала бота. Оформите пакетную подписку для полного функционала.\n\n"
+                            text += "ℹ️ <b>Важно:</b> При оформлении подписки \"Все режимы\" ваши текущие подписки будут автоматически отменены, и будет создана новая подписка \"Все режимы\"."
+                            
+                            # Сохраняем информацию о существующих подписках в состоянии для последующей отмены
+                            if user_id not in user_payment_state:
+                                user_payment_state[user_id] = {}
+                            user_payment_state[user_id]['existing_subs'] = active_subs
                             
                             markup = InlineKeyboardMarkup(row_width=1)
                             # Кнопки для оформления пакетных подписок
