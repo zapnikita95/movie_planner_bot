@@ -595,6 +595,144 @@ def register_series_handlers(bot_instance):
         except Exception as e:
             logger.error(f"[TICKET LOCKED] Ошибка: {e}", exc_info=True)
 
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
+    def ticket_new_callback(call):
+        """Обработчик кнопки 'Добавить новый сеанс' - показывает выбор типа билета"""
+        try:
+            from moviebot.states import user_ticket_state
+            from moviebot.utils.helpers import has_tickets_access
+            
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            # Проверяем доступ к функциям билетов
+            if not has_tickets_access(chat_id, user_id):
+                bot_instance.edit_message_text(
+                    "🎫 <b>Билеты в кино</b>\n\n"
+                    "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+                    "Используйте /payment для оформления подписки.",
+                    chat_id,
+                    call.message.message_id,
+                    parse_mode='HTML'
+                )
+                return
+            
+            # Парсим file_id из callback_data, если есть
+            parts = call.data.split(":")
+            file_id = parts[1] if len(parts) > 1 else None
+            
+            # Показываем выбор: добавить билет на фильм или на мероприятие
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("➕ Добавить фильм", callback_data=f"ticket_new_film:{file_id}" if file_id else "ticket_new_film"))
+            markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+            
+            bot_instance.edit_message_text(
+                "🎫 <b>Добавление билета</b>\n\n"
+                "Выберите тип билета:",
+                chat_id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"[TICKET NEW] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data == "ticket:add_event")
+    def ticket_add_event_callback(call):
+        """Обработчик кнопки 'Добавить билет' - начинает флоу добавления билета на мероприятие"""
+        try:
+            from moviebot.states import user_ticket_state
+            
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            # Начинаем флоу добавления билета на мероприятие
+            user_ticket_state[user_id] = {
+                'step': 'event_name',
+                'chat_id': chat_id,
+                'type': 'event'
+            }
+            
+            bot_instance.edit_message_text(
+                "🎤 <b>Добавление билета на мероприятие</b>\n\n"
+                "Напишите название мероприятия в ответ на это сообщение:",
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"[TICKET ADD EVENT] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_new_film"))
+    def ticket_new_film_callback(call):
+        """Обработчик кнопки 'Добавить фильм' - начинает флоу добавления билета на фильм"""
+        try:
+            from moviebot.states import user_ticket_state
+            
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            # Парсим file_id из callback_data, если есть
+            parts = call.data.split(":")
+            file_id = parts[1] if len(parts) > 1 else None
+            
+            # Начинаем флоу добавления билета на фильм
+            user_ticket_state[user_id] = {
+                'step': 'waiting_new_session',
+                'chat_id': chat_id,
+                'type': 'film',
+                'file_id': file_id
+            }
+            
+            bot_instance.edit_message_text(
+                "🎬 <b>Добавление билета на фильм</b>\n\n"
+                "Отправьте ссылку на фильм или его ID с Кинопоиска и укажите дату/время сеанса.\n"
+                "Формат: ссылка или ID + дата + время\n"
+                "Например: https://kinopoisk.ru/film/123456/ 15 января 19:30",
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"[TICKET NEW FILM] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data == "ticket:cancel")
+    def ticket_cancel_callback(call):
+        """Обработчик кнопки 'Отмена' для билетов"""
+        try:
+            from moviebot.states import user_ticket_state
+            
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            if user_id in user_ticket_state:
+                del user_ticket_state[user_id]
+            
+            bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+        except Exception as e:
+            logger.error(f"[TICKET CANCEL] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
     @bot_instance.callback_query_handler(func=lambda call: call.data == "random_event:close")
     def handle_random_event_close(call):
         """Обработчик кнопки 'Закрыть' для случайных уведомлений"""

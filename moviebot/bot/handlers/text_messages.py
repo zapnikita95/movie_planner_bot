@@ -360,6 +360,54 @@ def main_text_handler(message):
         step = state.get('step')
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_ticket_state, step={step}")
         
+        # Обработка билета на мероприятие
+        if state.get('type') == 'event':
+            if step == 'event_name':
+                # Получаем название мероприятия
+                event_name = text.strip()
+                if not event_name:
+                    bot_instance.reply_to(message, "❌ Название мероприятия не может быть пустым. Попробуйте еще раз.")
+                    return
+                
+                state['event_name'] = event_name
+                state['step'] = 'event_datetime'
+                
+                bot_instance.reply_to(
+                    message,
+                    f"✅ Название мероприятия: <b>{event_name}</b>\n\n"
+                    "Теперь укажите дату и время мероприятия в ответ на это сообщение.\n"
+                    "Формат: 15 января 19:30 или 17.01 15:20",
+                    parse_mode='HTML'
+                )
+                return
+            
+            elif step == 'event_datetime':
+                # Получаем дату и время
+                user_tz = get_user_timezone_or_default(user_id)
+                event_dt = parse_session_time(text, user_tz)
+                
+                if not event_dt:
+                    bot_instance.reply_to(message, "❌ Не удалось распознать дату и время. Попробуйте в формате:\n• 15 января 19:30\n• 17.01 15:20")
+                    return
+                
+                state['event_datetime'] = event_dt
+                state['step'] = 'event_file'
+                
+                import pytz
+                event_utc = event_dt.astimezone(pytz.utc)
+                state['event_datetime_utc'] = event_utc
+                
+                tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+                formatted_time = event_dt.strftime('%d.%m.%Y %H:%M')
+                
+                bot_instance.reply_to(
+                    message,
+                    f"✅ Дата и время: <b>{formatted_time} {tz_name}</b>\n\n"
+                    "Теперь отправьте файл или картинку с билетом:",
+                    parse_mode='HTML'
+                )
+                return
+        
         if step == 'waiting_new_session':
             # Обработка ввода нового сеанса (фильм + дата)
             from moviebot.bot.handlers.series import handle_new_session_input_internal
@@ -965,8 +1013,96 @@ def main_text_handler(message):
     logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано: '{text[:50]}'")
 
 
+@bot_instance.message_handler(content_types=['photo', 'document'])
+def main_file_handler(message):
+    """Единый хэндлер для всех фото и документов"""
+    logger.info(f"[MAIN FILE HANDLER] Получено фото/документ от {message.from_user.id}")
+    
+    user_id = message.from_user.id
+    
+    # Обработка билетов
+    if user_id in user_ticket_state:
+        state = user_ticket_state[user_id]
+        step = state.get('step')
+        
+        # Обработка билета на мероприятие
+        if state.get('type') == 'event' and step == 'event_file':
+            try:
+                chat_id = state.get('chat_id')
+                event_name = state.get('event_name')
+                event_datetime_utc = state.get('event_datetime_utc')
+                
+                if not event_name or not event_datetime_utc:
+                    bot_instance.reply_to(message, "❌ Ошибка: не найдены данные мероприятия.")
+                    if user_id in user_ticket_state:
+                        del user_ticket_state[user_id]
+                    return
+                
+                # Получаем file_id
+                file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+                
+                # Сохраняем билет на мероприятие в БД (film_id = NULL)
+                with db_lock:
+                    cursor.execute('''
+                        INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id, ticket_file_id)
+                        VALUES (%s, NULL, 'cinema', %s, %s, %s)
+                    ''', (chat_id, event_datetime_utc, user_id, file_id))
+                    conn.commit()
+                
+                logger.info(f"[EVENT TICKET] Билет на мероприятие сохранен: event_name={event_name}, chat_id={chat_id}, user_id={user_id}")
+                
+                bot_instance.reply_to(message, f"✅ Билет на мероприятие <b>{event_name}</b> сохранён! 🎟️", parse_mode='HTML')
+                
+                # Очищаем состояние
+                if user_id in user_ticket_state:
+                    del user_ticket_state[user_id]
+                return
+            except Exception as e:
+                logger.error(f"[EVENT TICKET] Ошибка при сохранении билета на мероприятие: {e}", exc_info=True)
+                bot_instance.reply_to(message, "❌ Произошла ошибка при сохранении билета.")
+                if user_id in user_ticket_state:
+                    del user_ticket_state[user_id]
+                return
+        
+        if step == 'upload_ticket':
+            # Обработка загрузки билетов для фильма
+            from moviebot.bot.handlers.series import handle_ticket_upload_internal
+            handle_ticket_upload_internal(message, state)
+            return
+        
+        if step == 'waiting_ticket_file':
+            # Пользователь выбрал сеанс и загружает билет
+            plan_id = state.get('plan_id')
+            if plan_id:
+                file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+                # Сохраняем билет в БД
+                with db_lock:
+                    cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (file_id, plan_id))
+                    conn.commit()
+                logger.info(f"[TICKET FILE] Билет сохранен в БД для plan_id={plan_id}, file_id={file_id}")
+                bot_instance.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿")
+                # Очищаем состояние пользователя, завершаем цикл работы с билетами
+                if user_id in user_ticket_state:
+                    del user_ticket_state[user_id]
+                logger.info(f"[TICKET FILE] Состояние пользователя {user_id} очищено после сохранения билета")
+                return
+        
+        # Сохраняем file_id для последующей обработки
+        file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+        state['file_id'] = file_id
+        bot_instance.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿")
+        # Очищаем состояние пользователя, завершаем цикл работы с билетами
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
+        logger.info(f"[TICKET FILE] Состояние пользователя {user_id} очищено после получения файла")
+        return
+    
+    # Если не в состоянии - игнорируем
+    logger.info(f"[MAIN FILE HANDLER] Фото/документ не обработан (пользователь не в user_ticket_state)")
+
+
 def register_text_message_handlers(bot_instance):
     """Регистрирует обработчики текстовых сообщений"""
-    # Обработчик уже зарегистрирован через декоратор
+    # Обработчики уже зарегистрированы через декораторы
     logger.info("Обработчики текстовых сообщений зарегистрированы")
 
