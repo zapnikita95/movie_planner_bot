@@ -4488,33 +4488,33 @@ def register_payment_callbacks(bot_instance):
                             total_price = 0
                             
                             for active_sub in all_subs:
-                            expires_at = active_sub.get('expires_at')
-                            plan_type = active_sub.get('plan_type')
-                            
-                            # Проверяем, что подписка активна
-                            is_active = False
-                            if not expires_at:
-                                is_active = True
-                            elif isinstance(expires_at, datetime):
-                                if expires_at.tzinfo is None:
-                                    expires_at = pytz.UTC.localize(expires_at)
-                                if expires_at.tzinfo != pytz.UTC:
-                                    expires_at = expires_at.astimezone(pytz.UTC)
-                                is_active = expires_at > now
-                            else:
-                                try:
-                                    if isinstance(expires_at, str):
-                                        expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                                        if expires_dt.tzinfo is None:
-                                            expires_dt = pytz.UTC.localize(expires_dt)
-                                        if expires_dt.tzinfo != pytz.UTC:
-                                            expires_dt = expires_dt.astimezone(pytz.UTC)
-                                        is_active = expires_dt > now
-                                    else:
-                                        is_active = True
-                                except:
+                                expires_at = active_sub.get('expires_at')
+                                plan_type = active_sub.get('plan_type')
+                                
+                                # Проверяем, что подписка активна
+                                is_active = False
+                                if not expires_at:
                                     is_active = True
-                            
+                                elif isinstance(expires_at, datetime):
+                                    if expires_at.tzinfo is None:
+                                        expires_at = pytz.UTC.localize(expires_at)
+                                    if expires_at.tzinfo != pytz.UTC:
+                                        expires_at = expires_at.astimezone(pytz.UTC)
+                                    is_active = expires_at > now
+                                else:
+                                    try:
+                                        if isinstance(expires_at, str):
+                                            expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                            if expires_dt.tzinfo is None:
+                                                expires_dt = pytz.UTC.localize(expires_dt)
+                                            if expires_dt.tzinfo != pytz.UTC:
+                                                expires_dt = expires_dt.astimezone(pytz.UTC)
+                                            is_active = expires_dt > now
+                                        else:
+                                            is_active = True
+                                    except:
+                                        is_active = True
+                                
                                 # Добавляем только активные и уникальные по plan_type
                                 if is_active and plan_type and plan_type not in seen_plan_types:
                                     active_subs.append(active_sub)
