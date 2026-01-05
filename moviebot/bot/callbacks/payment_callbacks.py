@@ -1508,20 +1508,24 @@ def register_payment_callbacks(bot_instance):
                     is_active = False
                     if expires_at:
                         if isinstance(expires_at, datetime):
-                            # Если expires_at без timezone, добавляем UTC
+                            # Приводим expires_at к aware datetime, если он naive
                             if expires_at.tzinfo is None:
                                 expires_at = pytz.UTC.localize(expires_at)
-                            # Если now без timezone, добавляем UTC
-                            if now.tzinfo is None:
-                                now = pytz.UTC.localize(now)
+                            # Приводим к UTC для корректного сравнения
+                            if expires_at.tzinfo != pytz.UTC:
+                                expires_at = expires_at.astimezone(pytz.UTC)
                             is_active = expires_at > now
                         else:
                             # Если expires_at - это строка или другой тип, пытаемся преобразовать
                             try:
                                 if isinstance(expires_at, str):
                                     expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                    # Убеждаемся, что datetime aware
                                     if expires_dt.tzinfo is None:
                                         expires_dt = pytz.UTC.localize(expires_dt)
+                                    # Приводим к UTC для корректного сравнения
+                                    if expires_dt.tzinfo != pytz.UTC:
+                                        expires_dt = expires_dt.astimezone(pytz.UTC)
                                     is_active = expires_dt > now
                                 else:
                                     is_active = True  # Если не можем проверить, считаем активной
@@ -2365,7 +2369,8 @@ def register_payment_callbacks(bot_instance):
                     # Фильтруем только активные подписки и убираем дубликаты по plan_type
                     active_subs = []
                     seen_plan_types = set()
-                    now = datetime.now()
+                    # Используем UTC для сравнения, чтобы избежать проблем с timezone
+                    now = datetime.now(pytz.UTC)
                 
                     for sub in existing_subs:
                         expires_at = sub.get('expires_at')
@@ -2377,12 +2382,24 @@ def register_payment_callbacks(bot_instance):
                             # Если нет expires_at, считаем подписку активной (lifetime)
                             is_active = True
                         elif isinstance(expires_at, datetime):
+                            # Приводим expires_at к aware datetime, если он naive
+                            if expires_at.tzinfo is None:
+                                expires_at = pytz.UTC.localize(expires_at)
+                            # Приводим к UTC для корректного сравнения
+                            if expires_at.tzinfo != pytz.UTC:
+                                expires_at = expires_at.astimezone(pytz.UTC)
                             is_active = expires_at > now
                         else:
                             # Если expires_at - это строка или другой тип, пытаемся преобразовать
                             try:
                                 if isinstance(expires_at, str):
                                     expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                    # Убеждаемся, что datetime aware
+                                    if expires_dt.tzinfo is None:
+                                        expires_dt = pytz.UTC.localize(expires_dt)
+                                    # Приводим к UTC для корректного сравнения
+                                    if expires_dt.tzinfo != pytz.UTC:
+                                        expires_dt = expires_dt.astimezone(pytz.UTC)
                                     is_active = expires_dt > now
                                 else:
                                     is_active = True  # Если не можем проверить, считаем активной
