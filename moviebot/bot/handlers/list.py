@@ -302,9 +302,9 @@ def handle_view_film_reply_internal(message, state):
             else:
                 # Пробуем извлечь ID из текста реплая (только цифры)
                 id_match = re.search(r'\b(\d{4,})\b', reply_text)
-                if id_match:
-                    kp_id = id_match.group(1)
-                    link = f"https://kinopoisk.ru/film/{kp_id}/"
+            if id_match:
+                kp_id = id_match.group(1)
+                link = f"https://kinopoisk.ru/film/{kp_id}/"
         
         if not kp_id:
             bot_instance.reply_to(message, "❌ Не удалось найти ссылку или ID фильма в сообщении. Попробуйте еще раз.")

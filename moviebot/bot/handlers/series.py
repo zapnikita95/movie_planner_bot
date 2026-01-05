@@ -32,13 +32,16 @@ cursor = get_db_cursor()
 
 
 # Обработчик выбора типа поиска (фильм/сериал) - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"), priority=1)
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
 def search_type_callback(call):
     """Обработчик выбора типа поиска (фильм или сериал)"""
     logger.info("=" * 80)
     logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     logger.info(f"[SEARCH TYPE] call.data={call.data}, call.message.message_id={call.message.message_id if call.message else 'N/A'}")
+    logger.info(f"[SEARCH TYPE] bot_instance={bot_instance}, type={type(bot_instance)}")
     try:
+        # Отвечаем на callback сразу, чтобы убрать "крутилку"
+        bot_instance.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         search_type = call.data.split(":")[1]  # 'film' или 'series'
@@ -1930,7 +1933,7 @@ def handle_kinopoisk_link(message):
                 
                 fake_message = FakeMessage(call)
                 clean_command(fake_message)
-                # answer_callback_query уже вызван выше
+                bot_instance.answer_callback_query(call.id)
                 return
             
             if action == "join":
@@ -1951,7 +1954,7 @@ def handle_kinopoisk_link(message):
                 
                 fake_message = FakeMessage(call)
                 join_command(fake_message)
-                # answer_callback_query уже вызван выше
+                bot_instance.answer_callback_query(call.id)
                 return
             
             if action == "back":

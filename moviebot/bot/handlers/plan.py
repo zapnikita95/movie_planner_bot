@@ -702,7 +702,7 @@ def show_schedule(message):
 
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
-def plan_type_callback(call):
+    def plan_type_callback(call):
         """Обработчик выбора типа плана"""
         logger.info("=" * 80)
         logger.info(f"[PLAN TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
@@ -752,8 +752,8 @@ def plan_type_callback(call):
                 pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "plan:cancel")
-def plan_cancel_callback(call):
+    @bot_instance.callback_query_handler(func=lambda call: call.data == "plan:cancel")
+    def plan_cancel_callback(call):
         """Обработчик отмены плана"""
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -767,8 +767,8 @@ def plan_cancel_callback(call):
                              chat_id, call.message.message_id)
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "plan_from_list")
-def plan_from_list_callback(call):
+    @bot_instance.callback_query_handler(func=lambda call: call.data == "plan_from_list")
+    def plan_from_list_callback(call):
         """Обработчик планирования из списка"""
         # TODO: Извлечь из moviebot.py строки 10886-10909
         try:
@@ -793,8 +793,8 @@ def plan_from_list_callback(call):
                 pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
-def plan_from_added_callback(call):
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
+    def plan_from_added_callback(call):
         """Обработчик планирования из добавленного фильма"""
         logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
         logger.info(f"[PLAN FROM ADDED] Получен callback: call.data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
@@ -866,8 +866,8 @@ def plan_from_added_callback(call):
             logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
-def add_ticket_from_plan_callback(call):
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
+    def add_ticket_from_plan_callback(call):
         """Обработчик кнопки 'Добавить билеты' из подтверждения /plan"""
         try:
             from moviebot.utils.helpers import has_tickets_access
