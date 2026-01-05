@@ -514,6 +514,7 @@ def show_schedule(message):
         """Обработчик кнопки показа описания фильма из /schedule"""
         logger.info("=" * 80)
         logger.info(f"[SHOW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+        logger.info(f"[SHOW FILM DESCRIPTION] ✅ ОБРАБОТЧИК ВЫЗВАН!")
         try:
             logger.info(f"[SHOW FILM DESCRIPTION] Вызов answer_callback_query")
             bot_instance.answer_callback_query(call.id)
@@ -632,11 +633,12 @@ def show_schedule(message):
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("plan_type:"))
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
     def plan_type_callback(call):
         """Обработчик выбора типа плана"""
         logger.info("=" * 80)
         logger.info(f"[PLAN TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+        logger.info(f"[PLAN TYPE] ✅ ОБРАБОТЧИК ВЫЗВАН!")
         # TODO: Извлечь из moviebot.py строки 10827-10868
         try:
             logger.info(f"[PLAN TYPE] Вызов answer_callback_query")
