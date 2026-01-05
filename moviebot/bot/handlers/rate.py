@@ -431,28 +431,66 @@ def handle_rating_internal(message, rating):
                             
                             # Получаем информацию о фильме из базы (без нового API запроса)
                             with db_lock:
-                                cursor.execute('SELECT id, title, watched, link FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                                cursor.execute('''
+                                    SELECT id, title, watched, link, year, genres, description, director, actors, is_series
+                                    FROM movies WHERE id = %s AND chat_id = %s
+                                ''', (film_id, chat_id))
                                 existing_row = cursor.fetchone()
                                 existing = None
                                 link = None
+                                info = None
+                                
                                 if existing_row:
                                     if isinstance(existing_row, dict):
-                                        existing = (existing_row.get('id'), existing_row.get('title'), existing_row.get('watched'))
+                                        film_id_db = existing_row.get('id')
+                                        title = existing_row.get('title')
+                                        watched = existing_row.get('watched')
                                         link = existing_row.get('link')
+                                        year = existing_row.get('year')
+                                        genres = existing_row.get('genres')
+                                        description = existing_row.get('description')
+                                        director = existing_row.get('director')
+                                        actors = existing_row.get('actors')
+                                        is_series = bool(existing_row.get('is_series', 0))
                                     else:
-                                        existing = (existing_row[0], existing_row[1], existing_row[2])
-                                        link = existing_row[3] if len(existing_row) > 3 else None
+                                        film_id_db = existing_row[0]
+                                        title = existing_row[1]
+                                        watched = existing_row[2]
+                                        link = existing_row[3]
+                                        year = existing_row[4] if len(existing_row) > 4 else None
+                                        genres = existing_row[5] if len(existing_row) > 5 else None
+                                        description = existing_row[6] if len(existing_row) > 6 else None
+                                        director = existing_row[7] if len(existing_row) > 7 else None
+                                        actors = existing_row[8] if len(existing_row) > 8 else None
+                                        is_series = bool(existing_row[9] if len(existing_row) > 9 else 0)
+                                    
+                                    existing = (film_id_db, title, watched)
+                                    
+                                    # Формируем словарь info из данных БД (без API запроса)
+                                    info = {
+                                        'title': title,
+                                        'year': year,
+                                        'genres': genres,
+                                        'description': description,
+                                        'director': director,
+                                        'actors': actors,
+                                        'is_series': is_series
+                                    }
                             
                             if not link:
                                 link = f"https://www.kinopoisk.ru/film/{kp_id}/"
                             
-                            # Получаем информацию о фильме (пробуем из кеша или делаем API запрос)
-                            from moviebot.api.kinopoisk_api import extract_movie_info
-                            info = extract_movie_info(link)
-                            if info:
-                                # Обновляем сообщение с описанием фильма
+                            if info and existing:
+                                # Обновляем сообщение с описанием фильма используя данные из БД
                                 show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
-                                logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено: message_id={film_message_id}")
+                                logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено из БД: message_id={film_message_id}")
+                            else:
+                                logger.warning(f"[RATE INTERNAL] Не удалось получить данные из БД, делаю API запрос")
+                                from moviebot.api.kinopoisk_api import extract_movie_info
+                                info = extract_movie_info(link)
+                                if info:
+                                    show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
+                                    logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено через API: message_id={film_message_id}")
                     except Exception as update_e:
                         logger.warning(f"[RATE INTERNAL] Не удалось обновить сообщение с описанием фильма: {update_e}", exc_info=True)
                 

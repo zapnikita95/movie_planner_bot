@@ -41,8 +41,6 @@ def payment_command(message):
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
-        if has_real_subscription:
-            markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
         text = "💳 <b>Оплата подписки</b>\n\n"
@@ -153,24 +151,9 @@ def register_payment_handlers(bot_instance):
             
             if action == "back":
                 # Возврат к главному меню оплаты
-                personal_sub = get_active_subscription(chat_id, user_id, 'personal')
-                group_sub = get_active_subscription(chat_id, user_id, 'group')
-                
-                has_real_subscription = False
-                if personal_sub:
-                    sub_id = personal_sub.get('id')
-                    if sub_id is not None and sub_id > 0:
-                        has_real_subscription = True
-                if group_sub:
-                    sub_id = group_sub.get('id')
-                    if sub_id is not None and sub_id > 0:
-                        has_real_subscription = True
-                
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
                 markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
-                if has_real_subscription:
-                    markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                 
                 text = "💳 <b>Оплата подписки</b>\n\n"

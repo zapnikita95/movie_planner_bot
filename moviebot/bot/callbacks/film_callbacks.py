@@ -341,6 +341,114 @@ def plan_type_callback_fallback(call):
         logger.info(f"[PLAN TYPE FALLBACK] ===== END: callback_id={call.id}")
 
 
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
+def show_film_description_callback(call):
+    """Обработчик кнопки '◀️ Вернуться к описанию' - показывает описание фильма из БД без API запроса"""
+    logger.info("=" * 80)
+    logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] ===== START: callback_id={call.id}, callback_data={call.data}")
+    try:
+        bot_instance.answer_callback_query(call.id, text="⏳ Загружаю описание...")
+        logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] answer_callback_query вызван, callback_id={call.id}")
+        
+        kp_id = call.data.split(":")[1]
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        message_thread_id = None
+        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+            message_thread_id = call.message.message_thread_id
+        
+        logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
+        
+        # Получаем информацию о фильме из БД (без API запроса)
+        with db_lock:
+            cursor.execute('''
+                SELECT id, title, watched, link, year, genres, description, director, actors, is_series
+                FROM movies WHERE chat_id = %s AND kp_id = %s
+            ''', (chat_id, kp_id))
+            row = cursor.fetchone()
+        
+        if not row:
+            logger.error(f"[SHOW FILM DESCRIPTION FROM RATE] Фильм не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
+            bot_instance.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+            return
+        
+        # Извлекаем данные
+        if isinstance(row, dict):
+            film_id = row.get('id')
+            title = row.get('title')
+            watched = row.get('watched')
+            link = row.get('link')
+            year = row.get('year')
+            genres = row.get('genres')
+            description = row.get('description')
+            director = row.get('director')
+            actors = row.get('actors')
+            is_series = bool(row.get('is_series', 0))
+        else:
+            film_id = row[0]
+            title = row[1]
+            watched = row[2]
+            link = row[3]
+            year = row[4] if len(row) > 4 else None
+            genres = row[5] if len(row) > 5 else None
+            description = row[6] if len(row) > 6 else None
+            director = row[7] if len(row) > 7 else None
+            actors = row[8] if len(row) > 8 else None
+            is_series = bool(row[9] if len(row) > 9 else 0)
+        
+        if not link:
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # Формируем словарь info из данных БД (без API запроса)
+        info = {
+            'title': title,
+            'year': year,
+            'genres': genres,
+            'description': description,
+            'director': director,
+            'actors': actors,
+            'is_series': is_series
+        }
+        
+        existing = (film_id, title, watched)
+        
+        # Ищем существующее сообщение с описанием фильма в bot_messages
+        from moviebot.states import bot_messages
+        film_message_id = None
+        for msg_id, link_value in bot_messages.items():
+            if link_value and kp_id in str(link_value):
+                film_message_id = msg_id
+                logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] Найдено сообщение с описанием фильма: message_id={film_message_id}")
+                break
+        
+        # Обновляем или отправляем новое сообщение
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(
+            chat_id, user_id, info, link, kp_id, existing=existing,
+            message_id=film_message_id, message_thread_id=message_thread_id
+        )
+        
+        # Удаляем сообщение с оценкой, если оно есть
+        if call.message:
+            try:
+                rating_message_id = call.message.message_id
+                bot_instance.delete_message(chat_id, rating_message_id)
+                logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] Сообщение с оценкой удалено: message_id={rating_message_id}")
+            except Exception as del_e:
+                logger.warning(f"[SHOW FILM DESCRIPTION FROM RATE] Не удалось удалить сообщение с оценкой: {del_e}")
+        
+        logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] Описание фильма показано из БД: kp_id={kp_id}")
+        
+    except Exception as e:
+        logger.error(f"[SHOW FILM DESCRIPTION FROM RATE] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+    finally:
+        logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] ===== END: callback_id={call.id}")
+
+
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description:"))
 def mark_watched_from_description_callback(call):
     """Обработчик кнопки '✅ Отметить просмотренным' - отмечает фильм как просмотренный и обновляет сообщение"""
