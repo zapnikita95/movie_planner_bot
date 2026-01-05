@@ -21071,16 +21071,15 @@ def handle_payment_callback(call):
                 from database.db_operations import save_payment
                 save_payment(
                     payment_id=payment_id,
+                    yookassa_payment_id=payment.id,
                     user_id=user_id,
                     chat_id=chat_id,
                     subscription_type='group',
                     plan_type=new_plan_type,
                     period_type=period_type,
-                    amount=upgrade_price,
-                    yookassa_payment_id=payment.id,
-                    status='pending',
                     group_size=group_size,
-                    upgrade_subscription_id=subscription_id
+                    amount=upgrade_price,
+                    status='pending'
                 )
                 
                 # Отправляем ссылку на оплату
