@@ -709,6 +709,10 @@ def main_text_handler(message):
                     sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
                     logger.info(f"[SEARCH] ✅ bot_instance.reply_to завершен успешно")
                     logger.info(f"[SEARCH] ✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов, message_id={sent_message.message_id if sent_message else 'None'}")
+                    # Удаляем состояние ТОЛЬКО после успешной отправки
+                    if user_id in user_search_state:
+                        del user_search_state[user_id]
+                        logger.info(f"[SEARCH] Состояние user_search_state удалено для user_id={user_id}")
                 except Exception as e:
                     logger.error(f"[SEARCH] ❌ КРИТИЧЕСКАЯ ОШИБКА отправки результатов поиска: {e}", exc_info=True)
                     logger.error(f"[SEARCH] Тип ошибки: {type(e).__name__}, args: {e.args}")
@@ -724,6 +728,10 @@ def main_text_handler(message):
                             bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
                         except:
                             pass
+                    # Удаляем состояние даже при ошибке, чтобы не блокировать пользователя
+                    if user_id in user_search_state:
+                        del user_search_state[user_id]
+                        logger.info(f"[SEARCH] Состояние user_search_state удалено после ошибки для user_id={user_id}")
             else:
                 logger.warning(f"[SEARCH] Пустой запрос от пользователя {user_id}")
             return

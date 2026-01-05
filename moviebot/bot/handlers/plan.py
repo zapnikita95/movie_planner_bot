@@ -112,58 +112,14 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
     # Проверяем доступ к билетам для кнопки "Добавить билеты" (только для планов в кино)
     from moviebot.utils.helpers import has_tickets_access
     markup = InlineKeyboardMarkup()
-    text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
     
     if plan_type == 'cinema' and plan_id:
         if has_tickets_access(chat_id, user_id):
             markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
         else:
             markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
-    elif plan_type == 'home' and plan_id:
-        # Для планов дома показываем онлайн-кинотеатры
-        with db_lock:
-            # Проверяем, выбран ли уже кинотеатр
-            cursor.execute('''
-                SELECT streaming_service, streaming_url 
-                FROM plans 
-                WHERE id = %s
-            ''', (plan_id,))
-            stream_row = cursor.fetchone()
-            if stream_row:
-                streaming_service = stream_row.get('streaming_service') if isinstance(stream_row, dict) else stream_row[0]
-                streaming_url = stream_row.get('streaming_url') if isinstance(stream_row, dict) else stream_row[1]
-                
-                if streaming_service and streaming_url:
-                    # Кинотеатр выбран - показываем кнопку со ссылкой
-                    markup.add(InlineKeyboardButton(f"📺 Смотреть на {streaming_service}", url=streaming_url))
-                else:
-                    # Кинотеатр не выбран - получаем источники из API
-                    cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                    kp_row = cursor.fetchone()
-                    if kp_row:
-                        kp_id_val = kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0]
-                        if kp_id_val:
-                            from moviebot.api.kinopoisk_api import get_external_sources
-                            sources = get_external_sources(kp_id_val)
-                            if sources:
-                                # Сохраняем источники в базу для будущего использования
-                                import json
-                                sources_dict = {platform: url for platform, url in sources[:6]}
-                                sources_json = json.dumps(sources_dict, ensure_ascii=False)
-                                cursor.execute('''
-                                    UPDATE plans 
-                                    SET ticket_file_id = %s 
-                                    WHERE id = %s
-                                ''', (sources_json, plan_id))
-                                conn.commit()
-                                
-                                markup = InlineKeyboardMarkup(row_width=2)
-                                for platform, url in sources[:6]:
-                                    markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id}:{platform}"))
-                                markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
-                                text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
     
-    bot_instance.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
+    bot_instance.send_message(chat_id, f"✅ <b>{title}</b> запланирован на {date_str} {type_text}", parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
     return True
 
