@@ -784,13 +784,10 @@ def save_movie_message(message):
 @bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
     """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
-    # Для логирования обрезаем текст, но для обработки используем полный текст
-    text_for_log = message.text[:100] if message.text else ''
-    logger.info(f"[MAIN TEXT HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{text_for_log}'")
+    logger.info(f"[MAIN TEXT HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else ''}'")
     
     user_id = message.from_user.id
     chat_id = message.chat.id
-    # Используем полный текст без обрезания для обработки
     text = message.text.strip() if message.text else ""
     
     # 1. Проверяем состояния (ticket, settings, plan, edit, search, view_film)
@@ -1521,22 +1518,10 @@ def main_text_handler(message):
             if state_chat_id and message.chat.id != state_chat_id:
                 return
             
-            # Проверяем, что сообщение является реплаем на сообщение бота
-            is_reply = (message.reply_to_message and 
-                       message.reply_to_message.from_user and 
-                       message.reply_to_message.from_user.id == BOT_ID)
-            
-            state_message_id = state.get('message_id')
-            # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
-            if not is_reply or (state_message_id and message.reply_to_message.message_id != state_message_id):
-                logger.info(f"[REFUND] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
-                return
-            
             # Обрабатываем ввод charge_id
-            # Используем message.text напрямую, чтобы избежать обрезания длинных charge_id
-            charge_id = message.text.strip() if message.text else ""
+            charge_id = text.strip()
             if charge_id:
-                logger.info(f"[REFUND] Получен charge_id от пользователя {user_id}: {charge_id[:50]}... (длина: {len(charge_id)})")
+                logger.info(f"[REFUND] Получен charge_id от пользователя {user_id}: {charge_id}")
                 # Удаляем состояние
                 del user_refund_state[user_id]
                 # Обрабатываем возврат
@@ -1549,22 +1534,7 @@ def main_text_handler(message):
         state = user_unsubscribe_state[user_id]
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_unsubscribe_state")
         
-        state_chat_id = state.get('chat_id')
-        if state_chat_id and message.chat.id != state_chat_id:
-            return
-        
-        # Проверяем, что сообщение является реплаем на сообщение бота
-        is_reply = (message.reply_to_message and 
-                   message.reply_to_message.from_user and 
-                   message.reply_to_message.from_user.id == BOT_ID)
-        
-        state_message_id = state.get('message_id')
-        # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
-        if not is_reply or (state_message_id and message.reply_to_message.message_id != state_message_id):
-            logger.info(f"[UNSUBSCRIBE] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
-            return
-        
-        # Обрабатываем ID
+        # Обрабатываем ID независимо от наличия реплая
         target_id_str = text.strip()
         if target_id_str:
             try:

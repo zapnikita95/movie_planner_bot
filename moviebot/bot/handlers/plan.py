@@ -1040,17 +1040,9 @@ def get_plan_day_or_date_internal(message, state):
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Сообщение не является реплаем, пропускаем")
         return
     
-    # Проверяем, что это реплай на сообщение бота
-    from moviebot.bot.bot_init import BOT_ID
-    if message.reply_to_message.from_user.id != BOT_ID:
-        logger.warning(f"[PLAN DAY/DATE INTERNAL] Реплай не на сообщение бота, пропускаем")
+    if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+        logger.warning(f"[PLAN DAY/DATE INTERNAL] Реплай не на правильное сообщение: reply_to_message_id={message.reply_to_message.message_id}, ожидаемый prompt_message_id={prompt_message_id}, пропускаем")
         return
-    
-    # Если prompt_message_id установлен, проверяем, что реплай именно на это сообщение
-    if prompt_message_id:
-        if message.reply_to_message.message_id != prompt_message_id:
-            logger.warning(f"[PLAN DAY/DATE INTERNAL] Реплай не на правильное сообщение: reply_to_message_id={message.reply_to_message.message_id}, ожидаемый prompt_message_id={prompt_message_id}, пропускаем")
-            return
     
     # Берем текст из сообщения пользователя (не из реплая)
     text = message.text.strip() if message.text else ""
@@ -1602,27 +1594,8 @@ def handle_edit_plan_datetime_internal(message, state):
         chat_id = message.chat.id
         text = message.text.strip() if message.text else ""
         plan_id = state.get('plan_id')
-        prompt_message_id = state.get('prompt_message_id')
         
-        logger.info(f"[EDIT PLAN DATETIME INTERNAL] Обработка: text='{text}', plan_id={plan_id}, prompt_message_id={prompt_message_id}")
-        logger.info(f"[EDIT PLAN DATETIME INTERNAL] reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
-        
-        # КРИТИЧЕСКИ ВАЖНО: Проверяем, что это реплай на правильное сообщение бота
-        if not message.reply_to_message:
-            logger.warning(f"[EDIT PLAN DATETIME INTERNAL] Сообщение не является реплаем, пропускаем")
-            return
-        
-        # Проверяем, что это реплай на сообщение бота
-        from moviebot.bot.bot_init import BOT_ID
-        if message.reply_to_message.from_user.id != BOT_ID:
-            logger.warning(f"[EDIT PLAN DATETIME INTERNAL] Реплай не на сообщение бота, пропускаем")
-            return
-        
-        # Если prompt_message_id установлен, проверяем, что реплай именно на это сообщение
-        if prompt_message_id:
-            if message.reply_to_message.message_id != prompt_message_id:
-                logger.warning(f"[EDIT PLAN DATETIME INTERNAL] Реплай не на правильное сообщение: reply_to_message_id={message.reply_to_message.message_id}, ожидаемый prompt_message_id={prompt_message_id}, пропускаем")
-                return
+        logger.info(f"[EDIT PLAN DATETIME INTERNAL] Обработка: text='{text}', plan_id={plan_id}")
         
         if not plan_id:
             bot_instance.reply_to(message, "❌ Ошибка: план не найден.")

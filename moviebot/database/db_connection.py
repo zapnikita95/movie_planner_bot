@@ -328,21 +328,6 @@ def init_database():
     except Exception as e:
         logger.debug(f"Миграция subscriptions.payment_method_id: {e}")
     
-    # Миграция: добавление полей для запланированных изменений подписки
-    try:
-        cursor.execute('ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS next_plan_type TEXT')
-        cursor.execute('ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS next_period_type TEXT')
-        cursor.execute('ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS replacement_date TIMESTAMP WITH TIME ZONE')
-        cursor.execute('ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS replacement_type TEXT CHECK(replacement_type IN (NULL, \'immediate\', \'next_payment\'))')
-        conn.commit()
-        logger.info("Миграция: поля для запланированных изменений подписки добавлены")
-    except Exception as e:
-        logger.debug(f"Миграция subscriptions (запланированные изменения): {e}")
-        try:
-            conn.rollback()
-        except:
-            pass
-    
     # Миграция: добавление telegram_payment_charge_id для возврата звезд
     try:
         cursor.execute('ALTER TABLE payments ADD COLUMN IF NOT EXISTS telegram_payment_charge_id TEXT')

@@ -212,8 +212,8 @@ def create_web_app(bot_instance):
                 db_status = payment_data.get('status')
                 if payment_status == 'succeeded' and db_status != 'succeeded':
                     logger.info(f"[YOOKASSA] Платеж успешен, обновляем статус и создаем/продлеваем подписку")
-                    # НЕ обновляем статус платежа здесь - это будет сделано после создания подписки
-                    # update_payment_status(payment_data['payment_id'], 'succeeded')
+                    # Обновляем статус платежа
+                    update_payment_status(payment_data['payment_id'], 'succeeded')
                     
                     # Создаем подписку
                     if payment and hasattr(payment, 'metadata') and payment.metadata:
@@ -799,6 +799,11 @@ def create_web_app(bot_instance):
                 elif payment_status == 'succeeded' and db_status == 'succeeded':
                     # Платеж уже обработан, проверяем, есть ли подписка
                     logger.info(f"[YOOKASSA] Платеж уже обработан (статус: {db_status}), проверяем наличие подписки")
+                    
+                    # Инициализируем check_url и pdf_url (могут быть None, если чек не создан)
+                    check_url = None
+                    pdf_url = None
+                    
                     subscription_id_from_payment = payment_data.get('subscription_id')
                     if not subscription_id_from_payment:
                         logger.warning(f"[YOOKASSA] Платеж обработан, но subscription_id отсутствует. Создаем подписку и отправляем сообщение.")
@@ -1030,6 +1035,25 @@ def create_web_app(bot_instance):
                         try:
                             from moviebot.database.db_operations import get_subscription_by_id
                             sub = get_subscription_by_id(subscription_id_from_payment)
+                            
+                            # Если подписка не найдена, используем данные из payment_data
+                            if not sub:
+                                logger.warning(f"[YOOKASSA] Подписка {subscription_id_from_payment} не найдена, используем данные из payment_data")
+                                # Получаем данные из metadata или payment_data
+                                if payment and hasattr(payment, 'metadata') and payment.metadata:
+                                    metadata = payment.metadata
+                                elif event_json.get('object', {}).get('metadata'):
+                                    metadata = event_json.get('object', {}).get('metadata', {})
+                                else:
+                                    metadata = {}
+                                
+                                sub = {
+                                    'user_id': int(metadata.get('user_id', payment_data['user_id'])),
+                                    'chat_id': int(metadata.get('chat_id', payment_data['chat_id'])),
+                                    'subscription_type': metadata.get('subscription_type', payment_data['subscription_type']),
+                                    'plan_type': metadata.get('plan_type', payment_data['plan_type']),
+                                    'group_size': payment_data.get('group_size')
+                                }
                             
                             if sub:
                                 user_id = sub.get('user_id')
