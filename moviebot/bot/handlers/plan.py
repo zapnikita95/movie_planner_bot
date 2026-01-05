@@ -576,6 +576,8 @@ def show_schedule(message):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("plan_type:"))
     def plan_type_callback(call):
         """Обработчик выбора типа плана"""
+        logger.info("=" * 80)
+        logger.info(f"[PLAN TYPE] ===== START: callback_id={call.id}, callback_data={call.data}")
         # TODO: Извлечь из moviebot.py строки 10827-10868
         try:
             bot_instance.answer_callback_query(call.id)
@@ -583,7 +585,9 @@ def show_schedule(message):
             chat_id = call.message.chat.id
             plan_type = call.data.split(":")[1]  # 'home' или 'cinema'
             
-            logger.info(f"[PLAN TYPE] Получен callback: user_id={user_id}, chat_id={chat_id}, plan_type={plan_type}, user_plan_state keys={list(user_plan_state.keys())}")
+            logger.info(f"[PLAN TYPE] Получен callback: user_id={user_id}, chat_id={chat_id}, plan_type={plan_type}")
+            logger.info(f"[PLAN TYPE] user_plan_state keys={list(user_plan_state.keys())}")
+            logger.info(f"[PLAN TYPE] user_id in user_plan_state = {user_id in user_plan_state}")
             
             if user_id not in user_plan_state:
                 logger.warning(f"[PLAN TYPE] Состояние не найдено для user_id={user_id}, текущие состояния: {list(user_plan_state.keys())}")

@@ -56,55 +56,99 @@ def add_to_database_callback(call):
             show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title_db, watched), message_id=call.message.message_id)
             return
         
-        # Фильма нет в базе - добавляем с минимальной информацией из текста сообщения
+        # Фильма нет в базе - добавляем с полной информацией из текста сообщения
         # НЕ ДЕЛАЕМ ЗАПРОС К API - используем информацию из сообщения
         message_text = call.message.text or ""
         logger.info(f"[ADD TO DATABASE] Фильм не найден в базе, извлекаю информацию из сообщения")
         
-        # Извлекаем название из текста сообщения (обычно первая строка после эмодзи)
+        # Извлекаем всю информацию из HTML-текста сообщения
         import re
-        title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
+        from html import unescape
+        
+        # Название и год
+        title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>\s*\((\d{4})\)', message_text)
         if title_match:
-            title = title_match.group(1)
+            title = unescape(title_match.group(1))
+            year = int(title_match.group(2))
         else:
-            # Пробуем без HTML тегов
-            title_match = re.search(r'[📺🎬]\s*(.+?)\s*\(', message_text)
+            title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
             if title_match:
-                title = title_match.group(1).strip()
+                title = unescape(title_match.group(1))
+                year_match = re.search(r'\((\d{4})\)', message_text)
+                year = int(year_match.group(1)) if year_match else None
             else:
-                # Если не нашли - используем kp_id как заглушку
-                title = f"Фильм {kp_id}"
+                title_match = re.search(r'[📺🎬]\s*(.+?)\s*\(', message_text)
+                if title_match:
+                    title = title_match.group(1).strip()
+                    year_match = re.search(r'\((\d{4})\)', message_text)
+                    year = int(year_match.group(1)) if year_match else None
+                else:
+                    title = f"Фильм {kp_id}"
+                    year = None
+        
+        # Режиссёр
+        director_match = re.search(r'<i>Режиссёр:</i>\s*(.+?)(?:\n|$)', message_text)
+        director = unescape(director_match.group(1).strip()) if director_match else None
+        
+        # Жанры
+        genres_match = re.search(r'<i>Жанры:</i>\s*(.+?)(?:\n|$)', message_text)
+        genres = unescape(genres_match.group(1).strip()) if genres_match else None
+        
+        # В ролях
+        actors_match = re.search(r'<i>В ролях:</i>\s*(.+?)(?:\n|$)', message_text)
+        actors = unescape(actors_match.group(1).strip()) if actors_match else None
+        
+        # Описание
+        description_match = re.search(r'<i>Кратко:</i>\s*(.+?)(?:\n|🟢|🔴|Кинопоиск|$)', message_text, re.DOTALL)
+        description = unescape(description_match.group(1).strip()) if description_match else None
         
         # Определяем, фильм это или сериал по эмодзи в сообщении
         is_series = '📺' in message_text
         link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
         
-        logger.info(f"[ADD TO DATABASE] Добавляю фильм в базу: title={title}, is_series={is_series}, link={link}")
+        logger.info(f"[ADD TO DATABASE] Добавляю фильм в базу: title={title}, year={year}, is_series={is_series}, link={link}")
         
-        # Добавляем фильм в базу с минимальной информацией
+        # Добавляем фильм в базу с полной информацией
         with db_lock:
             cursor.execute('''
                 INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
-                VALUES (%s, %s, %s, %s, NULL, NULL, NULL, NULL, NULL, %s, %s, NOW(), 'button')
-                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                RETURNING id, title, watched
-            ''', (chat_id, link, kp_id, title, 1 if is_series else 0, user_id))
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'button')
+                ON CONFLICT (chat_id, kp_id) DO UPDATE SET 
+                    link = EXCLUDED.link,
+                    title = EXCLUDED.title,
+                    year = COALESCE(EXCLUDED.year, movies.year),
+                    genres = COALESCE(EXCLUDED.genres, movies.genres),
+                    description = COALESCE(EXCLUDED.description, movies.description),
+                    director = COALESCE(EXCLUDED.director, movies.director),
+                    actors = COALESCE(EXCLUDED.actors, movies.actors),
+                    is_series = EXCLUDED.is_series
+                RETURNING id, title, watched, year, genres, description, director, actors
+            ''', (chat_id, link, kp_id, title, year, genres, description, director, actors, 1 if is_series else 0, user_id))
             
             result = cursor.fetchone()
             film_id = result.get('id') if isinstance(result, dict) else result[0]
             title_db = result.get('title') if isinstance(result, dict) else result[1]
             watched = result.get('watched') if isinstance(result, dict) else result[2]
+            year_db = result.get('year') if isinstance(result, dict) else (result[3] if len(result) > 3 else None)
+            genres_db = result.get('genres') if isinstance(result, dict) else (result[4] if len(result) > 4 else None)
+            description_db = result.get('description') if isinstance(result, dict) else (result[5] if len(result) > 5 else None)
+            director_db = result.get('director') if isinstance(result, dict) else (result[6] if len(result) > 6 else None)
+            actors_db = result.get('actors') if isinstance(result, dict) else (result[7] if len(result) > 7 else None)
             conn.commit()
         
         logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title_db}")
         bot_instance.answer_callback_query(call.id, f"✅ {title_db} добавлен в базу!", show_alert=False)
         
-        # Обновляем сообщение, показывая что фильм теперь в базе
+        # Обновляем сообщение, показывая что фильм теперь в базе с полной информацией
         from moviebot.bot.handlers.series import show_film_info_with_buttons
         info = {
             'title': title_db,
-            'year': None,
-            'is_series': is_series
+            'year': year_db,
+            'is_series': is_series,
+            'genres': genres_db,
+            'description': description_db,
+            'director': director_db,
+            'actors': actors_db
         }
         show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title_db, watched), message_id=call.message.message_id)
         
@@ -188,13 +232,20 @@ def plan_from_added_callback(call):
             link = f"https://kinopoisk.ru/film/{kp_id}/"
             logger.info(f"[PLAN FROM ADDED] Ссылка не найдена в базе, используем стандартную: {link}")
         
+        # Убеждаемся, что link установлен
+        if not link:
+            link = f"https://kinopoisk.ru/film/{kp_id}/"
+            logger.info(f"[PLAN FROM ADDED] Ссылка не найдена в базе, используем стандартную: {link}")
+        
         user_plan_state[user_id] = {
             'step': 2,
             'link': link,
-            'chat_id': chat_id
+            'chat_id': chat_id,
+            'kp_id': kp_id  # Сохраняем kp_id для отладки
         }
         
         logger.info(f"[PLAN FROM ADDED] Состояние установлено: user_id={user_id}, state={user_plan_state[user_id]}")
+        logger.info(f"[PLAN FROM ADDED] Проверка состояния после установки: user_id in user_plan_state = {user_id in user_plan_state}")
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
