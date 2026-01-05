@@ -4459,8 +4459,6 @@ def register_payment_callbacks(bot_instance):
                 # Финальное подтверждение отмены подписки
                 subscription_id = int(action.split(":")[1])
                 from moviebot.database.db_operations import get_subscription_by_id, cancel_subscription, get_user_personal_subscriptions
-                import pytz
-                from datetime import datetime
             
                 sub = get_subscription_by_id(subscription_id)
                 if not sub or sub.get('user_id') != user_id:
