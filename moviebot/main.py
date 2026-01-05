@@ -93,10 +93,90 @@ scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=
 scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=PLANS_TZ, id='resolve_cinema_votes')
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
-# Регистрируем все handlers
-from moviebot.bot.commands import register_all_handlers
-register_all_handlers(bot)
-logger.info("✅ Все handlers зарегистрированы")
+# Регистрация ВСЕХ хэндлеров (явно, в одном месте)
+logger.info("=" * 80)
+logger.info("[MAIN] ===== РЕГИСТРАЦИЯ ВСЕХ HANDLERS =====")
+bot_instance = bot  # Используем bot из bot_init
+
+# Импортируем модули с callback handlers для автоматической регистрации декораторов
+import moviebot.bot.callbacks.film_callbacks  # noqa: F401
+import moviebot.bot.callbacks.series_callbacks  # noqa: F401
+import moviebot.bot.callbacks.payment_callbacks  # noqa: F401
+import moviebot.bot.callbacks.premieres_callbacks  # noqa: F401
+import moviebot.bot.handlers.admin  # noqa: F401
+import moviebot.bot.handlers.promo  # noqa: F401
+import moviebot.bot.handlers.text_messages  # noqa: F401 - критично для регистрации декораторов
+
+# Регистрируем handlers команд и callbacks
+from moviebot.bot.handlers.start import register_start_handlers
+register_start_handlers(bot_instance)
+logger.info("✅ start handlers зарегистрированы")
+
+from moviebot.bot.handlers.list import register_list_handlers
+register_list_handlers(bot_instance)
+logger.info("✅ list handlers зарегистрированы")
+
+from moviebot.bot.handlers.seasons import register_seasons_handlers
+register_seasons_handlers(bot_instance)
+logger.info("✅ seasons handlers зарегистрированы")
+
+from moviebot.bot.handlers.plan import register_plan_handlers
+register_plan_handlers(bot_instance)
+logger.info("✅ plan handlers зарегистрированы (включая plan_type: callback)")
+
+from moviebot.bot.handlers.payment import register_payment_handlers
+register_payment_handlers(bot_instance)
+logger.info("✅ payment handlers зарегистрированы")
+
+from moviebot.bot.handlers.series import register_series_handlers
+register_series_handlers(bot_instance)
+logger.info("✅ series handlers зарегистрированы (включая search_type: callback)")
+
+from moviebot.bot.handlers.rate import register_rate_handlers
+register_rate_handlers(bot_instance)
+logger.info("✅ rate handlers зарегистрированы")
+
+from moviebot.bot.handlers.stats import register_stats_handlers
+register_stats_handlers(bot_instance)
+logger.info("✅ stats handlers зарегистрированы")
+
+from moviebot.bot.handlers.edit import register_edit_handlers
+register_edit_handlers(bot_instance)
+logger.info("✅ edit handlers зарегистрированы")
+
+from moviebot.bot.handlers.clean import register_clean_handlers
+register_clean_handlers(bot_instance)
+logger.info("✅ clean handlers зарегистрированы")
+
+from moviebot.bot.handlers.join import register_join_handlers
+register_join_handlers(bot_instance)
+logger.info("✅ join handlers зарегистрированы")
+
+# Регистрируем callback handlers
+from moviebot.bot.callbacks.film_callbacks import register_film_callbacks
+register_film_callbacks(bot_instance)
+logger.info("✅ film_callbacks зарегистрированы")
+
+from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
+register_series_callbacks(bot_instance)
+logger.info("✅ series_callbacks зарегистрированы")
+
+from moviebot.bot.callbacks.payment_callbacks import register_payment_callbacks
+register_payment_callbacks(bot_instance)
+logger.info("✅ payment_callbacks зарегистрированы")
+
+from moviebot.bot.callbacks.premieres_callbacks import register_premieres_callbacks
+register_premieres_callbacks(bot_instance)
+logger.info("✅ premieres_callbacks зарегистрированы")
+
+# Регистрируем главный обработчик текстовых сообщений
+from moviebot.bot.handlers.text_messages import register_text_message_handlers
+register_text_message_handlers(bot_instance)
+logger.info("✅ text_messages handlers зарегистрированы")
+
+logger.info("=" * 80)
+logger.info("✅ ВСЕ ХЭНДЛЕРЫ ЗАРЕГИСТРИРОВАНЫ")
+logger.info("=" * 80)
 
 # Периодическая синхронизация команд каждый час
 scheduler.add_job(
