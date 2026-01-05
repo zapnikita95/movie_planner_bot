@@ -62,9 +62,9 @@ def add_reactions_check(message):
     return True
 
 
-@bot_instance.message_handler(func=add_reactions_check, priority=10)
+@bot_instance.message_handler(func=add_reactions_check)
 def add_reactions(message):
-    """Обработчик добавления реакций с высоким приоритетом"""
+    """Обработчик добавления реакций"""
     user_id = message.from_user.id
     chat_id = message.chat.id
     
@@ -137,7 +137,7 @@ def add_reactions(message):
         del user_settings_state[user_id]
 
 
-@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in added_movie_messages and m.text and m.text.strip().isdigit() and 1 <= int(m.text.strip()) <= 10, priority=3)
+@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in added_movie_messages and m.text and m.text.strip().isdigit() and 1 <= int(m.text.strip()) <= 10)
 def handle_added_movie_rating_reply(message):
     """Обрабатывает реплай на сообщение 'Добавлено в базу' с числом от 1 до 10"""
     try:
@@ -169,9 +169,9 @@ def handle_added_movie_rating_reply(message):
         logger.error(f"[ADDED MOVIE REPLY] Ошибка: {e}", exc_info=True)
 
 
-@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text, priority=2)
+@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text)
 def handle_rate_list_reply(message):
-    """Обработчик реплаев на сообщения бота с оценками (приоритет 2)"""
+    """Обработчик реплаев на сообщения бота с оценками"""
     # Пропускаем команды
     if message.text and message.text.startswith('/'):
         return
@@ -389,7 +389,7 @@ def save_movie_message(message):
         logger.warning(f"[SAVE MESSAGE] Ошибка при обработке сообщения с фильмом: {e}", exc_info=True)
 
 
-@bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')), priority=1)
+@bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
     """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
     logger.info(f"[MAIN TEXT HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else ''}'")
