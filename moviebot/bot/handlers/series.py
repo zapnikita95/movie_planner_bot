@@ -2060,13 +2060,39 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
                 plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[1]
                 
-                # Добавляем кнопки только для планов "дома"
+                # Проверяем наличие билетов для планов "в кино"
+                ticket_file_id = None
+                if plan_type == 'cinema':
+                    with db_lock:
+                        cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
+                        ticket_row = cursor.fetchone()
+                        if ticket_row:
+                            ticket_file_id = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else ticket_row[0]
+                
                 if plan_type == 'home':
                     # Кнопка "Отметить просмотренным" (если фильм еще не просмотрен)
                     if existing:
                         watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
                         if not watched:
                             markup.add(InlineKeyboardButton("✅ Отметить просмотренным", callback_data=f"mark_watched_from_description:{film_id}"))
+                    
+                    # Кнопки "Изменить" и "Удалить" в одной строке
+                    markup.row(
+                        InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan:{plan_id}"),
+                        InlineKeyboardButton("🗑️ Удалить", callback_data=f"remove_from_calendar:{plan_id}")
+                    )
+                elif plan_type == 'cinema':
+                    # Кнопки для планов "в кино" с проверкой доступа к билетам
+                    if has_tickets_access(chat_id, user_id):
+                        if ticket_file_id:
+                            markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
+                        else:
+                            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                    else:
+                        if ticket_file_id:
+                            markup.add(InlineKeyboardButton("🔒 Перейти к билетам", callback_data=f"ticket_locked:{plan_id}"))
+                        else:
+                            markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
                     
                     # Кнопки "Изменить" и "Удалить" в одной строке
                     markup.row(

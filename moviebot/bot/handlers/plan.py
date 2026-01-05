@@ -96,17 +96,30 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
         # TODO: Добавить обработку сериалов (episode_info) из moviebot.py строки 23196-23274
         
         plan_utc = plan_dt.astimezone(pytz.utc)
-        cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s)',
+        cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s) RETURNING id',
                       (chat_id, film_id, plan_type, plan_utc, user_id))
+        plan_id_row = cursor.fetchone()
+        plan_id = plan_id_row.get('id') if isinstance(plan_id_row, dict) else plan_id_row[0] if plan_id_row else None
         conn.commit()
         
         # Успешное планирование - фильм уже в базе (film_id получен выше)
-        logger.info(f"[PLAN] Успешное планирование: film_id={film_id}, plan_type={plan_type}, plan_datetime={plan_utc}")
+        logger.info(f"[PLAN] Успешное планирование: plan_id={plan_id}, film_id={film_id}, plan_type={plan_type}, plan_datetime={plan_utc}")
     
     # Формируем сообщение об успехе
     date_str = plan_dt.strftime('%d.%m %H:%M')
     type_text = "дома" if plan_type == 'home' else "в кино"
-    bot_instance.send_message(chat_id, f"✅ <b>{title}</b> запланирован на {date_str} {type_text}", parse_mode='HTML')
+    
+    # Проверяем доступ к билетам для кнопки "Добавить билеты" (только для планов в кино)
+    from moviebot.utils.helpers import has_tickets_access
+    markup = InlineKeyboardMarkup()
+    
+    if plan_type == 'cinema' and plan_id:
+        if has_tickets_access(chat_id, user_id):
+            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+        else:
+            markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
+    
+    bot_instance.send_message(chat_id, f"✅ <b>{title}</b> запланирован на {date_str} {type_text}", parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
     return True
 
@@ -713,6 +726,49 @@ def show_schedule(message):
                 pass
         finally:
             logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
+    def add_ticket_from_plan_callback(call):
+        """Обработчик кнопки 'Добавить билеты' из подтверждения /plan"""
+        try:
+            from moviebot.utils.helpers import has_tickets_access
+            from moviebot.states import user_ticket_state
+            
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            plan_id = int(call.data.split(":")[1])
+            
+            # Проверяем доступ к функциям билетов
+            if not has_tickets_access(chat_id, user_id):
+                bot_instance.answer_callback_query(
+                    call.id, 
+                    "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment", 
+                    show_alert=True
+                )
+                return
+            
+            user_ticket_state[user_id] = {
+                'step': 'waiting_ticket_file',
+                'plan_id': plan_id,
+                'chat_id': chat_id
+            }
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+            
+            bot_instance.answer_callback_query(call.id, "Загрузите билеты в чат")
+            bot_instance.send_message(
+                chat_id,
+                "🎟️ <b>Загрузите билеты в чат</b>\n\n"
+                "Отправьте фото или файл с билетами в следующем сообщении.",
+                reply_markup=markup, parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"[ADD TICKET] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
 
     # TODO: Добавить остальные callback handlers:
     # - plan_detail

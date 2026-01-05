@@ -287,7 +287,7 @@ def handle_rate_list_reply(message):
     m.text and 
     ('kinopoisk.ru' in m.text or 'kinopoisk.com' in m.text) and
     not m.text.strip().startswith('/plan')
-))
+), priority=0)
 def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
     logger.info(f"[SAVE MOVIE] save_movie_message вызван для пользователя {message.from_user.id}, текст: '{message.text[:100]}'")

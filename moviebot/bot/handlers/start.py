@@ -166,14 +166,17 @@ def register_start_handlers(bot):
                     markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
                     markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                     
-                    bot.edit_message_text(
-                        text,
-                        chat_id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                    # Не удаляем сообщение для этого случая
+                    try:
+                        bot.edit_message_text(
+                            text,
+                            chat_id,
+                            call.message.message_id,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        logger.warning(f"[START MENU] Не удалось отредактировать сообщение, отправляем новое: {e}")
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                     return
                 else:
                     message.text = '/ticket'
