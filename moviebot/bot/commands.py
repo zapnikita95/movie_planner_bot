@@ -11,6 +11,10 @@ def register_all_handlers(bot):
     logger.info("=" * 80)
     logger.info("[REGISTER ALL HANDLERS] ===== НАЧАЛО РЕГИСТРАЦИИ ВСЕХ HANDLERS =====")
     
+    # КРИТИЧЕСКИ ВАЖНО: Импортируем модули с декораторами ДО вызова функций регистрации
+    # Это необходимо для того, чтобы декораторы @bot_instance.callback_query_handler сработали
+    import moviebot.bot.handlers.series  # noqa: F401 - импорт для регистрации декораторов (search_type_callback)
+    
     # Импортируем и регистрируем handlers
     logger.info("[REGISTER ALL HANDLERS] Регистрация handlers команд...")
     from moviebot.bot.handlers.start import register_start_handlers
