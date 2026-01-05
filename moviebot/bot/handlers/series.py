@@ -720,10 +720,150 @@ def register_series_handlers(bot_param):
             
             logger.info(f"[RANDOM CALLBACK] State updated: mode={mode}, step=period")
             
-            # TODO: Реализовать логику выбора периода как в старом файле
-            # Пока просто отвечаем на callback
-            bot_instance.answer_callback_query(call.id, f"Режим '{mode}' выбран. Функция в разработке.")
-            logger.warning(f"[RANDOM CALLBACK] Mode {mode} selected but period selection not implemented yet")
+            # Добавляем справку о режиме
+            mode_descriptions = {
+                'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
+                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм по вашим фильтрам.',
+                'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
+                'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
+            }
+            mode_description = mode_descriptions.get(mode, '')
+            
+            # Для режима kinopoisk пропускаем периоды и сразу переходим к выбору года и жанра
+            if mode == 'kinopoisk':
+                user_random_state[user_id]['step'] = 'year'
+                bot_instance.answer_callback_query(call.id)
+                logger.info(f"[RANDOM CALLBACK] Mode kinopoisk selected, moving to year selection")
+                # TODO: Вызвать _show_year_step
+                return
+            
+            # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
+            all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+            available_periods = []
+            
+            logger.info(f"[RANDOM CALLBACK] Checking available periods for mode={mode}")
+            
+            with db_lock:
+                if mode == 'my_votes':
+                    # Для режима "по моим оценкам" - получаем годы из импортированных фильмов с оценкой 9-10
+                    cursor.execute("""
+                        SELECT DISTINCT m.year
+                        FROM movies m
+                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                        WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                        AND m.year IS NOT NULL
+                        ORDER BY m.year
+                    """, (chat_id, user_id))
+                    years_rows = cursor.fetchall()
+                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    
+                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode")
+                    
+                    # Определяем доступные периоды на основе найденных годов
+                    for period in all_periods:
+                        if period == "До 1980":
+                            if any(y < 1980 for y in years):
+                                available_periods.append(period)
+                        elif period == "1980–1990":
+                            if any(1980 <= y <= 1990 for y in years):
+                                available_periods.append(period)
+                        elif period == "1990–2000":
+                            if any(1990 <= y <= 2000 for y in years):
+                                available_periods.append(period)
+                        elif period == "2000–2010":
+                            if any(2000 <= y <= 2010 for y in years):
+                                available_periods.append(period)
+                        elif period == "2010–2020":
+                            if any(2010 <= y <= 2020 for y in years):
+                                available_periods.append(period)
+                        elif period == "2020–сейчас":
+                            if any(y >= 2020 for y in years):
+                                available_periods.append(period)
+                elif mode == 'group_votes':
+                    # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 9
+                    cursor.execute("""
+                        SELECT DISTINCT m.year
+                        FROM movies m
+                        WHERE m.chat_id = %s AND m.year IS NOT NULL
+                        AND EXISTS (
+                            SELECT 1 FROM ratings r 
+                            WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                            GROUP BY r.film_id, r.chat_id 
+                            HAVING AVG(r.rating) >= 9
+                        )
+                        ORDER BY m.year
+                    """, (chat_id,))
+                    years_rows = cursor.fetchall()
+                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    
+                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for group_votes mode")
+                    
+                    # Определяем доступные периоды на основе найденных годов
+                    for period in all_periods:
+                        if period == "До 1980":
+                            if any(y < 1980 for y in years):
+                                available_periods.append(period)
+                        elif period == "1980–1990":
+                            if any(1980 <= y <= 1990 for y in years):
+                                available_periods.append(period)
+                        elif period == "1990–2000":
+                            if any(1990 <= y <= 2000 for y in years):
+                                available_periods.append(period)
+                        elif period == "2000–2010":
+                            if any(2000 <= y <= 2010 for y in years):
+                                available_periods.append(period)
+                        elif period == "2010–2020":
+                            if any(2010 <= y <= 2020 for y in years):
+                                available_periods.append(period)
+                        elif period == "2020–сейчас":
+                            if any(y >= 2020 for y in years):
+                                available_periods.append(period)
+                else:
+                    # Для режима database - используем старую логику
+                    base_query = """
+                        SELECT COUNT(DISTINCT m.id) 
+                        FROM movies m
+                        LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                        WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                    """
+                    params = [chat_id]
+                
+                    for period in all_periods:
+                        if period == "До 1980":
+                            condition = "m.year < 1980"
+                        elif period == "1980–1990":
+                            condition = "(m.year >= 1980 AND m.year <= 1990)"
+                        elif period == "1990–2000":
+                            condition = "(m.year >= 1990 AND m.year <= 2000)"
+                        elif period == "2000–2010":
+                            condition = "(m.year >= 2000 AND m.year <= 2010)"
+                        elif period == "2010–2020":
+                            condition = "(m.year >= 2010 AND m.year <= 2020)"
+                        elif period == "2020–сейчас":
+                            condition = "m.year >= 2020"
+                        
+                        query = f"{base_query} AND {condition}"
+                        cursor.execute(query, tuple(params))
+                        count_row = cursor.fetchone()
+                        count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                        
+                        if count > 0:
+                            available_periods.append(period)
+            
+            logger.info(f"[RANDOM CALLBACK] Available periods: {available_periods}")
+            
+            user_random_state[user_id]['available_periods'] = available_periods
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            if available_periods:
+                for period in available_periods:
+                    markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
+            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            
+            bot_instance.answer_callback_query(call.id)
+            text = f"{mode_description}\n\n🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)"
+            bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            logger.info(f"[RANDOM CALLBACK] ✅ Mode selected: {mode}, moving to period selection, user_id={user_id}")
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_mode: {e}", exc_info=True)
             try:
@@ -772,6 +912,77 @@ def register_series_handlers(bot_param):
                     "🔒 Функционал можно подключить через /payment",
                     show_alert=True
                 )
+            except:
+                pass
+    
+    @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_period:"))
+    def handle_rand_period(call):
+        """Обработчик выбора периода для рандома"""
+        try:
+            logger.info(f"[RANDOM CALLBACK] ===== PERIOD HANDLER: data={call.data}, user_id={call.from_user.id}")
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            data = call.data.split(":", 1)[1]
+            
+            if user_id not in user_random_state:
+                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}, reinitializing")
+                user_random_state[user_id] = {'step': 'period', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
+            
+            if data == "skip":
+                logger.info(f"[RANDOM CALLBACK] Period skipped, moving to genre")
+                user_random_state[user_id]['periods'] = []
+                user_random_state[user_id]['step'] = 'genre'
+                # TODO: Вызвать _show_genre_step
+                bot_instance.answer_callback_query(call.id, "Период пропущен. Функция в разработке.")
+                return
+            elif data == "done":
+                logger.info(f"[RANDOM CALLBACK] Periods confirmed, moving to genre")
+                user_random_state[user_id]['step'] = 'genre'
+                # TODO: Вызвать _show_genre_step
+                bot_instance.answer_callback_query(call.id, "Период выбран. Функция в разработке.")
+                return
+            else:
+                # Toggle периода
+                periods = user_random_state[user_id].get('periods', [])
+                if data in periods:
+                    periods.remove(data)
+                    logger.info(f"[RANDOM CALLBACK] Period removed: {data}")
+                else:
+                    periods.append(data)
+                    logger.info(f"[RANDOM CALLBACK] Period added: {data}")
+                
+                user_random_state[user_id]['periods'] = periods
+                
+                # Получаем доступные периоды из состояния
+                available_periods = user_random_state[user_id].get('available_periods', [])
+                if not available_periods:
+                    available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+                
+                # Обновляем кнопки
+                markup = InlineKeyboardMarkup(row_width=1)
+                if available_periods:
+                    for p in available_periods:
+                        label = f"✓ {p}" if p in periods else p
+                        markup.add(InlineKeyboardButton(label, callback_data=f"rand_period:{p}"))
+                
+                if periods:
+                    markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_period:done"))
+                else:
+                    markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+                
+                selected = ', '.join(periods) if periods else 'ничего'
+                try:
+                    bot_instance.edit_message_text(f"🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько)", 
+                                        chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.answer_callback_query(call.id)
+                    logger.info(f"[RANDOM CALLBACK] Period keyboard updated, selected={selected}")
+                except Exception as e:
+                    logger.error(f"[RANDOM CALLBACK] Error updating period keyboard: {e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка обновления")
+        except Exception as e:
+            logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_period: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "Ошибка обработки")
             except:
                 pass
 
@@ -2755,6 +2966,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                                 logger.info(f"[SHOW FILM INFO] Личная оценка получена: {user_rating_row}")
                                 if user_rating_row:
                                     user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
+                                else:
+                                    user_rating = None
                         finally:
                             db_lock.release()
                             logger.info(f"[SHOW FILM INFO] db_lock освобожден")
@@ -2786,40 +2999,42 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 text += f"\n\n⏳ <b>Ещё не просмотрено</b>"
                 # Добавляем строку о личной оценке пользователя даже если фильм не просмотрен (чтобы текст всегда менялся)
                 if user_id and film_id:
-                    logger.info(f"[SHOW FILM INFO] Попытка получить db_lock для запроса личной оценки...")
-                    # Используем timeout для получения lock, чтобы не зависнуть навсегда
-                    import threading
-                    lock_acquired = False
+                    logger.info(f"[SHOW FILM INFO] Запрос личной оценки (без блокировки, чтение безопасно)...")
+                    user_rating = None
                     try:
-                        # Пытаемся получить lock с таймаутом 5 секунд
-                        lock_acquired = db_lock.acquire(timeout=5.0)
-                        if lock_acquired:
-                            logger.info(f"[SHOW FILM INFO] db_lock получен, выполняю запрос личной оценки...")
-                            try:
-                                cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
-                                user_rating_row = cursor.fetchone()
-                                logger.info(f"[SHOW FILM INFO] Запрос личной оценки выполнен, результат: {user_rating_row}")
-                                if user_rating_row:
-                                    user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
-                                    if user_rating is not None:
-                                        text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
-                                    else:
-                                        text += f"\n⭐ <b>Ваша оценка: —</b>"
-                                else:
-                                    text += f"\n⭐ <b>Ваша оценка: —</b>"
-                            finally:
-                                db_lock.release()
-                                logger.info(f"[SHOW FILM INFO] db_lock освобожден")
+                        # Чтение безопасно без блокировки, используем короткий таймаут только для защиты от deadlock
+                        import threading
+                        lock_acquired = False
+                        try:
+                            # Короткий таймаут 1 секунда - если lock занят, просто пропускаем запрос
+                            lock_acquired = db_lock.acquire(timeout=1.0)
+                            if lock_acquired:
+                                try:
+                                    cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
+                                    user_rating_row = cursor.fetchone()
+                                    logger.info(f"[SHOW FILM INFO] Запрос личной оценки выполнен, результат: {user_rating_row}")
+                                    if user_rating_row:
+                                        user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
+                                finally:
+                                    db_lock.release()
+                                    logger.info(f"[SHOW FILM INFO] db_lock освобожден")
+                            else:
+                                logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос оценки (не критично)")
+                        except Exception as lock_e:
+                            logger.warning(f"[SHOW FILM INFO] Ошибка при получении lock для оценки: {lock_e}")
+                            if lock_acquired:
+                                try:
+                                    db_lock.release()
+                                except:
+                                    pass
+                        
+                        # Добавляем оценку в текст
+                        if user_rating is not None:
+                            text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
                         else:
-                            logger.warning(f"[SHOW FILM INFO] ⚠️ Не удалось получить db_lock за 5 секунд, пропускаем запрос оценки")
                             text += f"\n⭐ <b>Ваша оценка: —</b>"
                     except Exception as db_e:
-                        logger.error(f"[SHOW FILM INFO] Ошибка при работе с БД в блоке не просмотренного: {db_e}", exc_info=True)
-                        if lock_acquired:
-                            try:
-                                db_lock.release()
-                            except:
-                                pass
+                        logger.warning(f"[SHOW FILM INFO] Ошибка при запросе оценки (не критично): {db_e}")
                         text += f"\n⭐ <b>Ваша оценка: —</b>"
                 else:
                     logger.info(f"[SHOW FILM INFO] user_id или film_id отсутствуют, пропускаем запрос оценки")
