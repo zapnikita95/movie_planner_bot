@@ -2576,10 +2576,15 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 plan_row = cursor.fetchone()
                 has_plan = plan_row is not None
         
+        # Если фильм не в базе, добавляем кнопку "➕ Добавить в базу"
+        if not film_id:
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
+        
         # Добавляем кнопку "Запланировать просмотр" только если фильм не запланирован
         if not has_plan:
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
         
+        # Добавляем кнопки "Интересные факты" и "Оценить" всегда (для фильмов в базе и не в базе)
         if film_id:
             # Получаем информацию об оценках
             with db_lock:
