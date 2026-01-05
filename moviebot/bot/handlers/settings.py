@@ -519,9 +519,14 @@ def handle_settings_callback(call):
                     self.chat = call.message.chat
                     self.date = call.message.date
                     self.text = '/edit'
+                    # Сохраняем оригинальное сообщение для reply_to
+                    self._original_message = call.message
                 
                 def reply_to(self, text, **kwargs):
-                    # reply_to должен отправлять сообщение в тот же чат
+                    # reply_to должен отправлять сообщение с reply_to_message_id
+                    # Но так как мы удалили сообщение, просто отправляем в чат
+                    # Убираем reply_to_message_id из kwargs, если он есть
+                    kwargs.pop('reply_to_message_id', None)
                     return bot_instance.send_message(self.chat.id, text, **kwargs)
             
             try:
