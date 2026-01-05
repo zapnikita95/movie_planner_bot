@@ -22016,9 +22016,20 @@ def handle_settings_callback(call):
                 markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
                 
                 text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
-                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
+                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
+                text += "⏳ Осталось бросить кубик: 2 участник(ов)"
                 
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                
+                # Инициализируем состояние игры для примера события
+                if chat_id not in dice_game_state:
+                    dice_game_state[chat_id] = {
+                        'participants': {},
+                        'message_id': sent_msg.message_id,
+                        'start_time': datetime.now(plans_tz),
+                        'dice_messages': {}
+                    }
+                    logger.info(f"[RANDOM EVENTS EXAMPLE] Инициализировано состояние игры для примера события в чате {chat_id}, message_id={sent_msg.message_id}")
             
             return
         
