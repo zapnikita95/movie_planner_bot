@@ -188,10 +188,13 @@ def handle_rate_list_reply(message):
         user_unsubscribe_state, user_add_admin_state
     )
     
-    # Проверяем все состояния
-    # НО НЕ пропускаем user_promo_state и user_promo_admin_state - они обрабатываются в main_text_handler
+    # КРИТИЧЕСКИ ВАЖНО: Пропускаем user_promo_state и user_promo_admin_state - они обрабатываются в main_text_handler
+    if user_id in user_promo_state or user_id in user_promo_admin_state:
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии промокода (promo={user_id in user_promo_state}, promo_admin={user_id in user_promo_admin_state}), передаем в main_text_handler")
+        return
+    
+    # Проверяем остальные состояния
     if (user_id in user_plan_state or 
-        # user_promo_state и user_promo_admin_state обрабатываются в main_text_handler, не пропускаем их здесь
         user_id in user_ticket_state or
         user_id in user_search_state or
         user_id in user_settings_state or
