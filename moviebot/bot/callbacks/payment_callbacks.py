@@ -22,7 +22,7 @@ from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
 from moviebot.states import user_payment_state, user_promo_state
 from moviebot.utils.promo import apply_promocode, get_promocode_info
 from moviebot.utils.payments import create_stars_invoice
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 
 logger = logging.getLogger(__name__)
@@ -1255,7 +1255,6 @@ def register_payment_callbacks(bot_instance):
                     pass
             
                 from moviebot.database.db_operations import get_subscription_members, get_active_group_users
-                from datetime import datetime
             
                 # Получаем информацию о группе
                 try:
@@ -1423,7 +1422,6 @@ def register_payment_callbacks(bot_instance):
                     # В группе - показываем только текущую группу
                     try:
                         from moviebot.database.db_operations import get_subscription_members
-                        from datetime import datetime
                     
                         chat = bot_instance.get_chat(chat_id)
                         group_username = chat.username
@@ -1612,7 +1610,6 @@ def register_payment_callbacks(bot_instance):
             
                 # Проверяем существующие подписки
                 from moviebot.database.db_operations import get_user_personal_subscriptions
-                from datetime import datetime
                 existing_subs = get_user_personal_subscriptions(user_id)
             
                 # Фильтруем только активные подписки и убираем дубликаты по plan_type
@@ -1832,7 +1829,6 @@ def register_payment_callbacks(bot_instance):
                     
                         # Проверяем активные групповые подписки для этой группы
                         from moviebot.database.db_operations import get_active_group_subscription_by_chat_id
-                        from datetime import datetime
                         group_sub = get_active_group_subscription_by_chat_id(chat_id)
                         existing_group_plan_types = []
                     
@@ -2184,7 +2180,6 @@ def register_payment_callbacks(bot_instance):
                         all_price = SUBSCRIPTION_PRICES['personal']['all'].get(period_type, 0)
                         from moviebot.database.db_operations import update_subscription_price
                         from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-                        from datetime import datetime, timedelta
                         
                         if next_sub_id:
                             # Обновляем существующую подписку
@@ -2647,7 +2642,6 @@ def register_payment_callbacks(bot_instance):
                 # Проверяем существующие подписки для личных подписок
                 if sub_type == 'personal' and not is_owner:
                     from moviebot.database.db_operations import get_user_personal_subscriptions
-                    from datetime import datetime
                     existing_subs = get_user_personal_subscriptions(user_id)
                 
                     # Фильтруем только активные подписки и убираем дубликаты по plan_type
