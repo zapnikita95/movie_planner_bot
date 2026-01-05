@@ -19,7 +19,8 @@ from moviebot.database.db_operations import (
 from moviebot.bot.bot_init import BOT_ID
 from moviebot.api.yookassa_api import create_subscription_payment, YOOKASSA_AVAILABLE
 from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
-from moviebot.states import user_payment_state
+from moviebot.states import user_payment_state, user_promo_state
+from moviebot.utils.promo import apply_promocode, get_promocode_info
 from moviebot.utils.payments import create_stars_invoice
 from datetime import datetime
 import pytz
@@ -2839,6 +2840,10 @@ def register_payment_callbacks(bot_instance):
                 if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
                     callback_data_yookassa = f"payment:pay_yookassa:{payment_id_short}"
                     markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
+                
+                # Добавляем кнопку промокода
+                callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}:{final_price}"
+                markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
             
                 if group_size:
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))

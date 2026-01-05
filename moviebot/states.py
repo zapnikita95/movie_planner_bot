@@ -54,3 +54,7 @@ dice_game_state = {}  # chat_id: {'participants': {user_id: dice_value}, 'messag
 # Состояния возврата звезд
 user_refund_state = {}  # user_id: {'chat_id': int} - состояние ожидания ввода charge_id для возврата
 
+# Состояния промокодов
+user_promo_state = {}  # user_id: {'chat_id': int, 'message_id': int, 'sub_type': str, 'plan_type': str, 'period_type': str, 'group_size': int or None, 'payment_id': str, 'original_price': float} - состояние ожидания ввода промокода
+user_promo_admin_state = {}  # user_id: {} - состояние ожидания ввода промокода для /promo
+
