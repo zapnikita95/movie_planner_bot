@@ -365,9 +365,9 @@ def register_seasons_handlers(bot):
                         bot_instance.answer_callback_query(call.id, "ℹ️ Отметьте хотя бы одну серию как просмотренную, чтобы добавить сериал в базу", show_alert=True)
                     return
                 else:
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                title = row.get('title') if isinstance(row, dict) else row[1]
-                link = row.get('link') if isinstance(row, dict) else row[2]
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
+                    link = row.get('link') if isinstance(row, dict) else row[2]
                 
                 # Проверяем, просмотрен ли сериал
                 cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
