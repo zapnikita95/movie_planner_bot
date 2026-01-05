@@ -688,7 +688,6 @@ def register_series_handlers(bot_param):
     def handle_rand_mode_locked(call):
         """Обработчик заблокированных режимов рандомайзера"""
         try:
-            bot_instance.answer_callback_query(call.id)
             mode = call.data.split(":")[1]  # kinopoisk, my_votes, group_votes
             user_id = call.from_user.id
             chat_id = call.message.chat.id
