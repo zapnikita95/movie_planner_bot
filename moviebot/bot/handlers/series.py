@@ -3276,86 +3276,75 @@ def handle_kinopoisk_link(message):
             # Формируем сообщение с результатами
             results_text = f"🔍 Результаты поиска '{query}':\n\n"
             markup = InlineKeyboardMarkup(row_width=1)
-                        participant = random.choice(participants)
-                        p_user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
-                        username = participant.get('username') if isinstance(participant, dict) else participant[1]
-                        
-                        if username:
-                            user_name = f"@{username}"
-                        else:
-                            try:
-                                user_info = bot_instance.get_chat_member(chat_id, p_user_id)
-                                user_name = user_info.user.first_name or "участник"
-                            except:
-                                user_name = "участник"
-                    else:
-                        user_name = "участник"
-                    
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
-                    markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
-                    markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
-                    
-                    text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
-                    text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
-                    
-                    bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                else:
-                    # Пример события без участника (игра в кубик)
-                    # Проверяем количество участников (исключая бота)
-                    from moviebot.bot.bot_init import BOT_ID
-                    from moviebot.database.db_operations import is_bot_participant
-                    
-                    with db_lock:
-                        if BOT_ID:
-                            cursor.execute('''
-                                SELECT COUNT(DISTINCT user_id) 
-                                FROM stats 
-                                WHERE chat_id = %s 
-                                AND user_id != %s
-                            ''', (chat_id, BOT_ID))
-                        else:
-                            cursor.execute('''
-                                SELECT COUNT(DISTINCT user_id) 
-                                FROM stats 
-                                WHERE chat_id = %s
-                            ''', (chat_id,))
-                        participants_count_row = cursor.fetchone()
-                        participants_count = participants_count_row.get('count') if isinstance(participants_count_row, dict) else (participants_count_row[0] if participants_count_row else 0)
-                    
-                    # Если в группе только 1 участник (человек) + бот = всего 2, то недостаточно
-                    if participants_count < 2:
-                        bot_instance.answer_callback_query(
-                            call.id,
-                            "Не хватает еще хотя бы одного человека в группе. Для игры в кубик нужно минимум 2 участника (исключая бота).",
-                            show_alert=True
-                        )
-                        return
-                    
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
-                    markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
-                    markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
-                    
-                    text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
-                    text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
-                    text += f"⏳ Осталось бросить кубик: {participants_count} участник(ов)"
-                    
-                    sent_msg = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                    
-                    # Инициализируем состояние игры для примера события
-                    if chat_id not in dice_game_state:
-                        dice_game_state[chat_id] = {
-                            'participants': {},
-                            'message_id': sent_msg.message_id,
-                            'start_time': datetime.now(PLANS_TZ),
-                            'dice_messages': {}
-                        }
-                        logger.info(f"[RANDOM EVENTS EXAMPLE] Инициализировано состояние игры для примера события в чате {chat_id}, message_id={sent_msg.message_id}")
-                
-                return
             
-            if action.startswith("random_events:"):
+            for film in films[:10]:  # Показываем максимум 10 результатов на странице
+                try:
+                    # Пробуем разные варианты полей для совместимости с разными версиями API
+                    title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                    year = film.get('year') or film.get('releaseYear') or 'N/A'
+                    rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                    # Пробуем разные варианты ID
+                    kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                    
+                    # Определяем тип (сериал или фильм) по полю type из API
+                    film_type = film.get('type', '').upper() if film.get('type') else 'FILM'  # "FILM" или "TV_SERIES"
+                    is_series = film_type == 'TV_SERIES'
+                    
+                    if kp_id:
+                        # Ограничиваем длину текста кнопки
+                        type_indicator = "📺" if is_series else "🎬"
+                        button_text = f"{type_indicator} {title} ({year})"
+                        if len(button_text) > 50:
+                            button_text = button_text[:47] + "..."
+                        results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                        if rating != 'N/A':
+                            results_text += f" ⭐ {rating}"
+                        results_text += "\n"
+                        # Сохраняем тип в callback_data для правильного формирования ссылки
+                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+                except Exception as film_e:
+                    logger.error(f"[SEARCH REPLY] Ошибка обработки фильма: {film_e}", exc_info=True)
+                    continue
+            
+            # Добавляем пагинацию, если нужно
+            if total_pages > 1:
+                pagination_row = []
+                query_encoded = query.replace(' ', '_')
+                pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
+                if total_pages > 1:
+                    pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                markup.row(*pagination_row)
+            
+            # Добавляем кнопку "Назад в меню"
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            # Добавляем пояснение про эмодзи
+            results_text += "\n\n🎬 - фильм\n📺 - сериал"
+            
+            # Проверяем длину сообщения (лимит Telegram - 4096 символов)
+            if len(results_text) > 4096:
+                logger.warning(f"[SEARCH REPLY] Сообщение слишком длинное ({len(results_text)} символов), обрезаем")
+                max_length = 4000
+                results_text = results_text[:max_length] + "\n\n... (показаны не все результаты)"
+            
+            # Отправляем результаты
+            try:
+                sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"[SEARCH REPLY] ✅ Ответ отправлен пользователю {user_id}, найдено {len(films)} результатов, message_id={sent_message.message_id if sent_message else 'None'}")
+                # Удаляем состояние ТОЛЬКО после успешной отправки
+                if user_id in user_search_state:
+                    del user_search_state[user_id]
+                    logger.info(f"[SEARCH REPLY] Состояние user_search_state удалено для user_id={user_id}")
+            except Exception as e:
+                logger.error(f"[SEARCH REPLY] ❌ Ошибка отправки результатов поиска: {e}", exc_info=True)
+                try:
+                    bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
+                except Exception:
+                    pass
+                # Удаляем состояние даже при ошибке
+                if user_id in user_search_state:
+                    del user_search_state[user_id]
+            return
                 # Включение/выключение случайных событий
                 sub_action = action.split(":", 1)[1]
                 new_value = 'true' if sub_action == 'enable' else 'false'
