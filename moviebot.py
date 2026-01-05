@@ -21113,6 +21113,7 @@ def handle_payment_callback(call):
             markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
             if has_real_subscription:
                 markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             try:
                 bot.edit_message_text(
