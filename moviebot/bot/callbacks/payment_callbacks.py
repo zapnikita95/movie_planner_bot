@@ -4466,18 +4466,39 @@ def register_payment_callbacks(bot_instance):
                     bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
+                subscription_type = sub.get('subscription_type', 'personal')
+                
                 if cancel_subscription(subscription_id, user_id):
                     bot_instance.answer_callback_query(call.id, "Подписка отменена")
+                    logger.info(f"[PAYMENT CANCEL CONFIRM] Подписка {subscription_id} успешно отменена для user_id={user_id}")
+                    
+                    # Обновляем сообщение с информацией о подписках
+                    # Вызываем обработчик payment:active для обновления информации
                     try:
-                        bot_instance.edit_message_text(
-                            "✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.",
-                            call.message.chat.id,
-                            call.message.message_id,
-                            parse_mode='HTML'
+                        # Создаем фейковый callback для вызова обработчика active
+                        from telebot.types import CallbackQuery, Message, User, Chat
+                        fake_call = CallbackQuery(
+                            id=call.id,
+                            from_user=call.from_user,
+                            message=call.message,
+                            data=f"payment:active:{subscription_type}",
+                            chat_instance=call.chat_instance
                         )
-                    except Exception as e:
-                        if "message is not modified" not in str(e):
-                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                        # Рекурсивно вызываем обработчик для обновления информации
+                        handle_payment_callback(fake_call)
+                    except Exception as update_e:
+                        logger.error(f"[PAYMENT CANCEL CONFIRM] Ошибка обновления информации о подписках: {update_e}", exc_info=True)
+                        # Если не удалось обновить, показываем простое сообщение
+                        try:
+                            bot_instance.edit_message_text(
+                                "✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
+                                call.message.chat.id,
+                                call.message.message_id,
+                                parse_mode='HTML'
+                            )
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 else:
                     bot_instance.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
                 return
@@ -4489,6 +4510,7 @@ def register_payment_callbacks(bot_instance):
                 second_param = parts[1]
             
                 # Проверяем, является ли второй параметр числом (subscription_id) или строкой (personal/group)
+                sub_type = None
                 try:
                     subscription_id = int(second_param)
                     logger.info(f"[PAYMENT CANCEL] Параметр является числом (subscription_id={subscription_id})")
@@ -4498,6 +4520,7 @@ def register_payment_callbacks(bot_instance):
                 
                     if sub:
                         subscription_type = sub.get('subscription_type')
+                        sub_type = subscription_type  # Сохраняем для использования ниже
                     
                         # Для групповых подписок показываем подтверждение с предложением более дешевых вариантов
                         if subscription_type == 'group':
@@ -4600,10 +4623,17 @@ def register_payment_callbacks(bot_instance):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                     else:
                         bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                        return
                 except ValueError:
                     # Это строка (personal/group) - используем старую логику
                     logger.info(f"[PAYMENT CANCEL] Параметр является строкой (sub_type={second_param})")
                     sub_type = second_param
+                
+                # Если sub_type не определен, не можем продолжить
+                if not sub_type:
+                    bot_instance.answer_callback_query(call.id, "Ошибка: не удалось определить тип подписки", show_alert=True)
+                    return
+                
                 sub = get_active_subscription(chat_id, user_id, sub_type)
             
                 if not sub:
