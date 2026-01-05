@@ -8,54 +8,62 @@ from moviebot.database.db_operations import log_request, get_active_subscription
 
 logger = logging.getLogger(__name__)
 
+# Импортируем bot_instance для использования в функциях
+from moviebot.bot.bot_init import bot as bot_instance
+
+
+def payment_command(message):
+    """Команда /payment - управление подписками"""
+    logger.info(f"[HANDLER] /payment вызван от {message.from_user.id}")
+    try:
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+        username = message.from_user.username or f"user_{user_id}"
+        log_request(user_id, username, '/payment', chat_id)
+        
+        is_private = message.chat.type == 'private'
+        
+        # Получаем активные подписки
+        personal_sub = get_active_subscription(chat_id, user_id, 'personal')
+        group_sub = get_active_subscription(chat_id, user_id, 'group')
+        
+        # Проверяем, есть ли реальные подписки (не виртуальные, id > 0)
+        has_real_subscription = False
+        if personal_sub:
+            sub_id = personal_sub.get('id')
+            if sub_id is not None and sub_id > 0:
+                has_real_subscription = True
+        if group_sub:
+            sub_id = group_sub.get('id')
+            if sub_id is not None and sub_id > 0:
+                has_real_subscription = True
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
+        markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
+        if has_real_subscription:
+            markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        
+        text = "💳 <b>Оплата подписки</b>\n\n"
+        text += "Выберите действие:"
+        
+        bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"❌ Ошибка в /payment: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /payment")
+        except:
+            pass
+
 
 def register_payment_handlers(bot_instance):
     """Регистрирует обработчики команды /payment"""
     
     @bot_instance.message_handler(commands=['payment'])
-    def payment_command(message):
-        """Команда /payment - управление подписками"""
-        logger.info(f"[HANDLER] /payment вызван от {message.from_user.id}")
-        try:
-            chat_id = message.chat.id
-            user_id = message.from_user.id
-            username = message.from_user.username or f"user_{user_id}"
-            log_request(user_id, username, '/payment', chat_id)
-            
-            is_private = message.chat.type == 'private'
-            
-            # Получаем активные подписки
-            personal_sub = get_active_subscription(chat_id, user_id, 'personal')
-            group_sub = get_active_subscription(chat_id, user_id, 'group')
-            
-            # Проверяем, есть ли реальные подписки (не виртуальные, id > 0)
-            has_real_subscription = False
-            if personal_sub:
-                sub_id = personal_sub.get('id')
-                if sub_id is not None and sub_id > 0:
-                    has_real_subscription = True
-            if group_sub:
-                sub_id = group_sub.get('id')
-                if sub_id is not None and sub_id > 0:
-                    has_real_subscription = True
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
-            markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
-            if has_real_subscription:
-                markup.add(InlineKeyboardButton("❌ Отписаться", callback_data="payment:cancel"))
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            
-            text = "💳 <b>Оплата подписки</b>\n\n"
-            text += "Выберите действие:"
-            
-            bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-        except Exception as e:
-            logger.error(f"❌ Ошибка в /payment: {e}", exc_info=True)
-            try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /payment")
-            except:
-                pass
+    def _payment_command_handler(message):
+        """Обертка для регистрации команды /payment"""
+        payment_command(message)
 
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("payment:") and (
         call.data.startswith("payment:active") or 
