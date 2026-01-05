@@ -2823,8 +2823,10 @@ def register_payment_callbacks(bot_instance):
                             # Кнопки для оформления пакетных подписок
                             all_month_price = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
                             all_3months_price = SUBSCRIPTION_PRICES['personal']['all'].get('3months', 0)
+                            all_lifetime_price = SUBSCRIPTION_PRICES['personal']['all'].get('lifetime', 0)
                             markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_month_price}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
                             markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_3months_price}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
+                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_lifetime_price}₽/навсегда)", callback_data="payment:subscribe:personal:all:lifetime"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
                             try:
