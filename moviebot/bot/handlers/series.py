@@ -1984,25 +1984,25 @@ def handle_settings_callback(call):
                 return
         
         if action == "join":
-            # Вызываем команду /join
-            from moviebot.bot.handlers.join import join_command
-            
-            # Создаем полноценный fake_message с всеми необходимыми атрибутами
-            fake_message = telebot.types.Message()
-            fake_message.from_user = call.from_user
-            fake_message.chat = call.message.chat
-            fake_message.message_id = call.message.message_id
-            fake_message.date = call.message.date
-            fake_message.text = '/join'
-            
-            try:
-                bot_instance.delete_message(chat_id, call.message.message_id)
-            except:
-                pass
-            
-            join_command(fake_message)
-            bot_instance.answer_callback_query(call.id)
-            return
+                # Вызываем команду /join
+                from moviebot.bot.handlers.join import join_command
+                
+                # Создаем полноценный fake_message с всеми необходимыми атрибутами
+                fake_message = telebot.types.Message()
+                fake_message.from_user = call.from_user
+                fake_message.chat = call.message.chat
+                fake_message.message_id = call.message.message_id
+                fake_message.date = call.message.date
+                fake_message.text = '/join'
+                
+                try:
+                    bot_instance.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
+                
+                join_command(fake_message)
+                bot_instance.answer_callback_query(call.id)
+                return
         
         if action == "back":
                 # Возврат к главному меню settings
@@ -2072,7 +2072,7 @@ def handle_settings_callback(call):
                 f"⚙️ <b>Настройки реакций</b>\n\n"
                 f"📝 Поставьте выбранный эмодзи в ответ на это сообщение.\n\n"
                 f"Новые реакции будут {mode_text}.",
-                    call.message.chat.id,
+                call.message.chat.id,
                     call.message.message_id,
                     parse_mode='HTML'
                 )
