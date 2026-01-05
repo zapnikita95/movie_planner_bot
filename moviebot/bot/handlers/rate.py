@@ -428,28 +428,52 @@ def handle_rating_internal(message, rating):
                         # Если нашли сообщение, обновляем его
                         if film_message_id:
                             from moviebot.bot.handlers.series import show_film_info_with_buttons
-                            from moviebot.api.kinopoisk_api import extract_movie_info
                             
-                            # Получаем информацию о фильме
-                            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                            # Получаем информацию о фильме из базы (без нового API запроса)
+                            with db_lock:
+                                cursor.execute('SELECT id, title, watched, link FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                                existing_row = cursor.fetchone()
+                                existing = None
+                                link = None
+                                if existing_row:
+                                    if isinstance(existing_row, dict):
+                                        existing = (existing_row.get('id'), existing_row.get('title'), existing_row.get('watched'))
+                                        link = existing_row.get('link')
+                                    else:
+                                        existing = (existing_row[0], existing_row[1], existing_row[2])
+                                        link = existing_row[3] if len(existing_row) > 3 else None
+                            
+                            if not link:
+                                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                            
+                            # Получаем информацию о фильме (пробуем из кеша или делаем API запрос)
+                            from moviebot.api.kinopoisk_api import extract_movie_info
                             info = extract_movie_info(link)
                             if info:
-                                # Получаем existing для передачи в show_film_info_with_buttons
-                                with db_lock:
-                                    cursor.execute('SELECT id, title, watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                                    existing_row = cursor.fetchone()
-                                    existing = None
-                                    if existing_row:
-                                        if isinstance(existing_row, dict):
-                                            existing = (existing_row.get('id'), existing_row.get('title'), existing_row.get('watched'))
-                                        else:
-                                            existing = (existing_row[0], existing_row[1], existing_row[2])
-                                
                                 # Обновляем сообщение с описанием фильма
                                 show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
                                 logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено: message_id={film_message_id}")
                     except Exception as update_e:
                         logger.warning(f"[RATE INTERNAL] Не удалось обновить сообщение с описанием фильма: {update_e}", exc_info=True)
+                
+                # Отправляем рекомендации после оценки 10
+                if rating == 10 and kp_id:
+                    try:
+                        from moviebot.utils.helpers import has_recommendations_access
+                        if has_recommendations_access(chat_id, user_id):
+                            from moviebot.bot.handlers.series import random_command
+                            # Создаем фиктивное сообщение для вызова random_command
+                            class FakeMessage:
+                                def __init__(self, chat_id, user_id):
+                                    self.chat = type('obj', (object,), {'id': chat_id})()
+                                    self.from_user = type('obj', (object,), {'id': user_id})()
+                                    self.text = '/random'
+                            
+                            fake_msg = FakeMessage(chat_id, user_id)
+                            random_command(fake_msg)
+                            logger.info(f"[RATE INTERNAL] Рекомендации отправлены после оценки 10 для kp_id={kp_id}")
+                    except Exception as rec_e:
+                        logger.warning(f"[RATE INTERNAL] Не удалось отправить рекомендации после оценки 10: {rec_e}", exc_info=True)
                     
         except Exception as e:
             logger.error(f"[RATE INTERNAL] Ошибка при сохранении оценки: {e}", exc_info=True)

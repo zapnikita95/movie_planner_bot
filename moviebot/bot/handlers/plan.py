@@ -525,37 +525,72 @@ def show_schedule(message):
             
             logger.info(f"[SHOW FILM DESCRIPTION] Пользователь {user_id} хочет посмотреть описание фильма kp_id={kp_id}")
             
-            # Получаем информацию о фильме
-            from moviebot.api.kinopoisk_api import extract_movie_info
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            info = extract_movie_info(link)
-            
-            if not info:
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-                return
-            
             # Проверяем, есть ли фильм в базе
             with db_lock:
-                cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 row = cursor.fetchone()
             
             existing = None
+            link = None
             if row:
                 if isinstance(row, dict):
                     film_id = row.get('id')
                     title = row.get('title')
                     watched = row.get('watched')
+                    link = row.get('link')
                 else:
                     film_id = row[0]
                     title = row[1]
                     watched = row[2]
+                    link = row[3] if len(row) > 3 else None
                 existing = (film_id, title, watched)
             
-            # Показываем описание фильма
-            logger.info(f"[SHOW FILM DESCRIPTION] Вызов show_film_info_with_buttons")
-            from moviebot.bot.handlers.series import show_film_info_with_buttons
-            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
-            logger.info(f"[SHOW FILM DESCRIPTION] show_film_info_with_buttons завершен")
+            if not link:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            # Ищем существующее сообщение с описанием фильма в bot_messages
+            from moviebot.states import bot_messages
+            film_message_id = None
+            for msg_id, link_value in bot_messages.items():
+                if link_value and kp_id in str(link_value):
+                    film_message_id = msg_id
+                    logger.info(f"[SHOW FILM DESCRIPTION] Найдено сообщение с описанием фильма: message_id={film_message_id}")
+                    break
+            
+            # Если нашли сообщение, обновляем его без нового API запроса
+            if film_message_id:
+                logger.info(f"[SHOW FILM DESCRIPTION] Обновление существующего сообщения без API запроса")
+                # Получаем информацию о фильме из базы (без API запроса)
+                from moviebot.api.kinopoisk_api import extract_movie_info
+                info = extract_movie_info(link)
+                
+                if info:
+                    from moviebot.bot.handlers.series import show_film_info_with_buttons
+                    show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=film_message_id)
+                    logger.info(f"[SHOW FILM DESCRIPTION] Сообщение обновлено: message_id={film_message_id}")
+                else:
+                    # Если не удалось получить из базы, делаем API запрос
+                    logger.warning(f"[SHOW FILM DESCRIPTION] Не удалось получить информацию из базы, делаю API запрос")
+                    info = extract_movie_info(link)
+                    if info:
+                        from moviebot.bot.handlers.series import show_film_info_with_buttons
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=film_message_id)
+                    else:
+                        bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            else:
+                # Если сообщения нет, получаем информацию через API и отправляем новое
+                logger.info(f"[SHOW FILM DESCRIPTION] Сообщение не найдено, отправляю новое")
+                from moviebot.api.kinopoisk_api import extract_movie_info
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                info = extract_movie_info(link)
+                
+                if not info:
+                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                    return
+                
+                from moviebot.bot.handlers.series import show_film_info_with_buttons
+                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
+            
             logger.info(f"[SHOW FILM DESCRIPTION] ===== END (успешно) =====")
             
         except Exception as e:
@@ -983,8 +1018,22 @@ def get_plan_day_or_date_internal(message, state):
             plan_dt = user_tz.localize(plan_dt)
             logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата по дню недели: {plan_dt}")
         else:
-            # Обработка специальных форматов: "завтра", "следующая неделя"
-            if 'завтра' in text:
+            # Обработка специальных форматов: "сегодня", "завтра", "следующая неделя"
+            if 'сегодня' in text:
+                plan_date = now.date()
+                # Используем извлеченное время, если есть, иначе стандартное
+                if extracted_time:
+                    hour, minute = extracted_time
+                elif plan_type == 'home':
+                    hour = 19 if plan_date.weekday() < 5 else 10
+                    minute = 0
+                else:
+                    hour = 9
+                    minute = 0
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                plan_dt = user_tz.localize(plan_dt)
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'сегодня': {plan_dt}")
+            elif 'завтра' in text:
                 plan_date = (now.date() + timedelta(days=1))
                 # Используем извлеченное время, если есть, иначе стандартное
                 if extracted_time:
