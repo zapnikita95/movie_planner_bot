@@ -339,7 +339,7 @@ def is_kinopoisk_link(message):
     m.text and 
     not m.text.strip().startswith('/plan') and
     is_kinopoisk_link(m) is not None
-), priority=0)
+))
 def save_movie_message(message):
     """Обрабатывает сообщения пользователей со ссылками на фильмы: добавляет в базу и отправляет карточку"""
     logger.info(f"[SAVE MOVIE] save_movie_message вызван для пользователя {message.from_user.id}, текст: '{message.text[:100]}'")
