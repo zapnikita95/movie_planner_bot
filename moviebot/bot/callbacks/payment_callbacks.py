@@ -2904,6 +2904,13 @@ def register_payment_callbacks(bot_instance):
                     final_price = calculate_discounted_price(user_id, 'personal', plan_type, period_type)
                 else:  # group
                     final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
+                
+                # Проверяем, есть ли примененный промокод в состоянии
+                payment_state = user_payment_state.get(user_id, {})
+                if payment_state.get('promocode_id') and payment_state.get('price'):
+                    # Используем цену с промокодом
+                    final_price = payment_state['price']
+                    logger.info(f"[PAYMENT] Используется промокод: {payment_state.get('promocode')}, цена: {final_price}₽")
             
                 if final_price <= 0:
                     bot_instance.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
@@ -3121,6 +3128,13 @@ def register_payment_callbacks(bot_instance):
                         final_price = calculate_discounted_price(user_id, 'personal', plan_type, period_type)
                     else:  # group
                         final_price = calculate_discounted_price(user_id, 'group', plan_type, period_type, group_size)
+                    
+                    # Проверяем, есть ли примененный промокод в состоянии
+                    payment_state = user_payment_state.get(user_id, {})
+                    if payment_state.get('promocode_id') and payment_state.get('price'):
+                        # Используем цену с промокодом
+                        final_price = payment_state['price']
+                        logger.info(f"[STARS] Используется промокод: {payment_state.get('promocode')}, цена: {final_price}₽")
             
                 # Проверка на пустые значения
                 if not plan_type or not period_type:
@@ -4159,6 +4173,140 @@ def register_payment_callbacks(bot_instance):
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
+            
+            if action.startswith("promo:"):
+                # Обработка нажатия на кнопку "🏷️ Промокод"
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                    user_id = call.from_user.id
+                    chat_id = call.message.chat.id
+                    
+                    # Парсим данные из callback_data: payment:promo:personal::tickets:month:payment_id:price
+                    parts = action.split(":")
+                    if len(parts) < 7:
+                        logger.error(f"[PROMO] Ошибка парсинга callback_data: {action}")
+                        bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры", show_alert=True)
+                        return
+                    
+                    sub_type = parts[1]
+                    group_size_str = parts[2] if parts[2] else ''
+                    group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                    plan_type = parts[3]
+                    period_type = parts[4]
+                    payment_id = parts[5] if len(parts) > 5 else ''
+                    original_price = float(parts[6]) if len(parts) > 6 else 0
+                    
+                    # Сохраняем состояние для обработки промокода
+                    user_promo_state[user_id] = {
+                        'chat_id': chat_id,
+                        'message_id': call.message.message_id,
+                        'sub_type': sub_type,
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'group_size': group_size,
+                        'payment_id': payment_id,
+                        'original_price': original_price
+                    }
+                    
+                    # Отправляем сообщение с запросом промокода
+                    text = "Введите промокод в ответном сообщении:"
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:back_from_promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}:{original_price}"))
+                    
+                    msg = bot_instance.send_message(chat_id, text, reply_markup=markup)
+                    logger.info(f"[PROMO] Запрос промокода: user_id={user_id}, payment_id={payment_id}")
+                    
+                except Exception as e:
+                    logger.error(f"[PROMO] Ошибка при запросе промокода: {e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка обработки", show_alert=True)
+                return
+            
+            if action.startswith("back_from_promo:"):
+                # Возврат к сообщению с кнопками оплаты
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                    user_id = call.from_user.id
+                    chat_id = call.message.chat.id
+                    
+                    # Парсим данные
+                    parts = action.split(":")
+                    sub_type = parts[1]
+                    group_size_str = parts[2] if parts[2] else ''
+                    group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
+                    plan_type = parts[3]
+                    period_type = parts[4]
+                    payment_id = parts[5] if len(parts) > 5 else ''
+                    original_price = float(parts[6]) if len(parts) > 6 else 0
+                    
+                    # Удаляем состояние промокода
+                    if user_id in user_promo_state:
+                        del user_promo_state[user_id]
+                    
+                    # Восстанавливаем сообщение с кнопками оплаты
+                    period_names = {
+                        'month': 'месяц',
+                        '3months': '3 месяца',
+                        'year': 'год',
+                        'lifetime': 'навсегда'
+                    }
+                    period_name = period_names.get(period_type, period_type)
+                    
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Персональные рекомендации',
+                        'tickets': 'Билеты в кино',
+                        'all': 'Все режимы'
+                    }
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    
+                    subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+                    
+                    text = f"💳 <b>Оплата подписки</b>\n\n"
+                    text += f"📋 <b>Выбранный тариф:</b>\n"
+                    if sub_type == 'personal':
+                        text += f"👤 Личная подписка\n"
+                    else:
+                        text += f"👥 Групповая подписка (на {group_size} участников)\n"
+                    text += f"{plan_name}\n"
+                    text += f"⏰ Период: {period_name}\n"
+                    text += f"💰 Сумма: <b>{original_price}₽</b>\n\n"
+                    text += "Нажмите кнопку ниже для перехода к оплате:"
+                    
+                    stars_amount = rubles_to_stars(original_price)
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    # Если есть payment_id, значит уже создан платеж YooKassa
+                    if payment_id and len(payment_id) > 8:
+                        # Получаем URL из платежа
+                        from moviebot.database.db_operations import get_payment_by_id
+                        payment_data = get_payment_by_id(payment_id)
+                        if payment_data and payment_data.get('yookassa_payment_id'):
+                            from yookassa import Payment
+                            from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+                            from yookassa import Configuration
+                            Configuration.account_id = YOOKASSA_SHOP_ID
+                            Configuration.secret_key = YOOKASSA_SECRET_KEY
+                            try:
+                                yookassa_payment = Payment.find_one(payment_data['yookassa_payment_id'])
+                                confirmation_url = yookassa_payment.confirmation.confirmation_url
+                                markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+                            except:
+                                pass
+                    
+                    callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
+                    markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                    callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}:{original_price}"
+                    markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
+                    
+                    try:
+                        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    except:
+                        bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    
+                except Exception as e:
+                    logger.error(f"[PROMO] Ошибка при возврате: {e}", exc_info=True)
                 return
         
         except Exception as e:

@@ -736,6 +736,21 @@ def register_stats_handlers(bot_instance):
             text += f"   • Новых за неделю: {stats.get('new_subscriptions_week', 0)}\n"
             text += f"   • Отписавшихся за неделю: {stats.get('cancelled_subscriptions_week', 0)}\n\n"
             
+            # Статистика промокодов
+            from moviebot.utils.promo import get_promocode_statistics
+            promo_stats = get_promocode_statistics()
+            text += "🏷️ <b>Промокоды:</b>\n"
+            text += f"   • Всего промокодов: {promo_stats.get('total_promocodes', 0)}\n"
+            text += f"   • Активных: {promo_stats.get('active_promocodes', 0)}\n"
+            text += f"   • Использовано: {promo_stats.get('total_uses', 0)}\n"
+            if promo_stats.get('promocodes'):
+                text += "   • Детали:\n"
+                for promo in promo_stats['promocodes'][:5]:  # Показываем первые 5
+                    discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} руб/звезд"
+                    status = "✅" if promo['is_active'] else "❌"
+                    text += f"     {status} {promo['code']} ({discount_str}) — использовано: {promo['used_count']}/{promo['total_uses']}, осталось: {promo['remaining']}\n"
+            text += "\n"
+            
             text += "🎬 <b>Контент:</b>\n"
             text += f"   • Всего фильмов: {stats.get('total_movies', 0)}\n"
             text += f"   • Всего планов: {stats.get('total_plans', 0)}\n"

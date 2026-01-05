@@ -14,7 +14,7 @@ from moviebot.states import (
     user_search_state, user_plan_state, user_ticket_state,
     user_settings_state, user_edit_state, user_view_film_state,
     user_import_state, user_clean_state, user_cancel_subscription_state,
-    user_refund_state,
+    user_refund_state, user_promo_state, user_promo_admin_state,
     bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
@@ -576,6 +576,196 @@ def main_text_handler(message):
         if text.upper().strip() == 'ДА, УДАЛИТЬ':
             from moviebot.bot.handlers.series import handle_clean_confirm_internal
             handle_clean_confirm_internal(message)
+            return
+    
+    # === user_promo_state ===
+    if user_id in user_promo_state:
+        state = user_promo_state[user_id]
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_promo_state")
+        
+        # Проверяем, что это ответ на сообщение бота
+        if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
+            promo_code = text.strip().upper()
+            
+            # Применяем промокод
+            from moviebot.utils.promo import apply_promocode
+            success, discounted_price, message_text, promocode_id = apply_promocode(
+                promo_code,
+                state['original_price'],
+                user_id,
+                chat_id
+            )
+            
+            if success:
+                # Промокод применен успешно
+                sub_type = state['sub_type']
+                plan_type = state['plan_type']
+                period_type = state['period_type']
+                group_size = state.get('group_size')
+                payment_id = state.get('payment_id', '')
+                
+                # Обновляем цену в состоянии платежа
+                from moviebot.states import user_payment_state
+                if user_id in user_payment_state:
+                    payment_state = user_payment_state[user_id]
+                    payment_state['price'] = discounted_price
+                    payment_state['promocode_id'] = promocode_id
+                    payment_state['promocode'] = promo_code
+                    payment_state['original_price'] = state['original_price']
+                
+                # Формируем сообщение с обновленной ценой
+                period_names = {
+                    'month': 'месяц',
+                    '3months': '3 месяца',
+                    'year': 'год',
+                    'lifetime': 'навсегда'
+                }
+                period_name = period_names.get(period_type, period_type)
+                
+                plan_names = {
+                    'notifications': 'Уведомления о сериалах',
+                    'recommendations': 'Персональные рекомендации',
+                    'tickets': 'Билеты в кино',
+                    'all': 'Все режимы'
+                }
+                plan_name = plan_names.get(plan_type, plan_type)
+                
+                subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
+                
+                from moviebot.bot.callbacks.payment_callbacks import rubles_to_stars
+                stars_amount = rubles_to_stars(discounted_price)
+                
+                text_result = f"✅ {message_text}\n\n"
+                text_result += f"💳 <b>Оплата подписки</b>\n\n"
+                text_result += f"📋 <b>Выбранный тариф:</b>\n"
+                if sub_type == 'personal':
+                    text_result += f"👤 Личная подписка\n"
+                else:
+                    text_result += f"👥 Групповая подписка (на {group_size} участников)\n"
+                text_result += f"{plan_name}\n"
+                text_result += f"⏰ Период: {period_name}\n"
+                text_result += f"💰 Сумма: <b>{state['original_price']}₽</b> → <b>{discounted_price}₽</b>\n\n"
+                text_result += "Нажмите кнопку ниже для перехода к оплате:"
+                
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                markup = InlineKeyboardMarkup(row_width=1)
+                
+                # Если есть payment_id, создаем новый платеж с учетом скидки
+                if payment_id and len(payment_id) > 8:
+                    # Создаем новый платеж YooKassa с учетом скидки
+                    from moviebot.bot.callbacks.payment_callbacks import calculate_discounted_price
+                    from yookassa import Configuration, Payment
+                    from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+                    import os
+                    import uuid as uuid_module
+                    
+                    Configuration.account_id = YOOKASSA_SHOP_ID.strip()
+                    Configuration.secret_key = YOOKASSA_SECRET_KEY.strip()
+                    
+                    new_payment_id = str(uuid_module.uuid4())
+                    return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
+                    
+                    description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
+                    
+                    metadata = {
+                        "user_id": str(user_id),
+                        "chat_id": str(chat_id),
+                        "subscription_type": sub_type,
+                        "plan_type": plan_type,
+                        "period_type": period_type,
+                        "payment_id": new_payment_id,
+                        "promocode": promo_code
+                    }
+                    
+                    if sub_type == 'group':
+                        metadata["group_size"] = str(group_size) if group_size else ""
+                    
+                    try:
+                        payment = Payment.create({
+                            "amount": {
+                                "value": f"{discounted_price:.2f}",
+                                "currency": "RUB"
+                            },
+                            "confirmation": {
+                                "type": "redirect",
+                                "return_url": return_url
+                            },
+                            "capture": True,
+                            "description": description,
+                            "metadata": metadata
+                        })
+                        
+                        from moviebot.database.db_operations import save_payment
+                        save_payment(
+                            payment_id=new_payment_id,
+                            yookassa_payment_id=payment.id,
+                            user_id=user_id,
+                            chat_id=chat_id,
+                            subscription_type=sub_type,
+                            plan_type=plan_type,
+                            period_type=period_type,
+                            group_size=group_size,
+                            amount=discounted_price,
+                            status='pending'
+                        )
+                        
+                        confirmation_url = payment.confirmation.confirmation_url
+                        markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
+                    except Exception as e:
+                        logger.error(f"[PROMO] Ошибка создания платежа YooKassa: {e}", exc_info=True)
+                
+                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
+                markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}:{discounted_price}"
+                markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
+                
+                bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                
+                # Удаляем состояние промокода
+                del user_promo_state[user_id]
+                return
+            else:
+                # Промокод недействителен
+                error_text = f"❌ {message_text}\n\n"
+                error_text += "Введите другой промокод или оплатите полную стоимость подписки."
+                
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:back_from_promo:{state['sub_type']}:{state.get('group_size', '')}:{state['plan_type']}:{state['period_type']}:{state.get('payment_id', '')}:{state['original_price']}"))
+                
+                bot_instance.reply_to(message, error_text, reply_markup=markup)
+                # Не удаляем состояние, чтобы пользователь мог попробовать другой промокод
+                return
+    
+    # === user_promo_admin_state ===
+    if user_id in user_promo_admin_state:
+        state = user_promo_admin_state[user_id]
+        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_promo_admin_state")
+        
+        # Проверяем, что это ответ на сообщение бота
+        if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
+            # Парсим ввод: код скидка количество
+            parts = text.strip().split()
+            if len(parts) != 3:
+                bot_instance.reply_to(message, "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\n\nНапример: NEW2026 20% 100")
+                return
+            
+            code = parts[0].strip()
+            discount_input = parts[1].strip()
+            total_uses_str = parts[2].strip()
+            
+            # Создаем промокод
+            from moviebot.utils.promo import create_promocode
+            success, result_message = create_promocode(code, discount_input, total_uses_str)
+            
+            if success:
+                bot_instance.reply_to(message, f"✅ {result_message}")
+            else:
+                bot_instance.reply_to(message, f"❌ {result_message}")
+            
+            # Удаляем состояние
+            del user_promo_admin_state[user_id]
             return
     
     # === user_cancel_subscription_state ===
