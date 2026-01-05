@@ -1834,23 +1834,37 @@ def handle_kinopoisk_link(message):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
     def add_to_database_callback(call):
         """Обработчик кнопки '➕ Добавить в базу'"""
+        logger.info("=" * 80)
+        logger.info(f"[ADD TO DATABASE] ===== START: callback_id={call.id}, callback_data={call.data}")
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot_instance.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
+            logger.info(f"[ADD TO DATABASE] answer_callback_query вызван, callback_id={call.id}")
+            
             kp_id = call.data.split(":")[1]
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
-            logger.info(f"[ADD TO DATABASE] Пользователь {user_id} хочет добавить фильм kp_id={kp_id} в базу")
+            logger.info(f"[ADD TO DATABASE] Пользователь {user_id} хочет добавить фильм kp_id={kp_id} в базу, chat_id={chat_id}")
             
             # Получаем информацию о фильме/сериале
+            # Проверяем, фильм это или сериал
             link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            logger.info(f"[ADD TO DATABASE] Вызываю extract_movie_info для link={link}")
             info = extract_movie_info(link)
             if not info:
                 logger.error(f"[ADD TO DATABASE] Не удалось получить информацию о фильме для kp_id={kp_id}")
                 bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
                 return
             
+            logger.info(f"[ADD TO DATABASE] Информация получена, title={info.get('title', 'N/A')}, is_series={info.get('is_series', False)}")
+            
+            # Если это сериал, используем правильную ссылку
+            if info.get('is_series') or info.get('type') == 'TV_SERIES':
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                logger.info(f"[ADD TO DATABASE] Это сериал, обновлена ссылка: {link}")
+            
             # Добавляем фильм в базу
+            logger.info(f"[ADD TO DATABASE] Вызываю ensure_movie_in_database: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
             film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
             if not film_id:
                 logger.error(f"[ADD TO DATABASE] Не удалось добавить фильм в базу для kp_id={kp_id}")
@@ -1877,11 +1891,13 @@ def handle_kinopoisk_link(message):
                 bot_instance.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
                 logger.info(f"[ADD TO DATABASE] Фильм уже был в базе: film_id={film_id}, title={title}")
         except Exception as e:
-            logger.error(f"[ADD TO DATABASE] Ошибка: {e}", exc_info=True)
+            logger.error(f"[ADD TO DATABASE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
+            except Exception as answer_e:
+                logger.error(f"[ADD TO DATABASE] Не удалось вызвать answer_callback_query: {answer_e}")
+        finally:
+            logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 
     # Обработчик выбора типа поиска (фильм/сериал)
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("search_type:"))
