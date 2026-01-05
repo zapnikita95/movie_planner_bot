@@ -131,9 +131,22 @@ scheduler.add_job(choose_random_participant, 'cron', day_of_week='mon-sun', hour
 scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minute=0, timezone=PLANS_TZ, id='start_dice_game')
 
 # Регистрация ВСЕХ хэндлеров (явно, в одном месте)
-logger.info("=" * 80)
-logger.info("[MAIN] ===== РЕГИСТРАЦИЯ ВСЕХ HANDLERS =====")
-bot_instance = bot  # Используем bot из bot_init
+# Оборачиваем в try-except для обработки ошибок импорта
+try:
+    logger.info("=" * 80)
+    logger.info("[MAIN] ===== РЕГИСТРАЦИЯ ВСЕХ HANDLERS =====")
+    bot_instance = bot  # Используем bot из bot_init
+except (SyntaxError, ImportError, IndentationError) as e:
+    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ИМПОРТЕ МОДУЛЕЙ: {e}")
+    logger.critical(f"[MAIN] Файл: {getattr(e, 'filename', 'неизвестно')}")
+    logger.critical(f"[MAIN] Строка: {getattr(e, 'lineno', 'неизвестно')}")
+    logger.critical(f"[MAIN] Текст: {getattr(e, 'text', 'неизвестно')}")
+    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
+    sys.exit(1)
+except Exception as e:
+    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ИНИЦИАЛИЗАЦИИ: {e}", exc_info=True)
+    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
+    sys.exit(1)
 
 # Импортируем модули с callback handlers для автоматической регистрации декораторов
 import moviebot.bot.callbacks.film_callbacks  # noqa: F401
@@ -170,9 +183,25 @@ from moviebot.bot.handlers.series import register_series_handlers
 register_series_handlers(bot_instance)
 logger.info("✅ series handlers зарегистрированы (включая search_type: callback)")
 
-from moviebot.bot.handlers.rate import register_rate_handlers
-register_rate_handlers(bot_instance)
-logger.info("✅ rate handlers зарегистрированы")
+try:
+    from moviebot.bot.handlers.rate import register_rate_handlers
+    register_rate_handlers(bot_instance)
+    logger.info("✅ rate handlers зарегистрированы")
+except (SyntaxError, IndentationError) as e:
+    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА СИНТАКСИСА В rate.py: {e}")
+    logger.critical(f"[MAIN] Файл: {getattr(e, 'filename', 'неизвестно')}")
+    logger.critical(f"[MAIN] Строка: {getattr(e, 'lineno', 'неизвестно')}")
+    logger.critical(f"[MAIN] Текст: {getattr(e, 'text', 'неизвестно')}")
+    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
+    sys.exit(1)
+except ImportError as e:
+    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ИМПОРТА rate.py: {e}")
+    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
+    sys.exit(1)
+except Exception as e:
+    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ РЕГИСТРАЦИИ rate handlers: {e}", exc_info=True)
+    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
+    sys.exit(1)
 
 from moviebot.bot.handlers.stats import register_stats_handlers
 register_stats_handlers(bot_instance)

@@ -2076,8 +2076,10 @@ def register_series_handlers(bot_param):
                 
                 for query in search_queries:
                     try:
+                        # Передаем genre_id напрямую (число), если он есть
+                        genre_param = int(query['genre_id']) if query['genre_id'] else None
                         films = search_films_by_filters(
-                            genres=[query['genre_id']] if query['genre_id'] else None,
+                            genres=genre_param,
                             film_type=query['content_type'],
                             year_from=query['year_from'],
                             year_to=query['year_to'],
@@ -2137,7 +2139,7 @@ def register_series_handlers(bot_param):
                     movie_info = extract_movie_info(link)
                     
                     if movie_info:
-                        # Используем show_film_info_with_buttons для отображения
+                        # Используем show_film_info_with_buttons для отображения (там уже есть все нужные кнопки, включая "Выбрать онлайн-кинотеатр")
                         from moviebot.bot.handlers.series import show_film_info_with_buttons
                         show_film_info_with_buttons(
                             chat_id, user_id, movie_info, link, kp_id_result,
@@ -2147,7 +2149,7 @@ def register_series_handlers(bot_param):
                         del user_random_state[user_id]
                         return
                     else:
-                        # Если не удалось получить полную информацию, показываем базовую
+                        # Если не удалось получить полную информацию, показываем базовую с кнопками
                         title = selected_film.get('nameRu') or selected_film.get('nameEn', 'Без названия')
                         year = selected_film.get('year', '—')
                         film_genres = selected_film.get('genres', [])
@@ -2341,8 +2343,9 @@ def register_series_handlers(bot_param):
                         text += f"\n<a href='{link}'>Кинопоиск</a>"
                         
                         markup = InlineKeyboardMarkup()
-                        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_movie:{kp_id_result}"))
-                        markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
+                        markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id_result}"))
+                        markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id_result}"))
+                        markup.add(InlineKeyboardButton("🔗 Перейти к карточке", callback_data=f"add_to_database:{kp_id_result}"))
                         
                         try:
                             bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
@@ -2355,8 +2358,9 @@ def register_series_handlers(bot_param):
                         # Если не удалось получить полную информацию, показываем базовую
                         text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
                         markup = InlineKeyboardMarkup()
-                        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_movie:{kp_id_result}"))
-                        markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
+                        markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id_result}"))
+                        markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id_result}"))
+                        markup.add(InlineKeyboardButton("🔗 Перейти к карточке", callback_data=f"add_to_database:{kp_id_result}"))
                         
                         try:
                             bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
@@ -2540,13 +2544,12 @@ def register_series_handlers(bot_param):
                         text += f"👥 <b>Актёры:</b> {actors[:100]}...\n"
                     text += f"\n<a href='{link}'>Кинопоиск</a>"
                     
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_movie:{kp_id_result}"))
-                    
-                    try:
-                        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                    except:
-                        bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    # Используем show_film_info_with_buttons для отображения
+                    from moviebot.bot.handlers.series import show_film_info_with_buttons
+                    show_film_info_with_buttons(
+                        chat_id, user_id, found_film, link, kp_id_result,
+                        existing=None, message_id=call.message.message_id
+                    )
                     bot_instance.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
@@ -4584,6 +4587,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Добавляем кнопку "Запланировать просмотр" только если фильм не запланирован
         if not has_plan:
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+        
+        # Добавляем кнопку "Выбрать онлайн-кинотеатр" для всех фильмов
+        markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
         
         # Добавляем кнопки "Интересные факты" и "Оценить" всегда (для фильмов в базе и не в базе)
         logger.info(f"[SHOW FILM INFO] Добавление кнопок оценок для film_id={film_id}...")

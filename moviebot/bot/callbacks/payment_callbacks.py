@@ -612,8 +612,22 @@ def register_payment_callbacks(bot_instance):
                 except:
                     pass
             
-                from moviebot.database.db_operations import get_subscription_members, get_active_group_users
-                sub = get_active_subscription(chat_id, user_id, 'group')
+                from moviebot.database.db_operations import get_subscription_members, get_active_group_users, get_user_group_subscriptions
+                
+                # Если пользователь в личном чате, получаем chat_id группы из подписки
+                if is_private:
+                    # Получаем групповые подписки пользователя
+                    group_subs = get_user_group_subscriptions(user_id)
+                    if group_subs:
+                        # Берем первую активную групповую подписку
+                        sub = group_subs[0]
+                        chat_id = sub.get('chat_id', chat_id)  # Используем chat_id из подписки
+                        logger.info(f"[PAYMENT] Пользователь в личном чате, используем chat_id из подписки: {chat_id}")
+                    else:
+                        sub = None
+                else:
+                    # Если пользователь в группе, используем chat_id группы
+                    sub = get_active_subscription(chat_id, user_id, 'group')
             
                 logger.info(f"[PAYMENT] Проверка подписки для группы {chat_id}, user_id={user_id}, sub={sub}")
             
@@ -630,10 +644,23 @@ def register_payment_callbacks(bot_instance):
                     plan_type = sub.get('plan_type', 'all')
                     period_type = sub.get('period_type', 'lifetime')
                 
+                    # Получаем информацию о группе
+                    try:
+                        chat = bot_instance.get_chat(chat_id)
+                        group_title = chat.title
+                        group_username = chat.username
+                    except Exception as chat_error:
+                        logger.error(f"[PAYMENT] Ошибка получения информации о группе: {chat_error}")
+                        group_title = "Группа"
+                        group_username = None
+                    
                     text = f"👥 <b>Групповая подписка</b>\n\n"
                     if plan_type == 'all':
                         text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
-                    text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
+                    text += f"Группа: <b>{group_title}</b>\n"
+                    if group_username:
+                        text += f"@{group_username}\n"
+                    text += f"\n💰 Сумма платежа: <b>{price}₽</b>\n"
                     if group_size:
                         text += f"👥 Количество участников: <b>{group_size}</b>\n"
                         if subscription_id and subscription_id > 0:
@@ -642,10 +669,20 @@ def register_payment_callbacks(bot_instance):
                                 # Исключаем бота из списка участников
                                 if BOT_ID and BOT_ID in members:
                                     members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
-                                text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                                members_count = len(members) if members else 0
+                                text += f"✅ Участников в подписке: <b>{members_count}</b>\n"
                             except Exception as members_error:
                                 logger.error(f"[PAYMENT] Ошибка получения участников подписки: {members_error}")
-                                text += f"✅ Участников в подписке: <b>?</b>\n"
+                                # Пытаемся получить количество из активных пользователей группы
+                                try:
+                                    active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
+                                    if active_users and BOT_ID:
+                                        active_users = {uid: uname for uid, uname in active_users.items() if uid != BOT_ID}
+                                    active_count = len(active_users) if active_users else 0
+                                    text += f"✅ Участников в подписке: <b>{active_count}</b>\n"
+                                except Exception as active_error:
+                                    logger.error(f"[PAYMENT] Ошибка получения активных пользователей: {active_error}")
+                                    text += f"✅ Участников в подписке: <b>?</b>\n"
                     if activated:
                         text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
                     if next_payment:
@@ -1681,10 +1718,20 @@ def register_payment_callbacks(bot_instance):
                                         # Исключаем бота из списка участников
                                         if BOT_ID and BOT_ID in members:
                                             members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
-                                        text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                                        members_count = len(members) if members else 0
+                                        text += f"✅ Участников в подписке: <b>{members_count}</b>\n"
                                     except Exception as members_error:
                                         logger.error(f"[PAYMENT] Ошибка получения участников подписки: {members_error}")
-                                        text += f"✅ Участников в подписке: <b>?</b>\n"
+                                        # Пытаемся получить количество из активных пользователей группы
+                                        try:
+                                            active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
+                                            if active_users and BOT_ID:
+                                                active_users = {uid: uname for uid, uname in active_users.items() if uid != BOT_ID}
+                                            active_count = len(active_users) if active_users else 0
+                                            text += f"✅ Участников в подписке: <b>{active_count}</b>\n"
+                                        except Exception as active_error:
+                                            logger.error(f"[PAYMENT] Ошибка получения активных пользователей: {active_error}")
+                                            text += f"✅ Участников в подписке: <b>?</b>\n"
                             if activated:
                                 text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
                             if next_payment:
@@ -4839,10 +4886,20 @@ def register_payment_callbacks(bot_instance):
                                             # Исключаем бота из списка участников
                                             if BOT_ID and BOT_ID in members:
                                                 members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
-                                            text += f"✅ Участников в подписке: <b>{len(members)}</b>\n"
+                                            members_count = len(members) if members else 0
+                                            text += f"✅ Участников в подписке: <b>{members_count}</b>\n"
                                         except Exception as members_error:
                                             logger.error(f"[PAYMENT] Ошибка получения участников подписки: {members_error}")
-                                            text += f"✅ Участников в подписке: <b>?</b>\n"
+                                            # Пытаемся получить количество из активных пользователей группы
+                                            try:
+                                                active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
+                                                if active_users and BOT_ID:
+                                                    active_users = {uid: uname for uid, uname in active_users.items() if uid != BOT_ID}
+                                                active_count = len(active_users) if active_users else 0
+                                                text += f"✅ Участников в подписке: <b>{active_count}</b>\n"
+                                            except Exception as active_error:
+                                                logger.error(f"[PAYMENT] Ошибка получения активных пользователей: {active_error}")
+                                                text += f"✅ Участников в подписке: <b>?</b>\n"
                                 if activated:
                                     text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
                                 if next_payment:

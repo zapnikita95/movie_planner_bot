@@ -542,11 +542,12 @@ def search_films_by_filters(genres=None, film_type='ALL', year_from=None, year_t
         'page': page
     }
     
-    if genres:
-        # Если несколько жанров, берем первый (API не поддерживает несколько одновременно)
+    if genres is not None:
+        # Если список жанров, берем первый (API не поддерживает несколько одновременно)
         if isinstance(genres, list):
-            params['genres'] = genres[0] if genres else None
+            params['genres'] = genres[0] if genres and genres[0] else None
         else:
+            # Если это число (id жанра), используем его напрямую
             params['genres'] = genres
     
     if year_from:
@@ -559,6 +560,7 @@ def search_films_by_filters(genres=None, film_type='ALL', year_from=None, year_t
         if response.status_code == 200:
             data = response.json()
             return data.get('items', [])
+        logger.warning(f"[SEARCH FILMS] API вернул статус {response.status_code}: {response.text[:200]}")
         return []
     except Exception as e:
         logger.error(f"Ошибка search_films_by_filters: {e}", exc_info=True)

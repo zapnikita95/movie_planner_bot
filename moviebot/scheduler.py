@@ -40,12 +40,13 @@ def hourly_stats():
 
 # Функции для уведомлений о планах (определяем до использования в scheduler)
 
-def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None):
+def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None, user_id=None):
     """Отправляет уведомление о запланированном просмотре"""
 
     try:
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         from moviebot.api.kinopoisk_api import get_external_sources
+        from moviebot.utils.helpers import has_notifications_access
         import json
 
         plan_type_text = "дома" if plan_type == 'home' else "в кино"
@@ -55,6 +56,50 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         text += f"<b>{title}</b>\n{link}"
         
         markup = None
+        
+        # Проверяем, является ли фильм сериалом, и получаем информацию о последней просмотренной серии
+        is_series = False
+        last_episode_info = None
+        if user_id and film_id:
+            with db_lock:
+                cursor.execute('SELECT is_series FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                movie_row = cursor.fetchone()
+                if movie_row:
+                    is_series = bool(movie_row.get('is_series') if isinstance(movie_row, dict) else movie_row[0])
+                    
+                    # Если это сериал, получаем последнюю просмотренную серию
+                    if is_series:
+                        cursor.execute('''
+                            SELECT season_number, episode_number 
+                            FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                            ORDER BY season_number DESC, episode_number DESC
+                            LIMIT 1
+                        ''', (chat_id, film_id, user_id))
+                        last_episode_row = cursor.fetchone()
+                        if last_episode_row:
+                            if isinstance(last_episode_row, dict):
+                                last_episode_info = {
+                                    'season': last_episode_row.get('season_number'),
+                                    'episode': last_episode_row.get('episode_number')
+                                }
+                            else:
+                                last_episode_info = {
+                                    'season': last_episode_row[0],
+                                    'episode': last_episode_row[1]
+                                }
+        
+        # Добавляем информацию о последней просмотренной серии, если это сериал
+        if is_series and last_episode_info:
+            text += f"\n\n📺 <b>Последняя просмотренная серия:</b> Сезон {last_episode_info['season']}, Серия {last_episode_info['episode']}"
+        
+        # Проверяем подписку и добавляем информацию, если нет доступа к уведомлениям
+        has_access = False
+        if user_id:
+            has_access = has_notifications_access(chat_id, user_id)
+        
+        if not has_access and user_id:
+            text += "\n\n💡 <b>Вы можете отслеживать просмотренные серии и подключить напоминания о выходе новых серий с тарифом 🔔 Уведомления</b>"
         
         # Для планов "дома" проверяем онлайн-кинотеатры
         if plan_type == 'home' and plan_id:
@@ -118,11 +163,20 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                         
                         # Показываем кнопки с кинотеатрами
                         if sources_dict:
-                            markup = InlineKeyboardMarkup(row_width=2)
+                            if not markup:
+                                markup = InlineKeyboardMarkup(row_width=2)
                             for platform, url in list(sources_dict.items())[:6]:
                                 markup.add(InlineKeyboardButton(platform, url=url))
                             text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
                             logger.info(f"[PLAN NOTIFICATION] Показываем кнопки с кинотеатрами для плана {plan_id}")
+        
+        # Добавляем кнопку "Перейти к подписке", если нет доступа к уведомлениям
+        if not has_access and user_id:
+            if not markup:
+                markup = InlineKeyboardMarkup()
+            # Определяем тип подписки (личная или групповая) на основе chat_id
+            subscription_type = 'personal' if chat_id > 0 else 'group'
+            markup.add(InlineKeyboardButton("🔔 Перейти к подписке", callback_data=f"payment:tariffs:{subscription_type}"))
 
         msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
 
@@ -431,7 +485,7 @@ def check_and_send_plan_notifications():
                             job_id = f'plan_reminder_{chat_id}_{plan_id}_{int(reminder_utc.timestamp())}'
                             existing_job = scheduler.get_job(job_id)
                             if not existing_job:
-                                send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                                send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
                                 logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана кино {plan_id} (фильм {title})")
                             else:
                                 logger.info(f"[PLAN CHECK] Напоминание уже запланировано для плана кино {plan_id}")
@@ -601,7 +655,7 @@ def check_and_send_plan_notifications():
                                 job_id = f'plan_reminder_{chat_id}_{plan_id}_{int(reminder_utc.timestamp())}'
                                 existing_job = scheduler.get_job(job_id)
                                 if not existing_job:
-                                    send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                                    send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
                                     logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана дома {plan_id} (фильм {title})")
                                 else:
                                     logger.info(f"[PLAN CHECK] Напоминание уже запланировано для плана дома {plan_id}")
@@ -630,7 +684,7 @@ def check_and_send_plan_notifications():
 
                                 # Отправляем уведомление сразу, так как время уже наступило
 
-                                send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id)
+                                send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
 
                                 logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
 
