@@ -10776,6 +10776,7 @@ def settings_command(message):
         markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
         markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
         markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
         sent = bot.send_message(chat_id,
             f"⚙️ <b>Настройки</b>\n\n"
@@ -21747,20 +21748,26 @@ def handle_settings_callback(call):
         
         if action == "notifications_locked":
             # Заблокированная кнопка настроек напоминаний
-            bot.answer_callback_query(
-                call.id,
-                "⏰ Настройки напоминаний. Функционал можно подключить с подпиской 🔔 Уведомления через /payment",
-                show_alert=True
-            )
+            try:
+                bot.answer_callback_query(
+                    call.id,
+                    "⏰ Настройки напоминаний доступны с подпиской 🔔 Уведомления или 📦 Все режимы. Подключите подписку через /payment",
+                    show_alert=True
+                )
+            except Exception as e:
+                logger.error(f"[SETTINGS] Ошибка при ответе на callback для notifications_locked: {e}")
             return
         
         if action == "import_locked":
             # Заблокированная кнопка импорта базы
-            bot.answer_callback_query(
-                call.id,
-                "📥 Импорт базы из Кинопоиска. Функционал можно подключить с подпиской 🎯 Рекомендации через /payment",
-                show_alert=True
-            )
+            try:
+                bot.answer_callback_query(
+                    call.id,
+                    "📥 Импорт базы из Кинопоиска доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment",
+                    show_alert=True
+                )
+            except Exception as e:
+                logger.error(f"[SETTINGS] Ошибка при ответе на callback для import_locked: {e}")
             return
         
         if action == "notifications":
@@ -21838,11 +21845,14 @@ def handle_settings_callback(call):
         
         if action == "random_events_locked":
             # Показываем сообщение о том, что раздел доступен только в групповых чатах
-            bot.answer_callback_query(
-                call.id,
-                "Раздел доступен только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
-                show_alert=True
-            )
+            try:
+                bot.answer_callback_query(
+                    call.id,
+                    "Раздел доступен только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
+                    show_alert=True
+                )
+            except Exception as e:
+                logger.error(f"[SETTINGS] Ошибка при ответе на callback для random_events_locked: {e}")
             return
         
         if action == "random_events":
@@ -22387,10 +22397,16 @@ def handle_settings_callback(call):
             else:
                 markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
             
-            markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
+            # Проверяем, является ли чат личным (случайные события доступны только в группах)
+            is_private = call.message.chat.type == 'private'
+            if is_private:
+                markup.add(InlineKeyboardButton("🔒 Случайные события", callback_data="settings:random_events_locked"))
+            else:
+                markup.add(InlineKeyboardButton("🎲 Случайные события", callback_data="settings:random_events"))
             markup.add(InlineKeyboardButton("✏️ Редактировать записи", callback_data="settings:edit"))
             markup.add(InlineKeyboardButton("🗑️ Очистка базы", callback_data="settings:clean"))
             markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             bot.edit_message_text(
                 f"⚙️ <b>Настройки</b>\n\n"
