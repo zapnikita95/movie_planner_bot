@@ -109,9 +109,9 @@ def extract_movie_info(link):
                     actors_list.append(name)
         actors = ', '.join(actors_list) if actors_list else "—"
 
-        logger.info(f"Успешно: {title} ({year}), режиссёр: {director}, актёры: {actors}")
+        logger.info(f"[EXTRACT MOVIE] Успешно: {title} ({year}), режиссёр: {director}, актёры: {actors}")
 
-        return {
+        result = {
             'kp_id': kp_id,
             'title': title,
             'year': year,
@@ -121,8 +121,10 @@ def extract_movie_info(link):
             'description': description,
             'is_series': is_series
         }
+        logger.info(f"[EXTRACT MOVIE] ===== END: успешно, kp_id={kp_id}, title={title}")
+        return result
     except Exception as e:
-        logger.error(f"Ошибка получения данных для {kp_id}: {e}")
+        logger.error(f"[EXTRACT MOVIE] ===== END: КРИТИЧЕСКАЯ ОШИБКА для link={link}: {e}", exc_info=True)
         return None
 
 
