@@ -2302,10 +2302,14 @@ def handle_kinopoisk_link(message):
             logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}, chat_id={chat_id}")
             
             # Обновляем состояние поиска
+            logger.info(f"[SEARCH TYPE] Проверка состояния: user_id={user_id}, user_search_state keys={list(user_search_state.keys())}")
             if user_id in user_search_state:
-                # Обновляем только тип поиска, сохраняя существующий message_id
+                # Обновляем только тип поиска, сохраняя существующий message_id и chat_id
+                old_state = user_search_state[user_id].copy()
                 user_search_state[user_id]['search_type'] = search_type
-                logger.info(f"[SEARCH TYPE] Обновлен search_type для существующего состояния: message_id={user_search_state[user_id].get('message_id')}")
+                # Обновляем message_id на случай, если пользователь нажал кнопку в другом сообщении
+                user_search_state[user_id]['message_id'] = call.message.message_id
+                logger.info(f"[SEARCH TYPE] ✅ Обновлен search_type для существующего состояния: {old_state} -> {user_search_state[user_id]}")
             else:
                 # Если состояния нет, создаем новое с message_id текущего сообщения
                 user_search_state[user_id] = {
@@ -2313,7 +2317,7 @@ def handle_kinopoisk_link(message):
                     'message_id': call.message.message_id,
                     'search_type': search_type
                 }
-                logger.info(f"[SEARCH TYPE] Создано новое состояние: message_id={call.message.message_id}")
+                logger.info(f"[SEARCH TYPE] ✅ Создано новое состояние: {user_search_state[user_id]}")
             
             # Обновляем кнопки, чтобы показать выбранный тип
             markup = InlineKeyboardMarkup(row_width=2)

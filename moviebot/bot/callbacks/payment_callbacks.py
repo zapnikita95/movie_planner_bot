@@ -3180,6 +3180,13 @@ def register_payment_callbacks(bot_instance):
                     payment_id = payment_data.get('payment_id', '')
                     payment_chat_id = payment_data.get('chat_id', chat_id)
                     group_chat_id = payment_data.get('group_chat_id')
+                    
+                    # Проверяем, есть ли примененный промокод в состоянии (может быть обновлен после создания payment_data)
+                    payment_state = user_payment_state.get(user_id, {})
+                    if payment_state.get('promocode_id') and payment_state.get('price'):
+                        # Используем цену с промокодом из состояния (приоритет над payment_data)
+                        final_price = payment_state['price']
+                        logger.info(f"[STARS] Используется промокод из состояния: {payment_state.get('promocode')}, цена: {final_price}₽")
                 else:
                     # Старый формат: парсим из callback_data
                     parts = action.split(":")
@@ -3211,13 +3218,6 @@ def register_payment_callbacks(bot_instance):
                         # Используем цену с промокодом
                         final_price = payment_state['price']
                         logger.info(f"[STARS] Используется промокод: {payment_state.get('promocode')}, цена: {final_price}₽")
-                else:
-                    # Если payment_data есть, но там нет цены с промокодом, проверяем состояние
-                    payment_state = user_payment_state.get(user_id, {})
-                    if payment_state.get('promocode_id') and payment_state.get('price'):
-                        # Используем цену с промокодом из состояния
-                        final_price = payment_state['price']
-                        logger.info(f"[STARS] Используется промокод из состояния: {payment_state.get('promocode')}, цена: {final_price}₽")
             
                 # Проверка на пустые значения
                 if not plan_type or not period_type:

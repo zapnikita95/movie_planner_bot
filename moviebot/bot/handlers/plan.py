@@ -922,14 +922,41 @@ def get_plan_link_internal(message, state):
     chat_id = message.chat.id
     link = None
     
-    if message.reply_to_message:
-        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.reply_to_message.text or '')
+    # Сначала проверяем текст самого сообщения (даже если есть реплай)
+    message_text = message.text or ''
+    if message_text:
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message_text)
         if link_match:
             link = link_match.group(0)
+            logger.info(f"[PLAN] Найдена ссылка в тексте сообщения: {link}")
+        
+        # Также проверяем ID в тексте сообщения
+        if not link:
+            id_match = re.search(r'\b(\d{4,})\b', message_text)
+            if id_match:
+                kp_id = id_match.group(1)
+                with db_lock:
+                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor.fetchone()
+                    if row:
+                        link = row.get('link') if isinstance(row, dict) else row[0]
+                        logger.info(f"[PLAN] Найден фильм по ID {kp_id} в тексте сообщения (из базы): {link}")
+                    else:
+                        if len(kp_id) >= 4:
+                            link = f"https://kinopoisk.ru/film/{kp_id}"
+                            logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
+    
+    # Если не нашли в тексте сообщения, проверяем реплай
+    if not link and message.reply_to_message:
+        reply_text = message.reply_to_message.text or ''
+        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', reply_text)
+        if link_match:
+            link = link_match.group(0)
+            logger.info(f"[PLAN] Найдена ссылка в реплае: {link}")
         
         # Также проверяем ID в реплае
         if not link:
-            id_match = re.search(r'\b(\d{4,})\b', message.reply_to_message.text or '')
+            id_match = re.search(r'\b(\d{4,})\b', reply_text)
             if id_match:
                 kp_id = id_match.group(1)
                 with db_lock:
@@ -942,26 +969,6 @@ def get_plan_link_internal(message, state):
                         if len(kp_id) >= 4:
                             link = f"https://kinopoisk.ru/film/{kp_id}"
                             logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
-    
-    if not link:
-        link_match = re.search(r'(https?://[\w\./-]*kinopoisk\.ru/(film|series)/\d+)', message.text or '')
-        if link_match:
-            link = link_match.group(0)
-    
-    if not link:
-        id_match = re.search(r'\b(\d{4,})\b', message.text or '')
-        if id_match:
-            kp_id = id_match.group(1)
-            with db_lock:
-                cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                row = cursor.fetchone()
-                if row:
-                    link = row.get('link') if isinstance(row, dict) else row[0]
-                    logger.info(f"[PLAN] Найден фильм по ID {kp_id} (из базы): {link}")
-                else:
-                    if len(kp_id) >= 4:
-                        link = f"https://kinopoisk.ru/film/{kp_id}"
-                        logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
         bot_instance.reply_to(message, "❌ Не найдена ссылка на фильм. Пришлите ссылку или ID фильма.")
@@ -982,11 +989,15 @@ def get_plan_day_or_date_internal(message, state):
     logger.info("=" * 80)
     logger.info(f"[PLAN DAY/DATE INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
     user_id = message.from_user.id
-    text = message.text.lower().strip() if message.text else ""
+    # Сначала берем текст из самого сообщения, если есть реплай - проверяем и его
+    text = message.text.strip() if message.text else ""
+    if not text and message.reply_to_message:
+        text = message.reply_to_message.text or ""
+    text = text.lower().strip()
     plan_type = state.get('type')
     link = state.get('link')
     
-    logger.info(f"[PLAN DAY/DATE INTERNAL] Обработка: text='{text}', plan_type={plan_type}, link={link}")
+    logger.info(f"[PLAN DAY/DATE INTERNAL] Обработка: text='{text}', plan_type={plan_type}, link={link}, reply_to_message={message.reply_to_message is not None}")
     
     if not plan_type or not link:
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Отсутствует plan_type или link: plan_type={plan_type}, link={link}")
@@ -1441,5 +1452,81 @@ def streaming_done_callback(call):
         logger.error(f"[STREAMING DONE] Ошибка: {e}", exc_info=True)
         try:
             bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+def handle_edit_plan_datetime_internal(message, state):
+    """Внутренняя функция для обработки изменения даты/времени плана"""
+    logger.info(f"[EDIT PLAN DATETIME INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        text = message.text.strip() if message.text else ""
+        plan_id = state.get('plan_id')
+        
+        logger.info(f"[EDIT PLAN DATETIME INTERNAL] Обработка: text='{text}', plan_id={plan_id}")
+        
+        if not plan_id:
+            bot_instance.reply_to(message, "❌ Ошибка: план не найден.")
+            if user_id in user_edit_state:
+                del user_edit_state[user_id]
+            return
+        
+        # Получаем информацию о плане
+        with db_lock:
+            cursor.execute('''
+                SELECT m.link, p.plan_type
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            plan_row = cursor.fetchone()
+        
+        if not plan_row:
+            bot_instance.reply_to(message, "❌ План не найден.")
+            if user_id in user_edit_state:
+                del user_edit_state[user_id]
+            return
+        
+        if isinstance(plan_row, dict):
+            link = plan_row.get('link')
+            plan_type = plan_row.get('plan_type')
+        else:
+            link = plan_row[0]
+            plan_type = plan_row[1]
+        
+        user_tz = get_user_timezone_or_default(user_id)
+        
+        # Парсим новую дату/время
+        session_dt = parse_session_time(text, user_tz)
+        
+        if session_dt:
+            # Обновляем план
+            if isinstance(session_dt, datetime):
+                session_utc = session_dt.astimezone(pytz.utc) if session_dt.tzinfo else pytz.utc.localize(session_dt)
+            else:
+                session_utc = session_dt
+            
+            with db_lock:
+                cursor.execute('UPDATE plans SET plan_datetime = %s WHERE id = %s', (session_utc, plan_id))
+                conn.commit()
+            
+            tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
+            if isinstance(session_dt, datetime):
+                date_str = session_dt.strftime('%d.%m.%Y %H:%M')
+            else:
+                date_str = str(session_dt)
+            bot_instance.reply_to(message, f"✅ Дата и время плана обновлены: {date_str} {tz_name}")
+            logger.info(f"[EDIT PLAN DATETIME INTERNAL] План {plan_id} обновлен: {date_str}")
+            if user_id in user_edit_state:
+                del user_edit_state[user_id]
+        else:
+            bot_instance.reply_to(message, "❌ Не удалось распознать дату/время. Попробуйте еще раз.")
+            logger.warning(f"[EDIT PLAN DATETIME INTERNAL] Не удалось распознать дату/время из текста: '{text}'")
+    except Exception as e:
+        logger.error(f"[EDIT PLAN DATETIME INTERNAL] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке.")
         except:
             pass
