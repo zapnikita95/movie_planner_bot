@@ -169,6 +169,96 @@ def handle_added_movie_rating_reply(message):
         logger.error(f"[ADDED MOVIE REPLY] Ошибка: {e}", exc_info=True)
 
 
+@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "🔍 Укажите запрос для поиска" in (m.reply_to_message.text or ""))
+def handle_search_reply_direct(message):
+    """ОТДЕЛЬНЫЙ handler для реплаев на сообщение поиска - ВЫСОКИЙ ПРИОРИТЕТ"""
+    logger.info(f"[SEARCH REPLY DIRECT] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        query = message.text.strip() if message.text else ""
+        
+        if not query:
+            logger.warning(f"[SEARCH REPLY DIRECT] Пустой запрос от пользователя {user_id}")
+            return
+        
+        logger.info(f"[SEARCH REPLY DIRECT] Обрабатываем поисковый запрос: '{query}' от пользователя {user_id}")
+        
+        # Получаем тип поиска из состояния или используем 'mixed'
+        from moviebot.states import user_search_state
+        search_type = 'mixed'
+        if user_id in user_search_state:
+            search_type = user_search_state[user_id].get('search_type', 'mixed')
+        else:
+            # Если состояния нет, создаем его
+            user_search_state[user_id] = {
+                'chat_id': chat_id,
+                'message_id': message.reply_to_message.message_id if message.reply_to_message else None,
+                'search_type': 'mixed'
+            }
+        
+        # Выполняем поиск
+        from moviebot.bot.handlers.series import search_films_with_type
+        try:
+            films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
+            logger.info(f"[SEARCH REPLY DIRECT] ✅ Поиск завершен: найдено {len(films) if films else 0} результатов, страниц: {total_pages}")
+        except Exception as search_e:
+            logger.error(f"[SEARCH REPLY DIRECT] ❌ Ошибка при выполнении поиска: {search_e}", exc_info=True)
+            bot_instance.reply_to(message, f"❌ Ошибка при выполнении поиска. Попробуйте еще раз.")
+            return
+        
+        if not films:
+            logger.warning(f"[SEARCH REPLY DIRECT] Ничего не найдено по запросу '{query}'")
+            bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+            return
+        
+        # Формируем сообщение с результатами
+        results_text = f"🔍 Результаты поиска '{query}':\n\n"
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for idx, film in enumerate(films[:10]):
+            try:
+                title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                year = film.get('year') or film.get('releaseYear') or 'N/A'
+                rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                
+                film_type = film.get('type', '').upper() if film.get('type') else 'FILM'
+                is_series = film_type == 'TV_SERIES'
+                
+                if kp_id:
+                    type_indicator = "📺" if is_series else "🎬"
+                    button_text = f"{type_indicator} {title} ({year})"
+                    if len(button_text) > 50:
+                        button_text = button_text[:47] + "..."
+                    results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                    if rating != 'N/A':
+                        results_text += f" ⭐ {rating}"
+                    results_text += "\n"
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+            except Exception as film_e:
+                logger.error(f"[SEARCH REPLY DIRECT] Ошибка обработки фильма {idx+1}: {film_e}", exc_info=True)
+                continue
+        
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        results_text += "\n\n🎬 - фильм\n📺 - сериал"
+        
+        if len(results_text) > 4096:
+            results_text = results_text[:4000] + "\n\n... (показаны не все результаты)"
+        
+        try:
+            sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+            logger.info(f"[SEARCH REPLY DIRECT] ✅ Результаты поиска отправлены: message_id={sent_message.message_id if sent_message else 'None'}")
+            # Удаляем состояние после успешной отправки
+            if user_id in user_search_state:
+                del user_search_state[user_id]
+        except Exception as send_e:
+            logger.error(f"[SEARCH REPLY DIRECT] ❌ Ошибка отправки результатов: {send_e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[SEARCH REPLY DIRECT] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+
+
 @bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text)
 def handle_rate_list_reply(message):
     """Обработчик реплаев на сообщения бота с оценками"""

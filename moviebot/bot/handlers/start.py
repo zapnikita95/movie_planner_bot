@@ -166,7 +166,10 @@ def register_start_handlers(bot):
                 message.text = '/random'
                 random_start(message)
             elif action == 'search':
+                # Создаем правильное сообщение с user_id пользователя
                 message.text = '/search'
+                # Исправляем from_user.id на реальный user_id пользователя
+                message.from_user.id = user_id
                 handle_search(message)
             elif action == 'schedule':
                 message.text = '/schedule'
