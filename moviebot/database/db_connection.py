@@ -473,12 +473,48 @@ def init_database():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions (user_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_active ON subscriptions (is_active, expires_at)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscription_features_subscription_id ON subscription_features (subscription_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_timestamp ON kinopoisk_api_logs (timestamp)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_user_id ON kinopoisk_api_logs (user_id)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_chat_id ON kinopoisk_api_logs (chat_id)')
-        logger.info("Индексы созданы")
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_timestamp ON kinopoisk_api_logs (timestamp)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_user_id ON kinopoisk_api_logs (user_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_kinopoisk_api_logs_chat_id ON kinopoisk_api_logs (chat_id)')
+    logger.info("Индексы созданы")
     except Exception as e:
         logger.error(f"Ошибка при создании индексов: {e}", exc_info=True)
+        conn.rollback()
+    
+    # Таблица для промокодов
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS promocodes (
+                id SERIAL PRIMARY KEY,
+                code TEXT UNIQUE NOT NULL,
+                discount_type TEXT NOT NULL CHECK(discount_type IN ('percent', 'fixed')),
+                discount_value DECIMAL(10, 2) NOT NULL,
+                total_uses INTEGER NOT NULL DEFAULT 0,
+                used_count INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                deactivated_at TIMESTAMP WITH TIME ZONE
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS promocode_uses (
+                id SERIAL PRIMARY KEY,
+                promocode_id INTEGER REFERENCES promocodes(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                payment_id INTEGER REFERENCES payments(id) ON DELETE SET NULL,
+                used_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            )
+        ''')
+        
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_promocodes_code ON promocodes (code)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_promocodes_active ON promocodes (is_active)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_promocode_uses_promocode_id ON promocode_uses (promocode_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_promocode_uses_user_id ON promocode_uses (user_id)')
+        logger.info("Таблицы промокодов созданы")
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблиц промокодов: {e}", exc_info=True)
         conn.rollback()
     
     conn.commit()

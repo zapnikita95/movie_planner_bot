@@ -51,3 +51,6 @@ rating_messages = {}  # message_id: film_id (для обработки репл�
 # Состояния игры с кубиком
 dice_game_state = {}  # chat_id: {'participants': {user_id: dice_value}, 'message_id': int, 'start_time': datetime}
 
+# Состояния возврата звезд
+user_refund_state = {}  # user_id: {'chat_id': int} - состояние ожидания ввода charge_id для возврата
+

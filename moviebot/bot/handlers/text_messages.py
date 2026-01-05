@@ -14,6 +14,7 @@ from moviebot.states import (
     user_search_state, user_plan_state, user_ticket_state,
     user_settings_state, user_edit_state, user_view_film_state,
     user_import_state, user_clean_state, user_cancel_subscription_state,
+    user_refund_state,
     bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
@@ -604,6 +605,25 @@ def main_text_handler(message):
                     else:
                         bot_instance.reply_to(message, "❌ Ошибка отмены подписки. Попробуйте позже.", parse_mode='HTML')
                         del user_cancel_subscription_state[user_id]
+                return
+    
+    # === user_refund_state ===
+    if user_id in user_refund_state:
+        state = user_refund_state.get(user_id)
+        if state:
+            state_chat_id = state.get('chat_id')
+            if state_chat_id and message.chat.id != state_chat_id:
+                return
+            
+            # Обрабатываем ввод charge_id
+            charge_id = text.strip()
+            if charge_id:
+                logger.info(f"[REFUND] Получен charge_id от пользователя {user_id}: {charge_id}")
+                # Удаляем состояние
+                del user_refund_state[user_id]
+                # Обрабатываем возврат
+                from moviebot.bot.handlers.stats import _process_refund
+                _process_refund(message, charge_id)
                 return
     
     # 2. Обработка реплаев
