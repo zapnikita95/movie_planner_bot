@@ -2286,7 +2286,9 @@ def handle_kinopoisk_link(message):
             logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 
     # Обработчик выбора типа поиска (фильм/сериал)
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("search_type:"))
+    # ВАЖНО: Этот обработчик должен быть зарегистрирован ДО других обработчиков, которые могут перехватить callback
+    logger.info(f"[REGISTER SERIES HANDLERS] Регистрация search_type_callback...")
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
     def search_type_callback(call):
         """Обработчик выбора типа поиска (фильм или сериал)"""
         logger.info("=" * 80)

@@ -19,7 +19,7 @@ def extract_kp_id_from_text(text):
     """Извлекает kp_id из текста (URL или просто число)"""
     if not text:
         return None
-    
+
     # Пытаемся найти kp_id в URL (поддерживаем разные форматы)
     # kinopoisk.ru/film/123, kinopoisk.ru/series/123, www.kinopoisk.ru/film/123 и т.д.
     patterns = [
@@ -29,14 +29,14 @@ def extract_kp_id_from_text(text):
     
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
-        if match:
+    if match:
             return match.group(1)
-    
+
     # Если это просто число, возвращаем его
     match = re.search(r'^(\d+)$', text.strip())
     if match:
         return match.group(1)
-    
+
     return None
 
 
