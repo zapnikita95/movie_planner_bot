@@ -363,15 +363,29 @@ def register_series_callbacks(bot_instance):
                     from moviebot.bot.handlers.series import ensure_movie_in_database
                     link = f"https://www.kinopoisk.ru/series/{kp_id}/"
                     
-                    logger.info(f"[SERIES SUBSCRIBE] Вызываю extract_movie_info для kp_id={kp_id}")
-                    info = extract_movie_info(link)
+                    logger.info(f"[SERIES SUBSCRIBE] Вызываю extract_movie_info для kp_id={kp_id}, link={link}")
+                    try:
+                        info = extract_movie_info(link)
+                        logger.info(f"[SERIES SUBSCRIBE] extract_movie_info завершен, info={'получен' if info else 'None'}")
+                    except Exception as api_e:
+                        logger.error(f"[SERIES SUBSCRIBE] Ошибка в extract_movie_info: {api_e}", exc_info=True)
+                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении информации о сериале", show_alert=True)
+                        return
+                    
                     if not info:
                         logger.error(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале для kp_id={kp_id}")
                         bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
                         return
                     
-                    logger.info(f"[SERIES SUBSCRIBE] Информация получена, title={info.get('title', 'N/A')}, вызываю ensure_movie_in_database")
-                    film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                    logger.info(f"[SERIES SUBSCRIBE] Информация получена, title={info.get('title', 'N/A')}, is_series={info.get('is_series', False)}")
+                    logger.info(f"[SERIES SUBSCRIBE] Вызываю ensure_movie_in_database: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
+                    try:
+                        film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                        logger.info(f"[SERIES SUBSCRIBE] ensure_movie_in_database завершен: film_id={film_id}, was_inserted={was_inserted}")
+                    except Exception as db_e:
+                        logger.error(f"[SERIES SUBSCRIBE] Ошибка в ensure_movie_in_database: {db_e}", exc_info=True)
+                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                        return
                     if not film_id:
                         logger.error(f"[SERIES SUBSCRIBE] Не удалось добавить сериал в базу для kp_id={kp_id}")
                         bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)

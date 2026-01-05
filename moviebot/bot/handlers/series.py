@@ -1850,7 +1850,14 @@ def handle_kinopoisk_link(message):
             # Проверяем, фильм это или сериал
             link = f"https://www.kinopoisk.ru/film/{kp_id}/"
             logger.info(f"[ADD TO DATABASE] Вызываю extract_movie_info для link={link}")
-            info = extract_movie_info(link)
+            try:
+                info = extract_movie_info(link)
+                logger.info(f"[ADD TO DATABASE] extract_movie_info завершен, info={'получен' if info else 'None'}")
+            except Exception as api_e:
+                logger.error(f"[ADD TO DATABASE] Ошибка в extract_movie_info: {api_e}", exc_info=True)
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении информации о фильме", show_alert=True)
+                return
+            
             if not info:
                 logger.error(f"[ADD TO DATABASE] Не удалось получить информацию о фильме для kp_id={kp_id}")
                 bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
@@ -1865,7 +1872,13 @@ def handle_kinopoisk_link(message):
             
             # Добавляем фильм в базу
             logger.info(f"[ADD TO DATABASE] Вызываю ensure_movie_in_database: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
-            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            try:
+                film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                logger.info(f"[ADD TO DATABASE] ensure_movie_in_database завершен: film_id={film_id}, was_inserted={was_inserted}")
+            except Exception as db_e:
+                logger.error(f"[ADD TO DATABASE] Ошибка в ensure_movie_in_database: {db_e}", exc_info=True)
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+                return
             if not film_id:
                 logger.error(f"[ADD TO DATABASE] Не удалось добавить фильм в базу для kp_id={kp_id}")
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
@@ -2392,8 +2405,11 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
     Добавляет фильм/сериал в базу, если его еще нет.
     Возвращает (film_id, was_inserted), где was_inserted = True если фильм был добавлен.
     """
+    logger.info(f"[ENSURE MOVIE] ===== START: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}, link={link}")
     try:
+        logger.info(f"[ENSURE MOVIE] Входим в db_lock")
         with db_lock:
+            logger.info(f"[ENSURE MOVIE] db_lock получен, проверяю существование фильма")
             # Проверяем, существует ли фильм
             cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
             row = cursor.fetchone()
@@ -2401,9 +2417,12 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
             if row:
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
                 logger.info(f"[ENSURE MOVIE] Фильм уже в базе: film_id={film_id}, kp_id={kp_id}")
+                logger.info(f"[ENSURE MOVIE] ===== END (уже в базе) =====")
                 return film_id, False
             
             # Добавляем фильм в базу
+            logger.info(f"[ENSURE MOVIE] Фильм не найден, добавляю в БД")
+            logger.info(f"[ENSURE MOVIE] Данные: title={info.get('title', 'N/A')}, year={info.get('year', 'N/A')}, is_series={info.get('is_series', False)}")
             cursor.execute('''
                 INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'link')
@@ -2413,15 +2432,24 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
                   info['director'], info['actors'], 1 if info.get('is_series') else 0, user_id))
             
             result = cursor.fetchone()
+            logger.info(f"[ENSURE MOVIE] INSERT выполнен, result={result}")
             film_id = result.get('id') if isinstance(result, dict) else result[0]
+            logger.info(f"[ENSURE MOVIE] film_id извлечен: {film_id}")
             conn.commit()
+            logger.info(f"[ENSURE MOVIE] commit выполнен")
             
             logger.info(f"[ENSURE MOVIE] Фильм добавлен в базу: film_id={film_id}, kp_id={kp_id}, title={info['title']}")
+            logger.info(f"[ENSURE MOVIE] ===== END (добавлен) =====")
             return film_id, True
             
     except Exception as e:
-        logger.error(f"[ENSURE MOVIE] Ошибка при добавлении фильма в базу: {e}", exc_info=True)
-        conn.rollback()
+        logger.error(f"[ENSURE MOVIE] КРИТИЧЕСКАЯ ОШИБКА при добавлении фильма в базу: {e}", exc_info=True)
+        try:
+            conn.rollback()
+            logger.info(f"[ENSURE MOVIE] rollback выполнен")
+        except Exception as rollback_e:
+            logger.error(f"[ENSURE MOVIE] Ошибка при rollback: {rollback_e}")
+        logger.info(f"[ENSURE MOVIE] ===== END (ошибка) =====")
         return None, False
 
 
