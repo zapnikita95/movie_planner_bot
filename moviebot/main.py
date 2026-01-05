@@ -106,10 +106,6 @@ scheduler.add_job(
 # Устанавливаем команды бота
 setup_bot_commands(bot)
 
-# Регистрируем все handlers
-from moviebot.bot.commands import register_all_handlers
-register_all_handlers(bot)
-
 # Инициализация Watchdog для мониторинга критических компонентов
 try:
     # Watchdog находится в корневой директории utils/
@@ -151,6 +147,15 @@ if USE_WEBHOOK and WEBHOOK_URL:
 else:
     # Режим polling
     logger.info("Запуск бота в режиме polling...")
+    
+    # Проверяем, не запущен ли уже polling
+    try:
+        # Очищаем webhook перед запуском polling (на всякий случай)
+        bot.remove_webhook()
+        logger.info("Webhook очищен перед запуском polling")
+    except Exception as e:
+        logger.warning(f"Не удалось очистить webhook перед polling: {e}")
+    
     try:
         bot.polling(none_stop=True, interval=0, timeout=20)
     except KeyboardInterrupt:
@@ -158,4 +163,10 @@ else:
         scheduler.shutdown()
         if watchdog:
             watchdog.stop()
+    except Exception as e:
+        logger.error(f"Ошибка при запуске polling: {e}", exc_info=True)
+        scheduler.shutdown()
+        if watchdog:
+            watchdog.stop()
+        raise
 
