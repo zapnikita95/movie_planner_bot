@@ -639,11 +639,14 @@ def show_schedule(message):
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("plan_from_added:"))
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
     def plan_from_added_callback(call):
         """Обработчик планирования из добавленного фильма"""
-        # TODO: Извлечь из moviebot.py строки 10935-10975
+        logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
+        logger.info(f"[PLAN FROM ADDED] Получен callback: call.data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
         try:
+            bot_instance.answer_callback_query(call.id)  # Отвечаем сразу, чтобы убрать "крутилку"
+            
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             kp_id = call.data.split(":")[1]
@@ -656,9 +659,11 @@ def show_schedule(message):
                 row = cursor.fetchone()
                 if row:
                     link = row.get('link') if isinstance(row, dict) else row[0]
+                    logger.info(f"[PLAN FROM ADDED] Ссылка найдена в базе: {link}")
             
             if not link:
                 link = f"https://kinopoisk.ru/film/{kp_id}/"
+                logger.info(f"[PLAN FROM ADDED] Ссылка не найдена в базе, используем стандартную: {link}")
             
             user_plan_state[user_id] = {
                 'step': 2,
@@ -672,14 +677,17 @@ def show_schedule(message):
             markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
             markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
             
-            bot_instance.answer_callback_query(call.id, "Выберите тип просмотра")
+            logger.info(f"[PLAN FROM ADDED] Отправка сообщения с выбором типа просмотра...")
             bot_instance.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
+            logger.info(f"[PLAN FROM ADDED] Сообщение отправлено успешно")
         except Exception as e:
             logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
+        finally:
+            logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
 
     # TODO: Добавить остальные callback handlers:
     # - plan_detail
