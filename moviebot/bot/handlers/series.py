@@ -2135,6 +2135,74 @@ def handle_kinopoisk_link(message):
             except:
                 pass
 
+    # Обработчик кнопки результата поиска "add_film_{kp_id}:{film_type}"
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
+    def add_film_from_search_callback(call):
+        """Обработчик кнопки результата поиска - показывает информацию о фильме"""
+        logger.info("=" * 80)
+        logger.info(f"[ADD FILM FROM SEARCH] ===== START: callback_id={call.id}, callback_data={call.data}")
+        try:
+            bot_instance.answer_callback_query(call.id, text="⏳ Загружаю информацию...")
+            logger.info(f"[ADD FILM FROM SEARCH] answer_callback_query вызван, callback_id={call.id}")
+            
+            # Парсим callback_data: add_film_{kp_id}:{film_type}
+            parts = call.data.split(":")
+            if len(parts) < 2:
+                logger.error(f"[ADD FILM FROM SEARCH] Неверный формат callback_data: {call.data}")
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
+                return
+            
+            kp_id = parts[0].replace("add_film_", "")
+            film_type = parts[1] if len(parts) > 1 else "FILM"
+            
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            logger.info(f"[ADD FILM FROM SEARCH] kp_id={kp_id}, film_type={film_type}, user_id={user_id}, chat_id={chat_id}")
+            
+            # Формируем ссылку на Кинопоиск
+            if film_type == "TV_SERIES" or film_type == "MINI_SERIES":
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            else:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            # Получаем информацию о фильме через API
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            info = extract_movie_info(link)
+            
+            if not info:
+                logger.error(f"[ADD FILM FROM SEARCH] Не удалось получить информацию о фильме: kp_id={kp_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            # Проверяем, есть ли фильм уже в базе
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+            conn = get_db_connection()
+            cursor = get_db_cursor()
+            
+            existing = None
+            with db_lock:
+                cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                row = cursor.fetchone()
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
+                    watched = row.get('watched') if isinstance(row, dict) else row[2]
+                    existing = (film_id, title, watched)
+            
+            # Показываем карточку фильма с кнопками
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+            
+            logger.info(f"[ADD FILM FROM SEARCH] ===== END: успешно показана информация о фильме {kp_id}")
+        except Exception as e:
+            logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+        finally:
+            logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
+    
     # Обработчик кнопки "➕ Добавить в базу"
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
     def add_to_database_callback(call):
