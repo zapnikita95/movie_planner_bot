@@ -860,7 +860,17 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
         text = f"🔔 <b>Новая серия вышла!</b>\n\n"
         text += f"📺 <b>{title}</b>\n"
         text += f"📅 Сезон {season}, Эпизод {episode}\n\n"
-        text += f"<a href='https://www.kinopoisk.ru/series/{kp_id}/'>Кинопоиск</a>"
+        text += f"<a href='https://www.kinopoisk.ru/series/{kp_id}/'>Кинопоиск</a>\n\n"
+        text += "🎬 <b>Смотреть онлайн:</b>\n"
+        text += f"• <a href='https://www.kinopoisk.ru/series/{kp_id}/watch/'>Кинопоиск HD</a>\n"
+        text += f"• <a href='https://okko.tv/series/{kp_id}'>Okko</a>\n"
+        text += f"• <a href='https://www.ivi.ru/watch/{kp_id}'>IVI</a>\n"
+        text += f"• <a href='https://www.megogo.ru/ru/series/{kp_id}'>Megogo</a>"
+        
+        # Создаем клавиатуру с кнопкой "Отметить просмотренные серии"
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
         
         # Отправляем уведомление всем подписанным пользователям
         with db_lock:
@@ -876,7 +886,7 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
             user_id = sub_row.get('user_id') if isinstance(sub_row, dict) else sub_row[0]
             subscribers_list.append(user_id)
             try:
-                bot.send_message(chat_id, text, parse_mode='HTML')
+                bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
                 logger.info(f"[SERIES NOTIFICATION] Уведомление отправлено для сериала {title} (kp_id={kp_id})")
             except Exception as e:
                 logger.error(f"[SERIES NOTIFICATION] Ошибка отправки уведомления: {e}")

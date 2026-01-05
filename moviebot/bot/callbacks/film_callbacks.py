@@ -291,6 +291,56 @@ def show_facts_callback(call):
             logger.error(f"[SHOW FACTS] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"), priority=1)
+def plan_type_callback_fallback(call):
+    """Запасной обработчик выбора типа плана (на случай, если основной не срабатывает)"""
+    logger.info("=" * 80)
+    logger.info(f"[PLAN TYPE FALLBACK] ===== START: callback_id={call.id}, callback_data={call.data}")
+    try:
+        bot_instance.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        plan_type = call.data.split(":")[1]  # 'home' или 'cinema'
+        
+        logger.info(f"[PLAN TYPE FALLBACK] Получен callback: user_id={user_id}, chat_id={chat_id}, plan_type={plan_type}")
+        logger.info(f"[PLAN TYPE FALLBACK] user_plan_state keys={list(user_plan_state.keys())}")
+        logger.info(f"[PLAN TYPE FALLBACK] user_id in user_plan_state = {user_id in user_plan_state}")
+        
+        if user_id not in user_plan_state:
+            logger.warning(f"[PLAN TYPE FALLBACK] Состояние не найдено для user_id={user_id}")
+            bot_instance.edit_message_text("❌ Ошибка: сессия истекла. Начните заново с /plan", chat_id, call.message.message_id)
+            return
+        
+        state = user_plan_state[user_id]
+        link = state.get('link')
+        
+        if not link:
+            logger.warning(f"[PLAN TYPE FALLBACK] Ссылка не найдена в состоянии: {state}")
+            bot_instance.edit_message_text("❌ Ошибка: не найдена ссылка на фильм. Начните заново с /plan", chat_id, call.message.message_id)
+            del user_plan_state[user_id]
+            return
+        
+        state['type'] = plan_type
+        state['step'] = 3
+        
+        try:
+            bot_instance.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
+        
+        bot_instance.send_message(chat_id, f"📅 Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\nМожно указать:\n• День недели (сегодня, завтра, понедельник и т.д.)\n• Дату (01.01, 1 января и т.д.)\n• Время (19:00, 20:30)")
+        
+        logger.info(f"[PLAN TYPE FALLBACK] Пользователь {user_id} выбрал {plan_type}, link={link}")
+    except Exception as e:
+        logger.error(f"[PLAN TYPE FALLBACK] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+    finally:
+        logger.info(f"[PLAN TYPE FALLBACK] ===== END: callback_id={call.id}")
+
+
 def register_film_callbacks(bot_instance):
     """Регистрирует callback handlers для карточки фильма (уже зарегистрированы через декораторы)"""
     # Handlers уже зарегистрированы через декораторы @bot_instance.callback_query_handler
