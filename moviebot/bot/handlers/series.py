@@ -3231,17 +3231,6 @@ def handle_kinopoisk_link(message):
     # Обработчик settings: перенесен в handlers/settings.py
 
     # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-                    bot_instance.answer_callback_query(
-                        call.id,
-                        "⏰ Настройки напоминаний доступны с подпиской 🔔 Уведомления или 📦 Все режимы. Подключите подписку через /payment",
-                        show_alert=True
-                    )
-                except Exception as e:
-                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для notifications_locked: {e}")
-                return
-            
-            if action == "import_locked":
-                # Заблокированная кнопка импорта базы
                 try:
                     bot_instance.answer_callback_query(
                         call.id,
