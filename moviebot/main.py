@@ -206,6 +206,10 @@ from moviebot.bot.callbacks.premieres_callbacks import register_premieres_callba
 register_premieres_callbacks(bot_instance)
 logger.info("✅ premieres_callbacks зарегистрированы")
 
+from moviebot.bot.callbacks.random_callbacks import register_random_callbacks
+register_random_callbacks(bot_instance)
+logger.info("✅ random_callbacks зарегистрированы")
+
 # Регистрируем главный обработчик текстовых сообщений
 from moviebot.bot.handlers.text_messages import register_text_message_handlers
 register_text_message_handlers(bot_instance)

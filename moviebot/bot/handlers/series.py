@@ -684,9 +684,58 @@ def register_series_handlers(bot_param):
         """Обертка для регистрации команды /help"""
         help_command(message)
 
+    @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_mode:"))
+    def handle_rand_mode(call):
+        """Обработчик выбора режима рандомайзера"""
+        try:
+            logger.info(f"[RANDOM CALLBACK] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            mode = call.data.split(":")[1]
+            
+            logger.info(f"[RANDOM CALLBACK] Mode: {mode}, user_id={user_id}, chat_id={chat_id}")
+            
+            # Проверяем доступ к рекомендациям для режимов, требующих подписку
+            if mode in ['kinopoisk', 'my_votes', 'group_votes']:
+                has_rec_access = has_recommendations_access(chat_id, user_id)
+                logger.info(f"[RANDOM CALLBACK] Mode {mode} requires recommendations access: {has_rec_access}")
+                if not has_rec_access:
+                    bot_instance.answer_callback_query(
+                        call.id, 
+                        "❌ Этот режим доступен только с подпиской на рекомендации. Используйте /payment для оформления подписки.", 
+                        show_alert=True
+                    )
+                    logger.warning(f"[RANDOM CALLBACK] Access denied for mode {mode}, user_id={user_id}")
+                    return
+            
+            if user_id not in user_random_state:
+                logger.error(f"[RANDOM CALLBACK] State not found for user_id={user_id}, state keys: {list(user_random_state.keys())}")
+                bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено. Начните заново с /random", show_alert=True)
+                return
+            
+            logger.info(f"[RANDOM CALLBACK] State found: {user_random_state[user_id]}")
+            
+            user_random_state[user_id]['mode'] = mode
+            user_random_state[user_id]['step'] = 'period'
+            
+            logger.info(f"[RANDOM CALLBACK] State updated: mode={mode}, step=period")
+            
+            # TODO: Реализовать логику выбора периода как в старом файле
+            # Пока просто отвечаем на callback
+            bot_instance.answer_callback_query(call.id, f"Режим '{mode}' выбран. Функция в разработке.")
+            logger.warning(f"[RANDOM CALLBACK] Mode {mode} selected but period selection not implemented yet")
+        except Exception as e:
+            logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_mode: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
     @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
     def handle_rand_mode_locked(call):
         """Обработчик заблокированных режимов рандомайзера"""
+        try:
+            logger.info(f"[RANDOM CALLBACK] Locked mode handler: data={call.data}, user_id={call.from_user.id}")
         try:
             mode = call.data.split(":")[1]  # kinopoisk, my_votes, group_votes
             user_id = call.from_user.id
@@ -1542,6 +1591,7 @@ def handle_kinopoisk_link(message):
     def handle_settings_callback(call):
         """Обработчик callback для настроек"""
         logger.info(f"[SETTINGS CALLBACK] ===== НАЧАЛО ОБРАБОТКИ =====")
+        logger.info(f"[SETTINGS CALLBACK] callback_id={call.id}, message_id={call.message.message_id if call.message else None}")
         try:
             user_id = call.from_user.id
             chat_id = call.message.chat.id
@@ -1549,6 +1599,7 @@ def handle_kinopoisk_link(message):
             is_private = call.message.chat.type == 'private'
             
             logger.info(f"[SETTINGS CALLBACK] Получен callback от {user_id}, action={action}, chat_id={chat_id}, is_private={is_private}, callback_data={call.data}")
+            logger.info(f"[SETTINGS CALLBACK] bot_instance: {bot_instance}, type: {type(bot_instance)}")
             
             # Вызываем answer_callback_query в самом начале (как в рабочей версии)
             # Но сначала обрабатываем заблокированные кнопки
