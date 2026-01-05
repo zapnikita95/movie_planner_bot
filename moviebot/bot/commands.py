@@ -53,9 +53,14 @@ def register_all_handlers(bot):
     from moviebot.bot.callbacks.premieres_callbacks import register_premieres_callbacks
     register_premieres_callbacks(bot)
     
+    # КРИТИЧЕСКИ ВАЖНО: Импортируем модуль text_messages ДО вызова register_text_message_handlers
+    # чтобы декораторы @bot_instance.message_handler выполнились при импорте
+    import moviebot.bot.handlers.text_messages  # noqa: F401 - импорт для регистрации декораторов
+    
     # Регистрируем главный обработчик текстовых сообщений
     from moviebot.bot.handlers.text_messages import register_text_message_handlers
     register_text_message_handlers(bot)
+    logger.info("✅ Обработчики текстовых сообщений зарегистрированы")
     
     # TODO: Раскомментировать по мере реализации handlers:
     # from moviebot.bot.handlers.seasons import register_seasons_handlers
