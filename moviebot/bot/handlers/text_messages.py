@@ -645,123 +645,75 @@ def main_text_handler(message):
                     bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
                     return
                 
-                logger.info(f"[SEARCH] ✅ films не пустой, начинаем формирование результатов")
-                
-                # Формируем сообщение с результатами
-                logger.info(f"[SEARCH] ===== НАЧАЛО ФОРМИРОВАНИЯ РЕЗУЛЬТАТОВ =====")
+                # Формируем сообщение с результатами (упрощенная версия, как в старом файле)
                 results_text = f"🔍 Результаты поиска '{query}':\n\n"
                 markup = InlineKeyboardMarkup(row_width=1)
                 
-                films_to_show = films[:10]  # Показываем максимум 10 результатов на странице
-                logger.info(f"[SEARCH] Будет обработано {len(films_to_show)} фильмов из {len(films)}")
-                
-                try:
-                    for idx, film in enumerate(films_to_show):
-                        logger.info(f"[SEARCH] Обработка фильма {idx+1}/{len(films_to_show)}")
-                        try:
-                            title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
-                            year = film.get('year') or film.get('releaseYear') or 'N/A'
-                            rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
-                            kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
-                            
-                            logger.info(f"[SEARCH] Фильм {idx+1}: title={title}, year={year}, kp_id={kp_id}")
-                            
-                            # Определяем тип (сериал или фильм) по полю type из API
-                            film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
-                            is_series = film_type == 'TV_SERIES'
-                            type_indicator = "📺" if is_series else "🎬"
-                            
-                            if kp_id:
-                                # Ограничиваем длину текста кнопки
-                                button_text = f"{type_indicator} {title} ({year})"
-                                if len(button_text) > 50:
-                                    button_text = button_text[:47] + "..."
-                                results_text += f"• {type_indicator} <b>{title}</b> ({year})"
-                                if rating != 'N/A':
-                                    results_text += f" ⭐ {rating}"
-                                results_text += "\n"
-                                # Сохраняем тип в callback_data для правильного формирования ссылки
-                                markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
-                                logger.info(f"[SEARCH] Фильм {idx+1} добавлен в результаты")
-                            else:
-                                logger.warning(f"[SEARCH] Фильм {idx+1} без kp_id, пропускаем")
-                        except Exception as film_e:
-                            logger.error(f"[SEARCH] Ошибка обработки фильма {idx+1}: {film_e}", exc_info=True)
-                            continue
+                for film in films[:10]:  # Показываем максимум 10 результатов на странице
+                    # Пробуем разные варианты полей для совместимости с разными версиями API
+                    title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                    year = film.get('year') or film.get('releaseYear') or 'N/A'
+                    rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                    # Пробуем разные варианты ID
+                    kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                     
-                    logger.info(f"[SEARCH] ✅ Все фильмы обработаны, результатов: {len(markup.keyboard) if markup and markup.keyboard else 0}")
-                except Exception as loop_e:
-                    logger.error(f"[SEARCH] ❌ КРИТИЧЕСКАЯ ОШИБКА в цикле обработки фильмов: {loop_e}", exc_info=True)
-                    # Пробуем отправить хотя бы часть результатов
-                    if len(results_text) > 50:
-                        results_text += "\n\n⚠️ Произошла ошибка при обработке некоторых результатов."
-                
-                logger.info(f"[SEARCH] После цикла обработки фильмов, начинаем добавлять кнопки")
+                    # Определяем тип (сериал или фильм) по полю type из API
+                    film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
+                    is_series = film_type == 'TV_SERIES'
+                    
+                    if kp_id:
+                        # Ограничиваем длину текста кнопки
+                        type_indicator = "📺" if is_series else "🎬"
+                        button_text = f"{type_indicator} {title} ({year})"
+                        if len(button_text) > 50:
+                            button_text = button_text[:47] + "..."
+                        results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                        if rating != 'N/A':
+                            results_text += f" ⭐ {rating}"
+                        results_text += "\n"
+                        # Сохраняем тип в callback_data для правильного формирования ссылки
+                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
                 
                 # Добавляем пагинацию, если нужно
-                try:
+                if total_pages > 1:
+                    pagination_row = []
+                    query_encoded = query.replace(' ', '_')
+                    pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
                     if total_pages > 1:
-                        pagination_row = []
-                        query_encoded = query.replace(' ', '_')
-                        pagination_row.append(InlineKeyboardButton(f"Страница 1/{total_pages}", callback_data="noop"))
-                        if total_pages > 1:
-                            pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
-                        markup.row(*pagination_row)
-                        logger.info(f"[SEARCH] Пагинация добавлена: {total_pages} страниц")
-                except Exception as pag_e:
-                    logger.error(f"[SEARCH] Ошибка добавления пагинации: {pag_e}", exc_info=True)
+                        pagination_row.append(InlineKeyboardButton("Далее ▶️", callback_data=f"search_{query_encoded}_2"))
+                    markup.row(*pagination_row)
                 
                 # Добавляем кнопку "Назад в меню"
-                try:
-                    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                    logger.info(f"[SEARCH] Кнопка 'Назад в меню' добавлена")
-                except Exception as btn_e:
-                    logger.error(f"[SEARCH] Ошибка добавления кнопки 'Назад в меню': {btn_e}", exc_info=True)
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                 
                 # Добавляем пояснение про эмодзи
                 results_text += "\n\n🎬 - фильм\n📺 - сериал"
                 
-                logger.info(f"[SEARCH] Текст сформирован, длина: {len(results_text)} символов, кнопок: {len(markup.keyboard) if markup and markup.keyboard else 0}")
-                
                 # Проверяем длину сообщения (лимит Telegram - 4096 символов)
                 if len(results_text) > 4096:
                     logger.warning(f"[SEARCH] Сообщение слишком длинное ({len(results_text)} символов), обрезаем")
-                    # Обрезаем текст и оставляем только первые результаты
-                    max_length = 4000  # Оставляем запас для HTML-тегов
+                    max_length = 4000
                     results_text = results_text[:max_length] + "\n\n... (показаны не все результаты)"
-                    logger.info(f"[SEARCH] Текст обрезан до {len(results_text)} символов")
                 
-                logger.info(f"[SEARCH] ===== ПЕРЕД ОТПРАВКОЙ =====")
-                logger.info(f"[SEARCH] chat_id={chat_id}, user_id={user_id}, text_length={len(results_text)}, has_markup={markup is not None}")
+                logger.info(f"[SEARCH] Отправка результатов: текст длиной {len(results_text)}, кнопок: {len(markup.keyboard) if markup and markup.keyboard else 0}")
                 
+                # Отправляем результаты (как в старом файле)
                 try:
-                    logger.info(f"[SEARCH] Вызов bot_instance.reply_to...")
                     sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
-                    logger.info(f"[SEARCH] ✅ bot_instance.reply_to завершен успешно")
                     logger.info(f"[SEARCH] ✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов, message_id={sent_message.message_id if sent_message else 'None'}")
                     # Удаляем состояние ТОЛЬКО после успешной отправки
                     if user_id in user_search_state:
                         del user_search_state[user_id]
                         logger.info(f"[SEARCH] Состояние user_search_state удалено для user_id={user_id}")
                 except Exception as e:
-                    logger.error(f"[SEARCH] ❌ КРИТИЧЕСКАЯ ОШИБКА отправки результатов поиска: {e}", exc_info=True)
-                    logger.error(f"[SEARCH] Тип ошибки: {type(e).__name__}, args: {e.args}")
-                    logger.error(f"[SEARCH] Traceback: {e.__traceback__}")
+                    logger.error(f"[SEARCH] ❌ Ошибка отправки результатов поиска: {e}", exc_info=True)
                     try:
-                        # Пробуем отправить без разметки
-                        logger.info(f"[SEARCH] Попытка отправить без разметки...")
-                        bot_instance.reply_to(message, results_text[:4000], parse_mode='HTML')
-                        logger.info(f"[SEARCH] ✅ Отправлено без разметки")
-                    except Exception as e2:
-                        logger.error(f"[SEARCH] ❌ Не удалось отправить даже без разметки: {e2}", exc_info=True)
-                        try:
-                            bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
-                        except:
-                            pass
-                    # Удаляем состояние даже при ошибке, чтобы не блокировать пользователя
+                        bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
+                    except:
+                        pass
+                    # Удаляем состояние даже при ошибке
                     if user_id in user_search_state:
                         del user_search_state[user_id]
-                        logger.info(f"[SEARCH] Состояние user_search_state удалено после ошибки для user_id={user_id}")
             else:
                 logger.warning(f"[SEARCH] Пустой запрос от пользователя {user_id}")
             return
