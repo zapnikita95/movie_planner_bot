@@ -2174,34 +2174,53 @@ def register_payment_callbacks(bot_instance):
                     # Если переход на "Все режимы", отменяем все старые подписки
                     if plan_type == 'all':
                         from moviebot.database.db_operations import cancel_subscription
+                        next_sub_id = next_sub.get('id')
+                        
+                        # Отменяем все существующие подписки (включая ту, которую обновляем, если она есть в списке)
                         for sub in existing_subs:
                             sub_id = sub.get('id')
-                            if sub_id and sub_id != next_sub.get('id'):  # Не отменяем ту, которую обновляем
+                            if sub_id:
                                 cancel_subscription(sub_id, user_id)
                                 logger.info(f"[PAYMENT] Отменена подписка {sub_id} при переходе на 'Все режимы'")
                         
-                        # Обновляем существующую подписку на "Все режимы"
+                        # Обновляем существующую подписку на "Все режимы" (если она есть)
                         all_price = SUBSCRIPTION_PRICES['personal']['all'].get(period_type, 0)
                         from moviebot.database.db_operations import update_subscription_price
                         from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-                        subscription_id = next_sub.get('id')
-                        if subscription_id:
-                            update_subscription_price(subscription_id, all_price)
+                        from datetime import datetime, timedelta
+                        
+                        if next_sub_id:
+                            # Обновляем существующую подписку
+                            update_subscription_price(next_sub_id, all_price)
                             # Обновляем plan_type и period_type
                             conn = get_db_connection()
                             cursor = get_db_cursor()
                             with db_lock:
                                 cursor.execute(
-                                    'UPDATE subscriptions SET plan_type = %s, period_type = %s WHERE id = %s',
-                                    ('all', period_type, subscription_id)
+                                    'UPDATE subscriptions SET plan_type = %s, period_type = %s, is_active = TRUE WHERE id = %s',
+                                    ('all', period_type, next_sub_id)
                                 )
                                 conn.commit()
-                            logger.info(f"[PAYMENT] Обновлена подписка {subscription_id} на 'Все режимы', цена: {all_price}₽, period_type: {period_type}")
-                        
-                        next_payment_date = next_sub.get('next_payment_date')
-                        if not next_payment_date:
-                            from datetime import datetime, timedelta
+                            logger.info(f"[PAYMENT] Обновлена подписка {next_sub_id} на 'Все режимы', цена: {all_price}₽, period_type: {period_type}")
+                            
+                            next_payment_date = next_sub.get('next_payment_date')
+                            if not next_payment_date:
+                                next_payment_date = datetime.now(pytz.UTC) + timedelta(days=30)
+                        else:
+                            # Если next_sub не найден, создаем новую подписку
+                            from moviebot.database.db_operations import create_subscription
                             next_payment_date = datetime.now(pytz.UTC) + timedelta(days=30)
+                            next_sub_id = create_subscription(
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                subscription_type='personal',
+                                plan_type='all',
+                                period_type=period_type,
+                                price=all_price,
+                                telegram_username=call.from_user.username,
+                                next_payment_date=next_payment_date
+                            )
+                            logger.info(f"[PAYMENT] Создана новая подписка {next_sub_id} 'Все режимы' с датой следующего списания {next_payment_date}")
                         
                         text = "✅ <b>Переход на подписку \"Все режимы\"</b>\n\n"
                         text += "Ваши текущие подписки отменены. Подписка \"Все режимы\" будет активирована со следующего списания.\n\n"

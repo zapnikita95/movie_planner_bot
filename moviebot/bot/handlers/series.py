@@ -2366,8 +2366,93 @@ def handle_kinopoisk_link(message):
         finally:
             logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 
-    # Обработчик search_type_callback теперь на верхнем уровне модуля (выше)
-    logger.info(f"[REGISTER SERIES HANDLERS] ✅ Обработчик search_type_callback уже зарегистрирован на верхнем уровне модуля")
+    # Обработчик выбора типа поиска (фильм/сериал) - ВЫСОКИЙ ПРИОРИТЕТ
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"), priority=1)
+    def search_type_callback(call):
+        """Обработчик выбора типа поиска (фильм или сериал)"""
+        logger.info("=" * 80)
+        logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+        logger.info(f"[SEARCH TYPE] call.data={call.data}, call.message.message_id={call.message.message_id if call.message else 'N/A'}")
+        try:
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            search_type = call.data.split(":")[1]  # 'film' или 'series'
+            
+            logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}, chat_id={chat_id}")
+            
+            # Обновляем состояние
+            if user_id in user_search_state:
+                user_search_state[user_id]['search_type'] = search_type
+                user_search_state[user_id]['message_id'] = call.message.message_id
+            else:
+                user_search_state[user_id] = {
+                    'chat_id': chat_id,
+                    'message_id': call.message.message_id,
+                    'search_type': search_type
+                }
+            logger.info(f"[SEARCH TYPE] ✅ Состояние обновлено: {user_search_state[user_id]}")
+            
+            # Обновляем сообщение с указанием выбранного типа (как в старом файле)
+            type_text = "🎬 фильмы" if search_type == 'film' else "📺 сериалы" if search_type == 'series' else "🎬📺 фильмы и сериалы"
+            
+            # Обновляем кнопки, чтобы показать выбранный тип
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            markup = InlineKeyboardMarkup(row_width=2)
+            if search_type == 'film':
+                markup.add(
+                    InlineKeyboardButton("🎬 Найти фильм ✅", callback_data="search_type:film"),
+                    InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+                )
+            else:  # series
+                markup.add(
+                    InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+                    InlineKeyboardButton("📺 Найти сериал ✅", callback_data="search_type:series")
+                )
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            # Ограничение Telegram: текст в answer_callback_query не может быть длиннее 200 символов
+            answer_text = f"Выбран поиск: {type_text}"
+            if len(answer_text) > 200:
+                answer_text = answer_text[:197] + "..."
+            bot_instance.answer_callback_query(call.id, answer_text)
+            logger.info(f"[SEARCH TYPE] answer_callback_query вызван с текстом: '{answer_text}' (длина: {len(answer_text)})")
+            
+            try:
+                bot_instance.edit_message_text(
+                    f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик",
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=markup
+                )
+                logger.info(f"[SEARCH TYPE] ✅ Сообщение обновлено успешно")
+            except Exception as edit_e:
+                logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
+                # Пробуем отправить новое сообщение
+                try:
+                    bot_instance.send_message(
+                        chat_id,
+                        f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик",
+                        reply_markup=markup
+                    )
+                    logger.info(f"[SEARCH TYPE] ✅ Новое сообщение отправлено")
+                except Exception as send_e:
+                    logger.error(f"[SEARCH TYPE] ❌ Ошибка отправки нового сообщения: {send_e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except Exception as e:
+            logger.error(f"[SEARCH TYPE] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except Exception as answer_e:
+                logger.error(f"[SEARCH TYPE] Не удалось вызвать answer_callback_query: {answer_e}")
+        finally:
+            logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
+    
+    # Логируем регистрацию обработчика
+    logger.info(f"[REGISTER SERIES HANDLERS] ✅ Обработчик search_type_callback ЗАРЕГИСТРИРОВАН с priority=1")
+    logger.info(f"[REGISTER SERIES HANDLERS] Проверка регистрации: bot_instance.callback_query_handlers count={len(bot_instance.callback_query_handlers)}")
+    # Проверяем, что обработчик действительно зарегистрирован
+    search_type_handlers = [h for h in bot_instance.callback_query_handlers if 'search_type' in str(h.filters)]
+    logger.info(f"[REGISTER SERIES HANDLERS] Найдено обработчиков search_type: {len(search_type_handlers)}")
     logger.info(f"[REGISTER SERIES HANDLERS] Все обработчики сериалов зарегистрированы (включая search_type_callback)")
     logger.info(f"[REGISTER SERIES HANDLERS] ===== END =====")
     logger.info("=" * 80)
