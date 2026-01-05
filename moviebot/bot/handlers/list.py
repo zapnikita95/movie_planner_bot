@@ -292,40 +292,19 @@ def handle_view_film_reply_internal(message, state):
         if user_id in user_view_film_state:
             del user_view_film_state[user_id]
         
-        # Извлекаем ссылку или ID из текста сообщения или реплая
-        link = None
-        kp_id = None
+        # Извлекаем ссылку или ID из текста сообщения
+        from moviebot.utils.parsing import extract_kp_id_from_text
         
-        # Сначала проверяем текст самого сообщения
-        url_pattern = r'https?://(?:www\.)?(?:kinopoisk\.ru|kino\.poisk|kinopoiskapiunofficial\.tech)/film/(\d+)'
-        match = re.search(url_pattern, text)
-        if match:
-            kp_id = match.group(1)
-            link = match.group(0)
-        else:
-            # Пробуем извлечь ID из текста (только цифры)
-            id_match = re.search(r'\b(\d{4,})\b', text)
-            if id_match:
-                kp_id = id_match.group(1)
-                link = f"https://kinopoisk.ru/film/{kp_id}/"
-        
-        # Если не нашли в тексте сообщения, проверяем текст реплая
-        if not kp_id and message.reply_to_message:
-            reply_text = message.reply_to_message.text or ""
-            match = re.search(url_pattern, reply_text)
-            if match:
-                kp_id = match.group(1)
-                link = match.group(0)
-            else:
-                # Пробуем извлечь ID из текста реплая (только цифры)
-                id_match = re.search(r'\b(\d{4,})\b', reply_text)
-            if id_match:
-                kp_id = id_match.group(1)
-                link = f"https://kinopoisk.ru/film/{kp_id}/"
-        
+        kp_id = extract_kp_id_from_text(text)
         if not kp_id:
             bot_instance.reply_to(message, "❌ Не удалось найти ссылку или ID фильма в сообщении. Попробуйте еще раз.")
             return
+        
+        # Формируем ссылку
+        if text.strip().startswith('http'):
+            link = text.strip()
+        else:
+            link = f"https://kinopoisk.ru/film/{kp_id}/"
         
         # Получаем информацию о фильме
         info = extract_movie_info(link)

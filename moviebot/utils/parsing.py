@@ -29,7 +29,7 @@ def extract_kp_id_from_text(text):
     
     for pattern in patterns:
         match = re.search(pattern, text, re.IGNORECASE)
-    if match:
+        if match:
             return match.group(1)
 
     # Если это просто число, возвращаем его

@@ -1411,11 +1411,25 @@ def handle_kinopoisk_link(message):
     """Обработчик текстовых сообщений со ссылками на Кинопоиск"""
     logger.info(f"[KINOPOISK LINK] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}")
     try:
+        from moviebot.bot.bot_init import BOT_ID
+        
         user_id = message.from_user.id
         chat_id = message.chat.id
         text = message.text.strip()
         
         logger.info(f"[KINOPOISK LINK] Текст сообщения: '{text[:100]}'")
+        
+        # Пропускаем обработку, если это реплай на сообщение бота (для таких случаев есть отдельные handlers)
+        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
+            reply_text = message.reply_to_message.text or ""
+            # Проверяем, не является ли это реплаем на конкретные промпты бота
+            if any(prompt in reply_text for prompt in [
+                "Пришлите ссылку или ID фильма в ответном сообщении",
+                "Пришлите в ответном сообщении ссылку или ID фильма",
+                "В ответном сообщении пришлите ID фильмов"
+            ]):
+                logger.info(f"[KINOPOISK LINK] Сообщение является реплаем на промпт бота, пропускаем обработку (будет обработано отдельным handler)")
+                return
         
         # Проверяем, не находится ли пользователь в состоянии планирования или просмотра фильма
         from moviebot.states import user_plan_state, user_view_film_state
