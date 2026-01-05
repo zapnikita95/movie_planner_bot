@@ -149,6 +149,11 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
     
     bot_instance.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
+    # Очищаем состояние планирования после успешного завершения
+    if user_id in user_plan_state:
+        del user_plan_state[user_id]
+        logger.info(f"[PROCESS PLAN] Состояние планирования очищено для user_id={user_id}")
+    
     return True
 
 
@@ -1302,6 +1307,10 @@ def get_plan_day_or_date_internal(message, state):
     if result == 'NEEDS_TIMEZONE':
         show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
     elif result:
+        # process_plan уже очистил состояние, но на всякий случай проверим
+        if user_id in user_plan_state:
+            del user_plan_state[user_id]
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Состояние планирования очищено для user_id={user_id}")
         if user_id in user_plan_state:
             del user_plan_state[user_id]
 
@@ -1610,6 +1619,7 @@ def handle_edit_plan_datetime_internal(message, state):
     logger.info(f"[EDIT PLAN DATETIME INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
     try:
         from moviebot.bot.bot_init import BOT_ID
+        from moviebot.states import user_edit_state
         
         user_id = message.from_user.id
         chat_id = message.chat.id

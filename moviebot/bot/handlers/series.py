@@ -1418,10 +1418,15 @@ def handle_kinopoisk_link(message):
         logger.info(f"[KINOPOISK LINK] Текст сообщения: '{text[:100]}'")
         
         # Проверяем, не находится ли пользователь в состоянии планирования или просмотра фильма
-        # Если да, то пропускаем обработку ссылки (она будет обработана соответствующим обработчиком)
         from moviebot.states import user_plan_state, user_view_film_state
-        if user_id in user_plan_state or user_id in user_view_film_state:
-            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии планирования/просмотра, пропускаем обработку ссылки")
+        if user_id in user_plan_state:
+            # Если пользователь в состоянии планирования и пришла ссылка - прерываем планирование
+            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии планирования, прерываем планирование и обрабатываем ссылку")
+            bot_instance.reply_to(message, "⚠️ Планирование прервано. Обрабатываю ссылку...")
+            del user_plan_state[user_id]
+        elif user_id in user_view_film_state:
+            # Если пользователь в состоянии просмотра фильма - пропускаем обработку ссылки
+            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии просмотра фильма, пропускаем обработку ссылки")
             return
         
         logger.info(f"[KINOPOISK LINK] Получена ссылка от {user_id}: {text[:100]}")
