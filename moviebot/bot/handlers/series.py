@@ -1248,13 +1248,17 @@ def register_series_handlers(bot_instance):
             
             # Обновляем состояние поиска
             if user_id in user_search_state:
+                # Обновляем только тип поиска, сохраняя существующий message_id
                 user_search_state[user_id]['search_type'] = search_type
+                logger.info(f"[SEARCH TYPE] Обновлен search_type для существующего состояния: message_id={user_search_state[user_id].get('message_id')}")
             else:
+                # Если состояния нет, создаем новое с message_id текущего сообщения
                 user_search_state[user_id] = {
                     'chat_id': chat_id,
                     'message_id': call.message.message_id,
                     'search_type': search_type
                 }
+                logger.info(f"[SEARCH TYPE] Создано новое состояние: message_id={call.message.message_id}")
             
             # Обновляем кнопки, чтобы показать выбранный тип
             markup = InlineKeyboardMarkup(row_width=2)
