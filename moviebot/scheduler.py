@@ -1387,3 +1387,577 @@ def process_recurring_payments():
         logger.error(f"[RECURRING PAYMENT] Ошибка обработки рекуррентных платежей: {e}", exc_info=True)
 
 
+def get_random_events_enabled(chat_id):
+    """Проверяет, включены ли случайные события для чата"""
+    with db_lock:
+        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+        row = cursor.fetchone()
+        if row:
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            return value == 'true'
+    return True  # По умолчанию включено
+
+
+def was_event_sent_today(chat_id, event_type):
+    """Проверяет, было ли отправлено событие/уведомление сегодня для данного чата"""
+    if not bot:
+        return False
+    try:
+        now = datetime.now(PLANS_TZ)
+        today = now.date()
+        with db_lock:
+            cursor.execute("""
+                SELECT id FROM event_notifications 
+                WHERE chat_id = %s AND event_type = %s AND sent_date = %s
+            """, (chat_id, event_type, today))
+            row = cursor.fetchone()
+            return row is not None
+    except Exception as e:
+        logger.error(f"[EVENT NOTIFICATIONS] Ошибка проверки события: {e}", exc_info=True)
+        return False
+
+
+def mark_event_sent(chat_id, event_type):
+    """Отмечает, что событие/уведомление было отправлено сегодня"""
+    if not bot:
+        return
+    try:
+        now = datetime.now(PLANS_TZ)
+        today = now.date()
+        with db_lock:
+            cursor.execute("""
+                INSERT INTO event_notifications (chat_id, event_type, sent_date)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, event_type, sent_date) DO NOTHING
+            """, (chat_id, event_type, today))
+            conn.commit()
+    except Exception as e:
+        logger.error(f"[EVENT NOTIFICATIONS] Ошибка сохранения события: {e}", exc_info=True)
+
+
+def check_weekend_schedule():
+    """Проверяет расписание на выходные (пт-сб-вс) и предлагает рандомный фильм, если нет планов домашнего просмотра.
+    Выполняется только в пятницу. Если нет планов вообще (ни дома, ни в кино), отправляет уведомление раз в неделю."""
+    if not bot:
+        return
+    try:
+        now = datetime.now(PLANS_TZ)
+        current_weekday = now.weekday()
+        
+        # Проверяем только в пятницу (4 = пятница)
+        if current_weekday != 4:
+            return
+        
+        # Получаем все групповые чаты
+        with db_lock:
+            cursor.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor.fetchall()
+        
+        for row in chat_rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, что это групповой чат (не личный)
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    continue  # Пропускаем личные чаты
+            except Exception as e:
+                logger.warning(f"[WEEKEND SCHEDULE] Не удалось получить информацию о чате {chat_id}: {e}")
+                continue
+            
+            # Проверяем, включены ли случайные события
+            if not get_random_events_enabled(chat_id):
+                continue
+            
+            # Проверяем, было ли уже отправлено какое-то событие/уведомление сегодня
+            if was_event_sent_today(chat_id, 'random_event') or was_event_sent_today(chat_id, 'weekend_reminder') or was_event_sent_today(chat_id, 'premiere_reminder'):
+                logger.info(f"[WEEKEND SCHEDULE] Пропуск чата {chat_id} - уже было отправлено событие сегодня")
+                continue
+            
+            # Проверяем, отключено ли это напоминание
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_weekend_films_disabled'", (chat_id,))
+            reminder_disabled_row = cursor.fetchone()
+            if reminder_disabled_row:
+                is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
+                if is_disabled == 'true':
+                    continue
+            
+            # Проверяем, есть ли планы на выходные (пт-сб-вс) для домашнего просмотра
+            friday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            sunday = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=2)
+            
+            # Проверяем планы домашнего просмотра на выходные
+            cursor.execute('''
+                SELECT COUNT(*) FROM plans
+                WHERE chat_id = %s 
+                AND plan_type = 'home'
+                AND plan_datetime >= %s 
+                AND plan_datetime <= %s
+            ''', (chat_id, friday, sunday))
+            home_plans_count = cursor.fetchone()
+            home_count = home_plans_count.get('count') if isinstance(home_plans_count, dict) else home_plans_count[0] if home_plans_count else 0
+            
+            # Проверяем планы в кино на выходные
+            cursor.execute('''
+                SELECT COUNT(*) FROM plans
+                WHERE chat_id = %s 
+                AND plan_type = 'cinema'
+                AND plan_datetime >= %s 
+                AND plan_datetime <= %s
+            ''', (chat_id, friday, sunday))
+            cinema_plans_count = cursor.fetchone()
+            cinema_count = cinema_plans_count.get('count') if isinstance(cinema_plans_count, dict) else cinema_plans_count[0] if cinema_plans_count else 0
+            
+            # Если нет планов домашнего просмотра, отправляем уведомление
+            if home_count == 0:
+                # Проверяем, когда последний раз отправляли уведомление о выходных
+                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_weekend_reminder_date'", (chat_id,))
+                last_date_row = cursor.fetchone()
+                
+                should_send = True
+                if last_date_row:
+                    last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
+                    try:
+                        last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+                        days_passed = (now.date() - last_date).days
+                        # Если нет планов вообще (ни дома, ни в кино), отправляем раз в неделю
+                        if cinema_count == 0 and days_passed < 7:
+                            should_send = False
+                    except:
+                        pass
+                
+                if should_send:
+                    try:
+                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                        markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+                        markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:weekend_films"))
+                        
+                        text = "🎬 На выходных нет запланированных фильмов для домашнего просмотра!\n\n"
+                        if cinema_count == 0:
+                            text += "Также нет планов похода в кино.\n\n"
+                        text += "Хотите выбрать какой-нибудь фильм из вашей базы?"
+                        
+                        bot.send_message(
+                            chat_id,
+                            text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                        
+                        # Отмечаем, что событие отправлено
+                        mark_event_sent(chat_id, 'weekend_reminder')
+                        
+                        # Сохраняем дату последнего уведомления
+                        cursor.execute('''
+                            INSERT INTO settings (chat_id, key, value)
+                            VALUES (%s, 'last_weekend_reminder_date', %s)
+                            ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                        ''', (chat_id, now.date().isoformat()))
+                        conn.commit()
+                        
+                        logger.info(f"[WEEKEND SCHEDULE] Отправлено уведомление о выходных для чата {chat_id}")
+                    except Exception as e:
+                        logger.error(f"[WEEKEND SCHEDULE] Ошибка при отправке уведомления: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[WEEKEND SCHEDULE] Ошибка в check_weekend_schedule: {e}", exc_info=True)
+
+
+def check_premiere_reminder():
+    """Проверяет, нет ли планов по премьерам, и отправляет напоминание.
+    Выполняется только в пятницу. Если нет планов вообще (ни дома, ни в кино), отправляет раз в неделю."""
+    if not bot:
+        return
+    try:
+        now = datetime.now(PLANS_TZ)
+        current_weekday = now.weekday()
+        
+        # Проверяем только в пятницу (4 = пятница)
+        if current_weekday != 4:
+            return
+        
+        # Получаем все групповые чаты
+        with db_lock:
+            cursor.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor.fetchall()
+        
+        for row in chat_rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, что это групповой чат (не личный)
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    continue  # Пропускаем личные чаты
+            except Exception as e:
+                logger.warning(f"[PREMIERE REMINDER] Не удалось получить информацию о чате {chat_id}: {e}")
+                continue
+            
+            # Проверяем, включены ли случайные события
+            if not get_random_events_enabled(chat_id):
+                continue
+            
+            # Проверяем, было ли уже отправлено какое-то событие/уведомление сегодня
+            if was_event_sent_today(chat_id, 'random_event') or was_event_sent_today(chat_id, 'weekend_reminder') or was_event_sent_today(chat_id, 'premiere_reminder'):
+                logger.info(f"[PREMIERE REMINDER] Пропуск чата {chat_id} - уже было отправлено событие сегодня")
+                continue
+            
+            # Проверяем, отключено ли это напоминание
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_cinema_premieres_disabled'", (chat_id,))
+            reminder_disabled_row = cursor.fetchone()
+            if reminder_disabled_row:
+                is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
+                if is_disabled == 'true':
+                    continue
+            
+            # Проверяем, когда последний раз добавляли фильм в кино (plan_type='cinema')
+            cursor.execute('''
+                SELECT MAX(plan_datetime) FROM plans
+                WHERE chat_id = %s AND plan_type = 'cinema'
+            ''', (chat_id,))
+            last_cinema_row = cursor.fetchone()
+            
+            has_recent_cinema_plan = False
+            if last_cinema_row:
+                last_cinema = last_cinema_row.get('max') if isinstance(last_cinema_row, dict) else last_cinema_row[0]
+                if last_cinema:
+                    if isinstance(last_cinema, str):
+                        last_cinema = datetime.fromisoformat(last_cinema.replace('Z', '+00:00'))
+                    if last_cinema.tzinfo is None:
+                        last_cinema = pytz.utc.localize(last_cinema)
+                    last_cinema = last_cinema.astimezone(PLANS_TZ)
+                    
+                    if (now - last_cinema).days < 14:
+                        has_recent_cinema_plan = True
+            
+            # Если давно не добавляли фильмы в кино (14+ дней), отправляем напоминание
+            if not has_recent_cinema_plan:
+                # Проверяем, когда последний раз отправляли напоминание
+                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_cinema_reminder_date'", (chat_id,))
+                last_reminder_row = cursor.fetchone()
+                
+                should_send = True
+                if last_reminder_row:
+                    last_reminder_str = last_reminder_row.get('value') if isinstance(last_reminder_row, dict) else last_reminder_row[0]
+                    try:
+                        last_reminder = datetime.strptime(last_reminder_str, '%Y-%m-%d').date()
+                        days_passed = (now.date() - last_reminder).days
+                        # Если нет планов вообще (ни дома, ни в кино), отправляем раз в неделю
+                        # Проверяем планы домашнего просмотра
+                        friday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                        sunday = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=2)
+                        cursor.execute('''
+                            SELECT COUNT(*) FROM plans
+                            WHERE chat_id = %s 
+                            AND plan_type = 'home'
+                            AND plan_datetime >= %s 
+                            AND plan_datetime <= %s
+                        ''', (chat_id, friday, sunday))
+                        home_plans_count = cursor.fetchone()
+                        home_count = home_plans_count.get('count') if isinstance(home_plans_count, dict) else home_plans_count[0] if home_plans_count else 0
+                        
+                        if home_count == 0 and days_passed < 7:
+                            should_send = False
+                    except:
+                        pass
+                
+                if should_send:
+                    try:
+                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                        from moviebot.api.kinopoisk_api import get_premieres_for_period
+                        
+                        # Получаем премьеры текущего месяца
+                        premieres = get_premieres_for_period('current_month')
+                        
+                        if premieres:
+                            text = "🎬 Вы давно ничего не добавляли к просмотру в кинотеатре! Посмотрите, что сейчас идет в кино:\n\n"
+                            
+                            # Формируем список премьер (первые 10)
+                            for i, p in enumerate(premieres[:10], 1):
+                                title = p.get('nameRu') or p.get('nameOriginal') or 'Без названия'
+                                year = p.get('year') or ''
+                                text += f"{i}. {title}"
+                                if year:
+                                    text += f" ({year})"
+                                text += "\n"
+                            
+                            if len(premieres) > 10:
+                                text += f"\n... и еще {len(premieres) - 10} премьер"
+                            
+                            text += "\n\nИспользуйте /premieres для просмотра всех премьер"
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+                            markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+                            markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:cinema_premieres"))
+                            
+                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                            
+                            # Отмечаем, что событие отправлено
+                            mark_event_sent(chat_id, 'premiere_reminder')
+                            
+                            # Сохраняем дату последнего напоминания
+                            cursor.execute('''
+                                INSERT INTO settings (chat_id, key, value)
+                                VALUES (%s, 'last_cinema_reminder_date', %s)
+                                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                            ''', (chat_id, now.date().isoformat()))
+                            conn.commit()
+                            
+                            logger.info(f"[PREMIERE REMINDER] Отправлено напоминание о премьерах для чата {chat_id}")
+                    except Exception as e:
+                        logger.error(f"[PREMIERE REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[PREMIERE REMINDER] Ошибка в check_premiere_reminder: {e}", exc_info=True)
+
+
+def choose_random_participant():
+    """Раз в две недели выбирает случайного участника для выбора фильма"""
+    if not bot:
+        return
+    try:
+        import random
+        now = datetime.now(PLANS_TZ)
+        
+        # Получаем все групповые чаты
+        with db_lock:
+            cursor.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor.fetchall()
+        
+        for row in chat_rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, что это групповой чат (не личный)
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    continue  # Пропускаем личные чаты
+            except Exception as e:
+                logger.warning(f"[RANDOM PARTICIPANT] Не удалось получить информацию о чате {chat_id}: {e}")
+                continue
+            
+            # Проверяем, включены ли случайные события
+            if not get_random_events_enabled(chat_id):
+                continue
+            
+            # Проверяем, было ли уже отправлено какое-то событие/уведомление сегодня
+            if was_event_sent_today(chat_id, 'random_event') or was_event_sent_today(chat_id, 'weekend_reminder') or was_event_sent_today(chat_id, 'premiere_reminder'):
+                logger.info(f"[RANDOM PARTICIPANT] Пропуск чата {chat_id} - уже было отправлено событие сегодня")
+                continue
+            
+            # Проверяем, когда последний раз выбирали участника
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_random_participant_date'", (chat_id,))
+            last_date_row = cursor.fetchone()
+            
+            if last_date_row:
+                last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
+                try:
+                    last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+                    days_passed = (now.date() - last_date).days
+                    if days_passed < 14:
+                        continue
+                except:
+                    pass
+            
+            # Получаем список активных участников из stats
+            cursor.execute('''
+                SELECT DISTINCT user_id, username 
+                FROM stats 
+                WHERE chat_id = %s 
+                AND timestamp >= %s
+            ''', (chat_id, (now - timedelta(days=30)).isoformat()))
+            participants = cursor.fetchall()
+            
+            if not participants:
+                continue
+            
+            # Проверяем, что прошла неделя с начала участия для всех участников
+            cursor.execute('''
+                SELECT user_id, MIN(timestamp) as first_participation
+                FROM stats
+                WHERE chat_id = %s
+                GROUP BY user_id
+            ''', (chat_id,))
+            first_participations = {row.get('user_id') if isinstance(row, dict) else row[0]: 
+                                   (row.get('first_participation') if isinstance(row, dict) else row[1])
+                                   for row in cursor.fetchall()}
+            
+            # Проверяем, что для всех участников прошла неделя
+            week_ago = now - timedelta(days=7)
+            all_participated_week_ago = True
+            for participant in participants:
+                user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+                first_participation = first_participations.get(user_id)
+                if first_participation:
+                    if isinstance(first_participation, str):
+                        first_participation = datetime.fromisoformat(first_participation.replace('Z', '+00:00'))
+                    elif isinstance(first_participation, datetime.date) and not isinstance(first_participation, datetime):
+                        first_participation = datetime.combine(first_participation, datetime.min.time())
+                        if first_participation.tzinfo is None:
+                            first_participation = PLANS_TZ.localize(first_participation)
+                    
+                    if first_participation > week_ago:
+                        all_participated_week_ago = False
+                        break
+            
+            if not all_participated_week_ago:
+                logger.info(f"[RANDOM PARTICIPANT] Пропуск чата {chat_id} - не прошла неделя с начала участия всех участников")
+                continue
+            
+            # Выбираем случайного участника
+            participant = random.choice(participants)
+            user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+            username = participant.get('username') if isinstance(participant, dict) else participant[1]
+            
+            # Формируем имя пользователя для отображения
+            if username:
+                user_name = f"@{username}"
+            else:
+                try:
+                    user_info = bot.get_chat_member(chat_id, user_id)
+                    user_name = user_info.user.first_name or "участник"
+                except:
+                    user_name = "участник"
+            
+            # Отправляем сообщение
+            try:
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+                
+                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
+                
+                bot.send_message(
+                    chat_id,
+                    text,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                
+                # Отмечаем, что событие отправлено
+                mark_event_sent(chat_id, 'random_event')
+                
+                # Сохраняем дату последнего выбора
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, 'last_random_participant_date', %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (chat_id, now.date().isoformat()))
+                conn.commit()
+                
+                logger.info(f"[RANDOM PARTICIPANT] Выбран случайный участник {user_id} для чата {chat_id}")
+            except Exception as e:
+                logger.error(f"[RANDOM PARTICIPANT] Ошибка при отправке сообщения: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[RANDOM PARTICIPANT] Ошибка в choose_random_participant: {e}", exc_info=True)
+
+
+def start_dice_game():
+    """Раз в две недели запускает игру в кубик для выбора фильма"""
+    if not bot:
+        return
+    try:
+        now = datetime.now(PLANS_TZ)
+        
+        # Получаем все групповые чаты
+        with db_lock:
+            cursor.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor.fetchall()
+        
+        for row in chat_rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            
+            # Проверяем, что это групповой чат (не личный)
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    continue  # Пропускаем личные чаты
+            except Exception as e:
+                logger.warning(f"[DICE GAME] Не удалось получить информацию о чате {chat_id}: {e}")
+                continue
+            
+            # Проверяем, включены ли случайные события
+            if not get_random_events_enabled(chat_id):
+                continue
+            
+            # Проверяем, было ли уже отправлено какое-то событие/уведомление сегодня
+            if was_event_sent_today(chat_id, 'random_event') or was_event_sent_today(chat_id, 'weekend_reminder') or was_event_sent_today(chat_id, 'premiere_reminder'):
+                logger.info(f"[DICE GAME] Пропуск чата {chat_id} - уже было отправлено событие сегодня")
+                continue
+            
+            # Проверяем, когда последний раз запускали игру
+            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_dice_game_date'", (chat_id,))
+            last_date_row = cursor.fetchone()
+            
+            if last_date_row:
+                last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
+                try:
+                    last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+                    days_passed = (now.date() - last_date).days
+                    if days_passed < 14:
+                        continue
+                except:
+                    pass
+            
+            # Получаем список активных участников
+            cursor.execute('''
+                SELECT DISTINCT user_id, username 
+                FROM stats 
+                WHERE chat_id = %s 
+                AND timestamp >= %s
+            ''', (chat_id, (now - timedelta(days=30)).isoformat()))
+            participants = cursor.fetchall()
+            
+            if len(participants) < 2:
+                continue
+            
+            # Отправляем сообщение с кнопкой
+            try:
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                from moviebot.states import dice_game_state
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
+                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+                
+                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
+                
+                msg = bot.send_message(
+                    chat_id,
+                    text,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                
+                # Сохраняем состояние игры
+                dice_game_state[chat_id] = {
+                    'participants': {},
+                    'message_id': msg.message_id,
+                    'start_time': now,
+                    'dice_messages': {}
+                }
+                
+                # Отмечаем, что событие отправлено
+                mark_event_sent(chat_id, 'random_event')
+                
+                # Сохраняем дату последнего запуска
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, 'last_dice_game_date', %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (chat_id, now.date().isoformat()))
+                conn.commit()
+                
+                logger.info(f"[DICE GAME] Запущена игра в кубик для чата {chat_id}")
+            except Exception as e:
+                logger.error(f"[DICE GAME] Ошибка при запуске игры: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[DICE GAME] Ошибка в start_dice_game: {e}", exc_info=True)
+
+

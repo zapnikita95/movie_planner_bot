@@ -2261,9 +2261,9 @@ def handle_kinopoisk_link(message):
             except:
                 pass
 
-    # Обработчик кнопки результата поиска "add_film_{kp_id}:{film_type}"
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
-    def add_film_from_search_callback(call):
+# Обработчик кнопки результата поиска "add_film_{kp_id}:{film_type}" - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
+def add_film_from_search_callback(call):
         """Обработчик кнопки результата поиска - показывает информацию о фильме"""
         logger.info("=" * 80)
         logger.info(f"[ADD FILM FROM SEARCH] ===== START: callback_id={call.id}, callback_data={call.data}")

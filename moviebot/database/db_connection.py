@@ -520,7 +520,16 @@ def init_database():
     # Таблица для администраторов
     try:
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS admins (
+            CREATE TABLE IF NOT EXISTS event_notifications (
+            id SERIAL PRIMARY KEY,
+            chat_id BIGINT NOT NULL,
+            event_type TEXT NOT NULL,  -- 'random_event', 'weekend_reminder', 'premiere_reminder'
+            sent_date DATE NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(chat_id, event_type, sent_date)
+        );
+        
+        CREATE TABLE IF NOT EXISTS admins (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT UNIQUE NOT NULL,
                 added_by BIGINT NOT NULL,
