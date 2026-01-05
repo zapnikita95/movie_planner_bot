@@ -965,6 +965,11 @@ def main_text_handler(message):
                     payment_state['promocode_id'] = promocode_id
                     payment_state['promocode'] = promo_code
                     payment_state['original_price'] = state['original_price']
+                    
+                    # Обновляем payment_data с новой ценой и payment_id (если он будет обновлен)
+                    if 'payment_data' in payment_state:
+                        payment_state['payment_data']['amount'] = discounted_price
+                        logger.info(f"[PROMO] Обновлен payment_data.amount на {discounted_price}")
                 
                 # Формируем сообщение с обновленной ценой
                 period_names = {
@@ -1065,12 +1070,46 @@ def main_text_handler(message):
                         confirmation_url = payment.confirmation.confirmation_url
                         markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", url=confirmation_url))
                         logger.info(f"[PROMO] Платеж YooKassa создан: payment_id={new_payment_id}, amount={discounted_price}")
+                        # Обновляем payment_id на новый, созданный с учетом скидки
+                        payment_id = new_payment_id
                     except Exception as e:
                         logger.error(f"[PROMO] Ошибка создания платежа YooKassa: {e}", exc_info=True)
                 
-                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
+                # Обновляем состояние платежа с новым payment_id и новой ценой
+                from moviebot.states import user_payment_state
+                if user_id in user_payment_state:
+                    payment_state = user_payment_state[user_id]
+                    payment_state['payment_id'] = payment_id
+                    payment_state['price'] = discounted_price
+                    payment_state['promocode_id'] = promocode_id
+                    payment_state['promocode'] = promo_code
+                    payment_state['original_price'] = state['original_price']
+                    
+                    # Обновляем payment_data с новым payment_id и ценой
+                    if 'payment_data' in payment_state:
+                        payment_state['payment_data']['payment_id'] = payment_id
+                        payment_state['payment_data']['amount'] = discounted_price
+                        logger.info(f"[PROMO] Обновлен payment_data: payment_id={payment_id}, amount={discounted_price}")
+                    else:
+                        # Создаем payment_data, если его нет
+                        payment_state['payment_data'] = {
+                            'payment_id': payment_id,
+                            'amount': discounted_price,
+                            'sub_type': sub_type,
+                            'plan_type': plan_type,
+                            'period_type': period_type,
+                            'group_size': group_size,
+                            'chat_id': chat_id
+                        }
+                        logger.info(f"[PROMO] Создан payment_data: payment_id={payment_id}, amount={discounted_price}")
+                    
+                    logger.info(f"[PROMO] Обновлено состояние платежа: payment_id={payment_id}, price={discounted_price}")
+                
+                # Используем новый payment_id для кнопки оплаты звездами
+                payment_id_short = payment_id[:8] if len(payment_id) > 8 else payment_id
+                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
                 markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
-                callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}:{discounted_price}"
+                callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}:{discounted_price}"
                 markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                 

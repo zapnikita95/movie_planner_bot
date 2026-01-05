@@ -3211,6 +3211,13 @@ def register_payment_callbacks(bot_instance):
                         # Используем цену с промокодом
                         final_price = payment_state['price']
                         logger.info(f"[STARS] Используется промокод: {payment_state.get('promocode')}, цена: {final_price}₽")
+                else:
+                    # Если payment_data есть, но там нет цены с промокодом, проверяем состояние
+                    payment_state = user_payment_state.get(user_id, {})
+                    if payment_state.get('promocode_id') and payment_state.get('price'):
+                        # Используем цену с промокодом из состояния
+                        final_price = payment_state['price']
+                        logger.info(f"[STARS] Используется промокод из состояния: {payment_state.get('promocode')}, цена: {final_price}₽")
             
                 # Проверка на пустые значения
                 if not plan_type or not period_type:
