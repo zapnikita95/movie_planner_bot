@@ -1,2 +1,1 @@
-web: python moviebot.py
-
+web: python -m moviebot.main

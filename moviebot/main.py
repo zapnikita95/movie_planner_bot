@@ -110,7 +110,11 @@ register_all_handlers(bot)
 
 # Инициализация Watchdog для мониторинга критических компонентов
 try:
-    from moviebot.utils.watchdog import get_watchdog
+    # Watchdog находится в корневой директории utils/
+    import sys
+    import os
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from utils.watchdog import get_watchdog
     watchdog = get_watchdog(check_interval=60)
     watchdog.register_scheduler(scheduler)
     from moviebot.database.db_connection import get_db_connection
