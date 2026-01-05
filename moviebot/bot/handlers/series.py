@@ -2531,9 +2531,16 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         InlineKeyboardButton("🗑️ Удалить", callback_data=f"remove_from_calendar:{plan_id}")
                     )
         
+        # Проверяем длину текста перед отправкой
+        logger.info(f"[SHOW FILM INFO] Текст сформирован, длина={len(text)}, message_id={message_id}")
+        if len(text) > 4096:
+            logger.warning(f"[SHOW FILM INFO] Текст слишком длинный ({len(text)} символов), обрезаю до 4096")
+            text = text[:4093] + "..."
+        
         # Отправляем или обновляем сообщение
         if message_id:
             # Обновляем существующее сообщение
+            logger.info(f"[SHOW FILM INFO] Обновление существующего сообщения message_id={message_id}")
             try:
                 if message_thread_id:
                     # Для тредов используем API напрямую
@@ -2549,8 +2556,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     }
                     if reply_markup_json:
                         params['reply_markup'] = reply_markup_json
+                    logger.info(f"[SHOW FILM INFO] Вызов api_call editMessageText для треда")
                     bot_instance.api_call('editMessageText', params)
                 else:
+                    logger.info(f"[SHOW FILM INFO] Вызов edit_message_text")
                     bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
                 logger.info(f"[SHOW FILM INFO] Сообщение обновлено: {info.get('title')}, kp_id={kp_id}, message_id={message_id}")
             except telebot.apihelper.ApiTelegramException as e:
@@ -2614,21 +2623,29 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             # Отправляем новое сообщение
             logger.info(f"[SHOW FILM INFO] Отправка нового сообщения: chat_id={chat_id}, text_length={len(text)}, has_markup={markup is not None}")
             try:
+                logger.info(f"[SHOW FILM INFO] Вызов send_message, chat_id={chat_id}, text_length={len(text)}")
                 if message_thread_id:
+                    logger.info(f"[SHOW FILM INFO] Отправка в тред message_thread_id={message_thread_id}")
                     msg = bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
                 else:
+                    logger.info(f"[SHOW FILM INFO] Отправка обычного сообщения")
                     msg = bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-                logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
+                logger.info(f"[SHOW FILM INFO] ✅ Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
             except Exception as send_e:
-                logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
+                logger.error(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА при отправке сообщения: {send_e}", exc_info=True)
+                logger.error(f"[SHOW FILM INFO] Тип ошибки: {type(send_e).__name__}, args: {send_e.args}")
                 raise  # Пробрасываем ошибку дальше
         
     except Exception as e:
-        logger.error(f"[SHOW FILM INFO] Ошибка: {e}", exc_info=True)
+        logger.error(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА в show_film_info_with_buttons: {e}", exc_info=True)
+        logger.error(f"[SHOW FILM INFO] Тип ошибки: {type(e).__name__}, args: {e.args}")
+        logger.error(f"[SHOW FILM INFO] Traceback: {e.__traceback__}")
         try:
+            logger.info(f"[SHOW FILM INFO] Попытка отправить сообщение об ошибке")
             bot_instance.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
-        except:
-            pass
+            logger.info(f"[SHOW FILM INFO] Сообщение об ошибке отправлено")
+        except Exception as send_error:
+            logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить сообщение об ошибке: {send_error}", exc_info=True)
 
 
 def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
