@@ -118,7 +118,7 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
     return total_episodes, watched_episodes
 
 
-    def seasons_command(message):
+def seasons_command(message):
         """Команда /seasons - просмотр сезонов сериалов"""
         logger.info(f"[HANDLER] /seasons вызван от {message.from_user.id}")
         username = message.from_user.username or f"user_{message.from_user.id}"
