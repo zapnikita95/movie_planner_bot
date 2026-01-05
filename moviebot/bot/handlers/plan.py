@@ -490,15 +490,6 @@ def show_schedule(message):
         show_schedule(message)
 
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
-    
-    @bot_instance.message_handler(commands=['plan'])
-    def plan_handler(message):
-        """Команда /plan - планирование просмотра"""
-        logger.info(f"[HANDLER] /plan вызван от {message.from_user.id}")
-        try:
-            username = message.from_user.username or f"user_{message.from_user.id}"
-            log_request(message.from_user.id, username, '/plan', message.chat.id)
-            logger.info(f"Команда /plan от пользователя {message.from_user.id}")
     def schedule_back_callback(call):
         """Обработчик кнопки возврата из расписания - удаляет оба сообщения с планами"""
         try:
