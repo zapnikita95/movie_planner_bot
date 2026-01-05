@@ -668,11 +668,15 @@ def register_series_handlers(bot_instance):
                     title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
                     watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
                     
+                    logger.info(f"[KINOPOISK LINK] Фильм уже в базе, вызываю show_film_info_with_buttons: film_id={film_id}, kp_id={kp_id}, chat_id={chat_id}")
                     show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched))
+                    logger.info(f"[KINOPOISK LINK] show_film_info_with_buttons завершена для kp_id={kp_id}")
                     return
             
             # НЕ в базе - показываем описание с ВСЕМИ кнопками БЕЗ добавления в базу
+            logger.info(f"[KINOPOISK LINK] Фильм НЕ в базе, вызываю show_film_info_without_adding: kp_id={kp_id}, chat_id={chat_id}")
             show_film_info_without_adding(chat_id, user_id, info, link, kp_id)
+            logger.info(f"[KINOPOISK LINK] show_film_info_without_adding завершена для kp_id={kp_id}")
             
         except Exception as e:
             logger.error(f"[KINOPOISK LINK] Ошибка обработки ссылки: {e}", exc_info=True)
@@ -1084,8 +1088,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         message_id: ID сообщения для обновления (если None - отправляет новое)
         message_thread_id: ID треда для групповых чатов
     """
-    logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}")
+    logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
     try:
+        logger.info(f"[SHOW FILM INFO] info keys: {list(info.keys()) if info else 'None'}")
         is_series = info.get('is_series', False)
         type_emoji = "📺" if is_series else "🎬"
         
@@ -1440,14 +1445,16 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
         else:
             # Отправляем новое сообщение
+            logger.info(f"[SHOW FILM INFO] Отправка нового сообщения: chat_id={chat_id}, text_length={len(text)}, has_markup={markup is not None}")
             try:
                 if message_thread_id:
-                    bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                    msg = bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
                 else:
-                    bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-                logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}")
+                    msg = bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                logger.info(f"[SHOW FILM INFO] Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
             except Exception as send_e:
                 logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
+                raise  # Пробрасываем ошибку дальше
         
     except Exception as e:
         logger.error(f"[SHOW FILM INFO] Ошибка: {e}", exc_info=True)
