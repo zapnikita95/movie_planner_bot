@@ -506,6 +506,54 @@ def show_schedule(message):
         """Обертка для регистрации команды /schedule"""
         show_schedule(message)
 
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
+    def show_film_description_callback(call):
+        """Обработчик кнопки показа описания фильма из /schedule"""
+        try:
+            bot_instance.answer_callback_query(call.id)
+            kp_id = call.data.split(":")[1]
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            logger.info(f"[SHOW FILM DESCRIPTION] Пользователь {user_id} хочет посмотреть описание фильма kp_id={kp_id}")
+            
+            # Получаем информацию о фильме
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            info = extract_movie_info(link)
+            
+            if not info:
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            # Проверяем, есть ли фильм в базе
+            with db_lock:
+                cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                row = cursor.fetchone()
+            
+            existing = None
+            if row:
+                if isinstance(row, dict):
+                    film_id = row.get('id')
+                    title = row.get('title')
+                    watched = row.get('watched')
+                else:
+                    film_id = row[0]
+                    title = row[1]
+                    watched = row[2]
+                existing = (film_id, title, watched)
+            
+            # Показываем описание фильма
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing)
+            
+        except Exception as e:
+            logger.error(f"[SHOW FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
     def schedule_back_callback(call):
         """Обработчик кнопки возврата из расписания - удаляет оба сообщения с планами"""

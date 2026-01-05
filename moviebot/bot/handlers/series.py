@@ -1319,7 +1319,7 @@ def handle_kinopoisk_link(message):
                 watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
                 
                 logger.info(f"[KINOPOISK LINK] Вызываю show_film_info_with_buttons с актуальными данными из API (обновленными в базе)")
-                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched))
+                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=None)
                 logger.info(f"[KINOPOISK LINK] show_film_info_with_buttons завершена для kp_id={kp_id}")
                 return
         
