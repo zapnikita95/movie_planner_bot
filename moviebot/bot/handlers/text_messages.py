@@ -1532,9 +1532,10 @@ def main_text_handler(message):
                 return
             
             # Обрабатываем ввод charge_id
-            charge_id = text.strip()
+            # Используем message.text напрямую, чтобы избежать обрезания длинных charge_id
+            charge_id = message.text.strip() if message.text else ""
             if charge_id:
-                logger.info(f"[REFUND] Получен charge_id от пользователя {user_id}: {charge_id}")
+                logger.info(f"[REFUND] Получен charge_id от пользователя {user_id}: {charge_id[:50]}... (длина: {len(charge_id)})")
                 # Удаляем состояние
                 del user_refund_state[user_id]
                 # Обрабатываем возврат
