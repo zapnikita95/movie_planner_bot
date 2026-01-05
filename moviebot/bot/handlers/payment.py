@@ -70,10 +70,8 @@ def register_payment_handlers(bot_instance):
         call.data == "payment:tariffs" or 
         call.data == "payment:back" or 
         call.data == "payment:back_from_promo" or
-        call.data.startswith("payment:cancel") or 
-        call.data.startswith("payment:reminder_ok") or
-        call.data.startswith("payment:modify")
-        # payment:subscribe, payment:promo, payment:back_from_promo обрабатываются в payment_callbacks.py
+        call.data.startswith("payment:reminder_ok")
+        # payment:subscribe, payment:promo, payment:back_from_promo, payment:modify, payment:cancel обрабатываются в payment_callbacks.py
     ))
     def handle_payment_menu_callback(call):
         """Обработчик callback для меню оплаты (active, tariffs, back, cancel)"""
