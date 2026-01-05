@@ -644,33 +644,43 @@ def main_text_handler(message):
                     return
                 
                 # Формируем сообщение с результатами (упрощенная версия, как в старом файле)
+                logger.info(f"[SEARCH] Начинаем формирование результатов для {len(films)} фильмов")
                 results_text = f"🔍 Результаты поиска '{query}':\n\n"
                 markup = InlineKeyboardMarkup(row_width=1)
                 
-                for film in films[:10]:  # Показываем максимум 10 результатов на странице
-                    # Пробуем разные варианты полей для совместимости с разными версиями API
-                    title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
-                    year = film.get('year') or film.get('releaseYear') or 'N/A'
-                    rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
-                    # Пробуем разные варианты ID
-                    kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
-                    
-                    # Определяем тип (сериал или фильм) по полю type из API
-                    film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
-                    is_series = film_type == 'TV_SERIES'
-                    
-                    if kp_id:
-                        # Ограничиваем длину текста кнопки
-                        type_indicator = "📺" if is_series else "🎬"
-                        button_text = f"{type_indicator} {title} ({year})"
-                        if len(button_text) > 50:
-                            button_text = button_text[:47] + "..."
-                        results_text += f"• {type_indicator} <b>{title}</b> ({year})"
-                        if rating != 'N/A':
-                            results_text += f" ⭐ {rating}"
-                        results_text += "\n"
-                        # Сохраняем тип в callback_data для правильного формирования ссылки
-                        markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+                films_to_process = films[:10]  # Показываем максимум 10 результатов на странице
+                logger.info(f"[SEARCH] Будет обработано {len(films_to_process)} фильмов")
+                
+                for idx, film in enumerate(films_to_process):
+                    try:
+                        # Пробуем разные варианты полей для совместимости с разными версиями API
+                        title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                        year = film.get('year') or film.get('releaseYear') or 'N/A'
+                        rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                        # Пробуем разные варианты ID
+                        kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                        
+                        # Определяем тип (сериал или фильм) по полю type из API
+                        film_type = film.get('type', '').upper() if film.get('type') else 'FILM'  # "FILM" или "TV_SERIES"
+                        is_series = film_type == 'TV_SERIES'
+                        
+                        if kp_id:
+                            # Ограничиваем длину текста кнопки
+                            type_indicator = "📺" if is_series else "🎬"
+                            button_text = f"{type_indicator} {title} ({year})"
+                            if len(button_text) > 50:
+                                button_text = button_text[:47] + "..."
+                            results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                            if rating != 'N/A':
+                                results_text += f" ⭐ {rating}"
+                            results_text += "\n"
+                            # Сохраняем тип в callback_data для правильного формирования ссылки
+                            markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+                    except Exception as film_e:
+                        logger.error(f"[SEARCH] Ошибка обработки фильма {idx+1}: {film_e}", exc_info=True)
+                        continue
+                
+                logger.info(f"[SEARCH] Цикл обработки фильмов завершен, кнопок: {len(markup.keyboard) if markup and markup.keyboard else 0}")
                 
                 # Добавляем пагинацию, если нужно
                 if total_pages > 1:
