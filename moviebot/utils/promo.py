@@ -208,11 +208,17 @@ def apply_promocode(code, original_amount, user_id, chat_id):
         else:
             # Фиксированная скидка
             discounted_amount = original_amount - discount_value
-            if discounted_amount < 0:
-                discounted_amount = 0
+        
+        # Гарантируем, что итоговая сумма не меньше 0
+        if discounted_amount < 0:
+            discounted_amount = 0
         
         # Округляем вниз до целого числа
         discounted_amount = float(Decimal(str(discounted_amount)).quantize(Decimal('1'), rounding=ROUND_DOWN))
+        
+        # Дополнительная проверка после округления
+        if discounted_amount < 0:
+            discounted_amount = 0
         
         # Увеличиваем счетчик использований
         with db_lock:

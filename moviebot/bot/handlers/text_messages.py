@@ -345,14 +345,47 @@ def handle_promo_reply_direct(message):
         state = user_promo_state[user_id]
         logger.info(f"[PROMO REPLY DIRECT] Состояние: {state}")
         
-        # Применяем промокод
+        # Проверяем, не был ли уже применен промокод в текущей сессии платежа
+        from moviebot.states import user_payment_state
+        if user_id in user_payment_state:
+            payment_state = user_payment_state[user_id]
+            applied_promo = payment_state.get('promocode')
+            applied_promo_id = payment_state.get('promocode_id')
+            
+            if applied_promo or applied_promo_id:
+                logger.warning(f"[PROMO REPLY DIRECT] Промокод уже применен в текущей сессии платежа: promocode={applied_promo}, promocode_id={applied_promo_id}")
+                error_text = f"❌ Промокод уже применен к этому платежу.\n\n"
+                error_text += "Вы не можете применить промокод повторно."
+                
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
+                
+                bot_instance.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
+                return
+        
+        # Применяем промокод к оригинальной цене (не к уже дисконтированной)
+        original_price = state.get('original_price')
+        if not original_price:
+            # Если original_price не сохранен, берем из payment_state
+            if user_id in user_payment_state:
+                payment_state = user_payment_state[user_id]
+                original_price = payment_state.get('original_price', state.get('original_price', 0))
+            else:
+                original_price = state.get('original_price', 0)
+        
         from moviebot.utils.promo import apply_promocode
         success, discounted_price, message_text, promocode_id = apply_promocode(
             promo_code,
-            state['original_price'],
+            original_price,
             user_id,
             chat_id
         )
+        
+        # Проверяем, что итоговая сумма не меньше 0
+        if discounted_price < 0:
+            discounted_price = 0
+            logger.warning(f"[PROMO REPLY DIRECT] Итоговая сумма после применения промокода меньше 0, установлена в 0")
         
         logger.info(f"[PROMO REPLY DIRECT] Результат применения промокода: success={success}, discounted_price={discounted_price}, message='{message_text}'")
         
@@ -1436,16 +1469,32 @@ def main_text_handler(message):
                     # Не удаляем состояние, чтобы пользователь мог попробовать другой промокод
                     return
             
-            logger.info(f"[PROMO] Применяем промокод '{promo_code}' к цене {state.get('original_price', 0)}")
+            # Применяем промокод к оригинальной цене (не к уже дисконтированной)
+            original_price = state.get('original_price')
+            if not original_price:
+                # Если original_price не сохранен, берем из payment_state
+                from moviebot.states import user_payment_state
+                if user_id in user_payment_state:
+                    payment_state = user_payment_state[user_id]
+                    original_price = payment_state.get('original_price', state.get('original_price', 0))
+                else:
+                    original_price = state.get('original_price', 0)
+            
+            logger.info(f"[PROMO] Применяем промокод '{promo_code}' к оригинальной цене {original_price}")
             
             # Применяем промокод
             from moviebot.utils.promo import apply_promocode
             success, discounted_price, message_text, promocode_id = apply_promocode(
                 promo_code,
-                state['original_price'],
+                original_price,
                 user_id,
                 chat_id
             )
+            
+            # Проверяем, что итоговая сумма не меньше 0
+            if discounted_price < 0:
+                discounted_price = 0
+                logger.warning(f"[PROMO] Итоговая сумма после применения промокода меньше 0, установлена в 0")
             
             logger.info(f"[PROMO] Результат применения промокода: success={success}, discounted_price={discounted_price}, message='{message_text}', promocode_id={promocode_id}")
             

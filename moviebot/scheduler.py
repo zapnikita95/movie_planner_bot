@@ -1370,7 +1370,14 @@ def send_successful_payment_notification(chat_id, subscription_id, subscription_
                 expires_at_local = expires_at.astimezone(PLANS_TZ) if expires_at.tzinfo else PLANS_TZ.localize(expires_at)
                 text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
             else:
-                text += f"Действует до: {expires_at}"
+                # Если expires_at - строка, пытаемся распарсить
+                try:
+                    from dateutil import parser
+                    expires_at_dt = parser.parse(str(expires_at))
+                    expires_at_local = expires_at_dt.astimezone(PLANS_TZ) if expires_at_dt.tzinfo else PLANS_TZ.localize(expires_at_dt)
+                    text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
+                except:
+                    text += f"Действует до: {expires_at}"
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))

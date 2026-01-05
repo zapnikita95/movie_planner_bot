@@ -363,6 +363,16 @@ def create_web_app(bot_instance):
                                 # Продлеваем подписку
                                 renew_subscription(subscription_id, period_type)
                                 logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
+                                
+                                # Отправляем уведомление об успешном платеже
+                                from moviebot.scheduler import send_successful_payment_notification
+                                send_successful_payment_notification(
+                                    chat_id=chat_id,
+                                    subscription_id=subscription_id,
+                                    subscription_type=subscription_type,
+                                    plan_type=plan_type,
+                                    period_type=period_type
+                                )
                             else:
                                 # Параметры не совпадают - создаем новую подписку
                                 try:
@@ -526,30 +536,23 @@ def create_web_app(bot_instance):
                     logger.info(f"[YOOKASSA CHECK] Итоговый результат: check_url={check_url}, pdf_url={pdf_url}")
                     logger.info(f"[YOOKASSA CHECK] Будет ли чек добавлен в сообщение: {'ДА' if check_url else 'НЕТ'}")
                     
-                    # Отправляем подробное уведомление пользователю
-                    try:
-                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                        
-                        # Определяем, куда отправлять сообщение
-                        target_chat_id = chat_id
-                        logger.info(f"[YOOKASSA] Подготовка отправки уведомления в chat_id={target_chat_id}, user_id={user_id}")
-                        
-                        # Формируем описание функций в зависимости от типа подписки
-                        if subscription_type == 'personal':
-                            # Определяем название тарифа
-                            plan_names = {
-                                'notifications': 'Уведомления о сериалах',
-                                'recommendations': 'Рекомендации',
-                                'tickets': 'Билеты',
-                                'all': 'Все режимы'
-                            }
-                            tariff_name = plan_names.get(plan_type, plan_type)
-                            
-                            text = "Спасибо за покупку! 🎉\n\n"
-                            text += f"Ваша новая подписка: <b>{tariff_name}</b>\n\n"
-                            text += "Вот какой функционал вам теперь доступен:\n\n"
-                            
-                            if plan_type == 'notifications':
+                    # Отправляем уведомление об успешном платеже
+                    if subscription_id:
+                        try:
+                            from moviebot.scheduler import send_successful_payment_notification
+                            send_successful_payment_notification(
+                                chat_id=chat_id,
+                                subscription_id=subscription_id,
+                                subscription_type=subscription_type,
+                                plan_type=plan_type,
+                                period_type=period_type
+                            )
+                            logger.info(f"[YOOKASSA] Уведомление об успешном платеже отправлено для подписки {subscription_id}")
+                        except Exception as notify_error:
+                            logger.error(f"[YOOKASSA] Ошибка отправки уведомления об успешном платеже: {notify_error}", exc_info=True)
+                    
+                    # Старый блок отправки подробного уведомления удален - теперь используется send_successful_payment_notification
+                elif payment_status == 'succeeded' and db_status == 'succeeded':
                                 text += "🔔 <b>Уведомления о сериалах:</b>\n"
                                 text += "• Автоматические уведомления о выходе новых серий\n"
                                 text += "• Настройка времени уведомлений (будни/выходные)\n"

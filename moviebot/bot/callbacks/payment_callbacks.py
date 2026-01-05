@@ -193,6 +193,122 @@ def register_payment_callbacks(bot_instance):
                 except Exception as e:
                     logger.error(f"[PAYMENT REMINDER] Ошибка обработки подтверждения: {e}")
                 return
+            
+            if action.startswith("retry_payment:"):
+                # Повторная попытка провести платеж
+                try:
+                    subscription_id = int(action.split(":")[1])
+                    bot_instance.answer_callback_query(call.id, "⏳ Обработка платежа...")
+                    
+                    # Получаем информацию о подписке
+                    from moviebot.database.db_operations import get_subscription_by_id
+                    sub = get_subscription_by_id(subscription_id)
+                    
+                    if not sub:
+                        bot_instance.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
+                        return
+                    
+                    # Проверяем, что подписка принадлежит пользователю
+                    if sub.get('user_id') != user_id:
+                        bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа к этой подписке", show_alert=True)
+                        return
+                    
+                    payment_method_id = sub.get('payment_method_id')
+                    if not payment_method_id:
+                        bot_instance.answer_callback_query(call.id, "❌ Сохраненный способ оплаты не найден", show_alert=True)
+                        return
+                    
+                    # Получаем параметры подписки
+                    subscription_type = sub.get('subscription_type')
+                    plan_type = sub.get('plan_type')
+                    period_type = sub.get('period_type')
+                    price = float(sub.get('price', 0))
+                    chat_id_sub = sub.get('chat_id')
+                    telegram_username = sub.get('telegram_username')
+                    group_username = sub.get('group_username')
+                    group_size = sub.get('group_size')
+                    
+                    # Создаем безакцептный платеж
+                    from moviebot.api.yookassa_api import create_recurring_payment
+                    import uuid as uuid_module
+                    
+                    payment = create_recurring_payment(
+                        user_id=user_id,
+                        chat_id=chat_id_sub,
+                        subscription_type=subscription_type,
+                        plan_type=plan_type,
+                        period_type=period_type,
+                        amount=price,
+                        payment_method_id=payment_method_id,
+                        group_size=group_size,
+                        telegram_username=telegram_username,
+                        group_username=group_username
+                    )
+                    
+                    if not payment:
+                        bot_instance.answer_callback_query(call.id, "❌ Не удалось создать платеж", show_alert=True)
+                        return
+                    
+                    # Сохраняем платеж в БД
+                    payment_id = str(uuid_module.uuid4())
+                    from moviebot.database.db_operations import save_payment, update_payment_status, renew_subscription
+                    save_payment(
+                        payment_id=payment_id,
+                        yookassa_payment_id=payment.id,
+                        user_id=user_id,
+                        chat_id=chat_id_sub,
+                        subscription_type=subscription_type,
+                        plan_type=plan_type,
+                        period_type=period_type,
+                        group_size=group_size,
+                        amount=price,
+                        status=payment.status
+                    )
+                    
+                    # Если платеж успешен, продлеваем подписку и отправляем уведомление
+                    if payment.status == 'succeeded':
+                        renew_subscription(subscription_id, period_type)
+                        update_payment_status(payment_id, 'succeeded', subscription_id)
+                        
+                        # Отправляем уведомление об успешном платеже
+                        from moviebot.scheduler import send_successful_payment_notification
+                        send_successful_payment_notification(
+                            chat_id=chat_id_sub,
+                            subscription_id=subscription_id,
+                            subscription_type=subscription_type,
+                            plan_type=plan_type,
+                            period_type=period_type
+                        )
+                        
+                        # Удаляем кнопки из сообщения
+                        try:
+                            bot_instance.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                        except:
+                            pass
+                        
+                        bot_instance.answer_callback_query(call.id, "✅ Платеж успешно проведен!")
+                        logger.info(f"[RETRY PAYMENT] Платеж успешно проведен для подписки {subscription_id}")
+                    else:
+                        bot_instance.answer_callback_query(call.id, f"❌ Платеж не прошел. Статус: {payment.status}", show_alert=True)
+                        logger.warning(f"[RETRY PAYMENT] Платеж {payment.id} не успешен, статус: {payment.status}")
+                    
+                except Exception as e:
+                    logger.error(f"[RETRY PAYMENT] Ошибка обработки повторной попытки платежа: {e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка при обработке платежа", show_alert=True)
+                return
+            
+            if action == "success_ok":
+                # Подтверждение получения уведомления об успешном платеже
+                try:
+                    bot_instance.answer_callback_query(call.id, "✅ Готово")
+                    # Удаляем кнопки из сообщения
+                    try:
+                        bot_instance.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                    except:
+                        pass
+                except Exception as e:
+                    logger.error(f"[PAYMENT SUCCESS] Ошибка обработки подтверждения: {e}")
+                return
         
             if action == "active":
                 # Показываем действующие подписки
