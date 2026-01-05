@@ -178,7 +178,6 @@ def register_payment_callbacks(bot_instance):
                 get_active_group_subscription, get_user_personal_subscriptions,
                 get_user_group_subscriptions, cancel_subscription
             )
-            from datetime import datetime
         
             if action.startswith("reminder_ok:"):
                 # Подтверждение получения напоминания о списании
