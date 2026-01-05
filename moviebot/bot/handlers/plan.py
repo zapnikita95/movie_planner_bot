@@ -1609,12 +1609,25 @@ def handle_edit_plan_datetime_internal(message, state):
     """Внутренняя функция для обработки изменения даты/времени плана"""
     logger.info(f"[EDIT PLAN DATETIME INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
     try:
+        from moviebot.bot.bot_init import BOT_ID
+        
         user_id = message.from_user.id
         chat_id = message.chat.id
         text = message.text.strip() if message.text else ""
         plan_id = state.get('plan_id')
         
         logger.info(f"[EDIT PLAN DATETIME INTERNAL] Обработка: text='{text}', plan_id={plan_id}")
+        
+        # Проверяем, что сообщение является реплаем на сообщение бота
+        is_reply = (message.reply_to_message and 
+                   message.reply_to_message.from_user and 
+                   message.reply_to_message.from_user.id == BOT_ID)
+        
+        prompt_message_id = state.get('prompt_message_id')
+        # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
+        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+            logger.info(f"[EDIT PLAN DATETIME INTERNAL] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+            return
         
         if not plan_id:
             bot_instance.reply_to(message, "❌ Ошибка: план не найден.")

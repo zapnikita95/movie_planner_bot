@@ -1214,6 +1214,17 @@ def main_text_handler(message):
             return
         
         if action == 'edit_plan_datetime':
+            # Проверяем, что сообщение является реплаем на сообщение бота
+            is_reply = (message.reply_to_message and 
+                       message.reply_to_message.from_user and 
+                       message.reply_to_message.from_user.id == BOT_ID)
+            
+            prompt_message_id = state.get('prompt_message_id')
+            # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
+            if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+                logger.info(f"[EDIT PLAN DATETIME] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+                return
+            
             from moviebot.bot.handlers.plan import handle_edit_plan_datetime_internal
             handle_edit_plan_datetime_internal(message, state)
             return

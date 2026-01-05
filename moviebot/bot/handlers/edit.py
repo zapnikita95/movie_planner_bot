@@ -172,7 +172,8 @@ def edit_plan_datetime_callback(call):
         
         user_edit_state[user_id] = {
             'action': 'edit_plan_datetime',
-            'plan_id': plan_id
+            'plan_id': plan_id,
+            'prompt_message_id': call.message.message_id  # Сохраняем message_id промпта
         }
         
         markup = InlineKeyboardMarkup()
@@ -188,7 +189,7 @@ def edit_plan_datetime_callback(call):
             "• в субботу 15:00",
             chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
         )
-        logger.info(f"[EDIT PLAN DATETIME] Состояние установлено для плана {plan_id}")
+        logger.info(f"[EDIT PLAN DATETIME] Состояние установлено для плана {plan_id}, prompt_message_id={call.message.message_id}")
     except Exception as e:
         logger.error(f"[EDIT PLAN DATETIME] Ошибка: {e}", exc_info=True)
         try:
