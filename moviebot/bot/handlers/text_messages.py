@@ -892,12 +892,33 @@ def main_text_handler(message):
         state = user_promo_state[user_id]
         logger.info(f"[PROMO] ===== START: user_id={user_id}, chat_id={chat_id}, text='{text}'")
         logger.info(f"[PROMO] Состояние: {state}")
+        logger.info(f"[PROMO] reply_to_message: {message.reply_to_message is not None}")
         
-        # Обрабатываем промокод независимо от наличия реплая
+        # Обрабатываем промокод независимо от наличия реплая (можно ввести и в ответ, и без ответа)
         promo_code = text.strip().upper()
         logger.info(f"[PROMO] Обработанный промокод: '{promo_code}' (исходный текст: '{text}')")
         
         if promo_code:
+            # Проверяем, не был ли уже применен этот промокод в текущей сессии платежа
+            from moviebot.states import user_payment_state
+            if user_id in user_payment_state:
+                payment_state = user_payment_state[user_id]
+                applied_promo = payment_state.get('promocode')
+                applied_promo_id = payment_state.get('promocode_id')
+                
+                if applied_promo and applied_promo.upper() == promo_code:
+                    logger.warning(f"[PROMO] Промокод '{promo_code}' уже применен в текущей сессии платежа")
+                    error_text = f"❌ Промокод <b>{promo_code}</b> уже применен к этому платежу.\n\n"
+                    error_text += "Вы не можете применить один и тот же промокод дважды."
+                    
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
+                    
+                    bot_instance.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
+                    # Не удаляем состояние, чтобы пользователь мог попробовать другой промокод
+                    return
+            
             logger.info(f"[PROMO] Применяем промокод '{promo_code}' к цене {state.get('original_price', 0)}")
             
             # Применяем промокод
