@@ -784,10 +784,13 @@ def save_movie_message(message):
 @bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
     """Единый главный хэндлер для всех текстовых сообщений (исключая команды)"""
-    logger.info(f"[MAIN TEXT HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else ''}'")
+    # Для логирования обрезаем текст, но для обработки используем полный текст
+    text_for_log = message.text[:100] if message.text else ''
+    logger.info(f"[MAIN TEXT HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{text_for_log}'")
     
     user_id = message.from_user.id
     chat_id = message.chat.id
+    # Используем полный текст без обрезания для обработки
     text = message.text.strip() if message.text else ""
     
     # 1. Проверяем состояния (ticket, settings, plan, edit, search, view_film)
