@@ -1642,6 +1642,6 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
             bot_instance.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
         except:
             pass
-        finally:
-            logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== КОНЕЦ =====")
+    finally:
+        logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== КОНЕЦ =====")
         return None
