@@ -717,7 +717,7 @@ def main_text_handler(message):
                 logger.error(f"[SEARCH] ❌ Ошибка отправки результатов поиска: {e}", exc_info=True)
                 try:
                     bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
-                except:
+                except Exception:
                     pass
                 # Удаляем состояние даже при ошибке
                 if user_id in user_search_state:
