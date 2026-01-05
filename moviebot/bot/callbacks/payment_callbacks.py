@@ -2391,8 +2391,13 @@ def register_payment_callbacks(bot_instance):
                         bot_instance.answer_callback_query(call.id, "Ошибка: неверный ID подписки", show_alert=True)
                         return
                 
-                # Если subscription_id == "all", значит пользователь хочет изменить все подписки
-                elif modify_type == "all":
+                # Если modify_type == "all" или это число (subscription_id), значит пользователь хочет изменить все подписки или одну подписку
+                elif modify_type == "all" or (modify_type and modify_type.isdigit()):
+                    # Если это число, значит это subscription_id, обрабатываем как обычный modify
+                    if modify_type and modify_type.isdigit():
+                        subscription_id_str = modify_type
+                    else:
+                        subscription_id_str = "all"
                     logger.info(f"[PAYMENT MODIFY] Обработка modify:all для user_id={user_id}")
                     # Получаем все активные подписки пользователя
                     from moviebot.database.db_operations import get_user_personal_subscriptions
