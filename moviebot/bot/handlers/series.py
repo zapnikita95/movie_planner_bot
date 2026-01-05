@@ -295,15 +295,7 @@ def random_start(message):
                         markup.add(InlineKeyboardButton("🔒 Откроется от 50 оценок с КП", callback_data="rand_mode_locked:my_votes"))
             
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            
-            # Если это вызов из callback (через fake_message), используем edit_message_text
-            if hasattr(message, 'message_id') and hasattr(message, 'chat'):
-                try:
-                    bot_instance.edit_message_text("🎲 <b>Выберите режим рандома:</b>", message.chat.id, message.message_id, reply_markup=markup, parse_mode='HTML')
-                except:
-                    bot_instance.send_message(message.chat.id, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
-            else:
-                bot_instance.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
+            bot_instance.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
             logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
         except Exception as e:
             logger.error(f"❌ Ошибка в /random: {e}", exc_info=True)
@@ -3606,8 +3598,6 @@ def ensure_movie_in_database(kp_id, title=None):
                 logger.warning(f"[ENSURE MOVIE] Не удалось получить информацию о фильме {kp_id}")
         
         return existing or cursor.lastrowid
-                # Вызываем команду /edit
-                from moviebot.bot.handlers.settings.edit import edit_command
                 
                 # Удаляем сообщение перед вызовом команды (как в рабочей версии)
                 try:
