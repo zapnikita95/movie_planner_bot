@@ -1916,13 +1916,17 @@ def handle_kinopoisk_link(message):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("search_type:"))
     def search_type_callback(call):
         """Обработчик выбора типа поиска (фильм или сериал)"""
+        logger.info("=" * 80)
+        logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}")
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot_instance.answer_callback_query(call.id, text="⏳ Обновляю...")
+            logger.info(f"[SEARCH TYPE] answer_callback_query вызван, callback_id={call.id}")
+            
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             search_type = call.data.split(":")[1]  # 'film' или 'series'
             
-            logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}")
+            logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}, chat_id={chat_id}")
             
             # Обновляем состояние поиска
             if user_id in user_search_state:
@@ -1964,12 +1968,15 @@ def handle_kinopoisk_link(message):
             if user_id in user_search_state:
                 user_search_state[user_id]['message_id'] = call.message.message_id
             logger.info(f"[SEARCH TYPE] Состояние обновлено для user_id={user_id}, search_type={search_type}, message_id={call.message.message_id}")
+            logger.info(f"[SEARCH TYPE] Сообщение обновлено успешно")
         except Exception as e:
-            logger.error(f"[SEARCH TYPE] Ошибка: {e}", exc_info=True)
+            logger.error(f"[SEARCH TYPE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
+            except Exception as answer_e:
+                logger.error(f"[SEARCH TYPE] Не удалось вызвать answer_callback_query: {answer_e}")
+        finally:
+            logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
 
 
 def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
