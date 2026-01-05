@@ -544,13 +544,35 @@ def handle_settings_callback(call):
         
         if action == "clean":
             # Вызываем команду /clean
-            from moviebot.bot.handlers.settings.clean import clean_command
+            logger.info(f"[SETTINGS CALLBACK] Обработка action=clean для user_id={user_id}, chat_id={chat_id}")
+            
+            # Отвечаем на callback сразу
+            bot_instance.answer_callback_query(call.id)
+            
+            try:
+                from moviebot.bot.handlers.settings.clean import clean_command
+                logger.info(f"[SETTINGS CALLBACK] clean_command успешно импортирован")
+            except ImportError as e:
+                logger.error(f"[SETTINGS CALLBACK] Ошибка импорта clean_command: {e}", exc_info=True)
+                try:
+                    bot_instance.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /clean. Попробуйте вызвать её напрямую: /clean")
+                except:
+                    pass
+                return
+            except Exception as e:
+                logger.error(f"[SETTINGS CALLBACK] Неожиданная ошибка при импорте clean_command: {e}", exc_info=True)
+                try:
+                    bot_instance.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /clean напрямую")
+                except:
+                    pass
+                return
             
             # Удаляем сообщение перед вызовом команды (как в рабочей версии)
             try:
                 bot_instance.delete_message(chat_id, call.message.message_id)
-            except:
-                pass
+                logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено")
+            except Exception as e:
+                logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение: {e}")
             
             # Создаем полноценный fake_message с всеми необходимыми атрибутами
             class FakeMessage:
@@ -560,23 +582,60 @@ def handle_settings_callback(call):
                     self.chat = call.message.chat
                     self.date = call.message.date
                     self.text = '/clean'
+                    # Сохраняем оригинальное сообщение для reply_to
+                    self._original_message = call.message
                 
                 def reply_to(self, text, **kwargs):
+                    # reply_to должен отправлять сообщение с reply_to_message_id
+                    # Но так как мы удалили сообщение, просто отправляем в чат
+                    # Убираем reply_to_message_id из kwargs, если он есть
+                    kwargs.pop('reply_to_message_id', None)
                     return bot_instance.send_message(self.chat.id, text, **kwargs)
             
-            fake_message = FakeMessage(call)
-            clean_command(fake_message)
+            try:
+                fake_message = FakeMessage(call)
+                logger.info(f"[SETTINGS CALLBACK] Вызов clean_command для user_id={user_id}, chat_id={chat_id}")
+                clean_command(fake_message)
+                logger.info(f"[SETTINGS CALLBACK] clean_command успешно выполнен")
+            except Exception as e:
+                logger.error(f"[SETTINGS CALLBACK] Ошибка при вызове clean_command: {e}", exc_info=True)
+                try:
+                    bot_instance.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /clean. Попробуйте вызвать её напрямую: /clean")
+                except:
+                    pass
             return
         
         if action == "join":
             # Вызываем команду /join
-            from moviebot.bot.handlers.settings.join import join_command
+            logger.info(f"[SETTINGS CALLBACK] Обработка action=join для user_id={user_id}, chat_id={chat_id}")
+            
+            # Отвечаем на callback сразу
+            bot_instance.answer_callback_query(call.id)
+            
+            try:
+                from moviebot.bot.handlers.settings.join import join_command
+                logger.info(f"[SETTINGS CALLBACK] join_command успешно импортирован")
+            except ImportError as e:
+                logger.error(f"[SETTINGS CALLBACK] Ошибка импорта join_command: {e}", exc_info=True)
+                try:
+                    bot_instance.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /join. Попробуйте вызвать её напрямую: /join")
+                except:
+                    pass
+                return
+            except Exception as e:
+                logger.error(f"[SETTINGS CALLBACK] Неожиданная ошибка при импорте join_command: {e}", exc_info=True)
+                try:
+                    bot_instance.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /join напрямую")
+                except:
+                    pass
+                return
             
             # Удаляем сообщение перед вызовом команды (как в рабочей версии)
             try:
                 bot_instance.delete_message(chat_id, call.message.message_id)
-            except:
-                pass
+                logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено")
+            except Exception as e:
+                logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение: {e}")
             
             # Создаем полноценный fake_message с всеми необходимыми атрибутами
             class FakeMessage:
@@ -586,12 +645,27 @@ def handle_settings_callback(call):
                     self.chat = call.message.chat
                     self.date = call.message.date
                     self.text = '/join'
+                    # Сохраняем оригинальное сообщение для reply_to
+                    self._original_message = call.message
                 
                 def reply_to(self, text, **kwargs):
+                    # reply_to должен отправлять сообщение с reply_to_message_id
+                    # Но так как мы удалили сообщение, просто отправляем в чат
+                    # Убираем reply_to_message_id из kwargs, если он есть
+                    kwargs.pop('reply_to_message_id', None)
                     return bot_instance.send_message(self.chat.id, text, **kwargs)
             
-            fake_message = FakeMessage(call)
-            join_command(fake_message)
+            try:
+                fake_message = FakeMessage(call)
+                logger.info(f"[SETTINGS CALLBACK] Вызов join_command для user_id={user_id}, chat_id={chat_id}")
+                join_command(fake_message)
+                logger.info(f"[SETTINGS CALLBACK] join_command успешно выполнен")
+            except Exception as e:
+                logger.error(f"[SETTINGS CALLBACK] Ошибка при вызове join_command: {e}", exc_info=True)
+                try:
+                    bot_instance.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /join. Попробуйте вызвать её напрямую: /join")
+                except:
+                    pass
             return
         
         if action == "back":
