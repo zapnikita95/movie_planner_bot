@@ -678,7 +678,9 @@ def register_series_handlers(bot_instance):
             
             logger.info(f"[KINOPOISK LINK] Извлечен kp_id={kp_id} из ссылки: {link}")
             
-            # Получаем информацию о фильме/сериале
+            # ВСЕГДА получаем информацию о фильме/сериале из API (даже если фильм уже в базе)
+            # Это нужно для получения актуальных данных (описание, актеры, режиссер и т.д.)
+            logger.info(f"[KINOPOISK LINK] ⚠️ ВАЖНО: Отправка запроса к API Кинопоиска для получения актуальной информации (даже если фильм уже в базе)")
             logger.info(f"[KINOPOISK LINK] Вызов extract_movie_info для link={link}")
             try:
                 info = extract_movie_info(link)
@@ -686,27 +688,27 @@ def register_series_handlers(bot_instance):
                     logger.warning(f"[KINOPOISK LINK] extract_movie_info вернул None для link={link}")
                     bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме/сериале.")
                     return
-                logger.info(f"[KINOPOISK LINK] extract_movie_info успешно, title={info.get('title')}, is_series={info.get('is_series')}")
+                logger.info(f"[KINOPOISK LINK] ✅ extract_movie_info успешно, получены актуальные данные: title={info.get('title')}, is_series={info.get('is_series')}")
             except Exception as api_e:
-                logger.error(f"[KINOPOISK LINK] Ошибка extract_movie_info: {api_e}", exc_info=True)
+                logger.error(f"[KINOPOISK LINK] ❌ Ошибка extract_movie_info: {api_e}", exc_info=True)
                 bot_instance.reply_to(message, f"❌ Ошибка при получении информации о фильме/сериале: {str(api_e)}")
                 return
             
             is_series = info.get('is_series', False)
             
-            # Проверяем, есть ли уже в базе
+            # Проверяем, есть ли уже в базе (для определения статуса просмотра и оценки)
             with db_lock:
                 cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 row = cursor.fetchone()
                 if row:
-                    # Уже в базе - показываем через show_film_info_with_buttons
+                    # Уже в базе - используем СВЕЖИЕ данные из API (info) + данные из базы (film_id, watched)
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
                     cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
                     movie_row = cursor.fetchone()
                     title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
                     watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
                     
-                    logger.info(f"[KINOPOISK LINK] Фильм уже в базе, вызываю show_film_info_with_buttons: film_id={film_id}, kp_id={kp_id}, chat_id={chat_id}")
+                    logger.info(f"[KINOPOISK LINK] Фильм уже в базе (film_id={film_id}), но используем СВЕЖИЕ данные из API. Вызываю show_film_info_with_buttons с актуальными данными из API")
                     show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched))
                     logger.info(f"[KINOPOISK LINK] show_film_info_with_buttons завершена для kp_id={kp_id}")
                     return
