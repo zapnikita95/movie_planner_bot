@@ -2656,26 +2656,70 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Если фильм уже в базе, показываем дополнительную информацию
         if existing:
             logger.info(f"[SHOW FILM INFO] Фильм в базе, обрабатываем existing={existing}")
-            film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
-            watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
+            logger.info(f"[SHOW FILM INFO] Тип existing: {type(existing)}, isinstance dict: {isinstance(existing, dict)}, isinstance tuple: {isinstance(existing, tuple)}")
+            try:
+                if isinstance(existing, dict):
+                    logger.info(f"[SHOW FILM INFO] existing - словарь, извлекаю через .get()")
+                    film_id = existing.get('id')
+                    watched = existing.get('watched')
+                else:
+                    logger.info(f"[SHOW FILM INFO] existing - не словарь, извлекаю через индексы, len={len(existing) if hasattr(existing, '__len__') else 'N/A'}")
+                    film_id = existing[0] if len(existing) > 0 else None
+                    watched = existing[2] if len(existing) > 2 else None
+                logger.info(f"[SHOW FILM INFO] Извлечены film_id={film_id}, watched={watched}")
+            except Exception as extract_e:
+                logger.error(f"[SHOW FILM INFO] ❌ ОШИБКА при извлечении film_id и watched: {extract_e}", exc_info=True)
+                logger.error(f"[SHOW FILM INFO] existing type: {type(existing)}, value: {existing}")
+                # Пытаемся продолжить с дефолтными значениями
+                film_id = None
+                watched = False
             
             if watched:
-                with db_lock:
-                    cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
-                    avg_result = cursor.fetchone()
-                    if avg_result:
-                        avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                        avg = float(avg) if avg is not None else None
+                logger.info(f"[SHOW FILM INFO] Фильм просмотрен, запрашиваем оценки...")
+                logger.info(f"[SHOW FILM INFO] Попытка получить db_lock для запроса оценок...")
+                import threading
+                lock_acquired = False
+                avg = None
+                user_rating = None
+                try:
+                    # Пытаемся получить lock с таймаутом 5 секунд
+                    lock_acquired = db_lock.acquire(timeout=5.0)
+                    if lock_acquired:
+                        logger.info(f"[SHOW FILM INFO] db_lock получен, выполняю запрос AVG...")
+                        try:
+                            cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
+                            avg_result = cursor.fetchone()
+                            logger.info(f"[SHOW FILM INFO] AVG запрос выполнен, результат: {avg_result}")
+                            if avg_result:
+                                avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                                avg = float(avg) if avg is not None else None
+                            else:
+                                avg = None
+                            
+                            # Получаем личную оценку пользователя (если есть)
+                            if user_id:
+                                logger.info(f"[SHOW FILM INFO] Запрос личной оценки пользователя user_id={user_id}...")
+                                cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
+                                user_rating_row = cursor.fetchone()
+                                logger.info(f"[SHOW FILM INFO] Личная оценка получена: {user_rating_row}")
+                                if user_rating_row:
+                                    user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
+                        finally:
+                            db_lock.release()
+                            logger.info(f"[SHOW FILM INFO] db_lock освобожден")
                     else:
+                        logger.warning(f"[SHOW FILM INFO] ⚠️ Не удалось получить db_lock за 5 секунд, пропускаем запрос оценок")
                         avg = None
-                    
-                    # Получаем личную оценку пользователя (если есть)
+                        user_rating = None
+                except Exception as db_e:
+                    logger.error(f"[SHOW FILM INFO] Ошибка при работе с БД в блоке watched: {db_e}", exc_info=True)
+                    if lock_acquired:
+                        try:
+                            db_lock.release()
+                        except:
+                            pass
+                    avg = None
                     user_rating = None
-                    if user_id:
-                        cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
-                        user_rating_row = cursor.fetchone()
-                        if user_rating_row:
-                            user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
                 
                 text += f"\n\n✅ <b>Просмотрено</b>"
                 if avg:
@@ -2685,21 +2729,50 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
                 else:
                     text += f"\n⭐ <b>Ваша оценка: —</b>"
+                logger.info(f"[SHOW FILM INFO] Текст для просмотренного фильма сформирован")
             else:
+                logger.info(f"[SHOW FILM INFO] Фильм не просмотрен (watched=False), проверяем личную оценку...")
                 text += f"\n\n⏳ <b>Ещё не просмотрено</b>"
                 # Добавляем строку о личной оценке пользователя даже если фильм не просмотрен (чтобы текст всегда менялся)
                 if user_id and film_id:
-                    with db_lock:
-                        cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
-                        user_rating_row = cursor.fetchone()
-                        if user_rating_row:
-                            user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
-                            if user_rating is not None:
-                                text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
-                            else:
-                                text += f"\n⭐ <b>Ваша оценка: —</b>"
+                    logger.info(f"[SHOW FILM INFO] Попытка получить db_lock для запроса личной оценки...")
+                    # Используем timeout для получения lock, чтобы не зависнуть навсегда
+                    import threading
+                    lock_acquired = False
+                    try:
+                        # Пытаемся получить lock с таймаутом 5 секунд
+                        lock_acquired = db_lock.acquire(timeout=5.0)
+                        if lock_acquired:
+                            logger.info(f"[SHOW FILM INFO] db_lock получен, выполняю запрос личной оценки...")
+                            try:
+                                cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
+                                user_rating_row = cursor.fetchone()
+                                logger.info(f"[SHOW FILM INFO] Запрос личной оценки выполнен, результат: {user_rating_row}")
+                                if user_rating_row:
+                                    user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
+                                    if user_rating is not None:
+                                        text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
+                                    else:
+                                        text += f"\n⭐ <b>Ваша оценка: —</b>"
+                                else:
+                                    text += f"\n⭐ <b>Ваша оценка: —</b>"
+                            finally:
+                                db_lock.release()
+                                logger.info(f"[SHOW FILM INFO] db_lock освобожден")
                         else:
+                            logger.warning(f"[SHOW FILM INFO] ⚠️ Не удалось получить db_lock за 5 секунд, пропускаем запрос оценки")
                             text += f"\n⭐ <b>Ваша оценка: —</b>"
+                    except Exception as db_e:
+                        logger.error(f"[SHOW FILM INFO] Ошибка при работе с БД в блоке не просмотренного: {db_e}", exc_info=True)
+                        if lock_acquired:
+                            try:
+                                db_lock.release()
+                            except:
+                                pass
+                        text += f"\n⭐ <b>Ваша оценка: —</b>"
+                else:
+                    logger.info(f"[SHOW FILM INFO] user_id или film_id отсутствуют, пропускаем запрос оценки")
+                    text += f"\n⭐ <b>Ваша оценка: —</b>"
             logger.info(f"[SHOW FILM INFO] Обработка existing завершена")
         
         # Создаем кнопки
