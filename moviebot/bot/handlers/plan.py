@@ -1191,3 +1191,145 @@ def get_plan_day_or_date_internal(message, state):
     elif result:
         if user_id in user_plan_state:
             del user_plan_state[user_id]
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan:"))
+def edit_plan_callback(call):
+    """Обработчик выбора плана для редактирования"""
+    logger.info(f"[EDIT PLAN] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+    try:
+        bot_instance.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        plan_id = int(call.data.split(":")[1])
+        
+        logger.info(f"[EDIT PLAN] Пользователь {user_id} хочет редактировать план {plan_id}")
+        
+        from moviebot.states import user_edit_state
+        from moviebot.database.db_operations import get_user_timezone_or_default
+        
+        # Очищаем состояние редактирования при возврате к меню
+        if user_id in user_edit_state and user_edit_state[user_id].get('action') == 'edit_plan_datetime':
+            # Оставляем только базовую информацию для меню редактирования
+            user_edit_state[user_id] = {
+                'action': 'edit_plan',
+                'plan_id': plan_id
+            }
+        
+        # Получаем информацию о плане
+        with db_lock:
+            cursor.execute('''
+                SELECT p.plan_type, p.plan_datetime, m.title
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            plan_row = cursor.fetchone()
+        
+        if not plan_row:
+            bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+            logger.warning(f"[EDIT PLAN] План {plan_id} не найден")
+            return
+        
+        if isinstance(plan_row, dict):
+            plan_type = plan_row.get('plan_type')
+            plan_dt_value = plan_row.get('plan_datetime')
+            title = plan_row.get('title')
+        else:
+            plan_type = plan_row[0]
+            plan_dt_value = plan_row[1]
+            title = plan_row[2]
+        
+        user_tz = get_user_timezone_or_default(user_id)
+        if plan_dt_value:
+            if isinstance(plan_dt_value, datetime):
+                if plan_dt_value.tzinfo is None:
+                    dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                else:
+                    dt = plan_dt_value.astimezone(user_tz)
+            else:
+                dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+            date_str = dt.strftime('%d.%m.%Y %H:%M')
+        else:
+            date_str = "не указана"
+        
+        user_edit_state[user_id] = {
+            'action': 'edit_plan',
+            'plan_id': plan_id,
+            'plan_type': plan_type
+        }
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        if plan_type == 'cinema':
+            markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
+            markup.add(InlineKeyboardButton("🎟️ Загрузить билеты", callback_data=f"edit_plan_ticket:{plan_id}"))
+        else:
+            markup.add(InlineKeyboardButton("📅 Изменить дату/время", callback_data=f"edit_plan_datetime:{plan_id}"))
+            markup.add(InlineKeyboardButton("📺 Изменить онлайн-кинотеатр", callback_data=f"edit_plan_streaming:{plan_id}"))
+            markup.add(InlineKeyboardButton("🎦 Переключить в 'в кино'", callback_data=f"edit_plan_switch:{plan_id}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+        
+        text = f"✏️ <b>Редактирование плана:</b>\n\n"
+        text += f"<b>{title}</b>\n"
+        text += f"Тип: {'🎦 в кино' if plan_type == 'cinema' else '🏠 дома'}\n"
+        text += f"Дата/время: {date_str}\n\n"
+        text += f"Что вы хотите изменить?"
+        
+        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[EDIT PLAN] Меню редактирования отправлено для плана {plan_id}")
+    except Exception as e:
+        logger.error(f"[EDIT PLAN] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("remove_from_calendar:"))
+def handle_remove_from_calendar_callback(call):
+    """Обработчик удаления фильма из календаря"""
+    logger.info(f"[REMOVE FROM CALENDAR] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[REMOVE FROM CALENDAR] Удаление плана {plan_id} пользователем {user_id}")
+        
+        bot_instance.answer_callback_query(call.id)
+        
+        with db_lock:
+            # Получаем информацию о плане
+            cursor.execute('''
+                SELECT p.id, m.title
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            row = cursor.fetchone()
+            
+            if not row:
+                bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                logger.warning(f"[REMOVE FROM CALENDAR] План {plan_id} не найден")
+                return
+            
+            title = row.get('title') if isinstance(row, dict) else row[1]
+            
+            # Удаляем план
+            cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+            conn.commit()
+        
+        bot_instance.answer_callback_query(call.id, f"✅ Фильм '{title}' удалён из календаря")
+        logger.info(f"[REMOVE FROM CALENDAR] План {plan_id} удалён пользователем {user_id}")
+        
+        # Обновляем сообщение, убирая кнопки
+        try:
+            bot_instance.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception as e:
+            logger.warning(f"[REMOVE FROM CALENDAR] Не удалось обновить сообщение: {e}")
+    except Exception as e:
+        logger.error(f"[REMOVE FROM CALENDAR] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
