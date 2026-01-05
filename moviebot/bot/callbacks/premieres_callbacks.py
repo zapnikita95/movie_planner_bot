@@ -449,50 +449,168 @@ def premiere_detail_handler(call):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premiere_add:"))
 def premiere_add_to_db(call):
-    """Добавляет премьеру в базу"""
+    """Добавляет премьеру в базу и показывает описание фильма с кнопками БЕЗ повторного API запроса"""
+    logger.info("=" * 80)
+    logger.info(f"[PREMIERE ADD] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot_instance.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
+        logger.info(f"[PREMIERE ADD] answer_callback_query вызван, callback_id={call.id}")
+        
         kp_id = call.data.split(":")[1]
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         message_id = call.message.message_id
         
+        logger.info(f"[PREMIERE ADD] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
+        
         # Проверяем, есть ли фильм уже в базе
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-            existing = cursor.fetchone()
+            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            existing_row = cursor.fetchone()
         
-        if existing:
-            # Фильм уже есть - просто показываем маленькое уведомление
-            title = existing.get('title') if isinstance(existing, dict) else existing[1]
-            bot_instance.answer_callback_query(call.id, f"ℹ️ Фильм '{title}' уже есть в базе", show_alert=False)
+        if existing_row:
+            # Фильм уже есть - получаем полную информацию из БД и показываем описание
+            film_id = existing_row.get('id') if isinstance(existing_row, dict) else existing_row[0]
+            title = existing_row.get('title') if isinstance(existing_row, dict) else existing_row[1]
+            watched = existing_row.get('watched') if isinstance(existing_row, dict) else existing_row[2]
+            
+            logger.info(f"[PREMIERE ADD] Фильм уже в базе: film_id={film_id}, title={title}")
+            bot_instance.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
+            
+            # Получаем полную информацию из БД (без API запроса)
+            with db_lock:
+                cursor.execute('''
+                    SELECT year, genres, description, director, actors, is_series, link
+                    FROM movies WHERE id = %s AND chat_id = %s
+                ''', (film_id, chat_id))
+                db_row = cursor.fetchone()
+            
+            if db_row:
+                if isinstance(db_row, dict):
+                    year = db_row.get('year')
+                    genres = db_row.get('genres')
+                    description = db_row.get('description')
+                    director = db_row.get('director')
+                    actors = db_row.get('actors')
+                    is_series = bool(db_row.get('is_series', 0))
+                    link = db_row.get('link') or link
+                else:
+                    year = db_row[0] if len(db_row) > 0 else None
+                    genres = db_row[1] if len(db_row) > 1 else None
+                    description = db_row[2] if len(db_row) > 2 else None
+                    director = db_row[3] if len(db_row) > 3 else None
+                    actors = db_row[4] if len(db_row) > 4 else None
+                    is_series = bool(db_row[5] if len(db_row) > 5 else 0)
+                    link = db_row[6] if len(db_row) > 6 else link
+                
+                # Формируем словарь info из данных БД (без API запроса)
+                info = {
+                    'title': title,
+                    'year': year,
+                    'genres': genres,
+                    'description': description,
+                    'director': director,
+                    'actors': actors,
+                    'is_series': is_series
+                }
+                
+                existing = (film_id, title, watched)
+                
+                # Удаляем сообщение с премьерой
+                try:
+                    bot_instance.delete_message(chat_id, message_id)
+                except Exception as e:
+                    logger.warning(f"[PREMIERE ADD] Не удалось удалить сообщение: {e}")
+                
+                # Показываем описание фильма с кнопками
+                from moviebot.bot.handlers.series import show_film_info_with_buttons
+                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
+                logger.info(f"[PREMIERE ADD] Описание фильма показано из БД: kp_id={kp_id}")
             return
         
-        # Получаем информацию о фильме
+        # Фильма нет в базе - получаем информацию через API и добавляем
+        logger.info(f"[PREMIERE ADD] Фильм не найден в базе, получаю информацию через API")
         info = extract_movie_info(link)
         if not info:
             bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
         
         # Добавляем в базу
-        film_id, title = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+        film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
         
-        if film_id:
-            bot_instance.answer_callback_query(call.id, "✅ Фильм добавлен в базу!")
+        if not film_id:
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+            return
+        
+        logger.info(f"[PREMIERE ADD] Фильм добавлен в базу: film_id={film_id}, was_inserted={was_inserted}")
+        bot_instance.answer_callback_query(call.id, "✅ Фильм добавлен в базу!", show_alert=False)
+        
+        # Получаем полную информацию из БД (без повторного API запроса)
+        with db_lock:
+            cursor.execute('''
+                SELECT title, watched, year, genres, description, director, actors, is_series, link
+                FROM movies WHERE id = %s AND chat_id = %s
+            ''', (film_id, chat_id))
+            db_row = cursor.fetchone()
+        
+        if db_row:
+            if isinstance(db_row, dict):
+                title = db_row.get('title')
+                watched = db_row.get('watched')
+                year = db_row.get('year')
+                genres = db_row.get('genres')
+                description = db_row.get('description')
+                director = db_row.get('director')
+                actors = db_row.get('actors')
+                is_series = bool(db_row.get('is_series', 0))
+                link = db_row.get('link') or link
+            else:
+                title = db_row[0] if len(db_row) > 0 else info.get('title')
+                watched = db_row[1] if len(db_row) > 1 else 0
+                year = db_row[2] if len(db_row) > 2 else info.get('year')
+                genres = db_row[3] if len(db_row) > 3 else info.get('genres')
+                description = db_row[4] if len(db_row) > 4 else info.get('description')
+                director = db_row[5] if len(db_row) > 5 else info.get('director')
+                actors = db_row[6] if len(db_row) > 6 else info.get('actors')
+                is_series = bool(db_row[7] if len(db_row) > 7 else info.get('is_series', False))
+                link = db_row[8] if len(db_row) > 8 else link
+            
+            # Формируем словарь info из данных БД (без повторного API запроса)
+            info = {
+                'title': title,
+                'year': year,
+                'genres': genres,
+                'description': description,
+                'director': director,
+                'actors': actors,
+                'is_series': is_series
+            }
+            
+            existing = (film_id, title, watched)
+            
             # Удаляем сообщение с премьерой
             try:
                 bot_instance.delete_message(chat_id, message_id)
             except Exception as e:
                 logger.warning(f"[PREMIERE ADD] Не удалось удалить сообщение: {e}")
+            
+            # Показываем описание фильма с кнопками
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
+            logger.info(f"[PREMIERE ADD] Описание фильма показано из БД: kp_id={kp_id}")
         else:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+            logger.error(f"[PREMIERE ADD] Не удалось получить данные из БД после добавления: film_id={film_id}")
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении данных из базы", show_alert=True)
+            
     except Exception as e:
         logger.error(f"[PREMIERE ADD] Ошибка: {e}", exc_info=True)
         try:
             bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
+    finally:
+        logger.info(f"[PREMIERE ADD] ===== END: callback_id={call.id}")
 
 
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premiere_notify:"))
