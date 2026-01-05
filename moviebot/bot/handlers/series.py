@@ -2329,8 +2329,12 @@ def handle_kinopoisk_link(message):
                 )
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
-            bot_instance.answer_callback_query(call.id, f"Выбран поиск: {type_text}")
-            logger.info(f"[SEARCH TYPE] answer_callback_query вызван с текстом: 'Выбран поиск: {type_text}'")
+            # Ограничение Telegram: текст в answer_callback_query не может быть длиннее 200 символов
+            answer_text = f"Выбран поиск: {type_text}"
+            if len(answer_text) > 200:
+                answer_text = answer_text[:197] + "..."
+            bot_instance.answer_callback_query(call.id, answer_text)
+            logger.info(f"[SEARCH TYPE] answer_callback_query вызван с текстом: '{answer_text}' (длина: {len(answer_text)})")
             
             try:
                 bot_instance.edit_message_text(
