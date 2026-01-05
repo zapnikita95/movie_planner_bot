@@ -410,6 +410,101 @@ movie-planner-bot@yandex.com"""
     bot_instance.reply_to(message, text_html, reply_markup=markup, parse_mode='HTML')
 
 
+def show_cinema_sessions(chat_id, user_id, file_id=None):
+    """Показывает список запланированных сеансов в кино"""
+    logger.info(f"[SHOW SESSIONS] Показываем сеансы для пользователя {user_id}, chat_id={chat_id}, file_id={file_id}")
+    try:
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id, m.title, p.plan_datetime, 
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as ticket_count
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s AND p.plan_type = 'cinema'
+                ORDER BY p.plan_datetime
+                LIMIT 20
+            ''', (chat_id,))
+            sessions = cursor.fetchall()
+        
+        logger.info(f"[SHOW SESSIONS] Найдено сеансов: {len(sessions) if sessions else 0}")
+        
+        if not sessions:
+            logger.info(f"[SHOW SESSIONS] Нет сеансов, отправляем сообщение пользователю {user_id}")
+            if file_id:
+                # Если есть файл, но нет сеансов, предлагаем создать новый
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data=f"ticket_new:{file_id}"))
+                markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+                bot_instance.send_message(chat_id, "❌ Нет запланированных сеансов в кино.\n\n📎 Файл готов к добавлению. Создайте новый сеанс.", reply_markup=markup, parse_mode='HTML')
+            else:
+                # Нет файла и нет сеансов
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data="ticket_new"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                bot_instance.send_message(chat_id, "❌ Нет запланированных сеансов в кино.", reply_markup=markup, parse_mode='HTML')
+            return
+        
+        user_tz = get_user_timezone_or_default(user_id)
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for row in sessions:
+            if isinstance(row, dict):
+                plan_id = row.get('id')
+                title = row.get('title')
+                plan_dt_value = row.get('plan_datetime')
+                ticket_count = row.get('ticket_count', 0)
+            else:
+                plan_id = row[0]
+                title = row[1]
+                plan_dt_value = row[2]
+                ticket_count = row[3] if len(row) > 3 else 0
+            
+            if plan_dt_value:
+                if isinstance(plan_dt_value, datetime):
+                    if plan_dt_value.tzinfo is None:
+                        dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                    else:
+                        dt = plan_dt_value.astimezone(user_tz)
+                else:
+                    dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                
+                date_str = dt.strftime('%d.%m %H:%M')
+                ticket_emoji = "🎟️ " if ticket_count > 0 else ""
+                button_text = f"{ticket_emoji}{title} | {date_str}"
+                
+                if len(button_text) > 30:
+                    short_title = title[:20] + "..."
+                    button_text = f"{ticket_emoji}{short_title} | {date_str}"
+                    if len(button_text) > 30:
+                        button_text = button_text[:27] + "..."
+                
+                callback_data = f"ticket_session:{plan_id}"
+                if file_id:
+                    callback_data += f":{file_id}"
+                markup.add(InlineKeyboardButton(button_text, callback_data=callback_data))
+        
+        if file_id:
+            markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data=f"ticket_new:{file_id}"))
+        else:
+            markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data="ticket_new"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+        
+        text = "🎟️ <b>Выберите сеанс:</b>\n\n"
+        if file_id:
+            text += "📎 Файл готов к добавлению. Выберите сеанс или создайте новый."
+        else:
+            text += "Выберите сеанс для просмотра билетов или добавления новых."
+        
+        bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[SHOW SESSIONS] Сообщение с сеансами отправлено пользователю {user_id}")
+    except Exception as e:
+        logger.error(f"[SHOW SESSIONS] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.send_message(chat_id, "❌ Произошла ошибка при загрузке сеансов.")
+        except:
+            pass
+
+
 def register_series_handlers(bot_instance):
     """Регистрирует обработчики команд связанных с сериалами"""
     
