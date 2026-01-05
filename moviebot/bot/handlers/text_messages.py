@@ -1456,10 +1456,10 @@ def main_text_handler(message):
                 applied_promo = payment_state.get('promocode')
                 applied_promo_id = payment_state.get('promocode_id')
                 
-                if applied_promo and applied_promo.upper() == promo_code:
-                    logger.warning(f"[PROMO] Промокод '{promo_code}' уже применен в текущей сессии платежа")
-                    error_text = f"❌ Промокод <b>{promo_code}</b> уже применен к этому платежу.\n\n"
-                    error_text += "Вы не можете применить один и тот же промокод дважды."
+                if applied_promo or applied_promo_id:
+                    logger.warning(f"[PROMO] Промокод уже применен в текущей сессии платежа: promocode={applied_promo}, promocode_id={applied_promo_id}")
+                    error_text = f"❌ Промокод уже применен к этому платежу.\n\n"
+                    error_text += "Вы не можете применить промокод повторно."
                     
                     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                     markup = InlineKeyboardMarkup()
