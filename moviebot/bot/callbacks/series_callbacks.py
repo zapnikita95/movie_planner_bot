@@ -12,7 +12,6 @@ from moviebot.bot.bot_init import bot as bot_instance, scheduler
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_watched_emojis, get_watched_custom_emoji_ids
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
-from moviebot.bot.handlers.seasons import get_series_airing_status
 from moviebot.utils.helpers import has_notifications_access
 from moviebot.scheduler import send_series_notification, check_series_for_new_episodes
 from moviebot.states import user_episodes_state
