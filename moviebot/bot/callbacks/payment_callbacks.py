@@ -2892,7 +2892,20 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
                 
                 # Добавляем кнопку промокода
-                callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}:{final_price}"
+                # Сохраняем данные в состояние для использования короткого callback_data
+                # user_id и chat_id уже определены выше
+                user_promo_state[user_id] = {
+                    'chat_id': payment_chat_id,  # Используем payment_chat_id для правильного chat_id
+                    'message_id': call.message.message_id,
+                    'sub_type': sub_type,
+                    'plan_type': plan_type,
+                    'period_type': period_type,
+                    'group_size': group_size,
+                    'payment_id': payment_id_short,
+                    'original_price': final_price
+                }
+                # Используем короткий callback_data
+                callback_data_promo = "payment:promo"
                 markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
             
                 if group_size:
@@ -3117,7 +3130,20 @@ def register_payment_callbacks(bot_instance):
                     callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
                     markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
                     # Добавляем кнопку промокода
-                    callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}:{final_price}"
+                    # Сохраняем данные в состояние для использования короткого callback_data
+                    user_id = call.from_user.id
+                    user_promo_state[user_id] = {
+                        'chat_id': chat_id,
+                        'message_id': call.message.message_id,
+                        'sub_type': sub_type,
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'group_size': group_size,
+                        'payment_id': payment_id,
+                        'original_price': final_price
+                    }
+                    # Используем короткий callback_data
+                    callback_data_promo = "payment:promo"
                     markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                 
@@ -4225,44 +4251,46 @@ def register_payment_callbacks(bot_instance):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
             
-            if action.startswith("promo:"):
+            if action == "promo":
                 # Обработка нажатия на кнопку "🏷️ Промокод"
                 try:
                     bot_instance.answer_callback_query(call.id)
                     user_id = call.from_user.id
                     chat_id = call.message.chat.id
                     
-                    # Парсим данные из callback_data: payment:promo:personal::tickets:month:payment_id:price
-                    parts = action.split(":")
-                    if len(parts) < 7:
-                        logger.error(f"[PROMO] Ошибка парсинга callback_data: {action}")
-                        bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры", show_alert=True)
-                        return
+                    # Получаем данные из состояния (вместо парсинга из callback_data)
+                    if user_id not in user_promo_state:
+                        # Если состояния нет, пытаемся получить из payment_state
+                        payment_state = user_payment_state.get(user_id, {})
+                        if not payment_state:
+                            bot_instance.answer_callback_query(call.id, "❌ Ошибка: состояние не найдено", show_alert=True)
+                            return
+                        
+                        # Создаем состояние из payment_state
+                        user_promo_state[user_id] = {
+                            'chat_id': chat_id,
+                            'message_id': call.message.message_id,
+                            'sub_type': payment_state.get('sub_type'),
+                            'plan_type': payment_state.get('plan_type'),
+                            'period_type': payment_state.get('period_type'),
+                            'group_size': payment_state.get('group_size'),
+                            'payment_id': payment_state.get('payment_id', ''),
+                            'original_price': payment_state.get('price', 0)
+                        }
                     
-                    sub_type = parts[1]
-                    group_size_str = parts[2] if parts[2] else ''
-                    group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
-                    plan_type = parts[3]
-                    period_type = parts[4]
-                    payment_id = parts[5] if len(parts) > 5 else ''
-                    original_price = float(parts[6]) if len(parts) > 6 else 0
-                    
-                    # Сохраняем состояние для обработки промокода
-                    user_promo_state[user_id] = {
-                        'chat_id': chat_id,
-                        'message_id': call.message.message_id,
-                        'sub_type': sub_type,
-                        'plan_type': plan_type,
-                        'period_type': period_type,
-                        'group_size': group_size,
-                        'payment_id': payment_id,
-                        'original_price': original_price
-                    }
+                    promo_state = user_promo_state[user_id]
+                    sub_type = promo_state.get('sub_type')
+                    group_size = promo_state.get('group_size')
+                    plan_type = promo_state.get('plan_type')
+                    period_type = promo_state.get('period_type')
+                    payment_id = promo_state.get('payment_id', '')
+                    original_price = promo_state.get('original_price', 0)
                     
                     # Отправляем сообщение с запросом промокода
+                    # Используем короткий callback_data, так как данные уже сохранены в user_promo_state
                     text = "Введите промокод в ответном сообщении:"
                     markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:back_from_promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}:{original_price}"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
                     
                     msg = bot_instance.send_message(chat_id, text, reply_markup=markup)
                     logger.info(f"[PROMO] Запрос промокода: user_id={user_id}, payment_id={payment_id}")
@@ -4272,26 +4300,28 @@ def register_payment_callbacks(bot_instance):
                     bot_instance.answer_callback_query(call.id, "Ошибка обработки", show_alert=True)
                 return
             
-            if action.startswith("back_from_promo:"):
+            if action == "back_from_promo":
                 # Возврат к сообщению с кнопками оплаты
                 try:
                     bot_instance.answer_callback_query(call.id)
                     user_id = call.from_user.id
                     chat_id = call.message.chat.id
                     
-                    # Парсим данные
-                    parts = action.split(":")
-                    sub_type = parts[1]
-                    group_size_str = parts[2] if parts[2] else ''
-                    group_size = int(group_size_str) if group_size_str and group_size_str.isdigit() else None
-                    plan_type = parts[3]
-                    period_type = parts[4]
-                    payment_id = parts[5] if len(parts) > 5 else ''
-                    original_price = float(parts[6]) if len(parts) > 6 else 0
+                    # Получаем данные из состояния промокода (вместо парсинга из callback_data)
+                    if user_id not in user_promo_state:
+                        bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+                        return
+                    
+                    promo_state = user_promo_state[user_id]
+                    sub_type = promo_state.get('sub_type')
+                    group_size = promo_state.get('group_size')
+                    plan_type = promo_state.get('plan_type')
+                    period_type = promo_state.get('period_type')
+                    payment_id = promo_state.get('payment_id', '')
+                    original_price = promo_state.get('original_price', 0)
                     
                     # Удаляем состояние промокода
-                    if user_id in user_promo_state:
-                        del user_promo_state[user_id]
+                    del user_promo_state[user_id]
                     
                     # Восстанавливаем сообщение с кнопками оплаты
                     period_names = {
@@ -4346,7 +4376,21 @@ def register_payment_callbacks(bot_instance):
                     
                     callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
                     markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
-                    callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}:{original_price}"
+                    # Добавляем кнопку промокода
+                    # Сохраняем данные в состояние для использования короткого callback_data
+                    user_id = call.from_user.id
+                    user_promo_state[user_id] = {
+                        'chat_id': chat_id,
+                        'message_id': call.message.message_id,
+                        'sub_type': sub_type,
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'group_size': group_size,
+                        'payment_id': payment_id,
+                        'original_price': original_price
+                    }
+                    # Используем короткий callback_data
+                    callback_data_promo = "payment:promo"
                     markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                     
