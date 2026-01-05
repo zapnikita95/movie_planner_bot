@@ -288,7 +288,7 @@ def seasons_command(message):
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
         # Сохраняем message_id для возможности вернуться назад
-    bot_instance.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
+        bot_instance.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
 
 
 def register_seasons_handlers(bot):
