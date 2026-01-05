@@ -1291,22 +1291,26 @@ def process_recurring_payments():
                 subscription_type = sub.get('subscription_type') if isinstance(sub, dict) else sub[3]
                 plan_type = sub.get('plan_type') if isinstance(sub, dict) else sub[4]
                 period_type = sub.get('period_type') if isinstance(sub, dict) else sub[5]
+                # ВАЖНО: Используем цену из БД (сохраненную при создании подписки),
+                # а НЕ текущую цену из SUBSCRIPTION_PRICES.
+                # Это гарантирует, что изменение тарифов не повлияет на существующие подписки.
                 price = float(sub.get('price') if isinstance(sub, dict) else sub[6])
                 payment_method_id = sub.get('payment_method_id') if isinstance(sub, dict) else sub[8]
                 telegram_username = sub.get('telegram_username') if isinstance(sub, dict) else sub[9]
                 group_username = sub.get('group_username') if isinstance(sub, dict) else sub[10]
                 group_size = sub.get('group_size') if isinstance(sub, dict) else sub[11]
                 
-                logger.info(f"[RECURRING PAYMENT] Обработка подписки {subscription_id}, payment_method_id={payment_method_id}, сумма={price}")
+                logger.info(f"[RECURRING PAYMENT] Обработка подписки {subscription_id}, payment_method_id={payment_method_id}, сумма={price} (из БД)")
                 
                 # Создаем безакцептный платеж используя сохраненный payment_method_id
+                # ВАЖНО: Используем price из БД, а не из SUBSCRIPTION_PRICES
                 payment = create_recurring_payment(
                     user_id=user_id,
                     chat_id=chat_id,
                     subscription_type=subscription_type,
                     plan_type=plan_type,
                     period_type=period_type,
-                    amount=price,
+                    amount=price,  # Цена из БД (сохраненная при создании подписки)
                     payment_method_id=payment_method_id,
                     group_size=group_size,
                     telegram_username=telegram_username,

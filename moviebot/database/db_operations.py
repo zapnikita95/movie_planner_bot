@@ -671,7 +671,13 @@ def get_user_group_subscriptions(user_id):
 
 
 def renew_subscription(subscription_id, period_type):
-    """Продлевает существующую подписку на указанный период"""
+    """Продлевает существующую подписку на указанный период
+    
+    ВАЖНО: Эта функция НЕ изменяет цену подписки (price).
+    Цена остается той же, что была сохранена при создании подписки.
+    Это гарантирует, что изменение тарифов в SUBSCRIPTION_PRICES
+    не повлияет на уже существующие подписки пользователей.
+    """
     from datetime import datetime
     from dateutil.relativedelta import relativedelta
     import pytz
@@ -695,6 +701,7 @@ def renew_subscription(subscription_id, period_type):
         expires_at = None
         next_payment_date = None
     
+    # ВАЖНО: НЕ обновляем поле price - цена остается той же, что была при создании подписки
     with db_lock:
         cursor.execute("""
             UPDATE subscriptions 
