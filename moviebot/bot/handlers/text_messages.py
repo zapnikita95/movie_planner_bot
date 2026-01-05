@@ -21,6 +21,8 @@ from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
 from moviebot.bot.handlers.series import search_films_with_type, show_film_info_with_buttons, show_film_info_without_adding
 from moviebot.bot.handlers.list import handle_view_film_reply_internal
 from moviebot.bot.bot_init import BOT_ID
+# Импортируем обработчики промокодов для автоматической регистрации
+import moviebot.bot.handlers.promo  # noqa: F401
 from moviebot.database.db_operations import add_and_announce, is_bot_participant, get_watched_emojis
 
 logger = logging.getLogger(__name__)
