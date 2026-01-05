@@ -18064,6 +18064,56 @@ def handle_payment_callback(call):
                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
             return
         
+        if action.startswith("add_member:"):
+            # Добавление участника в подписку через кнопку
+            parts = action.split(":")
+            member_user_id = int(parts[1])
+            subscription_id = int(parts[2])
+            
+            from database.db_operations import get_subscription_members, add_subscription_member, get_active_group_users, get_subscription_by_id
+            
+            try:
+                # Проверяем, что подписка существует и принадлежит пользователю или группе
+                sub = get_subscription_by_id(subscription_id)
+                if not sub:
+                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    return
+                
+                # Проверяем, что пользователь имеет право добавлять участников (владелец подписки)
+                if sub.get('user_id') != user_id:
+                    bot.answer_callback_query(call.id, "Только владелец подписки может добавлять участников", show_alert=True)
+                    return
+                
+                existing_members = get_subscription_members(subscription_id)
+                
+                # Исключаем бота
+                if BOT_ID and BOT_ID in existing_members:
+                    existing_members = {uid: uname for uid, uname in existing_members.items() if uid != BOT_ID}
+                
+                if member_user_id in existing_members:
+                    bot.answer_callback_query(call.id, "Участник уже в подписке", show_alert=True)
+                    return
+                
+                # Проверяем лимит участников
+                group_size = sub.get('group_size')
+                if group_size and len(existing_members) >= int(group_size):
+                    bot.answer_callback_query(call.id, f"Достигнут лимит участников ({group_size})", show_alert=True)
+                    return
+                
+                # Добавляем участника
+                active_users = get_active_group_users(sub.get('chat_id', chat_id))
+                username = active_users.get(member_user_id, f"user_{member_user_id}")
+                add_subscription_member(subscription_id, member_user_id, username)
+                bot.answer_callback_query(call.id, f"✅ Участник @{username} добавлен")
+                
+                # Обновляем сообщение с информацией о подписке
+                # Можно отправить обновленное сообщение или просто подтвердить
+                logger.info(f"[PAYMENT] Участник {member_user_id} добавлен в подписку {subscription_id}")
+            except Exception as e:
+                logger.error(f"[PAYMENT] Ошибка добавления участника: {e}", exc_info=True)
+                bot.answer_callback_query(call.id, "Ошибка добавления участника", show_alert=True)
+            return
+        
         if action.startswith("toggle_member:"):
             # Переключение выбора участника при расширении
             parts = action.split(":")
@@ -18073,6 +18123,10 @@ def handle_payment_callback(call):
             from database.db_operations import get_subscription_members, add_subscription_member, get_active_group_users
             
             existing_members = get_subscription_members(subscription_id)
+            # Исключаем бота
+            if BOT_ID and BOT_ID in existing_members:
+                existing_members = {uid: uname for uid, uname in existing_members.items() if uid != BOT_ID}
+            
             state = user_payment_state.get(user_id, {})
             
             if member_user_id in existing_members:

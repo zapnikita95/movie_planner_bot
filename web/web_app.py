@@ -563,15 +563,35 @@ def create_web_app(bot_instance):
                             
                         elif subscription_type == 'group':
                             # Для групповой подписки отправляем в группу и в личку
-                            from database.db_operations import get_active_group_users, get_subscription_members
+                            from database.db_operations import get_active_group_users, get_subscription_members, add_subscription_member
                             
-                            # Получаем участников подписки
+                            # Получаем ID бота для исключения из списка участников
+                            bot_id = None
+                            try:
+                                bot_info = bot_instance.get_me()
+                                bot_id = bot_info.id if bot_info else None
+                            except:
+                                pass
+                            
+                            # Автоматически добавляем того, кто оплатил, в подписку
+                            if subscription_id and user_id:
+                                try:
+                                    username = metadata.get('telegram_username') or f"user_{user_id}"
+                                    add_subscription_member(subscription_id, user_id, username)
+                                    logger.info(f"[YOOKASSA] Автоматически добавлен оплативший пользователь {user_id} в подписку {subscription_id}")
+                                except Exception as add_error:
+                                    logger.error(f"[YOOKASSA] Ошибка добавления оплатившего пользователя в подписку: {add_error}", exc_info=True)
+                            
+                            # Получаем участников подписки (исключая бота)
                             # get_subscription_members возвращает dict {user_id: username}
-                            members_dict = get_subscription_members(subscription_id) if subscription_id else {}
+                            members_dict = get_subscription_members(subscription_id, bot_id) if subscription_id else {}
                             members_count = len(members_dict) if members_dict else 0
                             
-                            # Проверяем количество участников
+                            # Проверяем количество участников (исключаем бота)
                             active_users = get_active_group_users(chat_id)
+                            if active_users and bot_id:
+                                # Исключаем бота из списка активных пользователей
+                                active_users = {uid: uname for uid, uname in active_users.items() if uid != bot_id}
                             active_count = len(active_users) if active_users else 0
                             
                             # Формируем список участников, получивших доступ
@@ -582,13 +602,6 @@ def create_web_app(bot_instance):
                                     members_list += f"• @{member_username or f'user_{member_user_id}'}\n"
                                 if len(members_dict) > 20:
                                     members_list += f"• ... и еще {len(members_dict) - 20} участников\n"
-                            elif active_users and active_count <= (group_size or active_count):
-                                # Если участники не выбраны, но активных пользователей не больше лимита, показываем всех
-                                members_list = "\n\n👥 <b>Участники с доступом:</b>\n"
-                                for member_user_id, member_username in list(active_users.items())[:20]:
-                                    members_list += f"• @{member_username or f'user_{member_user_id}'}\n"
-                                if active_count > 20:
-                                    members_list += f"• ... и еще {active_count - 20} участников\n"
                             
                             # Формируем описание возможностей
                             features_text = ""
@@ -652,19 +665,44 @@ def create_web_app(bot_instance):
                             
                             group_text += "\nПриятного просмотра!"
                             
-                            # Если есть ограничение по количеству участников и активных пользователей больше
-                            if group_size and active_count > group_size and members_count < group_size:
-                                group_text += f"\n\n⚠️ <b>Внимание!</b>\n"
-                                group_text += f"В группе <b>{active_count}</b> активных участников, а подписка рассчитана на <b>{group_size}</b>.\n"
-                                group_text += f"Выберите участников для подписки:"
-                                
-                                markup = InlineKeyboardMarkup(row_width=1)
-                                markup.add(InlineKeyboardButton("👥 Выбрать участников", callback_data=f"payment:select_members:{subscription_id}"))
+                            # Если есть ограничение по количеству участников и можно добавить еще участников
+                            markup = None
+                            if group_size and members_count < int(group_size):
+                                # Есть место для дополнительных участников
+                                available_slots = int(group_size) - members_count
+                                if available_slots > 0:
+                                    # Находим участников, которых можно добавить (не бот, не уже в подписке)
+                                    potential_members = {}
+                                    if active_users:
+                                        for uid, uname in active_users.items():
+                                            if uid != bot_id and uid not in members_dict:
+                                                potential_members[uid] = uname
+                                    
+                                    if potential_members:
+                                        # Если есть только один потенциальный участник и есть место для одного, предлагаем добавить его
+                                        if len(potential_members) == 1 and available_slots >= 1:
+                                            member_uid, member_uname = list(potential_members.items())[0]
+                                            group_text += f"\n\n💡 Хотите добавить еще одного участника?"
+                                            markup = InlineKeyboardMarkup(row_width=1)
+                                            markup.add(InlineKeyboardButton(f"➕ Добавить @{member_uname or f'user_{member_uid}'}", callback_data=f"payment:add_member:{member_uid}:{subscription_id}"))
+                                        elif available_slots > 0:
+                                            # Несколько потенциальных участников - предлагаем выбрать
+                                            group_text += f"\n\n💡 Можно добавить еще <b>{available_slots}</b> участник(ов) в подписку:"
+                                            markup = InlineKeyboardMarkup(row_width=1)
+                                            markup.add(InlineKeyboardButton("👥 Выбрать участников", callback_data=f"payment:select_members:{subscription_id}"))
+                            
+                            if markup:
                                 try:
                                     result = bot_instance.send_message(chat_id, group_text, reply_markup=markup, parse_mode='HTML')
-                                    logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой выбора участников отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
+                                    logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой добавления участников отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
                                 except Exception as send_error:
-                                    logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения с кнопкой выбора участников: {send_error}", exc_info=True)
+                                    logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения с кнопкой добавления участников: {send_error}", exc_info=True)
+                                    # Отправляем без кнопки
+                                    try:
+                                        result = bot_instance.send_message(chat_id, group_text, parse_mode='HTML')
+                                        logger.info(f"[YOOKASSA] ✅ Сообщение без кнопки отправлено в группу {chat_id}")
+                                    except:
+                                        pass
                             else:
                                 logger.info(f"[YOOKASSA] Отправка сообщения об успешной оплате в группу chat_id={chat_id}, user_id={user_id}")
                                 try:
