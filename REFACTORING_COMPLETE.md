@@ -4,7 +4,7 @@
 
 Проект полностью переведен на новую модульную структуру. Все изменения запушены на GitHub.
 
-**Последнее обновление:** 5 января 2026
+**Последнее обновление:** 5 января 2026 (обновлено: добавлена структура settings/)
 
 ---
 
@@ -27,13 +27,16 @@ moviebot/
 │   │   ├── seasons.py        # ✅ /seasons, сериалы
 │   │   ├── plan.py           # ✅ /plan, планирование (включая plan_type: callback)
 │   │   ├── payment.py        # ✅ /payment, оплата
-│   │   ├── series.py         # ✅ /search, /random, /premieres, /ticket, /settings, /help
+│   │   ├── series.py         # ✅ /search, /random, /premieres, /ticket, /help
 │   │   │                      #    (включая search_type: callback)
 │   │   ├── rate.py           # ✅ /rate, оценка фильмов
 │   │   ├── stats.py          # ✅ /stats, /total, /admin_stats
-│   │   ├── edit.py           # ✅ /edit, редактирование
-│   │   ├── clean.py          # ✅ /clean, очистка
-│   │   ├── join.py           # ✅ /join, присоединение
+│   │   ├── settings.py       # ✅ /settings, настройки бота
+│   │   │                      #    (включая settings: callback и timezone: callback)
+│   │   ├── settings/         # ✅ Подпапка с настройками
+│   │   │   ├── edit.py       # ✅ /edit, редактирование
+│   │   │   ├── clean.py      # ✅ /clean, очистка
+│   │   │   └── join.py       # ✅ /join, присоединение
 │   │   ├── admin.py          # ✅ Админские команды (callbacks с декораторами)
 │   │   ├── promo.py          # ✅ Промокоды (callbacks с декораторами)
 │   │   └── text_messages.py  # ✅ Главный обработчик текстовых сообщений
@@ -93,9 +96,10 @@ register_payment_handlers(bot_instance)
 register_series_handlers(bot_instance)     # Включает search_type: callback
 register_rate_handlers(bot_instance)
 register_stats_handlers(bot_instance)
-register_edit_handlers(bot_instance)
-register_clean_handlers(bot_instance)
-register_join_handlers(bot_instance)
+register_settings_handlers(bot_instance)    # Включает settings: и timezone: callbacks
+register_edit_handlers(bot_instance)        # Из settings/edit.py
+register_clean_handlers(bot_instance)      # Из settings/clean.py
+register_join_handlers(bot_instance)       # Из settings/join.py
 
 # 3. Регистрация callback handlers
 register_film_callbacks(bot_instance)      # add_to_database, plan_from_added, show_facts
@@ -171,12 +175,24 @@ register_text_message_handlers(bot_instance)  # Главный обработч�
 - Callbacks: `payment:*` (дополнительный handler)
 
 **`series.py`**
-- Команды `/search`, `/random`, `/premieres`, `/ticket`, `/settings`, `/help`
-- Callbacks: `search_type:`, `add_to_database:`, `rand_mode_locked:`, `ticket_locked:`, `timezone:`, `settings:`
+- Команды `/search`, `/random`, `/premieres`, `/ticket`, `/help`
+- Callbacks: `search_type:`, `add_to_database:`, `rand_mode_locked:`, `ticket_locked:`
 - Функции:
   - `show_film_info_without_adding()` - показывает описание БЕЗ добавления в базу
   - `show_film_info_with_buttons()` - показывает описание с кнопками
   - `ensure_movie_in_database()` - добавляет фильм/сериал в базу
+
+**`settings.py`** ⭐ НОВЫЙ
+- Команда `/settings`, настройки бота
+- Callbacks: `settings:*` (все настройки), `timezone:` (выбор часового пояса)
+- Обрабатывает:
+  - Настройки эмодзи просмотра (`settings:emoji`, `settings:add`, `settings:replace`, `settings:reset`)
+  - Выбор часового пояса (`settings:timezone`, `timezone:Moscow`, `timezone:Serbia`)
+  - Настройки напоминаний (`settings:notifications`, `settings:notify:*`)
+  - Импорт базы из Кинопоиска (`settings:import`)
+  - Случайные события (`settings:random_events`, `settings:random_events:*`)
+  - Редактирование, очистка, участие (через вызовы соответствующих команд)
+- Логика продолжения планирования после выбора часового пояса
 
 **`rate.py`**
 - Команда `/rate`, оценка фильмов
@@ -185,14 +201,17 @@ register_text_message_handlers(bot_instance)  # Главный обработч�
 **`stats.py`**
 - Команды `/stats`, `/total`, `/admin_stats`
 
-**`edit.py`**
-- Команда `/edit`, редактирование
+**`settings/edit.py`**
+- Команда `/edit`, редактирование расписания и оценок
+- Импорт: `from moviebot.bot.handlers.settings.edit import register_edit_handlers`
 
-**`clean.py`**
-- Команда `/clean`, очистка
+**`settings/clean.py`**
+- Команда `/clean`, очистка базы данных
+- Импорт: `from moviebot.bot.handlers.settings.clean import register_clean_handlers`
 
-**`join.py`**
-- Команда `/join`, присоединение
+**`settings/join.py`**
+- Команда `/join`, управление участием в боте
+- Импорт: `from moviebot.bot.handlers.settings.join import register_join_handlers`
 
 **`admin.py`**
 - Админские команды: `/unsubscribe`, `/add_admin`
@@ -347,7 +366,7 @@ utils/payments.py
 
 ### Создано файлов
 - **Python файлов:** 40+
-- **Handlers:** 13 файлов
+- **Handlers:** 14 файлов (включая settings.py и 3 файла в settings/)
 - **Callbacks:** 4 файла
   - `film_callbacks.py` - карточка фильма
   - `series_callbacks.py` - сериалы
@@ -386,9 +405,10 @@ utils/payments.py
 - ✅ `series.py` - реализован (включая `search_type:` callback)
 - ✅ `rate.py` - реализован
 - ✅ `stats.py` - реализован
-- ✅ `edit.py` - реализован
-- ✅ `clean.py` - реализован
-- ✅ `join.py` - реализован
+- ✅ `settings.py` - реализован (включая `settings:` и `timezone:` callbacks)
+- ✅ `settings/edit.py` - реализован
+- ✅ `settings/clean.py` - реализован
+- ✅ `settings/join.py` - реализован
 - ✅ `admin.py` - реализован (callbacks через декораторы)
 - ✅ `promo.py` - реализован (callbacks через декораторы)
 - ✅ `text_messages.py` - главный обработчик текстовых сообщений
@@ -416,6 +436,7 @@ utils/payments.py
 - ✅ Убраны лишние запросы к API при добавлении фильма в базу
 - ✅ Исправлена настройка логирования для Railway
 - ✅ Добавлены ссылки на онлайн-кинотеатры в уведомлениях о сериях
+- ✅ Реорганизована структура settings: вынесен в отдельный файл, edit/clean/join перемещены в settings/
 
 ### 7. Запушено на GitHub
 - ✅ Все изменения закоммичены
@@ -502,4 +523,4 @@ from bot.handlers.start import start_command
 - и т.д.
 
 **Дата завершения рефакторинга:** 5 января 2026
-**Последнее обновление:** 5 января 2026
+**Последнее обновление:** 5 января 2026 (структура settings/)

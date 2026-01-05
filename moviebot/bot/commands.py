@@ -49,15 +49,19 @@ def register_all_handlers(bot):
     register_stats_handlers(bot)
     logger.info("✅ stats handlers зарегистрированы")
     
-    from moviebot.bot.handlers.edit import register_edit_handlers
+    from moviebot.bot.handlers.settings import register_settings_handlers
+    register_settings_handlers(bot)
+    logger.info("✅ settings handlers зарегистрированы")
+    
+    from moviebot.bot.handlers.settings.edit import register_edit_handlers
     register_edit_handlers(bot)
     logger.info("✅ edit handlers зарегистрированы")
     
-    from moviebot.bot.handlers.clean import register_clean_handlers
+    from moviebot.bot.handlers.settings.clean import register_clean_handlers
     register_clean_handlers(bot)
     logger.info("✅ clean handlers зарегистрированы")
     
-    from moviebot.bot.handlers.join import register_join_handlers
+    from moviebot.bot.handlers.settings.join import register_join_handlers
     register_join_handlers(bot)
     logger.info("✅ join handlers зарегистрированы")
     

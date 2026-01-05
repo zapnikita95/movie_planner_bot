@@ -3231,110 +3231,17 @@ def handle_kinopoisk_link(message):
     # Обработчик settings: перенесен в handlers/settings.py
 
     # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-                # Проверяем доступ к настройкам напоминаний
-                if not has_notifications_access(chat_id, user_id):
-                    bot_instance.answer_callback_query(
-                        call.id,
-                        "🔒 Функционал можно подключить через /payment",
-                        show_alert=True
-                    )
-                    return
-                
-                # Показываем настройки времени напоминаний
-                notify_settings = get_notification_settings(chat_id)
-                
-                separate = notify_settings.get('separate_weekdays', 'true') == 'true'
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("📅 Разделять будни/выходные", callback_data="settings:notify:separate_toggle"))
-                markup.add(InlineKeyboardButton("🏠 Домашний просмотр", callback_data="settings:notify:home"))
-                markup.add(InlineKeyboardButton("🎬 Просмотр в кино", callback_data="settings:notify:cinema"))
-                markup.add(InlineKeyboardButton("🎫 Билеты на сеанс", callback_data="settings:notify:tickets"))
-                markup.add(InlineKeyboardButton("📋 Регулярные напоминания", callback_data="settings:notify:regular_reminders"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
-                
-                separate_text = "✅ Включено" if separate else "❌ Выключено"
-                home_weekday = f"{notify_settings.get('home_weekday_hour', 19):02d}:{notify_settings.get('home_weekday_minute', 0):02d}"
-                home_weekend = f"{notify_settings.get('home_weekend_hour', 9):02d}:{notify_settings.get('home_weekend_minute', 0):02d}"
-                cinema_weekday = f"{notify_settings.get('cinema_weekday_hour', 9):02d}:{notify_settings.get('cinema_weekday_minute', 0):02d}"
-                cinema_weekend = f"{notify_settings.get('cinema_weekend_hour', 9):02d}:{notify_settings.get('cinema_weekend_minute', 0):02d}"
-                ticket_minutes = notify_settings.get('ticket_before_minutes', 10)
-                
-                if ticket_minutes == -1:
-                    ticket_text = "Не присылать отдельно"
-                elif ticket_minutes == 0:
-                    ticket_text = "Вместе с уведомлением"
-                else:
-                    ticket_text = f"За {ticket_minutes} минут"
-                
-                text = f"⏰ <b>Настройки напоминаний</b>\n\n"
-                text += f"📅 Разделение будни/выходные: <b>{separate_text}</b>\n\n"
-                text += f"🏠 <b>Домашний просмотр:</b>\n"
-                if separate:
-                    text += f"   Будни: <b>{home_weekday}</b>\n"
-                    text += f"   Выходные: <b>{home_weekend}</b>\n"
-                else:
-                    text += f"   Время: <b>{home_weekday}</b>\n"
-                text += f"\n🎬 <b>Просмотр в кино:</b>\n"
-                if separate:
-                    text += f"   Будни: <b>{cinema_weekday}</b>\n"
-                    text += f"   Выходные: <b>{cinema_weekend}</b>\n"
-                else:
-                    text += f"   Время: <b>{cinema_weekday}</b>\n"
-                text += f"\n🎫 <b>Билеты на сеанс:</b> <b>{ticket_text}</b>"
-                
-                bot_instance.edit_message_text(
-                    text,
-                    call.message.chat.id,
-                    call.message.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                return
+    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
+    def handle_search_reply(message):
+        """Обработчик ответных сообщений для поиска"""
+        logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
+        logger.info(f"[SEARCH REPLY] Получено сообщение: user_id={message.from_user.id}, text={message.text[:50] if message.text else 'None'}, has_reply={message.reply_to_message is not None}")
+        try:
+            user_id = message.from_user.id
+            chat_id = message.chat.id
+            query = message.text.strip()
             
-            if action == "import":
-                # Импорт базы из Кинопоиска
-                user_import_state[user_id] = {
-                    'step': 'waiting_user_id',
-                    'kp_user_id': None,
-                    'count': None
-                }
-                bot_instance.edit_message_text(
-                    f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
-                    f"Отправьте ID пользователя Кинопоиска или ссылку на профиль.\n\n"
-                    f"Примеры:\n"
-                    f"• <code>1931396</code>\n"
-                    f"• <code>https://www.kinopoisk.ru/user/1931396</code>",
-                    call.message.chat.id,
-                    call.message.message_id,
-                    parse_mode='HTML'
-                )
-                logger.info(f"[SETTINGS] Импорт базы - состояние установлено для user_id={user_id}")
-                return
-            
-            
-            if action.startswith("random_events:example:"):
-                # Отправка примера случайного события
-                example_type = action.split(":")[-1]  # with_user или without_user
-                
-                # Проверяем, что это групповой чат
-                try:
-                    chat_info = bot_instance.get_chat(chat_id)
-                    if chat_info.type == 'private':
-                        bot_instance.answer_callback_query(call.id, "Примеры событий работают только в групповых чатах", show_alert=True)
-                        return
-                except Exception as e:
-                    logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить информацию о чате {chat_id}: {e}")
-                    bot_instance.answer_callback_query(call.id, "Ошибка при отправке примера", show_alert=True)
-                    return
-                
-                bot_instance.answer_callback_query(call.id, "Отправляю пример события...")
-                
-                import random
-                
-                if example_type == "with_user":
-                    # Пример события с участником (выбор случайного участника)
-                    with db_lock:
+            logger.info(f"[SEARCH REPLY] Проверка состояния: user_id={user_id}, user_search_state keys={list(user_search_state.keys())}")
                         cursor.execute('''
                             SELECT DISTINCT user_id, username 
                             FROM stats 

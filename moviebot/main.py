@@ -143,6 +143,7 @@ import moviebot.bot.callbacks.premieres_callbacks  # noqa: F401
 import moviebot.bot.handlers.admin  # noqa: F401
 import moviebot.bot.handlers.promo  # noqa: F401
 import moviebot.bot.handlers.text_messages  # noqa: F401 - критично для регистрации декораторов
+import moviebot.bot.handlers.state_handlers  # noqa: F401 - handlers для состояний (оценки, промокоды и т.д.)
 
 # Регистрируем handlers команд и callbacks
 from moviebot.bot.handlers.start import register_start_handlers
@@ -177,15 +178,19 @@ from moviebot.bot.handlers.stats import register_stats_handlers
 register_stats_handlers(bot_instance)
 logger.info("✅ stats handlers зарегистрированы")
 
-from moviebot.bot.handlers.edit import register_edit_handlers
+from moviebot.bot.handlers.settings import register_settings_handlers
+register_settings_handlers(bot_instance)
+logger.info("✅ settings handlers зарегистрированы")
+
+from moviebot.bot.handlers.settings.edit import register_edit_handlers
 register_edit_handlers(bot_instance)
 logger.info("✅ edit handlers зарегистрированы")
 
-from moviebot.bot.handlers.clean import register_clean_handlers
+from moviebot.bot.handlers.settings.clean import register_clean_handlers
 register_clean_handlers(bot_instance)
 logger.info("✅ clean handlers зарегистрированы")
 
-from moviebot.bot.handlers.join import register_join_handlers
+from moviebot.bot.handlers.settings.join import register_join_handlers
 register_join_handlers(bot_instance)
 logger.info("✅ join handlers зарегистрированы")
 
@@ -218,6 +223,14 @@ logger.info("✅ text_messages handlers зарегистрированы")
 logger.info("=" * 80)
 logger.info("✅ ВСЕ ХЭНДЛЕРЫ ЗАРЕГИСТРИРОВАНЫ")
 logger.info("=" * 80)
+
+# Debug-хэндлер для settings (после всех register)
+@bot.callback_query_handler(func=lambda call: 'settings' in call.data.lower())
+def debug_settings(call):
+    logger.info(f"[DEBUG SETTINGS] СРАБОТАЛ! data={call.data}, user={call.from_user.id}")
+    bot.answer_callback_query(call.id, text="🔧 Settings debug OK")
+
+logger.info("✅ Debug-хэндлер для settings зарегистрирован")
 
 # Периодическая синхронизация команд каждый час
 scheduler.add_job(

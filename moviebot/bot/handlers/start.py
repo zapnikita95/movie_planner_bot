@@ -164,6 +164,8 @@ def register_start_handlers(bot):
                 premieres_command(message)
             elif action == 'random':
                 message.text = '/random'
+                # Исправляем from_user.id на реальный user_id пользователя
+                message.from_user.id = user_id
                 random_start(message)
             elif action == 'search':
                 # Создаем правильное сообщение с user_id пользователя
