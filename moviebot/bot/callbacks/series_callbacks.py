@@ -6,6 +6,7 @@ import json
 from datetime import datetime as dt, timedelta
 import pytz
 import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.bot.bot_init import bot as bot_instance, scheduler
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
@@ -14,164 +15,11 @@ from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info, get
 from moviebot.utils.helpers import has_notifications_access
 from moviebot.scheduler import send_series_notification, check_series_for_new_episodes
 from moviebot.states import user_episodes_state
-import sys
-import os
-
-# Импортируем show_film_info_with_buttons из старого файла (временно, пока не перенесена в новую структуру)
-# Создаем обертку, которая использует правильные зависимости
-def show_film_info_with_buttons_wrapper(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
-    """Обертка для show_film_info_with_buttons, которая использует правильные зависимости"""
-    try:
-        # Пытаемся импортировать функцию из старого файла
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        old_moviebot_path = os.path.join(project_root, 'moviebot.py')
-        if os.path.exists(old_moviebot_path):
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("moviebot_module", old_moviebot_path)
-            moviebot_module = importlib.util.module_from_spec(spec)
-            
-            # Устанавливаем правильные зависимости в модуль перед выполнением
-            moviebot_module.bot = bot_instance
-            moviebot_module.cursor = cursor
-            moviebot_module.conn = conn
-            moviebot_module.db_lock = db_lock
-            moviebot_module.logger = logger
-            
-            # Импортируем необходимые функции
-            from moviebot.api.kinopoisk_api import get_series_airing_status, get_seasons_data
-            from moviebot.utils.helpers import has_notifications_access
-            moviebot_module.get_series_airing_status = get_series_airing_status
-            moviebot_module.get_seasons_data = get_seasons_data
-            moviebot_module.has_notifications_access = has_notifications_access
-            
-            spec.loader.exec_module(moviebot_module)
-            original_function = moviebot_module.show_film_info_with_buttons
-            
-            # Вызываем функцию с правильными зависимостями
-            return original_function(chat_id, user_id, info, link, kp_id, existing, message_id, message_thread_id)
-        else:
-            raise ImportError("Файл moviebot.py не найден")
-    except Exception as import_e:
-        logger.error(f"[SERIES CALLBACKS] Ошибка импорта show_film_info_with_buttons: {import_e}", exc_info=True)
-        # Fallback: обновляем только клавиатуру
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-        
-        # Проверяем статус подписки из БД
-        is_subscribed = False
-        if existing:
-            film_id = existing[0] if isinstance(existing, tuple) else existing.get('id')
-            if film_id:
-                with db_lock:
-                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                    sub_row = cursor.fetchone()
-                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-        
-        markup = InlineKeyboardMarkup(row_width=1)
-        if is_subscribed:
-            markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
-        else:
-            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-        
-        if message_id:
-            try:
-                if message_thread_id:
-                    bot_instance.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        message_thread_id=message_thread_id,
-                        reply_markup=markup
-                    )
-                else:
-                    bot_instance.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        reply_markup=markup
-                    )
-            except Exception as e:
-                logger.error(f"[SERIES CALLBACKS] Ошибка обновления сообщения: {e}")
-
-# Создаем алиас для удобства
-show_film_info_with_buttons = show_film_info_with_buttons_wrapper
+from moviebot.bot.handlers.series import show_film_info_with_buttons  # Перенесённая функция из handlers/series.py
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
-
-# Импортируем show_film_info_with_buttons из старого файла (временно, пока не перенесена в новую структуру)
-# Создаем обертку, которая использует правильные зависимости
-def show_film_info_with_buttons_wrapper(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
-    """Обертка для show_film_info_with_buttons, которая использует правильные зависимости"""
-    try:
-        # Пытаемся импортировать функцию из старого файла
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-        old_moviebot_path = os.path.join(project_root, 'moviebot.py')
-        if os.path.exists(old_moviebot_path):
-            import importlib.util
-            spec = importlib.util.spec_from_file_location("moviebot_module", old_moviebot_path)
-            moviebot_module = importlib.util.module_from_spec(spec)
-            
-            # Устанавливаем правильные зависимости в модуль перед выполнением
-            moviebot_module.bot = bot_instance
-            moviebot_module.cursor = cursor
-            moviebot_module.conn = conn
-            moviebot_module.db_lock = db_lock
-            moviebot_module.logger = logger
-            
-            # Импортируем необходимые функции
-            from moviebot.api.kinopoisk_api import get_series_airing_status, get_seasons_data
-            from moviebot.utils.helpers import has_notifications_access
-            moviebot_module.get_series_airing_status = get_series_airing_status
-            moviebot_module.get_seasons_data = get_seasons_data
-            moviebot_module.has_notifications_access = has_notifications_access
-            
-            spec.loader.exec_module(moviebot_module)
-            original_function = moviebot_module.show_film_info_with_buttons
-            
-            # Вызываем функцию с правильными зависимостями
-            return original_function(chat_id, user_id, info, link, kp_id, existing, message_id, message_thread_id)
-        else:
-            raise ImportError("Файл moviebot.py не найден")
-    except Exception as import_e:
-        logger.error(f"[SERIES CALLBACKS] Ошибка импорта show_film_info_with_buttons: {import_e}", exc_info=True)
-        # Fallback: обновляем только клавиатуру
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-        
-        # Проверяем статус подписки из БД
-        is_subscribed = False
-        if existing:
-            film_id = existing[0] if isinstance(existing, tuple) else existing.get('id')
-            if film_id:
-                with db_lock:
-                    cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                    sub_row = cursor.fetchone()
-                    is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-        
-        markup = InlineKeyboardMarkup(row_width=1)
-        if is_subscribed:
-            markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
-        else:
-            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-        
-        if message_id:
-            try:
-                if message_thread_id:
-                    bot_instance.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        message_thread_id=message_thread_id,
-                        reply_markup=markup
-                    )
-                else:
-                    bot_instance.edit_message_reply_markup(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        reply_markup=markup
-                    )
-            except Exception as e:
-                logger.error(f"[SERIES CALLBACKS] Ошибка обновления сообщения: {e}")
-
-# Создаем алиас для удобства
-show_film_info_with_buttons = show_film_info_with_buttons_wrapper
 
 
 def register_series_callbacks(bot_instance):
@@ -180,12 +28,14 @@ def register_series_callbacks(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_subscribe:"))
     def series_subscribe_callback(call):
         """Обработчик подписки на новые серии сериала"""
-        logger.info(f"[SERIES SUBSCRIBE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, chat_id={call.message.chat.id if call.message else None}")
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
         try:
-            kp_id = call.data.split(":")[1]
-            chat_id = call.message.chat.id
-            user_id = call.from_user.id
+            logger.info(f"[SERIES SUBSCRIBE] ===== START: callback_id={call.id}, user_id={user_id}, chat_id={chat_id}")
             
+            data = call.data.split(':')
+            kp_id = data[1]
             logger.info(f"[SERIES SUBSCRIBE] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
             
             # Проверяем доступ к функциям уведомлений
@@ -198,32 +48,20 @@ def register_series_callbacks(bot_instance):
                 )
                 return
             
-            logger.info(f"[SERIES SUBSCRIBE] Получение film_id из БД для kp_id={kp_id}")
+            # Получение film_id и title
             with db_lock:
-                # Получаем film_id
-                cursor.execute("SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 row = cursor.fetchone()
-                if not row:
-                    logger.error(f"[SERIES SUBSCRIBE] Сериал не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
-                    bot_instance.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
-                    return
-                
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                title = row.get('title') if isinstance(row, dict) else row[1]
-                logger.info(f"[SERIES SUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
-                
-                # Проверяем, подписан ли уже
-                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                sub_row = cursor.fetchone()
-                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                
-                if is_subscribed:
-                    logger.info(f"[SERIES SUBSCRIBE] Пользователь уже подписан: user_id={user_id}, film_id={film_id}")
-                    bot_instance.answer_callback_query(call.id, "Вы уже подписан на этот сериал", show_alert=True)
-                    return
-                
-                logger.info(f"[SERIES SUBSCRIBE] Добавление подписки в БД: user_id={user_id}, film_id={film_id}, kp_id={kp_id}")
-                # Добавляем/обновляем подписку
+                if row:
+                    film_id = row[0] if isinstance(row, tuple) else row.get('id')
+                    title = row[1] if isinstance(row, tuple) else row.get('title')
+                    logger.info(f"[SERIES SUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
+                else:
+                    logger.error(f"[SERIES SUBSCRIBE] Сериал не найден для kp_id={kp_id}")
+                    raise ValueError("Сериал не найден в БД")
+            
+            # Добавление подписки
+            with db_lock:
                 cursor.execute('''
                     INSERT INTO series_subscriptions (chat_id, film_id, kp_id, user_id, subscribed)
                     VALUES (%s, %s, %s, %s, TRUE)
@@ -232,281 +70,117 @@ def register_series_callbacks(bot_instance):
                 conn.commit()
                 logger.info(f"[SERIES SUBSCRIBE] Подписка добавлена в БД успешно")
             
-            # Получаем информацию о следующей серии и ставим уведомление
+            # Получение данных о сезонах (с try)
             logger.info(f"[SERIES SUBSCRIBE] Получение данных о сезонах для kp_id={kp_id}")
-            seasons = None
             try:
-                seasons = get_seasons_data(kp_id)
-                logger.info(f"[SERIES SUBSCRIBE] Получено сезонов: {len(seasons) if seasons else 0}")
-            except Exception as seasons_e:
-                logger.error(f"[SERIES SUBSCRIBE] Ошибка при получении данных о сезонах: {seasons_e}", exc_info=True)
-                seasons = None
+                seasons_data = get_seasons_data(kp_id)
+                logger.info(f"[SERIES SUBSCRIBE] Получено сезонов: {len(seasons_data)}")
+            except Exception as e:
+                logger.error(f"[SERIES SUBSCRIBE] Ошибка get_seasons_data: {e}", exc_info=True)
+                seasons_data = []  # Fallback
             
-            next_episode_date = None
-            next_episode = None
-            if seasons:
-                now = dt.now()
-                
-                for season in seasons:
-                    episodes = season.get('episodes', [])
-                    for ep in episodes:
-                        release_str = ep.get('releaseDate', '')
-                        if release_str and release_str != '—':
-                            try:
-                                release_date = None
-                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                    try:
-                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                        break
-                                    except:
-                                        continue
-                                
-                                if release_date and release_date > now:
-                                    if not next_episode_date or release_date < next_episode_date:
-                                        next_episode_date = release_date
-                                        next_episode = {
-                                            'season': season.get('number', ''),
-                                            'episode': ep.get('episodeNumber', ''),
-                                            'date': release_date
-                                        }
-                            except:
-                                pass
+            # Постановка задачи проверки
+            next_check_date = None
+            nearest_release_date = None
+            for season in seasons_data:
+                episodes = season.get('episodes', [])
+                for ep in episodes:
+                    release_str = ep.get('releaseDate', '')
+                    if release_str and release_str != '—':
+                        try:
+                            release_date = dt.strptime(release_str, '%Y-%m-%d').replace(tzinfo=pytz.utc)
+                            if release_date > dt.now(pytz.utc):
+                                if nearest_release_date is None or release_date < nearest_release_date:
+                                    nearest_release_date = release_date
+                        except:
+                            pass
             
-            if next_episode_date and next_episode:
-                # Ставим уведомление на дату выхода следующей серии
-                # Получаем часовой пояс пользователя
-                user_tz = pytz.timezone('Europe/Moscow')  # По умолчанию
-                try:
-                    with db_lock:
-                        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
-                        tz_row = cursor.fetchone()
-                        if tz_row:
-                            tz_str = tz_row.get('value') if isinstance(tz_row, dict) else tz_row[0]
-                            user_tz = pytz.timezone(tz_str)
-                except:
-                    pass
-                
-                # Уведомление за день до выхода
-                notification_time = next_episode_date - timedelta(days=1)
-                notification_time = user_tz.localize(notification_time.replace(hour=10, minute=0))
-                
-                logger.info(f"[SERIES SUBSCRIBE] Постановка уведомления на {notification_time}")
-                try:
-                    if scheduler:
-                        scheduler.add_job(
-                            send_series_notification,
-                            'date',
-                            run_date=notification_time.astimezone(pytz.utc),
-                            args=[chat_id, film_id, kp_id, title, next_episode['season'], next_episode['episode']],
-                            id=f'series_notification_{chat_id}_{film_id}_{user_id}_{next_episode_date.strftime("%Y%m%d")}'
-                        )
-                        logger.info(f"[SERIES SUBSCRIBE] Уведомление поставлено успешно")
-                except Exception as scheduler_e:
-                    logger.error(f"[SERIES SUBSCRIBE] Ошибка при постановке уведомления: {scheduler_e}", exc_info=True)
+            if nearest_release_date:
+                next_check_date = nearest_release_date - timedelta(days=1)  # Проверяем за день до выхода
             else:
-                # Нет ближайшей даты - ставим периодическую проверку (через 3 недели)
-                logger.info(f"[SERIES SUBSCRIBE] Нет ближайшей даты выхода, ставим проверку через 3 недели")
-                check_time = dt.now(pytz.utc) + timedelta(weeks=3)
-                logger.info(f"[SERIES SUBSCRIBE] Постановка задачи проверки на {check_time}")
-                try:
-                    if scheduler:
-                        scheduler.add_job(
-                            check_series_for_new_episodes,
-                            'date',
-                            run_date=check_time,
-                            args=[chat_id, film_id, kp_id, user_id],
-                            id=f'series_check_{chat_id}_{film_id}_{user_id}_{int(check_time.timestamp())}'
-                        )
-                        logger.info(f"[SERIES SUBSCRIBE] Задача проверки поставлена успешно")
-                except Exception as scheduler_e:
-                    logger.error(f"[SERIES SUBSCRIBE] Ошибка при постановке задачи проверки: {scheduler_e}", exc_info=True)
+                next_check_date = dt.now(pytz.utc) + timedelta(weeks=3)  # Если нет дат, проверка через 3 недели
+            
+            logger.info(f"[SERIES SUBSCRIBE] Постановка задачи проверки на {next_check_date}")
+            scheduler.add_job(
+                check_series_for_new_episodes,
+                'date',
+                run_date=next_check_date,
+                args=[kp_id, film_id, chat_id, user_id]
+            )
+            logger.info(f"[SERIES SUBSCRIBE] Задача проверки поставлена успешно")
             
             logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
             
-            # Обновляем сообщение с обновленной кнопкой
-            logger.info(f"[SERIES SUBSCRIBE] Обновление сообщения с описанием сериала")
+            # Обновление сообщения
+            logger.info("[SERIES SUBSCRIBE] Обновление сообщения с описанием сериала")
             try:
-                # Получаем информацию о сериале из базы
+                logger.info("[SERIES SUBSCRIBE] Получение информации о сериале через API: link=https://www.kinopoisk.ru/series/{kp_id}/")
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                info = extract_movie_info(link)
+                if not info:
+                    raise ValueError("No info from API")
+                
+                # Получаем watched из БД
                 with db_lock:
-                    cursor.execute("SELECT id, title, link, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                    row = cursor.fetchone()
-                    if row:
-                        film_id = row.get('id') if isinstance(row, dict) else row[0]
-                        title = row.get('title') if isinstance(row, dict) else row[1]
-                        link = row.get('link') if isinstance(row, dict) else row[2]
-                        watched = row.get('watched') if isinstance(row, dict) else row[3]
-                        
-                        logger.info(f"[SERIES SUBSCRIBE] Получение информации о сериале через API: link={link}")
-                        # Получаем информацию о сериале через API с таймаутом
-                        info = None
-                        try:
-                            import threading
-                            
-                            result = [None]
-                            exception = [None]
-                            
-                            def call_extract():
-                                try:
-                                    result[0] = extract_movie_info(link)
-                                except Exception as e:
-                                    exception[0] = e
-                            
-                            thread = threading.Thread(target=call_extract)
-                            thread.daemon = True
-                            thread.start()
-                            thread.join(timeout=10)  # Таймаут 10 секунд
-                            
-                            if thread.is_alive():
-                                logger.error(f"[SERIES SUBSCRIBE] Таймаут при получении информации о сериале через API (превышен лимит 10 секунд)")
-                                info = None
-                            elif exception[0]:
-                                raise exception[0]
-                            else:
-                                info = result[0]
-                                if info:
-                                    logger.info(f"[SERIES SUBSCRIBE] Информация о сериале получена успешно")
-                                else:
-                                    logger.warning(f"[SERIES SUBSCRIBE] extract_movie_info вернул None")
-                        except Exception as api_e:
-                            logger.error(f"[SERIES SUBSCRIBE] Ошибка API при получении информации о сериале: {api_e}", exc_info=True)
-                            info = None
-                        
-                        if info:
-                            existing = (film_id, title, watched)
-                            # Получаем message_thread_id из сообщения, если оно есть
-                            message_thread_id = None
-                            message_id = None
-                            if call.message:
-                                message_id = call.message.message_id
-                                if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
-                                    message_thread_id = call.message.message_thread_id
-                            
-                            logger.info(f"[SERIES SUBSCRIBE] Вызываю show_film_info_with_buttons: message_id={message_id}, message_thread_id={message_thread_id}")
-                            # Обновляем существующее сообщение с обновленной кнопкой
-                            try:
-                                # Пытаемся использовать функцию из старого файла
-                                if 'show_film_info_with_buttons' in globals() and callable(show_film_info_with_buttons):
-                                    show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=message_id, message_thread_id=message_thread_id)
-                                    logger.info(f"[SERIES SUBSCRIBE] Сообщение обновлено успешно через show_film_info_with_buttons")
-                                else:
-                                    # Если функция не доступна, обновляем только клавиатуру
-                                    logger.warning(f"[SERIES SUBSCRIBE] show_film_info_with_buttons не доступна, обновляю только клавиатуру")
-                                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                                    new_markup = InlineKeyboardMarkup(row_width=1)
-                                    new_markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
-                                    
-                                    if message_thread_id:
-                                        bot_instance.edit_message_reply_markup(
-                                            chat_id=chat_id,
-                                            message_id=message_id,
-                                            message_thread_id=message_thread_id,
-                                            reply_markup=new_markup
-                                        )
-                                    else:
-                                        bot_instance.edit_message_reply_markup(
-                                            chat_id=chat_id,
-                                            message_id=message_id,
-                                            reply_markup=new_markup
-                                        )
-                                    logger.info(f"[SERIES SUBSCRIBE] Клавиатура обновлена успешно")
-                            except telebot.apihelper.ApiTelegramException as api_e:
-                                error_str = str(api_e).lower()
-                                logger.error(f"[SERIES SUBSCRIBE] Telegram API ошибка при обновлении сообщения: {api_e}", exc_info=True)
-                                
-                                # Если ошибка "message is not modified", пробуем обновить только клавиатуру
-                                if "message is not modified" in error_str or "message_not_modified" in error_str:
-                                    logger.info(f"[SERIES SUBSCRIBE] Telegram: 'message is not modified' — пробую только markup")
-                                    try:
-                                        # Получаем текущий текст и обновляем только клавиатуру
-                                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                                        new_markup = InlineKeyboardMarkup(row_width=1)
-                                        new_markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
-                                        
-                                        if message_thread_id:
-                                            bot_instance.edit_message_reply_markup(
-                                                chat_id=chat_id,
-                                                message_id=message_id,
-                                                message_thread_id=message_thread_id,
-                                                reply_markup=new_markup
-                                            )
-                                        else:
-                                            bot_instance.edit_message_reply_markup(
-                                                chat_id=chat_id,
-                                                message_id=message_id,
-                                                reply_markup=new_markup
-                                            )
-                                        logger.info(f"[SERIES SUBSCRIBE] Клавиатура обновлена успешно")
-                                    except Exception as markup_e:
-                                        logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления клавиатуры: {markup_e}", exc_info=True)
-                                        # Отправляем новое сообщение как fallback
-                                        bot_instance.send_message(chat_id, f"✅ Вы подписались на уведомления о новых сериях для {title}")
-                                else:
-                                    # Другая ошибка - отправляем новое сообщение
-                                    logger.warning(f"[SERIES SUBSCRIBE] Отправляю новое сообщение из-за ошибки API")
-                                    bot_instance.send_message(chat_id, f"✅ Вы подписались на уведомления о новых сериях для {title}")
-                            except Exception as update_e:
-                                logger.error(f"[SERIES SUBSCRIBE] Ошибка при обновлении сообщения через show_film_info_with_buttons: {update_e}", exc_info=True)
-                                # Отправляем новое сообщение как fallback
-                                bot_instance.send_message(chat_id, f"✅ Вы подписались на уведомления о новых сериях для {title}")
-                        else:
-                            logger.warning(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале через API для kp_id={kp_id}")
-                            # Даже если не удалось получить info, обновляем клавиатуру
-                            if call.message:
-                                message_id = call.message.message_id
-                                message_thread_id = None
-                                if hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
-                                    message_thread_id = call.message.message_thread_id
-                                
-                                try:
-                                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                                    new_markup = InlineKeyboardMarkup(row_width=1)
-                                    new_markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
-                                    
-                                    if message_thread_id:
-                                        bot_instance.edit_message_reply_markup(
-                                            chat_id=chat_id,
-                                            message_id=message_id,
-                                            message_thread_id=message_thread_id,
-                                            reply_markup=new_markup
-                                        )
-                                    else:
-                                        bot_instance.edit_message_reply_markup(
-                                            chat_id=chat_id,
-                                            message_id=message_id,
-                                            reply_markup=new_markup
-                                        )
-                                    logger.info(f"[SERIES SUBSCRIBE] Клавиатура обновлена успешно (без info)")
-                                except Exception as markup_e:
-                                    logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления клавиатуры без info: {markup_e}", exc_info=True)
+                    cursor.execute("SELECT watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                    watched_row = cursor.fetchone()
+                    watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                
+                # Вызов show_film_info_with_buttons
+                message_id = call.message.message_id if call.message else None
+                message_thread_id = None
+                if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                    message_thread_id = call.message.message_thread_id
+                
+                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=message_id, message_thread_id=message_thread_id)
+                logger.info("[SERIES SUBSCRIBE] show_film_info_with_buttons выполнен успешно")
+            
+            except telebot.apihelper.ApiTelegramException as tele_e:
+                logger.error(f"[SERIES SUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
+                if "message is not modified" in str(tele_e).lower():
+                    # Создай new_markup и обнови только клавиатуру
+                    new_markup = InlineKeyboardMarkup()
+                    new_markup.add(InlineKeyboardButton("🔕 Отписаться", callback_data=f"series_unsubscribe:{kp_id}"))
+                    # Добавь другие кнопки
+                    
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        reply_markup=new_markup
+                    )
+                    logger.info("[SERIES SUBSCRIBE] Только markup обновлён")
+                else:
+                    bot_instance.send_message(chat_id, f"🔔 Подписка добавлена на {title}, но карточка не обновилась. Переоткройте.")
+            
             except Exception as e:
-                logger.error(f"[SERIES SUBSCRIBE] Ошибка при обновлении сообщения: {e}", exc_info=True)
-                try:
-                    bot_instance.send_message(chat_id, "✅ Вы подписались на уведомления о новых сериях.\n(Не удалось обновить карточку — попробуйте открыть заново)")
-                    logger.info(f"[SERIES SUBSCRIBE] Отправлено fallback сообщение")
-                except Exception as send_e:
-                    logger.error(f"[SERIES SUBSCRIBE] Ошибка отправки fallback сообщения: {send_e}", exc_info=True)
+                logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления: {e}", exc_info=True)
+                bot_instance.send_message(chat_id, f"🔔 Подписка добавлена на {title}, но карточка не обновилась. Переоткройте.")
+        
         except Exception as e:
-            logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА в хэндлере: {e}", exc_info=True)
+            logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ошибка в хэндлере: {e}", exc_info=True)
             try:
-                bot_instance.send_message(chat_id, "✅ Подписка добавлена, но произошла ошибка при обновлении карточки.")
-            except Exception as send_e:
-                logger.error(f"[SERIES SUBSCRIBE] Не удалось отправить сообщение об ошибке: {send_e}", exc_info=True)
+                bot_instance.send_message(chat_id, "🔔 Подписка добавлена с ошибкой. Попробуйте позже.")
+            except:
+                pass
+        
         finally:
-            # ВСЕГДА отвечаем на callback!
             try:
-                bot_instance.answer_callback_query(call.id, text="✅ Подписка оформлена!")
-            except Exception as answer_e:
-                logger.error(f"[SERIES SUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
+                bot_instance.answer_callback_query(call.id, text="🔔 Подписка добавлена")
+                logger.info("[SERIES SUBSCRIBE] answer_callback_query выполнен")
+            except Exception as e:
+                logger.error(f"[ANSWER CALLBACK] Ошибка: {e}")
 
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_unsubscribe:"))
     def series_unsubscribe_callback(call):
         """Обработчик отписки от новых серий сериала"""
-        logger.info(f"[SERIES UNSUBSCRIBE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, chat_id={call.message.chat.id if call.message else None}")
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
         try:
-            kp_id = call.data.split(":")[1]
-            chat_id = call.message.chat.id
-            user_id = call.from_user.id
+            logger.info(f"[SERIES UNSUBSCRIBE] ===== START: callback_id={call.id}, user_id={user_id}, chat_id={chat_id}")
             
+            data = call.data.split(':')
+            kp_id = data[1]
             logger.info(f"[SERIES UNSUBSCRIBE] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
             
             # Проверяем доступ к функциям уведомлений
@@ -519,18 +193,17 @@ def register_series_callbacks(bot_instance):
                 )
                 return
             
-            logger.info(f"[SERIES UNSUBSCRIBE] Получение film_id из БД для kp_id={kp_id}")
+            # Получение film_id
             with db_lock:
-                # Получаем film_id
-                cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 row = cursor.fetchone()
                 if not row:
-                    logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
-                    bot_instance.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
-                    return
+                    logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден для kp_id={kp_id}")
+                    raise ValueError("Сериал не найден в БД")
                 
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                logger.info(f"[SERIES UNSUBSCRIBE] Найден сериал: film_id={film_id}")
+                film_id = row[0] if isinstance(row, tuple) else row.get('id')
+                title = row[1] if isinstance(row, tuple) else row.get('title')
+                logger.info(f"[SERIES UNSUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
                 
                 # Отписываемся
                 logger.info(f"[SERIES UNSUBSCRIBE] Отписка от сериала: user_id={user_id}, film_id={film_id}")
@@ -543,20 +216,63 @@ def register_series_callbacks(bot_instance):
                 logger.info(f"[SERIES UNSUBSCRIBE] Отписка выполнена в БД")
             
             logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
-            # TODO: Обновить сообщение с описанием сериала (как в series_subscribe)
-            bot_instance.send_message(chat_id, "🔕 Вы отписались от уведомлений о новых сериях")
+            
+            # Обновление сообщения
+            logger.info("[SERIES UNSUBSCRIBE] Обновление сообщения с описанием сериала")
+            try:
+                logger.info("[SERIES UNSUBSCRIBE] Получение информации о сериале через API")
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                info = extract_movie_info(link)
+                if not info:
+                    raise ValueError("No info from API")
+                
+                # Получаем watched из БД
+                with db_lock:
+                    cursor.execute("SELECT watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                    watched_row = cursor.fetchone()
+                    watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                
+                # Вызов show_film_info_with_buttons
+                message_id = call.message.message_id if call.message else None
+                message_thread_id = None
+                if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                    message_thread_id = call.message.message_thread_id
+                
+                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=message_id, message_thread_id=message_thread_id)
+                logger.info("[SERIES UNSUBSCRIBE] show_film_info_with_buttons выполнен успешно")
+            
+            except telebot.apihelper.ApiTelegramException as tele_e:
+                logger.error(f"[SERIES UNSUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
+                if "message is not modified" in str(tele_e).lower():
+                    new_markup = InlineKeyboardMarkup()
+                    new_markup.add(InlineKeyboardButton("🔔 Подписаться", callback_data=f"series_subscribe:{kp_id}"))
+                    
+                    bot_instance.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        reply_markup=new_markup
+                    )
+                    logger.info("[SERIES UNSUBSCRIBE] Только markup обновлён")
+                else:
+                    bot_instance.send_message(chat_id, f"🔕 Отписка выполнена от {title}, но карточка не обновилась. Переоткройте.")
+            
+            except Exception as e:
+                logger.error(f"[SERIES UNSUBSCRIBE] Ошибка обновления: {e}", exc_info=True)
+                bot_instance.send_message(chat_id, f"🔕 Отписка выполнена от {title}, но карточка не обновилась. Переоткройте.")
+        
         except Exception as e:
-            logger.error(f"[SERIES UNSUBSCRIBE] КРИТИЧЕСКАЯ ОШИБКА в хэндлере: {e}", exc_info=True)
+            logger.error(f"[SERIES UNSUBSCRIBE] КРИТИЧЕСКАЯ ошибка в хэндлере: {e}", exc_info=True)
             try:
-                bot_instance.send_message(chat_id, "🔕 Отписка выполнена, но произошла ошибка при обновлении карточки.")
-            except Exception as send_e:
-                logger.error(f"[SERIES UNSUBSCRIBE] Не удалось отправить сообщение об ошибке: {send_e}", exc_info=True)
+                bot_instance.send_message(chat_id, "🔕 Отписка выполнена с ошибкой. Попробуйте позже.")
+            except:
+                pass
+        
         finally:
-            # ВСЕГДА отвечаем на callback!
             try:
-                bot_instance.answer_callback_query(call.id, text="✅ Отписка выполнена")
-            except Exception as answer_e:
-                logger.error(f"[SERIES UNSUBSCRIBE] Не удалось ответить на callback: {answer_e}", exc_info=True)
+                bot_instance.answer_callback_query(call.id, text="🔕 Отписка выполнена")
+                logger.info("[SERIES UNSUBSCRIBE] answer_callback_query выполнен")
+            except Exception as e:
+                logger.error(f"[ANSWER CALLBACK] Ошибка: {e}")
 
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_locked:"))
     def series_locked_callback(call):
@@ -573,8 +289,6 @@ def register_series_callbacks(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:"))
     def handle_episode_toggle(call):
         """Обработчик переключения статуса просмотра эпизода"""
-        # TODO: Извлечь из moviebot.py строки 7800-7900
-        # Или из handlers/seasons.py если уже реализовано
         try:
             bot_instance.answer_callback_query(call.id)
             # Формат: series_episode:{kp_id}:{season_num}:{ep_num}
@@ -656,7 +370,6 @@ def register_series_callbacks(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
     def handle_season_all_toggle(call):
         """Обработчик отметки всех эпизодов сезона как просмотренных"""
-        # TODO: Извлечь из moviebot.py строки 7900-8000
         try:
             bot_instance.answer_callback_query(call.id)
             parts = call.data.split(":")
@@ -729,7 +442,6 @@ def register_series_callbacks(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("episodes_page:"))
     def handle_episodes_page_navigation(call):
         """Обработчик навигации по страницам эпизодов"""
-        # TODO: Извлечь из moviebot.py или handlers/seasons.py
         try:
             bot_instance.answer_callback_query(call.id)
             parts = call.data.split(":")
@@ -759,7 +471,6 @@ def register_series_callbacks(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_seasons:"))
     def handle_episodes_back_to_seasons(call):
         """Обработчик возврата к списку сезонов из эпизодов"""
-        # TODO: Извлечь из moviebot.py или handlers/seasons.py
         try:
             bot_instance.answer_callback_query(call.id)
             kp_id = call.data.split(":")[1]
@@ -774,11 +485,9 @@ def register_series_callbacks(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_watched_list:") or call.data.startswith("episodes_back_to_series_list:"))
     def handle_episodes_back_to_list(call):
         """Обработчик возврата к списку сериалов из эпизодов"""
-        # TODO: Извлечь из moviebot.py или handlers/seasons.py
         try:
             bot_instance.answer_callback_query(call.id)
             # TODO: Вызвать функцию показа списка сериалов
             logger.info(f"[EPISODES BACK] Возврат к списку сериалов")
         except Exception as e:
             logger.error(f"[EPISODES BACK] Ошибка: {e}", exc_info=True)
-
