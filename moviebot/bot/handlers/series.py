@@ -1984,27 +1984,27 @@ def handle_settings_callback(call):
                 return
         
         if action == "join":
-                # Вызываем команду /join
-                from moviebot.bot.handlers.join import join_command
-                
-                # Создаем полноценный fake_message с всеми необходимыми атрибутами
-                fake_message = telebot.types.Message()
-                fake_message.from_user = call.from_user
-                fake_message.chat = call.message.chat
-                fake_message.message_id = call.message.message_id
-                fake_message.date = call.message.date
-                fake_message.text = '/join'
-                
-                try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
-                except:
-                    pass
-                
-                join_command(fake_message)
-                bot_instance.answer_callback_query(call.id)
-                return
+            # Вызываем команду /join
+            from moviebot.bot.handlers.join import join_command
             
-            if action == "back":
+            # Создаем полноценный fake_message с всеми необходимыми атрибутами
+            fake_message = telebot.types.Message()
+            fake_message.from_user = call.from_user
+            fake_message.chat = call.message.chat
+            fake_message.message_id = call.message.message_id
+            fake_message.date = call.message.date
+            fake_message.text = '/join'
+            
+            try:
+                bot_instance.delete_message(chat_id, call.message.message_id)
+            except:
+                pass
+            
+            join_command(fake_message)
+            bot_instance.answer_callback_query(call.id)
+            return
+        
+        if action == "back":
                 # Возврат к главному меню settings
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
@@ -2066,12 +2066,12 @@ def handle_settings_callback(call):
                     'action': action,  # "add" или "replace"
                     'chat_id': chat_id
                 }
-                
-                mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
+            
+            mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
                 bot_instance.edit_message_text(
-                    f"⚙️ <b>Настройки реакций</b>\n\n"
-                    f"📝 Поставьте выбранный эмодзи в ответ на это сообщение.\n\n"
-                    f"Новые реакции будут {mode_text}.",
+                f"⚙️ <b>Настройки реакций</b>\n\n"
+                f"📝 Поставьте выбранный эмодзи в ответ на это сообщение.\n\n"
+                f"Новые реакции будут {mode_text}.",
                     call.message.chat.id,
                     call.message.message_id,
                     parse_mode='HTML'
