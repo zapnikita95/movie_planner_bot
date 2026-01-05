@@ -1025,7 +1025,11 @@ def register_series_callbacks(bot_instance):
                 
                 if existing_rating:
                     rating = existing_rating.get('rating') if isinstance(existing_rating, dict) else existing_rating[0]
-                    bot_instance.reply_to(call.message, f"✅ Вы уже оценили этот фильм: {rating}/10\n\nЧтобы изменить оценку, ответьте на сообщение с фильмом числом от 1 до 10.")
+                    msg = bot_instance.reply_to(call.message, f"✅ Вы уже оценили этот фильм: {rating}/10\n\nЧтобы изменить оценку, ответьте на это сообщение числом от 1 до 10.")
+                    # Добавляем сообщение в rating_messages, чтобы при ответе можно было найти film_id для изменения оценки
+                    if msg:
+                        rating_messages[msg.message_id] = film_id
+                        logger.info(f"[RATE FILM] Сообщение {msg.message_id} добавлено в rating_messages для film_id={film_id} (изменение оценки)")
                 else:
                     # Отправляем сообщение с просьбой оценить и добавляем его в rating_messages
                     msg = bot_instance.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.", parse_mode='Markdown')
