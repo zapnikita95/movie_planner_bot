@@ -11,6 +11,14 @@ logger = logging.getLogger(__name__)
 # Создаем экземпляр бота
 bot = telebot.TeleBot(TOKEN)
 
+# Scheduler будет установлен при инициализации в main.py
+scheduler = None
+
+def set_scheduler(scheduler_instance):
+    """Устанавливает глобальный scheduler"""
+    global scheduler
+    scheduler = scheduler_instance
+
 # BOT_ID будет установлен при инициализации бота
 BOT_ID = None
 

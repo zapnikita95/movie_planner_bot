@@ -50,6 +50,10 @@ except Exception as e:
 scheduler = BackgroundScheduler()
 scheduler.start()
 
+# Экспортируем scheduler в bot_init для использования в handlers
+from moviebot.bot.bot_init import set_scheduler
+set_scheduler(scheduler)
+
 # Устанавливаем экземпляр бота и scheduler в модуле scheduler
 from moviebot.scheduler import set_bot_instance, set_scheduler_instance
 set_bot_instance(bot)
