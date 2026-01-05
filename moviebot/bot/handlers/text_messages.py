@@ -626,8 +626,16 @@ def main_text_handler(message):
                 del user_search_state[user_id]
                 # Вызываем обработчик поиска
                 logger.info(f"[SEARCH] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}")
-                films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
+                try:
+                    films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
+                    logger.info(f"[SEARCH] ✅ Поиск завершен: найдено {len(films) if films else 0} результатов, страниц: {total_pages}")
+                except Exception as search_e:
+                    logger.error(f"[SEARCH] ❌ Ошибка при выполнении поиска: {search_e}", exc_info=True)
+                    bot_instance.reply_to(message, f"❌ Ошибка при выполнении поиска. Попробуйте еще раз.")
+                    return
+                
                 if not films:
+                    logger.warning(f"[SEARCH] Ничего не найдено по запросу '{query}'")
                     bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
                     return
                 
@@ -682,11 +690,19 @@ def main_text_handler(message):
                     results_text = results_text[:max_length] + "\n\n... (показаны не все результаты)"
                 
                 try:
-                    bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
-                    logger.info(f"✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов")
+                    logger.info(f"[SEARCH] Отправка результатов: текст длиной {len(results_text)}, кнопок: {len(markup.keyboard) if markup and markup.keyboard else 0}")
+                    sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[SEARCH] ✅ Ответ на /search отправлен пользователю {user_id}, найдено {len(films)} результатов, message_id={sent_message.message_id if sent_message else 'None'}")
                 except Exception as e:
-                    logger.error(f"[SEARCH] Ошибка отправки результатов поиска: {e}", exc_info=True)
-                    bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
+                    logger.error(f"[SEARCH] ❌ КРИТИЧЕСКАЯ ОШИБКА отправки результатов поиска: {e}", exc_info=True)
+                    logger.error(f"[SEARCH] Тип ошибки: {type(e).__name__}, args: {e.args}")
+                    try:
+                        # Пробуем отправить без разметки
+                        bot_instance.reply_to(message, results_text[:4000], parse_mode='HTML')
+                        logger.info(f"[SEARCH] Отправлено без разметки")
+                    except Exception as e2:
+                        logger.error(f"[SEARCH] ❌ Не удалось отправить даже без разметки: {e2}", exc_info=True)
+                        bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
             else:
                 logger.warning(f"[SEARCH] Пустой запрос от пользователя {user_id}")
             return
