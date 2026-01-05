@@ -931,14 +931,12 @@ def register_series_handlers(bot_param):
                 logger.info(f"[RANDOM CALLBACK] Period skipped, moving to genre")
                 user_random_state[user_id]['periods'] = []
                 user_random_state[user_id]['step'] = 'genre'
-                # TODO: Вызвать _show_genre_step
-                bot_instance.answer_callback_query(call.id, "Период пропущен. Функция в разработке.")
+                _show_genre_step(call, chat_id, user_id)
                 return
             elif data == "done":
                 logger.info(f"[RANDOM CALLBACK] Periods confirmed, moving to genre")
                 user_random_state[user_id]['step'] = 'genre'
-                # TODO: Вызвать _show_genre_step
-                bot_instance.answer_callback_query(call.id, "Период выбран. Функция в разработке.")
+                _show_genre_step(call, chat_id, user_id)
                 return
             else:
                 # Toggle периода
@@ -2194,7 +2192,7 @@ def handle_kinopoisk_link(message):
             
             if action == "edit":
                 # Вызываем команду /edit
-                from moviebot.bot.handlers.edit import edit_command
+                from moviebot.bot.handlers.settings.edit import edit_command
                 
                 # Удаляем сообщение перед вызовом команды (как в рабочей версии)
                 try:
@@ -2220,7 +2218,7 @@ def handle_kinopoisk_link(message):
             
             if action == "clean":
                 # Вызываем команду /clean
-                from moviebot.bot.handlers.clean import clean_command
+                from moviebot.bot.handlers.settings.clean import clean_command
                 
                 # Удаляем сообщение перед вызовом команды (как в рабочей версии)
                 try:
@@ -3120,25 +3118,16 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 film_id = None
             logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}")
         
-        # Проверяем, есть ли уже план для этого фильма
+        # Проверяем, есть ли уже план для этого фильма (чтение безопасно без lock)
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         has_plan = False
         if film_id:
             try:
-                import threading
-                lock_acquired = db_lock.acquire(timeout=1.0)
-                if lock_acquired:
-                    try:
-                        cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
-                        plan_row = cursor.fetchone()
-                        has_plan = plan_row is not None
-                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен, has_plan={has_plan}")
-                    finally:
-                        db_lock.release()
-                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов")
-                else:
-                    logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем проверку планов (не критично)")
-                    has_plan = False
+                # Чтение планов безопасно без lock
+                cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
+                plan_row = cursor.fetchone()
+                has_plan = plan_row is not None
+                logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (без lock), has_plan={has_plan}")
             except Exception as plan_e:
                 logger.warning(f"[SHOW FILM INFO] Ошибка при проверке планов (не критично): {plan_e}")
                 has_plan = False
@@ -3313,29 +3302,20 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
-        # Проверяем, есть ли план для этого фильма (дома)
+        # Проверяем, есть ли план для этого фильма (дома) - чтение безопасно без lock
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         plan_row = None
         if film_id:
             try:
-                import threading
-                lock_acquired = db_lock.acquire(timeout=1.0)
-                if lock_acquired:
-                    try:
-                        cursor.execute('''
-                            SELECT id, plan_type FROM plans 
-                            WHERE film_id = %s AND chat_id = %s
-                            ORDER BY plan_datetime ASC
-                            LIMIT 1
-                        ''', (film_id, chat_id))
-                        plan_row = cursor.fetchone()
-                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен, plan_row={plan_row is not None}")
-                    finally:
-                        db_lock.release()
-                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов")
-                else:
-                    logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем проверку планов (не критично)")
-                    plan_row = None
+                # Чтение планов безопасно без lock
+                cursor.execute('''
+                    SELECT id, plan_type FROM plans 
+                    WHERE film_id = %s AND chat_id = %s
+                    ORDER BY plan_datetime ASC
+                    LIMIT 1
+                ''', (film_id, chat_id))
+                plan_row = cursor.fetchone()
+                logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (без lock), plan_row={plan_row is not None}")
             except Exception as plan_e:
                 logger.warning(f"[SHOW FILM INFO] Ошибка при проверке планов (не критично): {plan_e}")
                 plan_row = None
@@ -3441,6 +3421,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         else:
             logger.info(f"[SHOW FILM INFO] Финальный текст длиной {len(text)}, markup отсутствует")
         
+        # ГАРАНТИРОВАННАЯ ОТПРАВКА: Всегда отправляем сообщение
+        logger.info(f"[SHOW FILM INFO] ===== ГАРАНТИРОВАННАЯ ОТПРАВКА СООБЩЕНИЯ =====")
         logger.info(f"[SHOW FILM INFO] Отправляю сообщение в чат...")
         
         # Отправляем или обновляем сообщение
@@ -3557,7 +3539,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.info(f"[SHOW FILM INFO] send_params keys: {list(send_params.keys())}, text_length: {len(send_params.get('text', ''))}")
                 msg = bot_instance.send_message(**send_params)
                 logger.info(f"[SHOW FILM INFO] ✅ Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
-                logger.info(f"[SHOW FILM INFO] Сообщение отправлено успешно")
+                logger.info(f"[SHOW FILM INFO] ✅ Сообщение отправлено успешно")
+                return  # Успешно отправлено, выходим
                 
             except telebot.apihelper.ApiTelegramException as api_e:
                 error_code = getattr(api_e, 'error_code', None)
