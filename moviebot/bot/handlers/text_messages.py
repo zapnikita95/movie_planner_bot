@@ -1149,13 +1149,99 @@ def main_text_handler(message):
     
     # Обработка реплаев и специальных случаев (fallback для необработанных сообщений)
     
-    # === user_ticket_state ===
-    if user_id in user_ticket_state:
-        state = user_ticket_state[user_id]
-        step = state.get('step')
-        logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в user_ticket_state, step={step}")
+    # Реплай на сообщение бота с оценками
+    if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
+        reply_text = message.reply_to_message.text or ""
         
-        # Обработка билета на мероприятие
+        if "Список просмотренных фильмов для оценки" in reply_text:
+            from moviebot.bot.handlers.rate import handle_rate_list_reply_internal
+            handle_rate_list_reply_internal(message)
+            return
+        
+        reply_msg_id = message.reply_to_message.message_id
+        if reply_msg_id in bot_messages:
+            link = bot_messages.get(reply_msg_id)
+            if link:
+                from moviebot.bot.handlers.series import handle_random_plan_reply_internal
+                handle_random_plan_reply_internal(message, link)
+                return
+    
+    # Реплай на сообщение с ошибкой планирования
+    if message.reply_to_message and message.reply_to_message.message_id in plan_error_messages:
+        from moviebot.bot.handlers.plan import handle_plan_error_reply_internal
+        handle_plan_error_reply_internal(message)
+        return
+    
+    # Реплай на голосование "в кино"
+    if message.reply_to_message and text.lower() in ['да', 'нет']:
+        from moviebot.bot.handlers.plan import handle_cinema_vote_internal
+        handle_cinema_vote_internal(message, text.lower())
+        return
+    
+    # Если сообщение не обработано ни одним handler, просто логируем
+    logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано ни одним специализированным handler: text='{text[:100]}', user_id={user_id}, chat_id={chat_id}")
+    return
+    
+    # ========== УДАЛЕНО: Вся логика обработки состояний перенесена в state_handlers.py ==========
+    # Все состояния теперь обрабатываются специализированными handlers:
+    # - user_ticket_state -> handle_ticket
+    # - user_search_state -> handle_search
+    # - user_import_state -> handle_import
+    # - user_edit_state -> handle_edit
+    # - user_settings_state -> handle_settings
+    # - user_clean_state -> handle_clean
+    # - user_promo_state -> handle_promo
+    # - user_promo_admin_state -> handle_promo
+    # - user_cancel_subscription_state -> handle_admin
+    # - user_refund_state -> handle_admin
+    # - user_unsubscribe_state -> handle_admin
+    # - user_add_admin_state -> handle_admin
+    # - user_view_film_state -> handle_list_view_film_reply (в text_messages.py)
+    # - Оценки -> handle_rating (в state_handlers.py)
+    
+    # Все состояния теперь обрабатываются специализированными handlers в state_handlers.py
+    # Старый код удален - больше не нужен
+    
+    # Обработка реплаев и специальных случаев (fallback для необработанных сообщений)
+    
+    # Реплай на сообщение бота с оценками
+    if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
+        reply_text = message.reply_to_message.text or ""
+        
+        if "Список просмотренных фильмов для оценки" in reply_text:
+            from moviebot.bot.handlers.rate import handle_rate_list_reply_internal
+            handle_rate_list_reply_internal(message)
+            return
+        
+        reply_msg_id = message.reply_to_message.message_id
+        if reply_msg_id in bot_messages:
+            link = bot_messages.get(reply_msg_id)
+            if link:
+                from moviebot.bot.handlers.series import handle_random_plan_reply_internal
+                handle_random_plan_reply_internal(message, link)
+                return
+    
+    # Реплай на сообщение с ошибкой планирования
+    if message.reply_to_message and message.reply_to_message.message_id in plan_error_messages:
+        from moviebot.bot.handlers.plan import handle_plan_error_reply_internal
+        handle_plan_error_reply_internal(message)
+        return
+    
+    # Реплай на голосование "в кино"
+    if message.reply_to_message and text.lower() in ['да', 'нет']:
+        from moviebot.bot.handlers.plan import handle_cinema_vote_internal
+        handle_cinema_vote_internal(message, text.lower())
+        return
+    
+    # Реплай на список фильмов
+    if message.reply_to_message and message.reply_to_message.message_id in list_messages:
+        from moviebot.bot.handlers.list import handle_list_reply_internal
+        handle_list_reply_internal(message)
+        return
+    
+    # Если сообщение не обработано ни одним handler, просто логируем
+    logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано ни одним специализированным handler: text='{text[:100]}', user_id={user_id}, chat_id={chat_id}")
+    return
         if state.get('type') == 'event':
             if step == 'event_name':
                 # Получаем название мероприятия
