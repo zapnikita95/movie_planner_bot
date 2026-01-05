@@ -1807,7 +1807,6 @@ def choose_random_participant():
                 continue
             
             # Выбираем случайного участника
-            import random
             participant = random.choice(participants)
             user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
             username = participant.get('username') if isinstance(participant, dict) else participant[1]
