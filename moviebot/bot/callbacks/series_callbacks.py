@@ -286,6 +286,39 @@ def register_series_callbacks(bot_instance):
             except:
                 pass
     
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_season:"))
+    def series_season_callback(call):
+        """Обработчик для выбора сезона и отметки эпизодов"""
+        try:
+            bot_instance.answer_callback_query(call.id)
+            
+            parts = call.data.split(":")
+            kp_id = parts[1]
+            season_num = parts[2]
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            
+            logger.info(f"[SERIES SEASON] Выбор сезона: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}, season={season_num}")
+            message_id = call.message.message_id
+            
+            # Получаем message_thread_id из сообщения, если оно есть
+            message_thread_id = None
+            if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+                message_thread_id = call.message.message_thread_id
+            
+            # Используем функцию show_episodes_page для отображения эпизодов
+            from moviebot.bot.handlers.seasons import show_episodes_page
+            if show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=message_id, message_thread_id=message_thread_id):
+                bot_instance.answer_callback_query(call.id)
+            else:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка загрузки эпизодов", show_alert=True)
+        except Exception as e:
+            logger.error(f"[SERIES SEASON] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
     @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_subscribe:"))
     def series_subscribe_callback(call):
         """Обработчик подписки на новые серии сериала"""
