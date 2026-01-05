@@ -2291,6 +2291,7 @@ def handle_kinopoisk_link(message):
         """Обработчик выбора типа поиска (фильм или сериал)"""
         logger.info("=" * 80)
         logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+        logger.info(f"[SEARCH TYPE] call.data={call.data}, call.message.message_id={call.message.message_id if call.message else 'N/A'}")
         try:
             user_id = call.from_user.id
             chat_id = call.message.chat.id
@@ -2361,6 +2362,8 @@ def handle_kinopoisk_link(message):
         finally:
             logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
     
+    # Логируем регистрацию обработчика
+    logger.info(f"[REGISTER SERIES HANDLERS] ✅ Обработчик search_type_callback ЗАРЕГИСТРИРОВАН с priority=1")
     logger.info(f"[REGISTER SERIES HANDLERS] Все обработчики сериалов зарегистрированы (включая search_type_callback)")
     logger.info(f"[REGISTER SERIES HANDLERS] ===== END =====")
     logger.info("=" * 80)
