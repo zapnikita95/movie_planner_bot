@@ -684,19 +684,23 @@ def register_series_handlers(bot_instance):
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
     def handle_settings_callback(call):
         """Обработчик callback для настроек"""
+        logger.info(f"[SETTINGS CALLBACK] ===== НАЧАЛО ОБРАБОТКИ =====")
         try:
-            bot_instance.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             action = call.data.split(":", 1)[1]
             is_private = call.message.chat.type == 'private'
             
-            logger.info(f"[SETTINGS CALLBACK] Получен callback от {user_id}, action={action}, chat_id={chat_id}, is_private={is_private}")
+            logger.info(f"[SETTINGS CALLBACK] Получен callback от {user_id}, action={action}, chat_id={chat_id}, is_private={is_private}, callback_data={call.data}")
+            
+            bot_instance.answer_callback_query(call.id)
             
             if action == "emoji":
                 # Показываем настройки эмодзи
+                logger.info(f"[SETTINGS CALLBACK] Обработка action=emoji для user_id={user_id}, chat_id={chat_id}")
                 current = get_watched_emojis(chat_id)
                 current_emojis_str = ''.join(current) if isinstance(current, list) else str(current)
+                logger.info(f"[SETTINGS CALLBACK] Текущие эмодзи: {current_emojis_str}")
                 
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
@@ -713,6 +717,7 @@ def register_series_handlers(bot_instance):
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
+                logger.info(f"[SETTINGS CALLBACK] Сообщение с настройками эмодзи обновлено для user_id={user_id}")
                 
                 # Сохраняем состояние для обработки реакций
                 user_settings_state[user_id] = {
@@ -1042,13 +1047,19 @@ def register_series_handlers(bot_instance):
                     bot_instance.answer_callback_query(call.id, f"Настройка {sub_action} будет реализована позже")
                     return
             
-            logger.warning(f"[SETTINGS CALLBACK] Необработанное действие: {action}")
+            logger.warning(f"[SETTINGS CALLBACK] Необработанное действие: {action}, callback_data={call.data}")
+            try:
+                bot_instance.answer_callback_query(call.id, f"Действие '{action}' будет реализовано позже", show_alert=True)
+            except:
+                pass
         except Exception as e:
             logger.error(f"[SETTINGS CALLBACK] Ошибка: {e}", exc_info=True)
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
+        finally:
+            logger.info(f"[SETTINGS CALLBACK] ===== КОНЕЦ ОБРАБОТКИ =====")
 
     # TODO: Добавить остальные callback handlers:
     # - search_type callback
