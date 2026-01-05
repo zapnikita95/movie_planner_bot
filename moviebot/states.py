@@ -40,6 +40,9 @@ added_movie_messages = {}  # message_id: {'chat_id': int, 'film_id': int, 'kp_id
 # Состояния оплаты
 user_payment_state = {}  # user_id: {'step': str, 'subscription_type': str, 'plan_type': str, 'period_type': str, 'chat_id': int, 'group_username': str, 'telegram_username': str}
 
+# Состояния работы с сериалами
+user_episodes_state = {}  # user_id: {'kp_id': str, 'season_num': int, 'episodes': list, ...}
+
 # Сообщения для обработки оценок
 rating_messages = {}  # message_id: film_id (для обработки реплаев с оценками)
 
