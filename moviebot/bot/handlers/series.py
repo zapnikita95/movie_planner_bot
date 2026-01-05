@@ -33,9 +33,11 @@ cursor = get_db_cursor()
 
 # Обработчик выбора типа поиска (фильм/сериал) - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
 # КРИТИЧЕСКИ ВАЖНО: Этот обработчик регистрируется при импорте модуля
+# ВАЖНО: Используем bot_instance из импорта, который должен быть тем же объектом, что и bot в register_series_handlers
 logger.info("=" * 80)
 logger.info(f"[SEARCH TYPE HANDLER] Регистрация обработчика search_type_callback")
 logger.info(f"[SEARCH TYPE HANDLER] bot_instance={bot_instance}, type={type(bot_instance)}")
+logger.info(f"[SEARCH TYPE HANDLER] id(bot_instance)={id(bot_instance)}")
 logger.info("=" * 80)
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
@@ -621,43 +623,53 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
             pass
 
 
-def register_series_handlers(bot_instance):
+def register_series_handlers(bot_param):
     """Регистрирует обработчики команд связанных с сериалами"""
     logger.info("=" * 80)
     logger.info(f"[REGISTER SERIES HANDLERS] ===== START: регистрация обработчиков сериалов =====")
-    logger.info(f"[REGISTER SERIES HANDLERS] bot_instance: {bot_instance}")
+    logger.info(f"[REGISTER SERIES HANDLERS] bot_param: {bot_param}")
+    logger.info(f"[REGISTER SERIES HANDLERS] bot_instance (из импорта): {bot_instance}")
+    logger.info(f"[REGISTER SERIES HANDLERS] bot_param == bot_instance: {bot_param == bot_instance}")
+    logger.info(f"[REGISTER SERIES HANDLERS] id(bot_param): {id(bot_param)}, id(bot_instance): {id(bot_instance)}")
     
-    @bot_instance.message_handler(commands=['search'])
+    # КРИТИЧЕСКИ ВАЖНО: Используем bot_param (переданный параметр) для регистрации handlers внутри функции
+    # Но обработчик search_type_callback уже зарегистрирован на верхнем уровне модуля с bot_instance
+    # Проверяем, что это один и тот же объект
+    if bot_param != bot_instance:
+        logger.warning(f"[REGISTER SERIES HANDLERS] ⚠️ ВНИМАНИЕ: bot_param != bot_instance! Это может вызвать проблемы!")
+        logger.warning(f"[REGISTER SERIES HANDLERS] bot_param id: {id(bot_param)}, bot_instance id: {id(bot_instance)}")
+    
+    @bot_param.message_handler(commands=['search'])
     def _handle_search_handler(message):
         """Обертка для регистрации команды /search"""
         handle_search(message)
     
-    @bot_instance.message_handler(commands=['random'])
+    @bot_param.message_handler(commands=['random'])
     def _random_start_handler(message):
         """Обертка для регистрации команды /random"""
         random_start(message)
     
-    @bot_instance.message_handler(commands=['premieres'])
+    @bot_param.message_handler(commands=['premieres'])
     def _premieres_command_handler(message):
         """Обертка для регистрации команды /premieres"""
         premieres_command(message)
     
-    @bot_instance.message_handler(commands=['ticket'])
+    @bot_param.message_handler(commands=['ticket'])
     def _ticket_command_handler(message):
         """Обертка для регистрации команды /ticket"""
         ticket_command(message)
     
-    @bot_instance.message_handler(commands=['settings'])
+    @bot_param.message_handler(commands=['settings'])
     def _settings_command_handler(message):
         """Обертка для регистрации команды /settings"""
         settings_command(message)
     
-    @bot_instance.message_handler(commands=['help'])
+    @bot_param.message_handler(commands=['help'])
     def _help_command_handler(message):
         """Обертка для регистрации команды /help"""
         help_command(message)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
+    @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
     def handle_rand_mode_locked(call):
         """Обработчик заблокированных режимов рандомайзера"""
         try:
