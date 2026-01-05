@@ -238,14 +238,19 @@ def ticket_command(message):
     """Команда /ticket - работа с билетами"""
     # TODO: Извлечь из moviebot.py строки 17031-17333
     logger.info(f"[TICKET COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
+    logger.info(f"[TICKET COMMAND] message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}")
     try:
         user_id = message.from_user.id
         chat_id = message.chat.id
         username = message.from_user.username or f"user_{user_id}"
+        logger.info(f"[TICKET COMMAND] Вызов log_request")
         log_request(user_id, username, '/ticket', chat_id)
+        logger.info(f"[TICKET COMMAND] log_request выполнен")
         
         # Проверяем доступ к функциям билетов
+        logger.info(f"[TICKET COMMAND] Проверка доступа к билетам")
         if not has_tickets_access(chat_id, user_id):
+            logger.info(f"[TICKET COMMAND] Нет доступа, отправка сообщения о подписке")
             text = "🎫 <b>Билеты в кино</b>\n\n"
             text += "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
             text += "Используйте /payment для оформления подписки."
@@ -254,12 +259,16 @@ def ticket_command(message):
             markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
+            logger.info(f"[TICKET COMMAND] Вызов reply_to для сообщения о подписке")
             bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+            logger.info(f"[TICKET COMMAND] Сообщение о подписке отправлено")
             return
         
         # Проверяем, есть ли файл в сообщении
+        logger.info(f"[TICKET COMMAND] Проверка наличия файла")
         has_photo = message.photo is not None and len(message.photo) > 0
         has_document = message.document is not None
+        logger.info(f"[TICKET COMMAND] has_photo={has_photo}, has_document={has_document}")
         
         if has_photo or has_document:
             # Сохраняем file_id для последующей обработки
@@ -268,6 +277,7 @@ def ticket_command(message):
             else:
                 file_id = message.document.file_id
             
+            logger.info(f"[TICKET COMMAND] Файл найден, file_id={file_id}")
             user_ticket_state[user_id] = {
                 'step': 'select_session',
                 'file_id': file_id,
@@ -275,16 +285,25 @@ def ticket_command(message):
             }
             
             # Показываем список сеансов в кино
+            logger.info(f"[TICKET COMMAND] Вызов show_cinema_sessions с file_id")
             show_cinema_sessions(chat_id, user_id, file_id)
+            logger.info(f"[TICKET COMMAND] show_cinema_sessions завершен")
         else:
             # Нет файла - показываем список сеансов для выбора или сообщение об отсутствии билетов
+            logger.info(f"[TICKET COMMAND] Файла нет, вызов show_cinema_sessions без file_id")
             show_cinema_sessions(chat_id, user_id, None)
+            logger.info(f"[TICKET COMMAND] show_cinema_sessions завершен")
+        
+        logger.info(f"[TICKET COMMAND] ===== КОНЕЦ (успешно) =====")
     except Exception as e:
-        logger.error(f"❌ Ошибка в /ticket: {e}", exc_info=True)
+        logger.error(f"[TICKET COMMAND] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        logger.error(f"[TICKET COMMAND] Тип ошибки: {type(e).__name__}, args: {e.args}")
         try:
+            logger.info(f"[TICKET COMMAND] Попытка отправить сообщение об ошибке")
             bot_instance.reply_to(message, "Произошла ошибка при обработке команды /ticket")
-        except:
-            pass
+            logger.info(f"[TICKET COMMAND] Сообщение об ошибке отправлено")
+        except Exception as send_error:
+            logger.error(f"[TICKET COMMAND] ❌ Не удалось отправить сообщение об ошибке: {send_error}", exc_info=True)
 
 
 def settings_command(message):

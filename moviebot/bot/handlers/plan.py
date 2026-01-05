@@ -509,8 +509,12 @@ def show_schedule(message):
     @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
     def show_film_description_callback(call):
         """Обработчик кнопки показа описания фильма из /schedule"""
+        logger.info("=" * 80)
+        logger.info(f"[SHOW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
         try:
+            logger.info(f"[SHOW FILM DESCRIPTION] Вызов answer_callback_query")
             bot_instance.answer_callback_query(call.id)
+            logger.info(f"[SHOW FILM DESCRIPTION] answer_callback_query выполнен")
             kp_id = call.data.split(":")[1]
             user_id = call.from_user.id
             chat_id = call.message.chat.id
@@ -544,11 +548,15 @@ def show_schedule(message):
                 existing = (film_id, title, watched)
             
             # Показываем описание фильма
+            logger.info(f"[SHOW FILM DESCRIPTION] Вызов show_film_info_with_buttons")
             from moviebot.bot.handlers.series import show_film_info_with_buttons
-            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing)
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
+            logger.info(f"[SHOW FILM DESCRIPTION] show_film_info_with_buttons завершен")
+            logger.info(f"[SHOW FILM DESCRIPTION] ===== END (успешно) =====")
             
         except Exception as e:
-            logger.error(f"[SHOW FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
+            logger.error(f"[SHOW FILM DESCRIPTION] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+            logger.error(f"[SHOW FILM DESCRIPTION] Тип ошибки: {type(e).__name__}, args: {e.args}")
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
@@ -625,10 +633,12 @@ def show_schedule(message):
     def plan_type_callback(call):
         """Обработчик выбора типа плана"""
         logger.info("=" * 80)
-        logger.info(f"[PLAN TYPE] ===== START: callback_id={call.id}, callback_data={call.data}")
+        logger.info(f"[PLAN TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
         # TODO: Извлечь из moviebot.py строки 10827-10868
         try:
+            logger.info(f"[PLAN TYPE] Вызов answer_callback_query")
             bot_instance.answer_callback_query(call.id)
+            logger.info(f"[PLAN TYPE] answer_callback_query выполнен")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             plan_type = call.data.split(":")[1]  # 'home' или 'cinema'

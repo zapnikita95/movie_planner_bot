@@ -1041,11 +1041,17 @@ def main_text_handler(message):
     # Реплай на сообщение с оценкой
     if message.reply_to_message and message.text:
         text_stripped = message.text.strip()
+        logger.info(f"[MAIN TEXT HANDLER] Проверка ответного сообщения с оценкой: text_stripped='{text_stripped}', reply_to_message_id={message.reply_to_message.message_id}")
         if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
            (len(text_stripped) == 2 and text_stripped == "10"):
             rating = int(text_stripped)
-            from moviebot.bot.handlers.rate import handle_rating_internal
-            handle_rating_internal(message, rating)
+            logger.info(f"[MAIN TEXT HANDLER] ✅ Обнаружена оценка: {rating}, вызов handle_rating_internal")
+            try:
+                from moviebot.bot.handlers.rate import handle_rating_internal
+                handle_rating_internal(message, rating)
+                logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+            except Exception as rating_e:
+                logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
             return
     
     # Реплай на голосование "в кино"
