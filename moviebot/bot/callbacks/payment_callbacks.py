@@ -841,7 +841,6 @@ def register_payment_callbacks(bot_instance):
                     get_subscription_by_id, add_subscription_member,
                     get_subscription_members, get_active_group_users
                 )
-                from moviebot.bot.bot_init import BOT_ID
                 
                 # Проверяем, что подписка существует и принадлежит этому чату
                 sub = get_subscription_by_id(subscription_id)
@@ -4286,6 +4285,17 @@ def register_payment_callbacks(bot_instance):
                     text += f"👤 Личная подписка\n"
                 else:
                     text += f"👥 Групповая подписка\n"
+                    # Добавляем информацию о группе для групповой подписки
+                    if chat_id_sub:
+                        try:
+                            chat = bot_instance.get_chat(chat_id_sub)
+                            group_title = chat.title
+                            group_username = chat.username
+                            text += f"Группа: <b>{group_title}</b>\n"
+                            if group_username:
+                                text += f"@{group_username}\n"
+                        except Exception as chat_error:
+                            logger.error(f"[PAYMENT] Ошибка получения информации о группе: {chat_error}")
                 text += f"{plan_names.get(plan_type, plan_type)}\n"
                 text += f"⏰ Период: {period_names.get(period_type, period_type)}\n\n"
             
@@ -4874,10 +4884,23 @@ def register_payment_callbacks(bot_instance):
                                 plan_type = group_sub.get('plan_type', 'all')
                                 period_type = group_sub.get('period_type', 'lifetime')
                                 
+                                # Получаем информацию о группе
+                                try:
+                                    chat = bot_instance.get_chat(chat_id)
+                                    group_title = chat.title
+                                    group_username = chat.username
+                                except Exception as chat_error:
+                                    logger.error(f"[PAYMENT] Ошибка получения информации о группе: {chat_error}")
+                                    group_title = "Группа"
+                                    group_username = None
+                                
                                 text = f"👥 <b>Групповая подписка</b>\n\n"
                                 if plan_type == 'all':
                                     text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
-                                text += f"💰 Сумма платежа: <b>{price}₽</b>\n"
+                                text += f"Группа: <b>{group_title}</b>\n"
+                                if group_username:
+                                    text += f"@{group_username}\n"
+                                text += f"\n💰 Сумма платежа: <b>{price}₽</b>\n"
                                 if group_size:
                                     text += f"👥 Количество участников: <b>{group_size}</b>\n"
                                     if subscription_id_new and subscription_id_new > 0:

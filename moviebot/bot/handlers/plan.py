@@ -1328,7 +1328,7 @@ def edit_plan_callback(call):
         # Получаем информацию о плане
         with db_lock:
             cursor.execute('''
-                SELECT p.plan_type, p.plan_datetime, m.title
+                SELECT p.plan_type, p.plan_datetime, m.title, m.kp_id
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.id = %s AND p.chat_id = %s
@@ -1344,10 +1344,12 @@ def edit_plan_callback(call):
             plan_type = plan_row.get('plan_type')
             plan_dt_value = plan_row.get('plan_datetime')
             title = plan_row.get('title')
+            kp_id = plan_row.get('kp_id')
         else:
             plan_type = plan_row[0]
             plan_dt_value = plan_row[1]
             title = plan_row[2]
+            kp_id = plan_row[3] if len(plan_row) > 3 else None
         
         user_tz = get_user_timezone_or_default(user_id)
         if plan_dt_value:
@@ -1365,7 +1367,8 @@ def edit_plan_callback(call):
         user_edit_state[user_id] = {
             'action': 'edit_plan',
             'plan_id': plan_id,
-            'plan_type': plan_type
+            'plan_type': plan_type,
+            'kp_id': kp_id  # Сохраняем kp_id для возврата к описанию
         }
         
         markup = InlineKeyboardMarkup(row_width=1)

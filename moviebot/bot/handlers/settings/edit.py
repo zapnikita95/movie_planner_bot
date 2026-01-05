@@ -144,10 +144,50 @@ def edit_action_callback(call):
             bot_instance.edit_message_text("⭐ <b>Выберите фильм для изменения оценки:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         
         elif action == "cancel":
-            # Очищаем состояние редактирования
+            # Проверяем, есть ли kp_id в состоянии для возврата к описанию
+            kp_id = None
             if user_id in user_edit_state:
+                kp_id = user_edit_state[user_id].get('kp_id')
                 del user_edit_state[user_id]
-            bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+            
+            # Если есть kp_id, возвращаемся к описанию фильма/сериала
+            if kp_id:
+                try:
+                    from moviebot.bot.handlers.series import show_film_info_with_buttons
+                    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                    from moviebot.api.kinopoisk_api import extract_movie_info
+                    
+                    conn = get_db_connection()
+                    cursor = get_db_cursor()
+                    
+                    # Получаем информацию о фильме/сериале
+                    with db_lock:
+                        cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        row = cursor.fetchone()
+                    
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
+                        watched = row.get('watched') if isinstance(row, dict) else row[2]
+                        link = row.get('link') if isinstance(row, dict) else row[3]
+                        
+                        existing = (film_id, title, watched)
+                        info = extract_movie_info(link)
+                        
+                        if info:
+                            show_film_info_with_buttons(
+                                chat_id, user_id, info, link, kp_id,
+                                existing=existing, message_id=call.message.message_id
+                            )
+                            return
+                    
+                    # Если не удалось получить информацию, просто показываем сообщение об отмене
+                    bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+                except Exception as e:
+                    logger.error(f"[EDIT CANCEL] Ошибка при возврате к описанию: {e}", exc_info=True)
+                    bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+            else:
+                bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
         
         else:
             logger.warning(f"[EDIT ACTION] Неизвестное действие: {action}")

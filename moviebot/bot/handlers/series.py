@@ -4324,7 +4324,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Если фильм уже в базе, добавляем сообщение об этом в начало
         text = ""
         if existing:
-            text += "✅ <b>Фильм уже в базе</b>\n\n"
+            # Определяем, сериал это или фильм
+            film_type_text = "Сериал" if is_series else "Фильм"
+            text += f"✅ <b>{film_type_text} уже в базе</b>\n\n"
         text += f"{type_emoji} <b>{info['title']}</b> ({info['year'] or '—'})\n"
         logger.info(f"[SHOW FILM INFO] Текст начала формироваться, title={info.get('title')}")
         if info.get('director'):
@@ -4358,6 +4360,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Если фильм не в базе, добавляем строку "Ещё не просмотрено"
         if not existing:
             text += f"\n\n⏳ <b>Ещё не просмотрено</b>"
+        
+        # Добавляем информацию о планировании, если фильм/сериал запланирован
+        # (plan_info будет определен позже, но проверяем здесь)
         
         # Если фильм уже в базе, показываем дополнительную информацию
         if existing:
@@ -4442,6 +4447,11 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
                 else:
                     text += f"\n⭐ <b>Ваша оценка: —</b>"
+            
+            # Добавляем информацию о планировании, если фильм/сериал запланирован
+            if plan_info:
+                plan_type_text = "🎦 в кино" if plan_info['type'] == 'cinema' else "🏠 дома"
+                text += f"\n\n📅 <b>Запланирован {plan_type_text}</b> на {plan_info['date']}"
                 logger.info(f"[SHOW FILM INFO] Текст для просмотренного фильма сформирован")
             else:
                 logger.info(f"[SHOW FILM INFO] Фильм не просмотрен (watched=False), проверяем личную оценку...")
@@ -4568,12 +4578,51 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Проверяем, есть ли уже план для этого фильма (чтение безопасно без lock)
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         has_plan = False
+        plan_info = None
         if film_id:
             try:
                 # Чтение планов безопасно без lock
-                cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
+                from moviebot.database.db_operations import get_user_timezone_or_default
+                cursor.execute('''
+                    SELECT id, plan_type, plan_datetime 
+                    FROM plans 
+                    WHERE film_id = %s AND chat_id = %s 
+                    LIMIT 1
+                ''', (film_id, chat_id))
                 plan_row = cursor.fetchone()
                 has_plan = plan_row is not None
+                if has_plan:
+                    if isinstance(plan_row, dict):
+                        plan_id = plan_row.get('id')
+                        plan_type = plan_row.get('plan_type')
+                        plan_dt_value = plan_row.get('plan_datetime')
+                    else:
+                        plan_id = plan_row[0]
+                        plan_type = plan_row[1]
+                        plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
+                    
+                    # Форматируем дату
+                    if plan_dt_value and user_id:
+                        user_tz = get_user_timezone_or_default(user_id)
+                        try:
+                            if isinstance(plan_dt_value, datetime):
+                                if plan_dt_value.tzinfo is None:
+                                    dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                                else:
+                                    dt = plan_dt_value.astimezone(user_tz)
+                            else:
+                                dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                            date_str = dt.strftime('%d.%m.%Y %H:%M')
+                        except:
+                            date_str = str(plan_dt_value)[:16]
+                    else:
+                        date_str = "не указана"
+                    
+                    plan_info = {
+                        'id': plan_id,
+                        'type': plan_type,
+                        'date': date_str
+                    }
                 logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (без lock), has_plan={has_plan}")
             except Exception as plan_e:
                 logger.warning(f"[SHOW FILM INFO] Ошибка при проверке планов (не критично): {plan_e}")
