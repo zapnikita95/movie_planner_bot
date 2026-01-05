@@ -2466,6 +2466,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         
         text += f"\n<a href='{link}'>Кинопоиск</a>"
         
+        # Если фильм не в базе, добавляем строку "Ещё не просмотрено"
+        if not existing:
+            text += f"\n\n⏳ <b>Ещё не просмотрено</b>"
+        
         # Если фильм уже в базе, показываем дополнительную информацию
         if existing:
             film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
@@ -2632,9 +2636,17 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
                 InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}")
             )
-            
-            # Если это сериал, добавляем кнопки для сериалов
-            if is_series and user_id:
+        else:
+            # Фильм не в базе - добавляем кнопки "Интересные факты" и "Оценить"
+            markup.row(
+                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+            )
+        
+        # Если это сериал, добавляем кнопки для сериалов (для фильмов в базе и не в базе)
+        if is_series and user_id:
+            if film_id:
+                # Фильм в базе - проверяем доступ к функциям уведомлений
                 # Проверяем доступ к функциям уведомлений
                 has_access = has_notifications_access(chat_id, user_id)
                 logger.info(f"[SHOW FILM INFO] Сериал: is_series=True, user_id={user_id}, chat_id={chat_id}, has_notifications_access={has_access}")
@@ -2702,6 +2714,15 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 else:
                     # Нет доступа - показываем заблокированные кнопки
                     logger.info(f"[SHOW FILM INFO] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}, показываем заблокированные кнопки")
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+            else:
+                # Фильм не в базе - проверяем доступ к функциям уведомлений
+                has_access = has_notifications_access(chat_id, user_id)
+                if has_access:
+                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                else:
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
