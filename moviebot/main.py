@@ -129,12 +129,34 @@ IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False').lower() == 'true'
 USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
+# Детальное логирование переменных окружения для диагностики
+logger.info("=" * 80)
+logger.info("[MAIN] Проверка переменных окружения:")
+logger.info(f"[MAIN] IS_PRODUCTION: {IS_PRODUCTION} (значение: '{os.getenv('IS_PRODUCTION', 'НЕ УСТАНОВЛЕН')}')")
+logger.info(f"[MAIN] USE_WEBHOOK: {USE_WEBHOOK} (значение: '{os.getenv('USE_WEBHOOK', 'НЕ УСТАНОВЛЕН')}')")
+logger.info(f"[MAIN] WEBHOOK_URL: '{WEBHOOK_URL}' (тип: {type(WEBHOOK_URL).__name__})")
+logger.info(f"[MAIN] PORT: '{os.getenv('PORT', 'НЕ УСТАНОВЛЕН')}'")
+logger.info(f"[MAIN] RAILWAY_PUBLIC_DOMAIN: '{os.getenv('RAILWAY_PUBLIC_DOMAIN', 'НЕ УСТАНОВЛЕН')}'")
+logger.info(f"[MAIN] RAILWAY_STATIC_URL: '{os.getenv('RAILWAY_STATIC_URL', 'НЕ УСТАНОВЛЕН')}'")
+logger.info("=" * 80)
+
 # В production используем только webhook, чтобы избежать конфликта 409
 if IS_PRODUCTION:
     logger.info("🚀 PRODUCTION режим: запуск только webhook (polling отключен)")
-    if not WEBHOOK_URL:
-        logger.error("❌ IS_PRODUCTION=True, но WEBHOOK_URL не установлен! Установите WEBHOOK_URL в Railway.")
-        raise ValueError("WEBHOOK_URL required in production mode")
+    
+    # Проверяем WEBHOOK_URL (может быть None или пустая строка)
+    if not WEBHOOK_URL or not WEBHOOK_URL.strip():
+        # Пробуем использовать RAILWAY_PUBLIC_DOMAIN как fallback
+        railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+        if railway_domain and railway_domain.strip():
+            WEBHOOK_URL = f"https://{railway_domain.strip()}"
+            logger.info(f"[MAIN] Используется RAILWAY_PUBLIC_DOMAIN: {WEBHOOK_URL}")
+        else:
+            logger.error("❌ IS_PRODUCTION=True, но WEBHOOK_URL не установлен!")
+            logger.error("   Установите в Railway одну из переменных:")
+            logger.error("   - WEBHOOK_URL=https://your-domain.com")
+            logger.error("   - RAILWAY_PUBLIC_DOMAIN=your-domain.railway.app (будет использован как https://your-domain.railway.app)")
+            raise ValueError("WEBHOOK_URL required in production mode")
     
     from moviebot.web.web_app import create_web_app
     app = create_web_app(bot)
