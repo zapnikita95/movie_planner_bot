@@ -45,6 +45,13 @@ def register_all_handlers(bot):
     
     # Регистрируем callback handlers
     # КРИТИЧЕСКИ ВАЖНО: Импортируем модули с callback handlers для автоматической регистрации декораторов
+    
+    # Callback handlers для карточки фильма (add_to_database, plan_from_added, show_facts)
+    import moviebot.bot.callbacks.film_callbacks  # noqa: F401 - импорт для регистрации декораторов
+    from moviebot.bot.callbacks.film_callbacks import register_film_callbacks
+    register_film_callbacks(bot)  # Пустая функция, но импорт модуля уже зарегистрировал handlers
+    logger.info("✅ Callback handlers для карточки фильма зарегистрированы")
+    
     import moviebot.bot.callbacks.series_callbacks  # noqa: F401 - импорт для регистрации декораторов
     from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
     register_series_callbacks(bot)
