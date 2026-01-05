@@ -2831,12 +2831,13 @@ def register_payment_callbacks(bot_instance):
                 markup = InlineKeyboardMarkup(row_width=1)
                 # Кнопка оплаты звездами (без ЮKassa)
                 payment_id_short = payment_id[:8]
-                callback_data_stars = f"pay_stars:{payment_id_short}"
+                # Используем формат payment:pay_stars:... для обработки в payment_callbacks.py
+                callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
                 markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
             
                 # Кнопка оплаты через ЮKassa (только если доступна)
                 if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
-                    callback_data_yookassa = f"pay_yookassa:{payment_id_short}"
+                    callback_data_yookassa = f"payment:pay_yookassa:{payment_id_short}"
                     markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
             
                 if group_size:
