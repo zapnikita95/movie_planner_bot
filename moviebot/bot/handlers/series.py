@@ -705,6 +705,9 @@ def register_series_handlers(bot_instance):
                 text += "Загрузите билеты, чтобы получать их перед сеансом."
                 markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
             
+            # Добавляем кнопку "✏️ Изменить" для изменения времени сеанса
+            markup.add(InlineKeyboardButton("✏️ Изменить", callback_data=f"ticket_edit_time:{plan_id}"))
+            
             if file_id:
                 # Если есть file_id, значит пользователь хочет добавить билеты к этому сеансу
                 user_ticket_state[user_id] = {
@@ -946,6 +949,69 @@ def register_series_handlers(bot_instance):
                     bot_instance.answer_callback_query(call.id, "❌ Ошибка отправки билетов", show_alert=True)
         except Exception as e:
             logger.error(f"[SHOW TICKET] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_edit_time:"))
+    def ticket_edit_time_callback(call):
+        """Обработчик кнопки 'Изменить время' - позволяет изменить время сеанса"""
+        try:
+            from moviebot.states import user_ticket_state
+            from moviebot.utils.parsing import parse_session_time
+            
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            plan_id = int(call.data.split(":")[1])
+            
+            # Получаем текущее время сеанса
+            with db_lock:
+                cursor.execute('SELECT plan_datetime FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                plan_row = cursor.fetchone()
+            
+            if not plan_row:
+                bot_instance.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
+                return
+            
+            plan_dt = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[0]
+            
+            # Устанавливаем состояние для изменения времени
+            user_ticket_state[user_id] = {
+                'step': 'edit_time',
+                'plan_id': plan_id,
+                'chat_id': chat_id
+            }
+            
+            # Формируем сообщение с примером
+            current_time_str = ""
+            if plan_dt:
+                user_tz = get_user_timezone_or_default(user_id)
+                if isinstance(plan_dt, datetime):
+                    if plan_dt.tzinfo is None:
+                        dt = pytz.utc.localize(plan_dt).astimezone(user_tz)
+                    else:
+                        dt = plan_dt.astimezone(user_tz)
+                else:
+                    dt = datetime.fromisoformat(str(plan_dt).replace('Z', '+00:00')).astimezone(user_tz)
+                current_time_str = f"\n\nТекущее время: {dt.strftime('%d.%m.%Y %H:%M')}"
+            
+            text = (
+                "✏️ <b>Изменение времени сеанса</b>\n\n"
+                "Напишите новую дату и время сеанса в ответ на это сообщение.\n"
+                "Формат: дата + время\n"
+                "Например: 18 января 19:30 или 18.01 19:30" + current_time_str
+            )
+            
+            bot_instance.edit_message_text(
+                text,
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"[TICKET EDIT TIME] Ошибка: {e}", exc_info=True)
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:

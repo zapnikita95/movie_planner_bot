@@ -511,6 +511,56 @@ def main_text_handler(message):
             from moviebot.bot.handlers.series import handle_edit_ticket_text_internal
             handle_edit_ticket_text_internal(message, state)
             return
+        
+        if step == 'edit_time':
+            # Обработка изменения времени сеанса
+            plan_id = state.get('plan_id')
+            chat_id = state.get('chat_id')
+            
+            if not plan_id:
+                bot_instance.reply_to(message, "❌ Ошибка: сеанс не найден.")
+                if user_id in user_ticket_state:
+                    del user_ticket_state[user_id]
+                return
+            
+            # Парсим новое время
+            from moviebot.utils.parsing import parse_session_time
+            from moviebot.database.db_operations import get_user_timezone_or_default
+            from datetime import datetime
+            import pytz
+            
+            user_tz = get_user_timezone_or_default(user_id)
+            new_dt = parse_session_time(text, user_tz)
+            
+            if not new_dt:
+                bot_instance.reply_to(message, "❌ Не удалось распознать дату и время. Попробуйте еще раз.\nФормат: 18 января 19:30 или 18.01 19:30")
+                return
+            
+            # Конвертируем в UTC для сохранения в БД
+            if new_dt.tzinfo is None:
+                new_dt_utc = user_tz.localize(new_dt).astimezone(pytz.utc)
+            else:
+                new_dt_utc = new_dt.astimezone(pytz.utc)
+            
+            # Обновляем время в БД
+            with db_lock:
+                cursor.execute("UPDATE plans SET plan_datetime = %s WHERE id = %s AND chat_id = %s", (new_dt_utc, plan_id, chat_id))
+                conn.commit()
+            
+            # Форматируем новое время для отображения
+            new_dt_local = new_dt_utc.astimezone(user_tz)
+            date_str = new_dt_local.strftime('%d.%m.%Y %H:%M')
+            
+            bot_instance.reply_to(message, f"✅ Время сеанса изменено на {date_str}")
+            
+            # Очищаем состояние
+            if user_id in user_ticket_state:
+                del user_ticket_state[user_id]
+            
+            # Показываем обновленную информацию о сеансе
+            from moviebot.bot.handlers.series import show_cinema_sessions
+            show_cinema_sessions(chat_id, user_id, None)
+            return
     
     # === user_search_state ===
     logger.info(f"[MAIN TEXT HANDLER] Проверка user_search_state: user_id={user_id}, keys={list(user_search_state.keys())}")
@@ -1116,6 +1166,49 @@ def main_text_handler(message):
         from moviebot.bot.handlers.plan import handle_plan_error_reply_internal
         handle_plan_error_reply_internal(message)
         return
+    
+    # Обработка оценок (работает и с реплаем, и без реплая)
+    if message.text:
+        text_stripped = message.text.strip()
+        # Проверяем, является ли сообщение числом от 1 до 10
+        if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
+           (len(text_stripped) == 2 and text_stripped == "10"):
+            rating = int(text_stripped)
+            logger.info(f"[MAIN TEXT HANDLER] Обнаружена оценка: {rating}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
+            
+            # Проверяем, есть ли реплай и находится ли сообщение в rating_messages
+            if message.reply_to_message:
+                reply_msg_id = message.reply_to_message.message_id
+                from moviebot.states import rating_messages
+                if reply_msg_id in rating_messages:
+                    logger.info(f"[MAIN TEXT HANDLER] ✅ Найдено сообщение в rating_messages: reply_msg_id={reply_msg_id}")
+                    try:
+                        from moviebot.bot.handlers.rate import handle_rating_internal
+                        handle_rating_internal(message, rating)
+                        logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+                    except Exception as rating_e:
+                        logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                    return
+                else:
+                    # Если реплай есть, но не в rating_messages, все равно пробуем обработать
+                    logger.info(f"[MAIN TEXT HANDLER] Реплай есть, но не в rating_messages, пробуем обработать оценку")
+                    try:
+                        from moviebot.bot.handlers.rate import handle_rating_internal
+                        handle_rating_internal(message, rating)
+                        logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+                    except Exception as rating_e:
+                        logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                    return
+            else:
+                # Если нет реплая, но это число от 1 до 10, пробуем обработать как оценку
+                logger.info(f"[MAIN TEXT HANDLER] Нет реплая, но это число от 1 до 10, пробуем обработать как оценку")
+                try:
+                    from moviebot.bot.handlers.rate import handle_rating_internal
+                    handle_rating_internal(message, rating)
+                    logger.info(f"[MAIN TEXT HANDLER] handle_rating_internal завершен")
+                except Exception as rating_e:
+                    logger.error(f"[MAIN TEXT HANDLER] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
+                return
     
     # Реплай на сообщение бота с оценками (для списка фильмов)
     if message.reply_to_message and message.reply_to_message.from_user.id == BOT_ID:
