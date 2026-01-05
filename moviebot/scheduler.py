@@ -1793,7 +1793,7 @@ def choose_random_participant():
                 if first_participation:
                     if isinstance(first_participation, str):
                         first_participation = datetime.fromisoformat(first_participation.replace('Z', '+00:00'))
-                    elif isinstance(first_participation, datetime.date) and not isinstance(first_participation, datetime):
+                    elif isinstance(first_participation, date) and not isinstance(first_participation, datetime):
                         first_participation = datetime.combine(first_participation, datetime.min.time())
                         if first_participation.tzinfo is None:
                             first_participation = PLANS_TZ.localize(first_participation)
