@@ -24,6 +24,8 @@ from moviebot.bot.handlers.list import handle_view_film_reply_internal
 from moviebot.bot.bot_init import BOT_ID
 # Импортируем обработчики промокодов для автоматической регистрации
 import moviebot.bot.handlers.promo  # noqa: F401
+# Импортируем обработчики админских команд для автоматической регистрации
+import moviebot.bot.handlers.admin  # noqa: F401
 from moviebot.database.db_operations import add_and_announce, is_bot_participant, get_watched_emojis
 
 logger = logging.getLogger(__name__)

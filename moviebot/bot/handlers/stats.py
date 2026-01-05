@@ -791,11 +791,11 @@ def register_stats_handlers(bot_instance):
 
     @bot_instance.message_handler(commands=['refundstars', 'refund_stars'])
     def refundstars_command(message):
-        """Команда для возврата звезд по ID операции (только для создателя)"""
-        # ID создателя бота
-        CREATOR_ID = 301810276
+        """Команда для возврата звезд по ID операции (только для администраторов)"""
+        from moviebot.utils.admin import is_admin
         
-        if message.from_user.id != CREATOR_ID:
+        user_id = message.from_user.id
+        if not is_admin(user_id):
             bot_instance.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
         
