@@ -267,6 +267,7 @@ def create_web_app(bot_instance):
                 try:
                     # КРИТИЧЕСКИЙ ФИКС: process_new_updates может не вызывать обработчики
                     # Пробуем вызвать обработчики вручную для команд
+                    handler_called = False
                     if hasattr(update, 'message') and update.message:
                         message = update.message
                         is_command = message.text and message.text.strip().startswith('/')
@@ -289,18 +290,24 @@ def create_web_app(bot_instance):
                                                 # Вызываем обработчик
                                                 handler_func = handler.get('function')
                                                 if handler_func:
-                                                    print(f"[WEBHOOK] Вызываем обработчик команды...", flush=True)
+                                                    print(f"[WEBHOOK] Вызываем обработчик команды напрямую...", flush=True)
                                                     handler_func(message)
-                                                    print(f"[WEBHOOK] Обработчик команды вызван", flush=True)
+                                                    print(f"[WEBHOOK] ✅ Обработчик команды вызван напрямую", flush=True)
+                                                    handler_called = True
                                                     break
                                     except Exception as handler_error:
-                                        print(f"[WEBHOOK] Ошибка в обработчике команды: {handler_error}", flush=True)
+                                        print(f"[WEBHOOK] ❌ Ошибка в обработчике команды: {handler_error}", flush=True)
                                         import traceback
                                         print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
+                                        logger.error(f"[WEBHOOK] ❌ Ошибка в обработчике команды: {handler_error}", exc_info=True)
                     
-                    # Все равно вызываем process_new_updates для остальных типов обновлений
-                    result = bot_instance.process_new_updates([update])
-                    print(f"[WEBHOOK] process_new_updates завершен, результат: {result}", flush=True)
+                    # Вызываем process_new_updates для остальных типов обновлений или если команда не обработана
+                    if not handler_called:
+                        print(f"[WEBHOOK] Вызываем process_new_updates (handler_called={handler_called})", flush=True)
+                        result = bot_instance.process_new_updates([update])
+                        print(f"[WEBHOOK] process_new_updates завершен, результат: {result}", flush=True)
+                    else:
+                        print(f"[WEBHOOK] Пропускаем process_new_updates, так как обработчик уже вызван вручную", flush=True)
                 except Exception as process_error:
                     print(f"[WEBHOOK] ❌ ОШИБКА в process_new_updates: {process_error}", flush=True)
                     import traceback
