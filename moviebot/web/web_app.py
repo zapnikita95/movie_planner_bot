@@ -35,6 +35,7 @@ app.logger.disabled = True
 logger.info("[WEB APP] Flask приложение создано")
 
 # Глобальное логирование всех запросов - ПРИНУДИТЕЛЬНОЕ
+# Глобальное логирование всех запросов - ПРИНУДИТЕЛЬНОЕ
 @app.before_request
 def log_all_requests():
     # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ - ДОЛЖНО СРАБАТЫВАТЬ ВСЕГДА
@@ -82,6 +83,7 @@ def create_web_app(bot_instance):
     """Создает Flask приложение с webhook обработчиками"""
     # КРИТИЧЕСКИ ВАЖНО: Проверяем, что это тот же экземпляр бота, что используется в обработчиках
     from moviebot.bot.bot_init import bot as bot_from_init
+    
     print(f"[WEB APP] bot_instance: {bot_instance}, id: {id(bot_instance)}", flush=True)
     print(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}", flush=True)
     print(f"[WEB APP] bot_instance == bot_from_init: {bot_instance is bot_from_init}", flush=True)
@@ -90,17 +92,16 @@ def create_web_app(bot_instance):
     logger.info(f"[WEB APP] bot_instance == bot_from_init: {bot_instance is bot_from_init}")
     
     # ВСЕГДА используем bot_from_init (тот, на котором зарегистрированы обработчики)
-    # Это гарантирует, что обработчики будут работать правильно
     if bot_instance is not bot_from_init:
         print("[WEB APP] ⚠️ ВНИМАНИЕ: bot_instance != bot_from_init! Используем bot_from_init", flush=True)
         logger.warning("[WEB APP] ⚠️ ВНИМАНИЕ: bot_instance != bot_from_init! Используем bot_from_init")
     
-    # ВСЕГДА используем bot_from_init для гарантии правильной работы
+    # ПЕРЕПРИСВАИВАЕМ — это ключевой момент
     bot_instance = bot_from_init
     print(f"[WEB APP] ✅ Используем bot_from_init: {bot_instance}, id: {id(bot_instance)}", flush=True)
     logger.info(f"[WEB APP] ✅ Используем bot_from_init: {bot_instance}, id: {id(bot_instance)}")
     
-    # Получаем ID бота для исключения из подсчета участников
+    # Получаем ID бота
     try:
         bot_info = bot_instance.get_me()
         BOT_ID = bot_info.id
@@ -108,6 +109,8 @@ def create_web_app(bot_instance):
     except Exception as e:
         logger.warning(f"[WEB APP] Не удалось получить ID бота: {e}")
         BOT_ID = None
+    
+    # === ВСЕ РОУТЫ ОПРЕДЕЛЯЕМ ТОЛЬКО ПОСЛЕ ПЕРЕПРИСВАИВАНИЯ bot_instance ===
     
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
@@ -172,7 +175,7 @@ def create_web_app(bot_instance):
             print(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}", flush=True)
             logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}")
             
-            # Логирование деталей update (оставил как было)
+            # Логирование деталей update
             if hasattr(update, 'message') and update.message:
                 logger.info(f"[WEBHOOK] Update.message.content_type={getattr(update.message, 'content_type', 'НЕТ')}")
                 logger.info(f"[WEBHOOK] Update.message.text='{getattr(update.message, 'text', None)[:200] if hasattr(update.message, 'text') else None}'")
@@ -198,7 +201,7 @@ def create_web_app(bot_instance):
                 for i, handler in enumerate(bot_instance.message_handlers[:5]):
                     print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
             
-            # Основной вызов
+            # Основной вызов — теперь на правильном боте!
             print(f"[WEBHOOK] Вызываем bot_instance.process_new_updates([update])", flush=True)
             bot_instance.process_new_updates([update])
             print(f"[WEBHOOK] process_new_updates завершен", flush=True)
