@@ -178,7 +178,15 @@ def create_web_app(bot_instance):
             # Логирование деталей update
             if hasattr(update, 'message') and update.message:
                 logger.info(f"[WEBHOOK] Update.message.content_type={getattr(update.message, 'content_type', 'НЕТ')}")
-                logger.info(f"[WEBHOOK] Update.message.text='{getattr(update.message, 'text', None)[:200] if hasattr(update.message, 'text') else None}'")
+                
+                # Безопасное получение текста
+                message_text = getattr(update.message, 'text', None)
+                if message_text is not None:
+                    text_preview = message_text[:200]
+                else:
+                    text_preview = "None"
+                logger.info(f"[WEBHOOK] Update.message.text='{text_preview}'")
+                
                 logger.info(f"[WEBHOOK] Update.message.from_user.id={getattr(update.message.from_user, 'id', None) if update.message.from_user else None}")
                 
                 if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
@@ -193,7 +201,7 @@ def create_web_app(bot_instance):
                     logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
                     logger.info(f"[WEBHOOK] web_app_data.data={getattr(update.message.web_app_data, 'data', 'НЕТ')}")
                     logger.info(f"[WEBHOOK] web_app_data.button_text={getattr(update.message.web_app_data, 'button_text', 'НЕТ')}")
-            
+                    
             # Проверка обработчиков
             print(f"[WEBHOOK] Проверка обработчиков перед process_new_updates", flush=True)
             if hasattr(bot_instance, 'message_handlers'):
