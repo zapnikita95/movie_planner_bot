@@ -52,6 +52,101 @@ def log_all_requests():
             logger.info(f"Data preview: (не удалось прочитать: {e})")
     logger.info("=" * 80)
 
+@app.route('/webhook', methods=['POST', 'GET'])
+def webhook():
+    # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ В САМОМ НАЧАЛЕ
+    logger.info("=" * 80)
+    logger.info("=== WEBHOOK РОУТ СРАБОТАЛ! Запрос получен ===")
+    logger.info(f"Method: {request.method}")
+    logger.info(f"IP: {request.remote_addr}")
+    logger.info(f"Path: {request.path}")
+    logger.info(f"Content-Type: {request.headers.get('content-type')}")
+    logger.info(f"Raw data length: {len(request.get_data())} bytes")
+    logger.info("=" * 80)
+    
+    if request.method == 'GET':
+        logger.info("[WEBHOOK] GET запрос - возвращаем 200")
+        return "OK", 200
+    
+    # Логируем POST запросы
+    logger.info(f"[WEBHOOK] POST запрос получен")
+    logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
+    
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data(as_text=True)
+        logger.info(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт")
+        logger.info(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...")
+        
+        try:
+            update = telebot.types.Update.de_json(json_string)
+            logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update.update_id if hasattr(update, 'update_id') else 'N/A'}")
+            logger.info(f"[WEBHOOK] Тип update: {type(update)}")
+            logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
+            
+            # КРИТИЧНО: Проверяем наличие successful_payment на уровне update
+            if hasattr(update, 'message') and update.message and hasattr(update.message, 'successful_payment') and update.message.successful_payment:
+                logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment НА УРОВНЕ UPDATE! ⭐⭐⭐")
+                logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
+                logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
+                logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
+            
+            # Проверяем наличие pre_checkout_query (хотя для Stars не должен прийти)
+            if hasattr(update, 'pre_checkout_query') and update.pre_checkout_query:
+                logger.info(f"[WEBHOOK] ⚠️ PRE CHECKOUT QUERY пришел! (хотя для Stars не должен)")
+                logger.info(f"[WEBHOOK] pre_checkout_query.currency={update.pre_checkout_query.currency}")
+                logger.info(f"[WEBHOOK] pre_checkout_query.invoice_payload={update.pre_checkout_query.invoice_payload}")
+            
+            # Логируем информацию о реплае для отладки
+            if update.message:
+                logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")
+                logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
+                logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
+                
+                # КРИТИЧНО: Логируем successful_payment если есть
+                if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
+                    logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment! ⭐⭐⭐")
+                    logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
+                    logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
+                    logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
+                    logger.info(f"[WEBHOOK] successful_payment.telegram_payment_charge_id={getattr(update.message.successful_payment, 'telegram_payment_charge_id', 'N/A')}")
+                
+                # Проверяем наличие web_app_data
+                if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
+                    logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
+                    logger.info(f"[WEBHOOK] web_app_data.data={update.message.web_app_data.data if hasattr(update.message.web_app_data, 'data') else 'НЕТ'}")
+                    logger.info(f"[WEBHOOK] web_app_data.button_text={update.message.web_app_data.button_text if hasattr(update.message.web_app_data, 'button_text') else 'НЕТ'}")
+                
+                # Проверяем, является ли сообщение командой
+                if update.message.text and update.message.text.startswith('/'):
+                    logger.info(f"[WEBHOOK] ⚠️ Обнаружена команда: '{update.message.text}'")
+                    # Проверяем entities для команд
+                    if hasattr(update.message, 'entities') and update.message.entities:
+                        for entity in update.message.entities:
+                            logger.info(f"[WEBHOOK] Entity: type={entity.type}, offset={entity.offset}, length={entity.length}")
+            
+                # Обрабатываем обновление с обработкой ошибок
+                logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
+                logger.info(f"[WEBHOOK] Update ID: {update.update_id}, type: {type(update)}")
+                if hasattr(update, 'message') and update.message:
+                    logger.info(f"[WEBHOOK] Message type: {update.message.content_type if hasattr(update.message, 'content_type') else 'unknown'}")
+                if hasattr(update, 'callback_query') and update.callback_query:
+                    logger.info(f"[WEBHOOK] Callback query data: {update.callback_query.data[:100] if update.callback_query.data else 'None'}")
+                
+                bot_instance.process_new_updates([update])
+                logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
+                return '', 200
+                
+        except Exception as e:
+            logger.error(f"[WEBHOOK] ❌ Ошибка обработки update: {e}", exc_info=True)
+            import traceback
+            logger.error(f"[WEBHOOK] Traceback: {traceback.format_exc()}")
+            # Возвращаем 200, чтобы Telegram не повторял запрос
+            return '', 200
+    else:
+        logger.warning(f"[WEBHOOK] Неверный content-type: {request.headers.get('content-type')}")
+        return 'Forbidden', 403
+
+
 # Проверяем переменные окружения при старте приложения
 def check_environment_variables():
     """Проверяет наличие необходимых переменных окружения"""
@@ -82,101 +177,7 @@ def create_web_app(bot_instance):
     except Exception as e:
         logger.warning(f"[WEB APP] Не удалось получить ID бота: {e}")
         BOT_ID = None
-    
-    @app.route('/webhook', methods=['POST', 'GET'])
-    def webhook():
-        # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ В САМОМ НАЧАЛЕ
-        logger.info("=" * 80)
-        logger.info("=== WEBHOOK РОУТ СРАБОТАЛ! Запрос получен ===")
-        logger.info(f"Method: {request.method}")
-        logger.info(f"IP: {request.remote_addr}")
-        logger.info(f"Path: {request.path}")
-        logger.info(f"Content-Type: {request.headers.get('content-type')}")
-        logger.info(f"Raw data length: {len(request.get_data())} bytes")
-        logger.info("=" * 80)
-        
-        if request.method == 'GET':
-            logger.info("[WEBHOOK] GET запрос - возвращаем 200")
-            return "OK", 200
-        
-        # Логируем POST запросы
-        logger.info(f"[WEBHOOK] POST запрос получен")
-        logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
-        
-        if request.headers.get('content-type') == 'application/json':
-            json_string = request.get_data(as_text=True)
-            logger.info(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт")
-            logger.info(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...")
-            
-            try:
-                update = telebot.types.Update.de_json(json_string)
-                logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update.update_id if hasattr(update, 'update_id') else 'N/A'}")
-                logger.info(f"[WEBHOOK] Тип update: {type(update)}")
-                logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
-                
-                # КРИТИЧНО: Проверяем наличие successful_payment на уровне update
-                if hasattr(update, 'message') and update.message and hasattr(update.message, 'successful_payment') and update.message.successful_payment:
-                    logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment НА УРОВНЕ UPDATE! ⭐⭐⭐")
-                    logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
-                    logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
-                    logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
-                
-                # Проверяем наличие pre_checkout_query (хотя для Stars не должен прийти)
-                if hasattr(update, 'pre_checkout_query') and update.pre_checkout_query:
-                    logger.info(f"[WEBHOOK] ⚠️ PRE CHECKOUT QUERY пришел! (хотя для Stars не должен)")
-                    logger.info(f"[WEBHOOK] pre_checkout_query.currency={update.pre_checkout_query.currency}")
-                    logger.info(f"[WEBHOOK] pre_checkout_query.invoice_payload={update.pre_checkout_query.invoice_payload}")
-                
-                # Логируем информацию о реплае для отладки
-                if update.message:
-                    logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")
-                    logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
-                    logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
-                    
-                    # КРИТИЧНО: Логируем successful_payment если есть
-                    if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
-                        logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment! ⭐⭐⭐")
-                        logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
-                        logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
-                        logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
-                        logger.info(f"[WEBHOOK] successful_payment.telegram_payment_charge_id={getattr(update.message.successful_payment, 'telegram_payment_charge_id', 'N/A')}")
-                    
-                    # Проверяем наличие web_app_data
-                    if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
-                        logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
-                        logger.info(f"[WEBHOOK] web_app_data.data={update.message.web_app_data.data if hasattr(update.message.web_app_data, 'data') else 'НЕТ'}")
-                        logger.info(f"[WEBHOOK] web_app_data.button_text={update.message.web_app_data.button_text if hasattr(update.message.web_app_data, 'button_text') else 'НЕТ'}")
-                    
-                    # Проверяем, является ли сообщение командой
-                    if update.message.text and update.message.text.startswith('/'):
-                        logger.info(f"[WEBHOOK] ⚠️ Обнаружена команда: '{update.message.text}'")
-                        # Проверяем entities для команд
-                        if hasattr(update.message, 'entities') and update.message.entities:
-                            for entity in update.message.entities:
-                                logger.info(f"[WEBHOOK] Entity: type={entity.type}, offset={entity.offset}, length={entity.length}")
-                
-                    # Обрабатываем обновление с обработкой ошибок
-                    logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
-                    logger.info(f"[WEBHOOK] Update ID: {update.update_id}, type: {type(update)}")
-                    if hasattr(update, 'message') and update.message:
-                        logger.info(f"[WEBHOOK] Message type: {update.message.content_type if hasattr(update.message, 'content_type') else 'unknown'}")
-                    if hasattr(update, 'callback_query') and update.callback_query:
-                        logger.info(f"[WEBHOOK] Callback query data: {update.callback_query.data[:100] if update.callback_query.data else 'None'}")
-                    
-                    bot_instance.process_new_updates([update])
-                    logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
-                    return '', 200
-                    
-            except Exception as e:
-                logger.error(f"[WEBHOOK] ❌ Ошибка обработки update: {e}", exc_info=True)
-                import traceback
-                logger.error(f"[WEBHOOK] Traceback: {traceback.format_exc()}")
-                # Возвращаем 200, чтобы Telegram не повторял запрос
-                return '', 200
-        else:
-            logger.warning(f"[WEBHOOK] Неверный content-type: {request.headers.get('content-type')}")
-            return 'Forbidden', 403
-    
+
     def process_yookassa_notification(event_json, is_test=False):
         """Обрабатывает уведомление от ЮKassa (можно вызывать из webhook или теста)"""
         try:
