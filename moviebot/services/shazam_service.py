@@ -38,6 +38,17 @@ BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / 'data' / 'shazam'
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# Кэш для моделей (Railway Volume)
+CACHE_DIR = Path(os.getenv('CACHE_DIR', '/app/cache'))
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Настраиваем кэш для HuggingFace моделей
+os.environ['HF_HOME'] = str(CACHE_DIR / 'huggingface')
+os.environ['TRANSFORMERS_CACHE'] = str(CACHE_DIR / 'huggingface' / 'transformers')
+os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sentence_transformers')
+
+logger.info(f"[CACHE] Используется кэш моделей: {CACHE_DIR}")
+
 INDEX_PATH = DATA_DIR / 'imdb_index.faiss'
 DATA_PATH = DATA_DIR / 'imdb_movies.csv'
 BASICS_PATH = DATA_DIR / 'title.basics.tsv'
@@ -95,14 +106,43 @@ def get_whisper():
     """Ленивая загрузка модели Whisper для распознавания речи"""
     global _whisper
     if _whisper is None:
-        logger.info("Загрузка модели Whisper...")
+        logger.info(f"Загрузка модели Whisper (кэш: {CACHE_DIR})...")
         try:
-            _whisper = pipeline(
-                "automatic-speech-recognition",
-                model="openai/whisper-small",
-                device=-1  # CPU
-            )
-            logger.info("Модель Whisper загружена")
+            # Используем whisper.load_model для возможности указать download_root
+            import whisper
+            
+            # Создаем директорию для кэша Whisper
+            whisper_cache_dir = CACHE_DIR / 'whisper'
+            whisper_cache_dir.mkdir(parents=True, exist_ok=True)
+            
+            logger.info(f"Загружаем Whisper base модель в {whisper_cache_dir}...")
+            whisper_model = whisper.load_model("base", download_root=str(whisper_cache_dir))
+            
+            # Создаем обертку для совместимости с pipeline API
+            class WhisperWrapper:
+                def __init__(self, model):
+                    self.model = model
+                
+                def __call__(self, audio_path):
+                    result = self.model.transcribe(audio_path, language="ru")
+                    return {"text": result.get("text", "").strip()}
+            
+            _whisper = WhisperWrapper(whisper_model)
+            logger.info("Модель Whisper загружена из кэша/скачана")
+        except ImportError:
+            logger.warning("Whisper не установлен. Установите: pip install openai-whisper")
+            # Fallback на transformers pipeline
+            try:
+                logger.info("Пробуем загрузить через transformers pipeline...")
+                _whisper = pipeline(
+                    "automatic-speech-recognition",
+                    model="openai/whisper-small",
+                    device=-1  # CPU
+                )
+                logger.info("Модель Whisper загружена через transformers")
+            except Exception as e:
+                logger.error(f"Ошибка загрузки Whisper через pipeline: {e}", exc_info=True)
+                _whisper = False
         except Exception as e:
             logger.error(f"Ошибка загрузки Whisper: {e}", exc_info=True)
             _whisper = False  # Помечаем как недоступный
