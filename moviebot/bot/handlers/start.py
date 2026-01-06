@@ -24,19 +24,19 @@ def send_welcome(message):
     logger.info(f"[START] СРАБОТАЛ /start от user_id={message.from_user.id}, chat_id={message.chat.id}")
 
     try:
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("Тест кнопка 1", callback_data="test_button_1"))
-        markup.add(InlineKeyboardButton("Тест кнопка 2", callback_data="test_button_2"))
-
-        bot.reply_to(message, "Тест: меню работает!", reply_markup=markup, parse_mode='HTML')
-        logger.info("[START] ТЕСТОВОЕ МИНИМАЛЬНОЕ МЕНЮ ОТПРАВЛЕНО")
-
+        message_text = message.text or ""
+        command_type = '/start' if message_text.startswith('/start') else '/menu'
+        logger.info(f"[HANDLER] {command_type} вызван от {message.from_user.id}, chat_type={message.chat.type}, text='{message_text}'")
+        username = message.from_user.username or f"user_{message.from_user.id}"
+        log_request(message.from_user.id, username, '/start', message.chat.id)
+        logger.info(f"Команда /start от пользователя {message.from_user.id}")
     except Exception as e:
-        logger.error(f"[START] Ошибка даже с минимальным меню: {e}", exc_info=True)
+        logger.error(f"[SEND_WELCOME] Ошибка в начале функции: {e}", exc_info=True)
         try:
-            bot.reply_to(message, "Ошибка даже с тестом!")
+            bot.reply_to(message, "❌ Произошла ошибка. Попробуйте еще раз.")
         except:
             pass
+        return
 
     # Унифицированное приветствие для личных сообщений и групп
     subscription_info = ""
@@ -232,7 +232,7 @@ def back_to_start_menu_callback(call):
             markup.add(InlineKeyboardButton("🔒 КиноШазам", callback_data="shazam:start"))
         markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
         markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
-        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="s   tart_menu:random"))
+        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
         try:
