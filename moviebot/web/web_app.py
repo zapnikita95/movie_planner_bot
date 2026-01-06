@@ -98,13 +98,14 @@ def create_web_app(bot_instance):
         print(f"Method: {request.method}", file=sys.stdout, flush=True)
         print(f"IP: {request.remote_addr}", file=sys.stdout, flush=True)
         
+        # НЕ ЧИТАЕМ request.get_data() здесь - это может вызвать проблемы
+        print("[WEBHOOK] Логирование базовой информации", flush=True)
         logger.info("=" * 80)
         logger.info("=== WEBHOOK РОУТ СРАБОТАЛ! Запрос получен ===")
         logger.info(f"Method: {request.method}")
         logger.info(f"IP: {request.remote_addr}")
         logger.info(f"Path: {request.path}")
         logger.info(f"Content-Type: {request.headers.get('content-type')}")
-        logger.info(f"Raw data length: {len(request.get_data())} bytes")
         logger.info("=" * 80)
         
         if request.method == 'GET':
@@ -115,11 +116,10 @@ def create_web_app(bot_instance):
         # Логируем POST запросы
         print("[WEBHOOK] POST запрос получен", flush=True)
         logger.info(f"[WEBHOOK] POST запрос получен")
-        print(f"[WEBHOOK] Headers: {dict(request.headers)}", flush=True)
-        logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
         
         content_type = request.headers.get('content-type')
         print(f"[WEBHOOK] Content-Type проверка: '{content_type}'", flush=True)
+        logger.info(f"[WEBHOOK] Content-Type: '{content_type}'")
         
         if content_type == 'application/json':
             print("[WEBHOOK] Content-Type правильный, обрабатываем JSON", flush=True)
