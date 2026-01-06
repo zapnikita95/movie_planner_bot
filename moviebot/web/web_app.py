@@ -62,30 +62,15 @@ def create_web_app(bot_instance):
         logger.warning(f"[WEB APP] Не удалось получить ID бота: {e}")
         BOT_ID = None
     
-    # Добавляем middleware для логирования всех запросов
-    @app.before_request
-    def log_request_info():
-        logger.info("=" * 80)
-        logger.info(f"[FLASK] ===== ПОЛУЧЕН HTTP ЗАПРОС =====")
-        logger.info(f"[FLASK] Method: {request.method}")
-        logger.info(f"[FLASK] Path: {request.path}")
-        logger.info(f"[FLASK] Remote Address: {request.remote_addr}")
-        logger.info(f"[FLASK] Headers: {dict(request.headers)}")
-        if request.method == 'POST':
-            logger.info(f"[FLASK] Content-Type: {request.content_type}")
-            logger.info(f"[FLASK] Content-Length: {request.content_length}")
-    
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
-        # Логируем ВСЕ запросы, включая GET
-        logger.info("=" * 80)
-        logger.info(f"[WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС ({request.method}) =====")
-        logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
-        logger.info(f"[WEBHOOK] Content-Type: {request.headers.get('content-type')}")
-        
+        # Логируем только POST запросы (GET - это проверки доступности)
         if request.method == 'GET':
-            logger.info("[WEBHOOK] GET запрос - возвращаем 200")
             return '', 200
+        
+        # Логируем POST запросы
+        logger.info(f"[WEBHOOK] POST запрос получен")
+        logger.info(f"[WEBHOOK] Content-Type: {request.headers.get('content-type')}")
         
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
