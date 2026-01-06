@@ -5461,3 +5461,131 @@ def register_payment_callbacks(bot_instance):
             except:
                 pass
 
+
+@bot.message_handler(content_types=['successful_payment'])
+def handle_successful_payment(message):
+    """Обработчик успешного платежа через Telegram Stars"""
+    try:
+        logger.info(f"[SUCCESSFUL PAYMENT] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+        
+        if not message.successful_payment:
+            logger.warning(f"[SUCCESSFUL PAYMENT] successful_payment отсутствует в сообщении")
+            return
+        
+        successful_payment = message.successful_payment
+        invoice_payload = successful_payment.invoice_payload
+        telegram_payment_charge_id = getattr(successful_payment, 'telegram_payment_charge_id', None)
+        
+        logger.info(f"[SUCCESSFUL PAYMENT] invoice_payload={invoice_payload}, telegram_payment_charge_id={telegram_payment_charge_id}")
+        
+        if not invoice_payload:
+            logger.warning(f"[SUCCESSFUL PAYMENT] invoice_payload отсутствует")
+            return
+        
+        # Парсим payment_id из invoice_payload (формат: stars_{payment_id})
+        if not invoice_payload.startswith('stars_'):
+            logger.warning(f"[SUCCESSFUL PAYMENT] Неверный формат invoice_payload: {invoice_payload}")
+            return
+        
+        payment_id = invoice_payload.replace('stars_', '', 1)
+        logger.info(f"[SUCCESSFUL PAYMENT] Извлечен payment_id: {payment_id}")
+        
+        # Обновляем платеж в БД, добавляя telegram_payment_charge_id
+        if telegram_payment_charge_id:
+            with db_lock:
+                cursor.execute("""
+                    UPDATE payments 
+                    SET telegram_payment_charge_id = %s, status = 'succeeded', updated_at = NOW()
+                    WHERE payment_id = %s
+                """, (telegram_payment_charge_id, payment_id))
+                conn.commit()
+                logger.info(f"[SUCCESSFUL PAYMENT] ✅ Обновлен платеж: payment_id={payment_id}, telegram_payment_charge_id={telegram_payment_charge_id[:50]}...")
+        else:
+            logger.warning(f"[SUCCESSFUL PAYMENT] telegram_payment_charge_id отсутствует в successful_payment")
+            # Обновляем статус платежа на succeeded даже без charge_id
+            with db_lock:
+                cursor.execute("""
+                    UPDATE payments 
+                    SET status = 'succeeded', updated_at = NOW()
+                    WHERE payment_id = %s
+                """, (payment_id,))
+                conn.commit()
+        
+        # Получаем данные платежа для создания подписки
+        with db_lock:
+            cursor.execute("""
+                SELECT user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount
+                FROM payments 
+                WHERE payment_id = %s
+            """, (payment_id,))
+            payment_row = cursor.fetchone()
+        
+        if not payment_row:
+            logger.error(f"[SUCCESSFUL PAYMENT] Платеж {payment_id} не найден в БД")
+            return
+        
+        if isinstance(payment_row, dict):
+            user_id = payment_row.get('user_id')
+            chat_id = payment_row.get('chat_id')
+            subscription_type = payment_row.get('subscription_type')
+            plan_type = payment_row.get('plan_type')
+            period_type = payment_row.get('period_type')
+            group_size = payment_row.get('group_size')
+            amount = payment_row.get('amount')
+        else:
+            user_id = payment_row[0]
+            chat_id = payment_row[1]
+            subscription_type = payment_row[2]
+            plan_type = payment_row[3]
+            period_type = payment_row[4]
+            group_size = payment_row[5] if len(payment_row) > 5 else None
+            amount = payment_row[6] if len(payment_row) > 6 else 0
+        
+        logger.info(f"[SUCCESSFUL PAYMENT] Данные платежа: user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}")
+        
+        # Создаем/продлеваем подписку (логика из payment_callbacks.py)
+        from moviebot.scheduler import send_successful_payment_notification
+        
+        # Вычисляем даты начала и окончания подписки
+        now = datetime.now(pytz.UTC)
+        if period_type == 'month':
+            end_date = now + timedelta(days=30)
+        elif period_type == '3months':
+            end_date = now + timedelta(days=90)
+        elif period_type == 'year':
+            end_date = now + timedelta(days=365)
+        elif period_type == 'lifetime':
+            end_date = datetime(2099, 12, 31, tzinfo=pytz.UTC)
+        else:
+            end_date = now + timedelta(days=30)
+        
+        # Создаем подписку
+        subscription_id = create_subscription(
+            user_id=user_id,
+            chat_id=chat_id,
+            subscription_type=subscription_type,
+            plan_type=plan_type,
+            period_type=period_type,
+            group_size=group_size,
+            payment_id=payment_id
+        )
+        
+        if subscription_id:
+            logger.info(f"[SUCCESSFUL PAYMENT] ✅ Подписка создана: subscription_id={subscription_id}")
+            
+            # Отправляем уведомление об успешной оплате
+            send_successful_payment_notification(
+                chat_id=chat_id,
+                subscription_id=subscription_id,
+                subscription_type=subscription_type,
+                plan_type=plan_type,
+                period_type=period_type
+            )
+        else:
+            logger.error(f"[SUCCESSFUL PAYMENT] ❌ Не удалось создать подписку для payment_id={payment_id}")
+        
+        logger.info(f"[SUCCESSFUL PAYMENT] ===== END: успешно обработан")
+        
+    except Exception as e:
+        logger.error(f"[SUCCESSFUL PAYMENT] ❌ Ошибка обработки successful_payment: {e}", exc_info=True)
+
