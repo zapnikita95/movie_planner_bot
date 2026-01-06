@@ -4789,52 +4789,65 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         plan_info = None
         if film_id:
             try:
-                # Чтение планов безопасно без lock
+                # КРИТИЧЕСКИЙ ФИКС: Обернуто в try-except с таймаутом для предотвращения зависания
+                import threading
                 from moviebot.database.db_operations import get_user_timezone_or_default
-                cursor.execute('''
-                    SELECT id, plan_type, plan_datetime 
-                    FROM plans 
-                    WHERE film_id = %s AND chat_id = %s 
-                    LIMIT 1
-                ''', (film_id, chat_id))
-                plan_row = cursor.fetchone()
-                has_plan = plan_row is not None
-                if has_plan:
-                    if isinstance(plan_row, dict):
-                        plan_id = plan_row.get('id')
-                        plan_type = plan_row.get('plan_type')
-                        plan_dt_value = plan_row.get('plan_datetime')
-                    else:
-                        plan_id = plan_row[0]
-                        plan_type = plan_row[1]
-                        plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
-                    
-                    # Форматируем дату
-                    if plan_dt_value and user_id:
-                        user_tz = get_user_timezone_or_default(user_id)
-                        try:
-                            if isinstance(plan_dt_value, datetime):
-                                if plan_dt_value.tzinfo is None:
-                                    dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
-                                else:
-                                    dt = plan_dt_value.astimezone(user_tz)
+                
+                # Пробуем получить lock с таймаутом
+                lock_acquired = db_lock.acquire(timeout=5.0)
+                if lock_acquired:
+                    try:
+                        cursor.execute('''
+                            SELECT id, plan_type, plan_datetime 
+                            FROM plans 
+                            WHERE film_id = %s AND chat_id = %s 
+                            LIMIT 1
+                        ''', (film_id, chat_id))
+                        plan_row = cursor.fetchone()
+                        has_plan = plan_row is not None
+                        if has_plan:
+                            if isinstance(plan_row, dict):
+                                plan_id = plan_row.get('id')
+                                plan_type = plan_row.get('plan_type')
+                                plan_dt_value = plan_row.get('plan_datetime')
                             else:
-                                dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
-                            date_str = dt.strftime('%d.%m.%Y %H:%M')
-                        except:
-                            date_str = str(plan_dt_value)[:16]
-                    else:
-                        date_str = "не указана"
-                    
-                    plan_info = {
-                        'id': plan_id,
-                        'type': plan_type,
-                        'date': date_str
-                    }
-                logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (без lock), has_plan={has_plan}")
+                                plan_id = plan_row[0]
+                                plan_type = plan_row[1]
+                                plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
+                            
+                            # Форматируем дату
+                            if plan_dt_value and user_id:
+                                user_tz = get_user_timezone_or_default(user_id)
+                                try:
+                                    if isinstance(plan_dt_value, datetime):
+                                        if plan_dt_value.tzinfo is None:
+                                            dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                                        else:
+                                            dt = plan_dt_value.astimezone(user_tz)
+                                    else:
+                                        dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                                    date_str = dt.strftime('%d.%m.%Y %H:%M')
+                                except:
+                                    date_str = str(plan_dt_value)[:16]
+                            else:
+                                date_str = "не указана"
+                            
+                            plan_info = {
+                                'id': plan_id,
+                                'type': plan_type,
+                                'date': date_str
+                            }
+                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (с lock), has_plan={has_plan}")
+                    finally:
+                        db_lock.release()
+                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов")
+                else:
+                    logger.warning(f"[SHOW FILM INFO] db_lock timeout (5 сек) - пропускаем проверку планов (не критично)")
+                    has_plan = False
             except Exception as plan_e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка при проверке планов (не критично): {plan_e}")
+                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при проверке планов (пропускаем): {plan_e}", exc_info=True)
                 has_plan = False
+                plan_info = None
         logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}")
         
         # Если фильм запланирован, показываем специальную логику кнопок
@@ -4887,7 +4900,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             rating_text = "💬 Оценить"
             try:
                 import threading
-                lock_acquired = db_lock.acquire(timeout=1.0)
+                # КРИТИЧЕСКИЙ ФИКС: Увеличен таймаут до 5 секунд и добавлена обработка ошибок
+                lock_acquired = db_lock.acquire(timeout=5.0)
                 if lock_acquired:
                     try:
                         # Получаем среднюю оценку
@@ -4931,10 +4945,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         db_lock.release()
                         logger.info(f"[SHOW FILM INFO] db_lock освобожден после запроса оценок")
                 else:
-                    logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос оценок (не критично)")
+                    logger.warning(f"[SHOW FILM INFO] db_lock timeout (5 сек) - пропускаем запрос оценок (не критично)")
                     rating_text = "💬 Оценить"
             except Exception as rating_e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка при запросе оценок (не критично): {rating_e}")
+                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при запросе оценок (пропускаем): {rating_e}", exc_info=True)
                 rating_text = "💬 Оценить"
             logger.info(f"[SHOW FILM INFO] Оценки получены, rating_text={rating_text}")
             
@@ -5044,17 +5058,27 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         plan_row = None
         if film_id:
             try:
-                # Чтение планов безопасно без lock
-                cursor.execute('''
-                    SELECT id, plan_type FROM plans 
-                    WHERE film_id = %s AND chat_id = %s
-                    ORDER BY plan_datetime ASC
-                    LIMIT 1
-                ''', (film_id, chat_id))
-                plan_row = cursor.fetchone()
-                logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (без lock), plan_row={plan_row is not None}")
+                # КРИТИЧЕСКИЙ ФИКС: Обернуто в try-except с таймаутом для предотвращения зависания
+                import threading
+                lock_acquired = db_lock.acquire(timeout=5.0)
+                if lock_acquired:
+                    try:
+                        cursor.execute('''
+                            SELECT id, plan_type FROM plans 
+                            WHERE film_id = %s AND chat_id = %s
+                            ORDER BY plan_datetime ASC
+                            LIMIT 1
+                        ''', (film_id, chat_id))
+                        plan_row = cursor.fetchone()
+                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (с lock), plan_row={plan_row is not None}")
+                    finally:
+                        db_lock.release()
+                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов (второй блок)")
+                else:
+                    logger.warning(f"[SHOW FILM INFO] db_lock timeout (5 сек) - пропускаем проверку планов (не критично)")
+                    plan_row = None
             except Exception as plan_e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка при проверке планов (не критично): {plan_e}")
+                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при проверке планов (пропускаем): {plan_e}", exc_info=True)
                 plan_row = None
             
             if plan_row:
@@ -5078,10 +5102,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                                 db_lock.release()
                                 logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки билетов")
                         else:
-                            logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем проверку билетов (не критично)")
+                            logger.warning(f"[SHOW FILM INFO] db_lock timeout (1 сек) - пропускаем проверку билетов (не критично)")
                             ticket_file_id = None
                     except Exception as ticket_e:
-                        logger.warning(f"[SHOW FILM INFO] Ошибка при проверке билетов (не критично): {ticket_e}")
+                        logger.error(f"[SHOW FILM INFO] ❌ Ошибка при проверке билетов (пропускаем): {ticket_e}", exc_info=True)
                         ticket_file_id = None
                 
                 if plan_type == 'home':
@@ -5331,6 +5355,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
     except Exception as e:
         error_type = type(e).__name__
         error_str = str(e)
+        import sys
+        import traceback
+        print(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", file=sys.stdout, flush=True)
+        print(f"[SHOW FILM INFO] Traceback: {traceback.format_exc()}", file=sys.stdout, flush=True)
         logger.error(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА в show_film_info_with_buttons: {e}", exc_info=True)
         logger.error(f"[SHOW FILM INFO] Тип ошибки: {error_type}, args: {e.args}")
         logger.error(f"[SHOW FILM INFO] chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, existing={existing}")
@@ -5346,13 +5374,12 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         except Exception as send_error_e:
             logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить даже сообщение об ошибке: {send_error_e}", exc_info=True)
         # НЕ пробрасываем ошибку дальше - бот должен продолжать работать
-        logger.error(f"[SHOW FILM INFO] Traceback: {e.__traceback__}")
-        try:
-            logger.info(f"[SHOW FILM INFO] Попытка отправить сообщение об ошибке")
-            bot_instance.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
-            logger.info(f"[SHOW FILM INFO] Сообщение об ошибке отправлено")
-        except Exception as send_error:
-            logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить сообщение об ошибке: {send_error}", exc_info=True)
+        logger.info(f"[SHOW FILM INFO] ===== END (с ошибкой) =====")
+        print(f"[SHOW FILM INFO] ===== END (с ошибкой) =====", file=sys.stdout, flush=True)
+    else:
+        logger.info(f"[SHOW FILM INFO] ===== END (успешно) =====")
+        import sys
+        print(f"[SHOW FILM INFO] ===== END (успешно) =====", file=sys.stdout, flush=True)
 
 
 def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
