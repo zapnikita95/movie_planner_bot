@@ -34,9 +34,15 @@ app.logger.disabled = True
 # Добавляем логирование при создании приложения
 logger.info("[WEB APP] Flask приложение создано")
 
-# Глобальное логирование всех запросов
+# Глобальное логирование всех запросов - ПРИНУДИТЕЛЬНОЕ
 @app.before_request
 def log_all_requests():
+    # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ - ДОЛЖНО СРАБАТЫВАТЬ ВСЕГДА
+    import sys
+    print("=" * 80, file=sys.stdout, flush=True)
+    print("=== НОВЫЙ ЗАПРОС В FLASK ===", file=sys.stdout, flush=True)
+    print(f"Path: {request.path}, Method: {request.method}, IP: {request.remote_addr}", file=sys.stdout, flush=True)
+    
     logger.info("=" * 80)
     logger.info("=== НОВЫЙ ЗАПРОС В FLASK ===")
     logger.info(f"Path: {request.path}, Method: {request.method}, IP: {request.remote_addr}")
@@ -85,7 +91,13 @@ def create_web_app(bot_instance):
     
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
-        # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ В САМОМ НАЧАЛЕ
+        # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ В САМОМ НАЧАЛЕ - И PRINT И LOGGER
+        import sys
+        print("=" * 80, file=sys.stdout, flush=True)
+        print("=== WEBHOOK РОУТ СРАБОТАЛ! Запрос получен ===", file=sys.stdout, flush=True)
+        print(f"Method: {request.method}", file=sys.stdout, flush=True)
+        print(f"IP: {request.remote_addr}", file=sys.stdout, flush=True)
+        
         logger.info("=" * 80)
         logger.info("=== WEBHOOK РОУТ СРАБОТАЛ! Запрос получен ===")
         logger.info(f"Method: {request.method}")
