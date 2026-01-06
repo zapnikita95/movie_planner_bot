@@ -453,26 +453,43 @@ def check_promo_message(message):
     if not message.text or not message.text.strip():
         return False
     
-    # Проверяем, есть ли реплай на сообщение с запросом промокода
-    if message.reply_to_message:
-        reply_text = message.reply_to_message.text or ""
-        promo_prompts = [
-            "Введите промокод",
-            "Укажите промокод",
-            "Промокод",
-            "введите промокод в ответном сообщении"
-        ]
-        if any(prompt.lower() in reply_text.lower() for prompt in promo_prompts):
-            return True
+    text = message.text.strip()
     
-    # В личных чатах можно отправлять промокод без реплая
-    try:
-        chat_info = bot_instance.get_chat(message.chat.id)
-        if chat_info.type == 'private':
+    # Для обычного пользователя (оплата)
+    if user_id in user_promo_state:
+        # В личке можно без реплая, в группе — только реплай на промпт
+        if message.reply_to_message:
+            reply_text = message.reply_to_message.text or ""
+            promo_prompts = ["Введите промокод", "Укажите промокод", "Промокод", "введите промокод"]
+            if any(prompt.lower() in reply_text.lower() for prompt in promo_prompts):
+                return True
+        
+        # В личных чатах — любой текст
+        if message.chat.type == 'private':
             return True
-    except:
-        if message.chat.id > 0:
+        
+        return False
+    
+    # Для админа (создание промокода) — только если формат похож на "КОД СКИДКА КОЛИЧЕСТВО"
+    if user_id in user_promo_admin_state:
+        parts = text.split()
+        if len(parts) == 3:
+            # Простая проверка, чтобы не ловить случайный текст
+            try:
+                int(parts[2])  # количество должно быть числом
+                if parts[1].endswith('%') or parts[1].isdigit():
+                    return True
+            except:
+                pass
+        
+        # Или если это реплай на меню /promo
+        if message.reply_to_message and "Задайте промокод" in (message.reply_to_message.text or ""):
             return True
+        
+        if message.chat.type == 'private':
+            return True
+        
+        return False
     
     return False
 
@@ -481,175 +498,149 @@ def check_promo_message(message):
 def handle_promo(message):
     """Обработчик для промокодов"""
     logger.info(f"[PROMO HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
-    try:
-        from moviebot.states import user_promo_state, user_promo_admin_state
-        user_id = message.from_user.id
-        chat_id = message.chat.id
-        text = message.text.strip()
+    
+    from moviebot.states import user_promo_state, user_promo_admin_state
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+    
+    # Проверка на команду
+    if message.text and message.text.startswith('/'):
+        return  # Это команда → пропускаем
+    
+    # Проверяем состояние
+    if user_id in user_promo_state:
+        state = user_promo_state[user_id]
+        prompt_message_id = state.get('prompt_message_id')
         
-        # ────────────────────────────────────────────────────────────────
-        # Добавляем эту проверку в самом начале!
-        if message.text and message.text.startswith('/'):
-            return  # Это команда → пропускаем, пусть обработают command-handlers
-        # ────────────────────────────────────────────────────────────────
+        # Проверяем, нужно ли обрабатывать
+        should_process, is_reply, is_private = should_process_message(
+            message, state, prompt_message_id, require_reply_in_groups=True
+        )
         
-        # Проверяем состояние
-        if user_id in user_promo_state:
-            state = user_promo_state[user_id]
-            prompt_message_id = state.get('prompt_message_id')
-            
-            # Проверяем, нужно ли обрабатывать
-            should_process, is_reply, is_private = should_process_message(
-                message, state, prompt_message_id, require_reply_in_groups=True
-            )
-            
-            if not should_process:
-                logger.info(f"[PROMO HANDLER] Пропускаем сообщение (не соответствует условиям)")
-                return
-            
-            # Обрабатываем промокод
-            promo_code = text.upper()
-            logger.info(f"[PROMO HANDLER] Обработка промокода: {promo_code}")
-            
-            try:
-                # Переносим логику из MAIN TEXT HANDLER
-                if not promo_code:
-                    send_error_message(
-                        message,
-                        "❌ Промокод не может быть пустым. Введите промокод.",
-                        prompt_message_id=prompt_message_id,
-                        state=state,
-                        back_callback="payment:back_from_promo"
-                    )
-                    return
-                
-                # Проверяем, не был ли уже применен этот промокод в текущей сессии платежа
-                from moviebot.states import user_payment_state
-                if user_id in user_payment_state:
-                    payment_state = user_payment_state[user_id]
-                    applied_promo = payment_state.get('promocode')
-                    applied_promo_id = payment_state.get('promocode_id')
-                    
-                    if applied_promo or applied_promo_id:
-                        logger.warning(f"[PROMO HANDLER] Промокод уже применен: promocode={applied_promo}, promocode_id={applied_promo_id}")
-                        error_text = f"❌ Промокод уже применен к этому платежу.\n\n"
-                        error_text += "Вы не можете применить промокод повторно."
-                        
-                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                        markup = InlineKeyboardMarkup()
-                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
-                        
-                        bot_instance.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
-                        return
-                
-                # Применяем промокод к оригинальной цене
-                original_price = state.get('original_price')
-                if not original_price:
-                    from moviebot.states import user_payment_state
-                    if user_id in user_payment_state:
-                        payment_state = user_payment_state[user_id]
-                        original_price = payment_state.get('original_price', state.get('original_price', 0))
-                    else:
-                        original_price = state.get('original_price', 0)
-                
-                logger.info(f"[PROMO HANDLER] Применяем промокод '{promo_code}' к оригинальной цене {original_price}")
-                
-                # Применяем промокод
-                from moviebot.utils.promo import apply_promocode
-                success, discounted_price, message_text, promocode_id = apply_promocode(
-                    promo_code,
-                    original_price,
-                    user_id,
-                    chat_id
-                )
-                
-                # Проверяем, что итоговая сумма не меньше 0
-                if discounted_price < 0:
-                    discounted_price = 0
-                    logger.warning(f"[PROMO HANDLER] Итоговая сумма после применения промокода меньше 0, установлена в 0")
-                
-                logger.info(f"[PROMO HANDLER] Результат: success={success}, discounted_price={discounted_price}, message='{message_text}'")
-                
-                if success:
-                    # Промокод применен успешно - обрабатываем результат
-                    _process_promo_success(message, state, promo_code, discounted_price, message_text, promocode_id, user_id, chat_id)
-                else:
-                    # Промокод недействителен
-                    error_text = f"❌ {message_text}\n\n"
-                    error_text += "Введите другой промокод или оплатите полную стоимость подписки."
-                    
-                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
-                    
-                    bot_instance.reply_to(message, error_text, reply_markup=markup)
-                    # Не удаляем состояние, чтобы пользователь мог попробовать другой промокод
-                    
-            except Exception as e:
-                logger.error(f"[PROMO HANDLER] Ошибка обработки промокода: {e}", exc_info=True)
+        if not should_process:
+            logger.info(f"[PROMO HANDLER] Пропускаем сообщение (не соответствует условиям)")
+            return
+        
+        # Обрабатываем промокод (вложенный try оставляем)
+        promo_code = text.upper()
+        logger.info(f"[PROMO HANDLER] Обработка промокода: {promo_code}")
+        
+        try:
+            if not promo_code:
                 send_error_message(
                     message,
-                    "❌ Не получилось обработать промокод. Проверьте правильность ввода.",
+                    "❌ Промокод не может быть пустым. Введите промокод.",
                     prompt_message_id=prompt_message_id,
                     state=state,
                     back_callback="payment:back_from_promo"
                 )
-        
-        elif user_id in user_promo_admin_state:
-            state = user_promo_admin_state[user_id]
-            
-            # В личных чатах можно отвечать без реплая
-            try:
-                chat_info = bot_instance.get_chat(chat_id)
-                is_private = chat_info.type == 'private'
-            except:
-                is_private = chat_id > 0
-            
-            if not is_private:
-                # В группах требуется реплай
-                if not message.reply_to_message:
-                    return
-            
-            # Обрабатываем создание промокода
-            parts = text.strip().split()
-            if len(parts) != 3:
-                send_error_message(
-                    message,
-                    "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\n\nНапример: NEW2026 20% 100",
-                    state=state,
-                    back_callback="admin:back"
-                )
                 return
             
-            try:
-                from moviebot.utils.promo import create_promocode
-                code = parts[0].strip()
-                discount_input = parts[1].strip()
-                total_uses_str = parts[2].strip()
+            # Проверка уже применённого промокода
+            from moviebot.states import user_payment_state
+            if user_id in user_payment_state:
+                payment_state = user_payment_state[user_id]
+                applied_promo = payment_state.get('promocode')
+                applied_promo_id = payment_state.get('promocode_id')
                 
-                success, result_message = create_promocode(code, discount_input, total_uses_str)
+                if applied_promo or applied_promo_id:
+                    logger.warning(f"[PROMO HANDLER] Промокод уже применен")
+                    error_text = "❌ Промокод уже применен к этому платежу.\n\nВы не можете применить промокод повторно."
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
+                    bot_instance.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
+                    return
+            
+            # Применяем промокод
+            original_price = state.get('original_price', 0)
+            if user_id in user_payment_state:
+                original_price = user_payment_state[user_id].get('original_price', original_price)
+            
+            from moviebot.utils.promo import apply_promocode
+            success, discounted_price, message_text, promocode_id = apply_promocode(
+                promo_code, original_price, user_id, chat_id
+            )
+            
+            if discounted_price < 0:
+                discounted_price = 0
+            
+            if success:
+                _process_promo_success(message, state, promo_code, discounted_price, message_text, promocode_id, user_id, chat_id)
+            else:
+                error_text = f"❌ {message_text}\n\nВведите другой промокод или оплатите полную стоимость."
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
+                bot_instance.reply_to(message, error_text, reply_markup=markup)
                 
-                if success:
-                    bot_instance.reply_to(message, f"✅ {result_message}")
-                else:
-                    bot_instance.reply_to(message, f"❌ {result_message}")
+        except Exception as e:
+            logger.error(f"[PROMO HANDLER] Ошибка обработки промокода: {e}", exc_info=True)
+            send_error_message(
+                message,
+                "❌ Не получилось обработать промокод.",
+                prompt_message_id=prompt_message_id,
+                state=state,
+                back_callback="payment:back_from_promo"
+            )
+    
+    elif user_id in user_promo_admin_state:
+        state = user_promo_admin_state[user_id]
+        
+        # Проверка лички/реплая
+        try:
+            chat_info = bot_instance.get_chat(chat_id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = chat_id > 0
+        
+        if not is_private and not message.reply_to_message:
+            return
+        
+        parts = text.strip().split()
+        if len(parts) != 3:
+            send_error_message(
+                message,
+                "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\n\nНапример: NEW2026 20% 100",
+                state=state,
+                back_callback="admin:back"
+            )
+            return
+        
+        try:
+            from moviebot.utils.promo import create_promocode
+            code = parts[0].strip()
+            discount_input = parts[1].strip()
+            total_uses_str = parts[2].strip()
+            
+            success, result_message = create_promocode(code, discount_input, total_uses_str)
+            
+            if success:
+                bot_instance.reply_to(message, f"✅ {result_message}")
                 
-                del user_promo_admin_state[user_id]
-            except Exception as e:
-                logger.error(f"[PROMO HANDLER] Ошибка создания промокода: {e}", exc_info=True)
-                send_error_message(
-                    message,
-                    "❌ Не получилось обработать промокод. Проверьте правильность ввода.",
-                    state=state,
-                    back_callback="admin:back"
-                )
-    except Exception as e:
-        logger.error(f"[PROMO HANDLER] Критическая ошибка: {e}", exc_info=True)
-        send_error_message(
-            message,
-            "❌ Не получилось обработать сообщение",
-            back_callback="back_to_start_menu"
-        )
+                # Обновление меню /promo
+                class FakeMessage:
+                    def __init__(self, original_message):
+                        self.chat = original_message.chat
+                        self.from_user = original_message.from_user
+                        self.message_id = original_message.message_id
+                        self.text = '/promo'
+                
+                fake_msg = FakeMessage(message)
+                from moviebot.bot.handlers.promo import promo_command
+                promo_command(fake_msg)
+            else:
+                bot_instance.reply_to(message, f"❌ {result_message}")
+            
+            del user_promo_admin_state[user_id]
+            
+        except Exception as e:
+            logger.error(f"[PROMO HANDLER] Ошибка создания промокода: {e}", exc_info=True)
+            send_error_message(
+                message,
+                "❌ Ошибка при создании промокода.",
+                state=state,
+                back_callback="admin:back"
+            )
 
 # ==================== HANDLER ДЛЯ БИЛЕТОВ ====================
 

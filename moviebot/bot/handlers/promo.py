@@ -171,7 +171,6 @@ def promo_info_callback(call):
 def promo_deactivate_callback(call):
     """Обработчик деактивации промокода"""
     try:
-        bot_instance.answer_callback_query(call.id)
         promocode_id = int(call.data.split(":")[2])
         user_id = call.from_user.id
         
@@ -186,17 +185,8 @@ def promo_deactivate_callback(call):
         
         if success:
             bot_instance.answer_callback_query(call.id, "✅ Промокод деактивирован", show_alert=False)
-            # Возвращаемся к списку промокодов
-            from moviebot.bot.handlers.promo import promo_command
-            # Создаем фиктивное сообщение для вызова команды
-            class FakeMessage:
-                def __init__(self, chat_id, user_id):
-                    self.chat = type('obj', (object,), {'id': chat_id, 'type': 'private'})()
-                    self.from_user = type('obj', (object,), {'id': user_id})()
-                    self.text = '/promo'
-            
-            fake_msg = FakeMessage(call.message.chat.id, user_id)
-            promo_command(fake_msg)
+            # Обновляем текущее сообщение с новой информацией
+            promo_info_callback(call)
         else:
             bot_instance.answer_callback_query(call.id, f"❌ {message}", show_alert=True)
             
@@ -213,18 +203,50 @@ def promo_back_callback(call):
     try:
         bot_instance.answer_callback_query(call.id)
         user_id = call.from_user.id
+        chat_id = call.message.chat.id
         
-        # Возвращаемся к списку промокодов
-        from moviebot.bot.handlers.promo import promo_command
-        class FakeMessage:
-            def __init__(self, chat_id, user_id):
-                self.chat = type('obj', (object,), {'id': chat_id, 'type': 'private'})()
-                self.from_user = type('obj', (object,), {'id': user_id})()
-                self.text = '/promo'
+        # Получаем список активных промокодов
+        active_promocodes = get_active_promocodes()
         
-        fake_msg = FakeMessage(call.message.chat.id, user_id)
-        promo_command(fake_msg)
+        text = "🏷️ <b>Управление промокодами</b>\n\n"
+        text += "Задайте промокод, скидку и количество купонов.\n\n"
+        text += "Формат: <code>КОД СКИДКА КОЛИЧЕСТВО</code>\n"
+        text += "Пример: <code>NEW2026 20% 100</code>\n\n"
+        text += "<b>Действующие промокоды:</b>\n"
+        
+        if active_promocodes:
+            for promo in active_promocodes:
+                discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} руб/звезд"
+                remaining = promo['total_uses'] - promo['used_count']
+                text += f"• <code>{promo['code']}</code> — {discount_str} (осталось: {remaining}/{promo['total_uses']})\n"
+        else:
+            text += "Нет активных промокодов\n"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Добавляем кнопки для каждого активного промокода
+        for promo in active_promocodes:
+            discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} руб/звезд"
+            remaining = promo['total_uses'] - promo['used_count']
+            button_text = f"🏷️ {promo['code']} ({discount_str}, осталось: {remaining})"
+            if len(button_text) > 50:
+                button_text = button_text[:47] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"promo:info:{promo['id']}"))
+        
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="back_to_start_menu"))
+        
+        # Редактируем текущее сообщение
+        bot_instance.edit_message_text(
+            text=text,
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
         
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_back_callback: {e}", exc_info=True)
-
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass

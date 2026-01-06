@@ -3,13 +3,15 @@
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 from moviebot.database.db_operations import (
     get_active_subscription,
     get_active_group_subscription_by_chat_id,
     log_request
 )
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access
+from moviebot.database.db_connection import db_lock, get_db_cursor
+from moviebot.bot.handlers.seasons import count_episodes_for_watch_check, get_seasons_data, get_series_airing_status
+from moviebot.api.kinopoisk_api import get_seasons_data  # Если нужно для проверки
 
 logger = logging.getLogger(__name__)
 
@@ -162,28 +164,132 @@ def register_start_handlers(bot):
                 return
             
             # Вызываем соответствующую команду
-            if action == 'seasons':
-                # Команда /seasons обрабатывается через callback "seasons_list"
-                # Просто меняем data и обрабатываем как callback
-                call.data = "seasons_list"
-                # Обработчик уже зарегистрирован в series_callbacks, просто обрабатываем callback
-                # Импортируем обработчик напрямую
-                from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
-                # Обработчик уже зарегистрирован при старте, просто отправляем сообщение
-                # или используем прямой вызов через bot
+            elif action == 'seasons':
+                logger.info(f"[START MENU] Показ списка сериалов для user_id={user_id}, chat_id={chat_id}")
+                
                 try:
-                    # Создаем временный callback с нужными данными
-                    original_data = call.data
-                    call.data = "seasons_list"
-                    # Обработчик должен быть зарегистрирован, но для надежности вызываем напрямую
-                    # Просто отправляем сообщение с кнопкой для вызова seasons
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("📺 Список сериалов", callback_data="seasons_list"))
-                    bot.send_message(chat_id, "📺 Нажмите кнопку для просмотра сериалов", reply_markup=markup)
-                    call.data = original_data
+                    with db_lock:
+                        cursor.execute("""
+                            SELECT m.kp_id, m.title, m.year
+                            FROM movies m
+                            WHERE m.chat_id = %s AND m.is_series = TRUE
+                            ORDER BY m.added_at DESC
+                            LIMIT 50  # Чтобы не перегружать, если много
+                        """, (chat_id,))
+                        series_list = cursor.fetchall()
+                    
+                    if not series_list:
+                        text = "📺 <b>Сериалы</b>\n\nВ базе пока нет сериалов.\nДобавьте их через поиск или ссылку с Кинопоиска."
+                        markup = InlineKeyboardMarkup(row_width=2)
+                        markup.add(
+                            InlineKeyboardButton("🔍 Поиск сериалов", callback_data="search_type:series"),
+                            InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu")
+                        )
+                    else:
+                        text = f"📺 <b>Ваши сериалы ({len(series_list)})</b>\n\n"
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        
+                        for row in series_list:
+                            kp_id = row[0] if isinstance(row, tuple) else row.get('kp_id')
+                            title = row[1] if isinstance(row, tuple) else row.get('title')
+                            year = row[2] if isinstance(row, tuple) else row.get('year', '—')
+                            
+                            button_text = f"📺 {title} ({year})"
+                            if len(button_text) > 60:
+                                button_text = button_text[:57] + "..."
+                            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_track:{kp_id}"))
+                        
+                        # Добавляем кнопку для просмотренных сериалов
+                        markup.add(InlineKeyboardButton("👀 Просмотренные сериалы", callback_data="start_menu:watched_seasons"))
+                        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                    
+                    bot.edit_message_text(
+                        text,
+                        chat_id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    logger.info(f"[START MENU] Список сериалов отправлен: {len(series_list) if series_list else 0} шт.")
+                    
                 except Exception as e:
-                    logger.error(f"[START MENU] Ошибка при вызове seasons: {e}", exc_info=True)
-                    bot.send_message(chat_id, "📺 Используйте /seasons для просмотра сериалов")
+                    logger.error(f"[START MENU] Ошибка при загрузке сериалов: {e}", exc_info=True)
+                    bot.edit_message_text(
+                        "❌ Ошибка при загрузке списка сериалов. Попробуйте позже.",
+                        chat_id,
+                        call.message.message_id
+                    )
+                return
+                
+            elif action == 'watched_seasons':
+                logger.info(f"[START MENU] Показ полностью просмотренных сериалов для user_id={user_id}, chat_id={chat_id}")
+                
+                try:
+                    watched_series = []
+                    
+                    with db_lock:
+                        cursor = get_db_cursor()
+                        cursor.execute("""
+                            SELECT m.id, m.kp_id, m.title, m.year
+                            FROM movies m
+                            WHERE m.chat_id = %s AND m.is_series = TRUE
+                            ORDER BY m.added_at DESC
+                            LIMIT 50
+                        """, (chat_id,))
+                        all_series = cursor.fetchall()
+                    
+                    for row in all_series:
+                        film_id = row[0] if isinstance(row, tuple) else row.get('id')
+                        kp_id = row[1] if isinstance(row, tuple) else row.get('kp_id')
+                        title = row[2] if isinstance(row, tuple) else row.get('title')
+                        year = row[3] if isinstance(row, tuple) else row.get('year', '—')
+                        
+                        seasons_data = get_seasons_data(kp_id)
+                        if not seasons_data:
+                            continue
+                        
+                        is_airing, _ = get_series_airing_status(kp_id)
+                        
+                        with db_lock:
+                            cursor.execute("""
+                                SELECT season_number, episode_number
+                                FROM series_tracking
+                                WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                            """, (chat_id, film_id))
+                            watched_rows = cursor.fetchall()
+                            watched_set = set((str(r[0]), str(r[1])) for r in watched_rows)  # str на всякий случай
+                        
+                        _, watched_episodes = count_episodes_for_watch_check(
+                            seasons_data, is_airing, watched_set, chat_id, film_id, user_id
+                        )
+                        total_episodes, _ = count_episodes_for_watch_check(
+                            seasons_data, is_airing, set(), chat_id, film_id, user_id
+                        )  # пустой set для total без watched
+                        
+                        if total_episodes > 0 and total_episodes == watched_episodes:
+                            watched_series.append({'kp_id': kp_id, 'title': title, 'year': year})
+                    
+                    if not watched_series:
+                        text = "👀 <b>Просмотренные сериалы</b>\n\nПока нет полностью просмотренных сериалов.\nОтмечайте эпизоды в обычном списке сериалов."
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("📺 К списку сериалов", callback_data="start_menu:seasons"))
+                        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                    else:
+                        text = f"👀 <b>Просмотренные сериалы ({len(watched_series)})</b>\n\n"
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        for series in watched_series:
+                            button_text = f"📺 {series['title']} ({series['year']})"
+                            if len(button_text) > 60:
+                                button_text = button_text[:57] + "..."
+                            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_track:{series['kp_id']}"))
+                        markup.add(InlineKeyboardButton("📺 К списку сериалов", callback_data="start_menu:seasons"))
+                        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                    
+                    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    
+                except Exception as e:
+                    logger.error(f"[WATCHED SEASONS] Ошибка: {e}", exc_info=True)
+                    bot.edit_message_text("❌ Ошибка при загрузке просмотренных сериалов.", chat_id, call.message.message_id)
                 return
             elif action == 'premieres':
                 message.text = '/premieres'
