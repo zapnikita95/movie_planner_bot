@@ -424,9 +424,11 @@ def handle_clean_imported_ratings_reply(message):
         chat_id = message.chat.id
         text = message.text.strip().upper() if message.text else ""
         
-        # Проверяем, что текст точно "ДА, УДАЛИТЬ"
-        if text != "ДА, УДАЛИТЬ":
-            logger.warning(f"[CLEAN IMPORTED RATINGS REPLY] Неверный текст подтверждения: '{text}'")
+        # Нормализуем текст: убираем пробелы, запятые, приводим к верхнему регистру
+        normalized_text = text.replace(' ', '').replace(',', '').upper()
+        # Проверяем различные варианты написания "ДА, УДАЛИТЬ"
+        if normalized_text != 'ДАУДАЛИТЬ':
+            logger.warning(f"[CLEAN IMPORTED RATINGS REPLY] Неверный текст подтверждения: '{text}' (нормализовано: '{normalized_text}')")
             return
         
         # Проверяем, что пользователь в состоянии user_clean_state с target='imported_ratings'

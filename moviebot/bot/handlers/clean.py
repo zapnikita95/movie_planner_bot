@@ -300,9 +300,26 @@ def clean_action_choice(call):
         user_clean_state[user_id]['target'] = 'clean_imported_movies'
     
     elif action == 'cancel':
+        bot_instance.answer_callback_query(call.id)
         bot_instance.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
         if user_id in user_clean_state:
             del user_clean_state[user_id]
+        
+        # Возвращаемся к меню /clean
+        from moviebot.bot.handlers.clean import clean_command
+        class FakeMessage:
+            def __init__(self, call):
+                self.message_id = call.message.message_id
+                self.from_user = call.from_user
+                self.chat = call.message.chat
+                self.date = call.message.date
+                self.text = '/clean'
+            
+            def reply_to(self, text, **kwargs):
+                return bot_instance.send_message(self.chat.id, text, **kwargs)
+        
+        fake_message = FakeMessage(call)
+        clean_command(fake_message)
 
 
 def register_clean_handlers(bot):
