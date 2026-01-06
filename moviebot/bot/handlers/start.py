@@ -93,6 +93,10 @@ def register_start_handlers(bot):
         """.strip()
 
         try:
+            # КРИТИЧЕСКИ ВАЖНО: Проверяем, что bot - это правильный экземпляр
+            print(f"[START HANDLER] Проверка bot перед отправкой: bot={bot}, id={id(bot)}", file=sys.stdout, flush=True)
+            logger.info(f"[START HANDLER] Проверка bot перед отправкой: bot={bot}, id={id(bot)}")
+            
             # Создаём меню с кнопками
             markup = InlineKeyboardMarkup(row_width=1)
             # Кнопка КиноШазам (в самом верху)
@@ -121,8 +125,19 @@ def register_start_handlers(bot):
             markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
             markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
             
-            bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
-            logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
+            print(f"[START HANDLER] Вызываем bot.reply_to для chat_id={message.chat.id}", file=sys.stdout, flush=True)
+            logger.info(f"[START HANDLER] Вызываем bot.reply_to для chat_id={message.chat.id}")
+            
+            try:
+                msg = bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
+                print(f"[START HANDLER] ✅ bot.reply_to успешно, message_id={msg.message_id if msg else 'None'}", file=sys.stdout, flush=True)
+                logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}, message_id={msg.message_id if msg else 'None'}")
+            except Exception as send_error:
+                print(f"[START HANDLER] ❌ ОШИБКА при bot.reply_to: {send_error}", file=sys.stdout, flush=True)
+                import traceback
+                print(f"[START HANDLER] Traceback: {traceback.format_exc()}", file=sys.stdout, flush=True)
+                logger.error(f"[START HANDLER] ❌ Ошибка при bot.reply_to: {send_error}", exc_info=True)
+                raise
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке ответа на /start: {e}", exc_info=True)
             try:

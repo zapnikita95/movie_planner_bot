@@ -89,11 +89,16 @@ def create_web_app(bot_instance):
     logger.info(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}")
     logger.info(f"[WEB APP] bot_instance == bot_from_init: {bot_instance is bot_from_init}")
     
-    # Если это разные экземпляры, используем bot_from_init (тот, на котором зарегистрированы обработчики)
+    # ВСЕГДА используем bot_from_init (тот, на котором зарегистрированы обработчики)
+    # Это гарантирует, что обработчики будут работать правильно
     if bot_instance is not bot_from_init:
         print("[WEB APP] ⚠️ ВНИМАНИЕ: bot_instance != bot_from_init! Используем bot_from_init", flush=True)
         logger.warning("[WEB APP] ⚠️ ВНИМАНИЕ: bot_instance != bot_from_init! Используем bot_from_init")
-        bot_instance = bot_from_init
+    
+    # ВСЕГДА используем bot_from_init для гарантии правильной работы
+    bot_instance = bot_from_init
+    print(f"[WEB APP] ✅ Используем bot_from_init: {bot_instance}, id: {id(bot_instance)}", flush=True)
+    logger.info(f"[WEB APP] ✅ Используем bot_from_init: {bot_instance}, id: {id(bot_instance)}")
     
     # Получаем ID бота для исключения из подсчета участников
     try:
