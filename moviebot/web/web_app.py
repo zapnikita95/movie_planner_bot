@@ -146,6 +146,235 @@ def webhook():
         logger.warning(f"[WEBHOOK] Неверный content-type: {request.headers.get('content-type')}")
         return 'Forbidden', 403
 
+@app.route('/', methods=['GET'])
+def root():
+    logger.info("[ROOT] Root запрос получен")
+    return jsonify({'status': 'ok', 'service': 'moviebot'}), 200
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Улучшенный health check endpoint с проверкой всех компонентов"""
+    logger.info("[HEALTH] Health check запрос получен")
+    
+    try:
+        # Пытаемся получить статус от watchdog, если он доступен
+        try:
+            from moviebot.utils.watchdog import get_watchdog
+            watchdog = get_watchdog()
+            health_status = watchdog.get_health_status()
+            
+            # Определяем общий статус
+            overall_status = health_status.get('overall', 'unknown')
+            components = health_status.get('components', {})
+            
+            # Формируем ответ
+            response = {
+                'status': 'ok' if overall_status == 'healthy' else 'degraded',
+                'overall': overall_status,
+                'components': components,
+                'last_check': health_status.get('last_check'),
+                'crash_count': health_status.get('crash_count', 0),
+                'last_crash': health_status.get('last_crash')
+            }
+            
+            # HTTP статус код зависит от состояния
+            http_status = 200 if overall_status == 'healthy' else 503
+            
+            logger.info(f"[HEALTH] Статус: {overall_status}, компоненты: {list(components.keys())}")
+            return jsonify(response), http_status
+            
+        except ImportError:
+            # Watchdog не доступен - возвращаем базовый статус
+            logger.warning("[HEALTH] Watchdog не доступен, возвращаем базовый статус")
+            return jsonify({'status': 'ok', 'bot': 'running', 'watchdog': 'not_available'}), 200
+        except Exception as e:
+            logger.error(f"[HEALTH] Ошибка при получении статуса от watchdog: {e}", exc_info=True)
+            return jsonify({
+                'status': 'error',
+                'error': str(e),
+                'bot': 'running'
+            }), 503
+            
+    except Exception as e:
+        logger.error(f"[HEALTH] Критическая ошибка в health check: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'error': str(e)
+        }), 503
+
+@app.route('/yookassa/webhook', methods=['POST', 'GET'])
+def yookassa_webhook():
+    """Обработчик webhook от ЮKassa (старый путь для совместимости)"""
+    return yookassa_webhook_new()
+
+@app.route('/yookassa_webhook', methods=['POST', 'GET'])
+def yookassa_webhook_new():
+    """Обработчик webhook от ЮKassa - основной endpoint"""
+    if request.method == 'GET':
+        # Для проверки доступности endpoint
+        logger.info("[YOOKASSA WEBHOOK] GET запрос - проверка доступности endpoint")
+        return jsonify({'status': 'ok', 'message': 'YooKassa webhook endpoint is active'}), 200
+    
+    try:
+        logger.info("=" * 80)
+        logger.info("[YOOKASSA WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС ОТ ЮKASSA =====")
+        logger.info(f"[YOOKASSA WEBHOOK] Headers: {dict(request.headers)}")
+        logger.info(f"[YOOKASSA WEBHOOK] Content-Type: {request.content_type}")
+        logger.info(f"[YOOKASSA WEBHOOK] Body (первые 1000 символов): {request.get_data(as_text=True)[:1000]}")
+        
+        event_json = request.get_json(force=True)
+        if not event_json:
+            logger.warning("[YOOKASSA WEBHOOK] Пустой JSON")
+            logger.warning(f"[YOOKASSA WEBHOOK] Raw data: {request.get_data()}")
+            return jsonify({'error': 'Empty JSON'}), 400
+        
+        logger.info(f"[YOOKASSA WEBHOOK] JSON получен: {event_json}")
+        logger.info(f"[YOOKASSA WEBHOOK] Событие: {event_json.get('event')}")
+        logger.info(f"[YOOKASSA WEBHOOK] Payment ID: {event_json.get('object', {}).get('id')}")
+        
+        result = process_yookassa_notification(event_json, is_test=False)
+        logger.info(f"[YOOKASSA WEBHOOK] Обработка завершена успешно")
+        return result
+    except Exception as e:
+        logger.error(f"[YOOKASSA WEBHOOK] Ошибка: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/yookassa/test-webhook', methods=['POST', 'GET'])
+def test_yookassa_webhook():
+    """Тестовый endpoint для симуляции уведомлений от ЮKassa"""
+    try:
+        if request.method == 'GET':
+            # Показываем форму для тестирования
+            html = """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Тест webhook ЮKassa</title>
+                <meta charset="UTF-8">
+                <style>
+                    body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+                    .form-group { margin: 15px 0; }
+                    label { display: block; margin-bottom: 5px; font-weight: bold; }
+                    input, select { width: 100%; padding: 8px; box-sizing: border-box; }
+                    button { background: #4CAF50; color: white; padding: 10px 20px; border: none; cursor: pointer; }
+                    button:hover { background: #45a049; }
+                    .result { margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 5px; }
+                </style>
+            </head>
+            <body>
+                <h1>🧪 Тест webhook ЮKassa</h1>
+                <form method="POST" id="testForm">
+                    <div class="form-group">
+                        <label>YooKassa Payment ID (из БД):</label>
+                        <input type="text" name="yookassa_payment_id" placeholder="2c1c5c0a-0001-0000-0000-000000000000" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Событие:</label>
+                        <select name="event" required>
+                            <option value="payment.succeeded">payment.succeeded</option>
+                            <option value="payment.canceled">payment.canceled</option>
+                        </select>
+                    </div>
+                    <button type="submit">Отправить тестовое уведомление</button>
+                </form>
+                <div id="result"></div>
+                <script>
+                    document.getElementById('testForm').addEventListener('submit', async function(e) {
+                        e.preventDefault();
+                        const formData = new FormData(this);
+                        const response = await fetch('/yookassa/test-webhook', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({
+                                yookassa_payment_id: formData.get('yookassa_payment_id'),
+                                event: formData.get('event')
+                            })
+                        });
+                        const result = await response.json();
+                        document.getElementById('result').innerHTML = '<div class="result"><pre>' + JSON.stringify(result, null, 2) + '</pre></div>';
+                    });
+                </script>
+            </body>
+            </html>
+            """
+            return html, 200
+        
+        # POST запрос - симулируем уведомление
+        data = request.json or request.form.to_dict()
+        yookassa_payment_id = data.get('yookassa_payment_id')
+        event = data.get('event', 'payment.succeeded')
+        
+        if not yookassa_payment_id:
+            return jsonify({'error': 'yookassa_payment_id обязателен'}), 400
+        
+        logger.info(f"[YOOKASSA TEST] Симуляция события {event} для платежа {yookassa_payment_id}")
+        
+        # Получаем платеж из БД
+        from moviebot.database.db_operations import get_payment_by_yookassa_id
+        payment_data = get_payment_by_yookassa_id(yookassa_payment_id)
+        
+        if not payment_data:
+            return jsonify({
+                'error': 'Платеж не найден в БД',
+                'hint': 'Сначала создайте платеж через кнопку "Оплатить" в боте'
+            }), 404
+        
+        # Создаем тестовое уведомление в формате ЮKassa
+        test_notification = {
+            'type': 'notification',
+            'event': event,
+            'object': {
+                'id': yookassa_payment_id,
+                'status': 'succeeded' if event == 'payment.succeeded' else 'canceled',
+                'amount': {
+                    'value': str(payment_data['amount']),
+                    'currency': 'RUB'
+                },
+                'metadata': {
+                    'user_id': str(payment_data['user_id']),
+                    'chat_id': str(payment_data['chat_id']),
+                    'subscription_type': payment_data['subscription_type'],
+                    'plan_type': payment_data['plan_type'],
+                    'period_type': payment_data['period_type'],
+                    'payment_id': payment_data['payment_id']
+                }
+            }
+        }
+        
+        # Добавляем group_size в metadata если есть
+        if payment_data.get('group_size'):
+            test_notification['object']['metadata']['group_size'] = str(payment_data['group_size'])
+        
+        # Вызываем обработчик уведомления в тестовом режиме
+        try:
+            result = process_yookassa_notification(test_notification, is_test=True)
+            return jsonify({
+                'status': 'success',
+                'message': f'Тестовое уведомление обработано: {event}',
+                'payment_data': {
+                    'payment_id': payment_data['payment_id'],
+                    'user_id': payment_data['user_id'],
+                    'chat_id': payment_data['chat_id'],
+                    'amount': float(payment_data['amount']),
+                    'status': payment_data['status']
+                },
+                'result': result.get_json() if hasattr(result, 'get_json') else str(result)
+            }), 200
+        except Exception as e:
+            logger.error(f"[YOOKASSA TEST] Ошибка обработки тестового уведомления: {e}", exc_info=True)
+            return jsonify({
+                'status': 'error',
+                'error': str(e),
+                'payment_data': payment_data
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"[YOOKASSA TEST] Ошибка: {e}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
+logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
+logger.info(f"[WEB APP] Возвращаем app: {app}")
 
 # Проверяем переменные окружения при старте приложения
 def check_environment_variables():
@@ -1294,236 +1523,6 @@ def create_web_app(bot_instance):
         except Exception as e:
             logger.error(f"[YOOKASSA] Ошибка обработки webhook: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
-    
-    @app.route('/', methods=['GET'])
-    def root():
-        logger.info("[ROOT] Root запрос получен")
-        return jsonify({'status': 'ok', 'service': 'moviebot'}), 200
-    
-    @app.route('/health', methods=['GET'])
-    def health():
-        """Улучшенный health check endpoint с проверкой всех компонентов"""
-        logger.info("[HEALTH] Health check запрос получен")
-        
-        try:
-            # Пытаемся получить статус от watchdog, если он доступен
-            try:
-                from moviebot.utils.watchdog import get_watchdog
-                watchdog = get_watchdog()
-                health_status = watchdog.get_health_status()
-                
-                # Определяем общий статус
-                overall_status = health_status.get('overall', 'unknown')
-                components = health_status.get('components', {})
-                
-                # Формируем ответ
-                response = {
-                    'status': 'ok' if overall_status == 'healthy' else 'degraded',
-                    'overall': overall_status,
-                    'components': components,
-                    'last_check': health_status.get('last_check'),
-                    'crash_count': health_status.get('crash_count', 0),
-                    'last_crash': health_status.get('last_crash')
-                }
-                
-                # HTTP статус код зависит от состояния
-                http_status = 200 if overall_status == 'healthy' else 503
-                
-                logger.info(f"[HEALTH] Статус: {overall_status}, компоненты: {list(components.keys())}")
-                return jsonify(response), http_status
-                
-            except ImportError:
-                # Watchdog не доступен - возвращаем базовый статус
-                logger.warning("[HEALTH] Watchdog не доступен, возвращаем базовый статус")
-                return jsonify({'status': 'ok', 'bot': 'running', 'watchdog': 'not_available'}), 200
-            except Exception as e:
-                logger.error(f"[HEALTH] Ошибка при получении статуса от watchdog: {e}", exc_info=True)
-                return jsonify({
-                    'status': 'error',
-                    'error': str(e),
-                    'bot': 'running'
-                }), 503
-                
-        except Exception as e:
-            logger.error(f"[HEALTH] Критическая ошибка в health check: {e}", exc_info=True)
-            return jsonify({
-                'status': 'error',
-                'error': str(e)
-            }), 503
-    
-    @app.route('/yookassa/webhook', methods=['POST', 'GET'])
-    def yookassa_webhook():
-        """Обработчик webhook от ЮKassa (старый путь для совместимости)"""
-        return yookassa_webhook_new()
-    
-    @app.route('/yookassa_webhook', methods=['POST', 'GET'])
-    def yookassa_webhook_new():
-        """Обработчик webhook от ЮKassa - основной endpoint"""
-        if request.method == 'GET':
-            # Для проверки доступности endpoint
-            logger.info("[YOOKASSA WEBHOOK] GET запрос - проверка доступности endpoint")
-            return jsonify({'status': 'ok', 'message': 'YooKassa webhook endpoint is active'}), 200
-        
-        try:
-            logger.info("=" * 80)
-            logger.info("[YOOKASSA WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС ОТ ЮKASSA =====")
-            logger.info(f"[YOOKASSA WEBHOOK] Headers: {dict(request.headers)}")
-            logger.info(f"[YOOKASSA WEBHOOK] Content-Type: {request.content_type}")
-            logger.info(f"[YOOKASSA WEBHOOK] Body (первые 1000 символов): {request.get_data(as_text=True)[:1000]}")
-            
-            event_json = request.get_json(force=True)
-            if not event_json:
-                logger.warning("[YOOKASSA WEBHOOK] Пустой JSON")
-                logger.warning(f"[YOOKASSA WEBHOOK] Raw data: {request.get_data()}")
-                return jsonify({'error': 'Empty JSON'}), 400
-            
-            logger.info(f"[YOOKASSA WEBHOOK] JSON получен: {event_json}")
-            logger.info(f"[YOOKASSA WEBHOOK] Событие: {event_json.get('event')}")
-            logger.info(f"[YOOKASSA WEBHOOK] Payment ID: {event_json.get('object', {}).get('id')}")
-            
-            result = process_yookassa_notification(event_json, is_test=False)
-            logger.info(f"[YOOKASSA WEBHOOK] Обработка завершена успешно")
-            return result
-        except Exception as e:
-            logger.error(f"[YOOKASSA WEBHOOK] Ошибка: {e}", exc_info=True)
-            return jsonify({'error': str(e)}), 500
-    
-    @app.route('/yookassa/test-webhook', methods=['POST', 'GET'])
-    def test_yookassa_webhook():
-        """Тестовый endpoint для симуляции уведомлений от ЮKassa"""
-        try:
-            if request.method == 'GET':
-                # Показываем форму для тестирования
-                html = """
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Тест webhook ЮKassa</title>
-                    <meta charset="UTF-8">
-                    <style>
-                        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-                        .form-group { margin: 15px 0; }
-                        label { display: block; margin-bottom: 5px; font-weight: bold; }
-                        input, select { width: 100%; padding: 8px; box-sizing: border-box; }
-                        button { background: #4CAF50; color: white; padding: 10px 20px; border: none; cursor: pointer; }
-                        button:hover { background: #45a049; }
-                        .result { margin-top: 20px; padding: 15px; background: #f0f0f0; border-radius: 5px; }
-                    </style>
-                </head>
-                <body>
-                    <h1>🧪 Тест webhook ЮKassa</h1>
-                    <form method="POST" id="testForm">
-                        <div class="form-group">
-                            <label>YooKassa Payment ID (из БД):</label>
-                            <input type="text" name="yookassa_payment_id" placeholder="2c1c5c0a-0001-0000-0000-000000000000" required>
-                        </div>
-                        <div class="form-group">
-                            <label>Событие:</label>
-                            <select name="event" required>
-                                <option value="payment.succeeded">payment.succeeded</option>
-                                <option value="payment.canceled">payment.canceled</option>
-                            </select>
-                        </div>
-                        <button type="submit">Отправить тестовое уведомление</button>
-                    </form>
-                    <div id="result"></div>
-                    <script>
-                        document.getElementById('testForm').addEventListener('submit', async function(e) {
-                            e.preventDefault();
-                            const formData = new FormData(this);
-                            const response = await fetch('/yookassa/test-webhook', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({
-                                    yookassa_payment_id: formData.get('yookassa_payment_id'),
-                                    event: formData.get('event')
-                                })
-                            });
-                            const result = await response.json();
-                            document.getElementById('result').innerHTML = '<div class="result"><pre>' + JSON.stringify(result, null, 2) + '</pre></div>';
-                        });
-                    </script>
-                </body>
-                </html>
-                """
-                return html, 200
-            
-            # POST запрос - симулируем уведомление
-            data = request.json or request.form.to_dict()
-            yookassa_payment_id = data.get('yookassa_payment_id')
-            event = data.get('event', 'payment.succeeded')
-            
-            if not yookassa_payment_id:
-                return jsonify({'error': 'yookassa_payment_id обязателен'}), 400
-            
-            logger.info(f"[YOOKASSA TEST] Симуляция события {event} для платежа {yookassa_payment_id}")
-            
-            # Получаем платеж из БД
-            from moviebot.database.db_operations import get_payment_by_yookassa_id
-            payment_data = get_payment_by_yookassa_id(yookassa_payment_id)
-            
-            if not payment_data:
-                return jsonify({
-                    'error': 'Платеж не найден в БД',
-                    'hint': 'Сначала создайте платеж через кнопку "Оплатить" в боте'
-                }), 404
-            
-            # Создаем тестовое уведомление в формате ЮKassa
-            test_notification = {
-                'type': 'notification',
-                'event': event,
-                'object': {
-                    'id': yookassa_payment_id,
-                    'status': 'succeeded' if event == 'payment.succeeded' else 'canceled',
-                    'amount': {
-                        'value': str(payment_data['amount']),
-                        'currency': 'RUB'
-                    },
-                    'metadata': {
-                        'user_id': str(payment_data['user_id']),
-                        'chat_id': str(payment_data['chat_id']),
-                        'subscription_type': payment_data['subscription_type'],
-                        'plan_type': payment_data['plan_type'],
-                        'period_type': payment_data['period_type'],
-                        'payment_id': payment_data['payment_id']
-                    }
-                }
-            }
-            
-            # Добавляем group_size в metadata если есть
-            if payment_data.get('group_size'):
-                test_notification['object']['metadata']['group_size'] = str(payment_data['group_size'])
-            
-            # Вызываем обработчик уведомления в тестовом режиме
-            try:
-                result = process_yookassa_notification(test_notification, is_test=True)
-                return jsonify({
-                    'status': 'success',
-                    'message': f'Тестовое уведомление обработано: {event}',
-                    'payment_data': {
-                        'payment_id': payment_data['payment_id'],
-                        'user_id': payment_data['user_id'],
-                        'chat_id': payment_data['chat_id'],
-                        'amount': float(payment_data['amount']),
-                        'status': payment_data['status']
-                    },
-                    'result': result.get_json() if hasattr(result, 'get_json') else str(result)
-                }), 200
-            except Exception as e:
-                logger.error(f"[YOOKASSA TEST] Ошибка обработки тестового уведомления: {e}", exc_info=True)
-                return jsonify({
-                    'status': 'error',
-                    'error': str(e),
-                    'payment_data': payment_data
-                }), 500
-                
-        except Exception as e:
-            logger.error(f"[YOOKASSA TEST] Ошибка: {e}", exc_info=True)
-            return jsonify({'error': str(e)}), 500
-    
-    logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
-    logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
-    logger.info(f"[WEB APP] Возвращаем app: {app}")
     return app
 
 
