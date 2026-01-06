@@ -2008,13 +2008,15 @@ def choose_random_participant():
                 except:
                     pass
             
-            # Получаем список активных участников из stats
+            # Получаем список активных участников из stats (исключая бота)
+            from moviebot.bot.bot_init import BOT_ID
             cursor.execute('''
                 SELECT DISTINCT user_id, username 
                 FROM stats 
                 WHERE chat_id = %s 
                 AND timestamp >= %s
-            ''', (chat_id, (now - timedelta(days=30)).isoformat()))
+                AND user_id != %s
+            ''', (chat_id, (now - timedelta(days=30)).isoformat(), BOT_ID))
             participants = cursor.fetchall()
             
             if not participants:

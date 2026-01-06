@@ -386,88 +386,10 @@ def handle_plan_link_reply(message):
             pass
 
 
-def check_clean_imported_ratings_reply(message):
-    """Проверка для handler ответа на сообщение об удалении импортированных оценок"""
-    if not message.reply_to_message:
-        # Для личных сообщений: проверяем сохраненный prompt
-        if message.chat.type == 'private':
-            from moviebot.states import private_chat_prompts
-            user_id = message.from_user.id
-            if user_id in private_chat_prompts:
-                prompt_data = private_chat_prompts[user_id]
-                if prompt_data.get('handler_type') == 'clean_imported_ratings':
-                    # Проверяем текст
-                    if message.text and message.text.strip().upper() == "ДА, УДАЛИТЬ":
-                        return True
-        return False
-    
-    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
-        return False
-    reply_text = message.reply_to_message.text or ""
-    if "Удаление импортированных оценок с Кинопоиска" not in reply_text:
-        return False
-    if not message.text or message.text.strip().upper() != "ДА, УДАЛИТЬ":
-        return False
-    return True
-
-
-@bot_instance.message_handler(func=check_clean_imported_ratings_reply)
-def handle_clean_imported_ratings_reply(message):
-    """Обработчик ответа на сообщение об удалении импортированных оценок - ТОЛЬКО для 'ДА, УДАЛИТЬ'"""
-    logger.info(f"[CLEAN IMPORTED RATINGS REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
-    try:
-        user_id = message.from_user.id
-        chat_id = message.chat.id
-        text = message.text.strip().upper()
-        
-        # Проверяем, что текст точно "ДА, УДАЛИТЬ"
-        if text != "ДА, УДАЛИТЬ":
-            logger.warning(f"[CLEAN IMPORTED RATINGS REPLY] Неверный текст подтверждения: '{text}'")
-            return
-        
-        # Для личных сообщений: очищаем сохраненный prompt после обработки
-        if message.chat.type == 'private':
-            from moviebot.states import private_chat_prompts
-            if user_id in private_chat_prompts:
-                del private_chat_prompts[user_id]
-        
-        # Проверяем, что пользователь в состоянии user_clean_state с target='imported_ratings'
-        from moviebot.states import user_clean_state
-        if user_id not in user_clean_state:
-            logger.warning(f"[CLEAN IMPORTED RATINGS REPLY] Пользователь {user_id} не в состоянии user_clean_state")
-            return
-        
-        state = user_clean_state[user_id]
-        if state.get('target') != 'imported_ratings':
-            logger.warning(f"[CLEAN IMPORTED RATINGS REPLY] Неверный target в состоянии: {state.get('target')}")
-            return
-        
-        # Вызываем обработчик удаления импортированных оценок
-        from moviebot.bot.handlers.series import handle_clean_confirm_internal
-        handle_clean_confirm_internal(message)
-        logger.info(f"[CLEAN IMPORTED RATINGS REPLY] ✅ Завершено")
-    except Exception as e:
-        logger.error(f"[CLEAN IMPORTED RATINGS REPLY] ❌ Ошибка: {e}", exc_info=True)
-        try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
-        except:
-            pass
-
-
 def check_list_view_film_reply(message):
     """Проверка для handler ответа на промпт просмотра описания из /list"""
     if not message.reply_to_message:
-        # Для личных сообщений: проверяем сохраненный prompt
-        if message.chat.type == 'private':
-            from moviebot.states import private_chat_prompts
-            user_id = message.from_user.id
-            if user_id in private_chat_prompts:
-                prompt_data = private_chat_prompts[user_id]
-                if prompt_data.get('handler_type') == 'list_view_film':
-                    if message.text and message.text.strip():
-                        return True
         return False
-    
     if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
         return False
     reply_text = message.reply_to_message.text or ""
@@ -484,28 +406,14 @@ def handle_list_view_film_reply(message):
     logger.info(f"[LIST VIEW FILM REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
     try:
         from moviebot.bot.handlers.list import handle_view_film_reply_internal
-        from moviebot.states import user_view_film_state, private_chat_prompts
+        from moviebot.states import user_view_film_state
         
         user_id = message.from_user.id
-        
-        # Для личных сообщений: получаем prompt_message_id из сохраненного состояния
-        if message.chat.type == 'private' and not message.reply_to_message:
-            if user_id in private_chat_prompts:
-                prompt_data = private_chat_prompts[user_id]
-                prompt_message_id = prompt_data.get('prompt_message_id')
-                # Очищаем после использования
-                del private_chat_prompts[user_id]
-            else:
-                logger.warning(f"[LIST VIEW FILM REPLY] Нет сохраненного prompt для личного чата")
-                return
-        else:
-            prompt_message_id = message.reply_to_message.message_id if message.reply_to_message else None
-        
         if user_id not in user_view_film_state:
             user_view_film_state[user_id] = {'chat_id': message.chat.id}
         
         state = user_view_film_state[user_id]
-        state['prompt_message_id'] = prompt_message_id
+        state['prompt_message_id'] = message.reply_to_message.message_id
         
         handle_view_film_reply_internal(message, state)
         logger.info(f"[LIST VIEW FILM REPLY] ✅ Завершено")

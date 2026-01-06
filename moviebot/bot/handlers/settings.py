@@ -327,13 +327,15 @@ def handle_settings_callback(call):
             
             if example_type == "with_user":
                 # Пример события с участником (выбор случайного участника)
+                from moviebot.bot.bot_init import BOT_ID
                 with db_lock:
                     cursor.execute('''
                         SELECT DISTINCT user_id, username 
                         FROM stats 
                         WHERE chat_id = %s 
+                        AND user_id != %s
                         LIMIT 10
-                    ''', (chat_id,))
+                    ''', (chat_id, BOT_ID))
                     participants = cursor.fetchall()
                 
                 if participants:

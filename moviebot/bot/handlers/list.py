@@ -137,7 +137,8 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
         
         if not rows:
             text = "⏳ Нет непросмотренных фильмов!"
-            markup = None
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             if message_id:
                 try:
                     bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
@@ -239,6 +240,9 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
                     nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"list_page:{page+1}"))
                 if nav_buttons:
                     markup.row(*nav_buttons)
+            
+            # Добавляем кнопку "Назад в меню"
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             # Сохраняем состояние
             user_list_state[user_id] = {
