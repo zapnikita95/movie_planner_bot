@@ -255,8 +255,29 @@ def create_web_app(bot_instance):
                         for i, handler in enumerate(bot_instance.message_handlers[:5]):
                             print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
                     
-                    # Пробуем вызвать обработчики напрямую для диагностики
+                    # КРИТИЧЕСКИЙ ФИКС: Пробуем вызвать обработчики вручную, если process_new_updates не работает
+                    # Это может быть проблема с telebot - иногда process_new_updates не вызывает обработчики
                     print(f"[WEBHOOK] Вызываем process_new_updates...", flush=True)
+                    
+                    # Пробуем альтернативный способ - вызываем обработчики напрямую
+                    if hasattr(update, 'message') and update.message:
+                        print(f"[WEBHOOK] Пробуем вызвать обработчики напрямую для message", flush=True)
+                        # Получаем все message handlers
+                        if hasattr(bot_instance, 'message_handlers'):
+                            for handler in bot_instance.message_handlers:
+                                try:
+                                    # Проверяем, подходит ли handler для этого сообщения
+                                    if hasattr(handler, 'filters') and handler.filters:
+                                        # Проверяем фильтры
+                                        if handler.filters.check(update.message):
+                                            print(f"[WEBHOOK] Handler прошел проверку фильтров: {handler}", flush=True)
+                                            handler.function(update.message)
+                                            print(f"[WEBHOOK] Handler вызван успешно", flush=True)
+                                            break
+                                except Exception as handler_error:
+                                    print(f"[WEBHOOK] Ошибка в handler: {handler_error}", flush=True)
+                    
+                    # Все равно вызываем process_new_updates
                     result = bot_instance.process_new_updates([update])
                     print(f"[WEBHOOK] process_new_updates вернул: {result}", flush=True)
                     print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)
