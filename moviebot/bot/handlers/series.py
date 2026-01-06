@@ -5063,14 +5063,29 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                                 cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
                                 conn.commit()
                     
-                    # Проверяем подписку
+                    # Проверка подписки на новые серии — с таймаутом
                     is_subscribed = False
-                    if film_id:
-                        with db_lock:
-                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                            sub_row = cursor.fetchone()
-                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                    
+                    try:
+                        lock_acquired = db_lock.acquire(timeout=2.0)
+                        if lock_acquired:
+                            try:
+                                cursor.execute('''
+                                    SELECT subscribed 
+                                    FROM series_subscriptions 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                                ''', (chat_id, film_id, user_id))
+                                sub_row = cursor.fetchone()
+                                if sub_row:
+                                    is_subscribed = sub_row[0] if not isinstance(sub_row, dict) else sub_row.get('subscribed', False)
+                            finally:
+                                db_lock.release()
+                                logger.info("[SHOW FILM INFO] db_lock освобождён после проверки подписки на серии")
+                        else:
+                            logger.warning("[SHOW FILM INFO] db_lock timeout при проверке подписки на серии — считаем неподписанным")
+                    except Exception as sub_e:
+                        logger.error(f"[SHOW FILM INFO] Ошибка проверки подписки на серии: {sub_e}", exc_info=True)
+                        is_subscribed = False
+                        
                     # Добавляем строку о статусе подписки в текст (чтобы текст всегда менялся)
                     if is_subscribed:
                         text += f"\n\n🔔 <b>Статус подписки: ✅ Подписан</b>"
