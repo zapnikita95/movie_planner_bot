@@ -75,20 +75,15 @@ def create_promocode(code, discount_input, total_uses):
         return False, f"Ошибка при создании промокода: {e}"
 
 
-def get_active_promocodes():
+def get_all_promocodes():
     """
-    Получает список активных промокодов
-    
-    Returns:
-        list of dict: [{'id': int, 'code': str, 'discount_type': str, 'discount_value': float, 
-                       'total_uses': int, 'used_count': int}]
+    Получает ВСЕ промокоды (активные и неактивные, исчерпанные и нет)
     """
     try:
         with db_lock:
             cursor.execute('''
-                SELECT id, code, discount_type, discount_value, total_uses, used_count
+                SELECT id, code, discount_type, discount_value, total_uses, used_count, is_active
                 FROM promocodes
-                WHERE is_active = TRUE AND used_count < total_uses
                 ORDER BY created_at DESC
             ''')
             rows = cursor.fetchall()
@@ -96,28 +91,23 @@ def get_active_promocodes():
             result = []
             for row in rows:
                 if isinstance(row, dict):
-                    result.append({
-                        'id': row['id'],
-                        'code': row['code'],
-                        'discount_type': row['discount_type'],
-                        'discount_value': float(row['discount_value']),
-                        'total_uses': row['total_uses'],
-                        'used_count': row['used_count']
-                    })
+                    promo = row
                 else:
-                    result.append({
+                    promo = {
                         'id': row[0],
                         'code': row[1],
                         'discount_type': row[2],
                         'discount_value': float(row[3]),
                         'total_uses': row[4],
-                        'used_count': row[5]
-                    })
+                        'used_count': row[5],
+                        'is_active': bool(row[6])
+                    }
+                promo['discount_value'] = float(promo['discount_value'])
+                result.append(promo)
             return result
     except Exception as e:
-        logger.error(f"Ошибка при получении активных промокодов: {e}", exc_info=True)
+        logger.error(f"Ошибка при получении всех промокодов: {e}", exc_info=True)
         return []
-
 
 def get_promocode_info(code):
     """

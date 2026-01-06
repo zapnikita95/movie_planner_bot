@@ -3,7 +3,7 @@
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
+from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.states import user_promo_admin_state
 from moviebot.utils.promo import get_active_promocodes, deactivate_promocode, get_promocode_info
@@ -61,27 +61,32 @@ def promo_command(message):
         text += "Задайте промокод, скидку и количество купонов.\n\n"
         text += "Формат: <code>КОД СКИДКА КОЛИЧЕСТВО</code>\n"
         text += "Пример: <code>NEW2026 20% 100</code>\n\n"
-        text += "<b>Действующие промокоды:</b>\n"
-        
-        if active_promocodes:
-            for promo in active_promocodes:
-                discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} руб/звезд"
+        text += "<b>Все промокоды:</b>\n"
+
+        if promocodes:
+            for promo in promocodes:
+                status = "✅" if promo['is_active'] else "🔴"
                 remaining = promo['total_uses'] - promo['used_count']
-                text += f"• <code>{promo['code']}</code> — {discount_str} (осталось: {remaining}/{promo['total_uses']})\n"
+                if remaining < 0:
+                    remaining = 0
+                exhausted = " (исчерпан)" if promo['used_count'] >= promo['total_uses'] else ""
+                discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} ₽"
+                text += f"{status} <code>{promo['code']}</code> — {discount_str} (осталось: {remaining}/{promo['total_uses']}{exhausted})\n"
         else:
-            text += "Нет активных промокодов\n"
-        
+            text += "Нет промокодов\n"
+
         markup = InlineKeyboardMarkup(row_width=1)
-        
-        # Добавляем кнопки для каждого активного промокода
-        for promo in active_promocodes:
-            discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} руб/звезд"
+        for promo in promocodes:
+            status = "✅" if promo['is_active'] else "🔴"
             remaining = promo['total_uses'] - promo['used_count']
-            button_text = f"🏷️ {promo['code']} ({discount_str}, осталось: {remaining})"
-            if len(button_text) > 50:
-                button_text = button_text[:47] + "..."
+            if remaining < 0:
+                remaining = 0
+            discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} ₽"
+            button_text = f"{status} {promo['code']} ({discount_str}, осталось: {remaining})"
+            if len(button_text) > 60:
+                button_text = button_text[:57] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"promo:info:{promo['id']}"))
-        
+
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="back_to_start_menu"))
         
         # Устанавливаем состояние для обработки ответа
@@ -109,7 +114,7 @@ def promo_info_callback(call):
             bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
             return
         
-        # Получаем информацию о промокоде
+        # Получаем свежие данные о промокоде
         from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
         conn = get_db_connection()
         cursor = get_db_cursor()
@@ -126,6 +131,7 @@ def promo_info_callback(call):
             bot_instance.answer_callback_query(call.id, "❌ Промокод не найден", show_alert=True)
             return
         
+        # Парсим строку или dict
         if isinstance(row, dict):
             code = row['code']
             discount_type = row['discount_type']
@@ -142,23 +148,33 @@ def promo_info_callback(call):
             is_active = bool(row[5])
         
         discount_str = f"{discount_value}%" if discount_type == 'percent' else f"{int(discount_value)} руб/звезд"
-        remaining = total_uses - used_count
+        remaining = max(0, total_uses - used_count)
+        status_text = "✅ Активен" if is_active else "🔴 Деактивирован"
         
         text = f"🏷️ <b>Промокод: {code}</b>\n\n"
         text += f"Скидка: {discount_str}\n"
         text += f"Использовано: {used_count}/{total_uses}\n"
         text += f"Осталось: {remaining}\n"
-        text += f"Статус: {'✅ Активен' if is_active else '❌ Деактивирован'}\n"
+        text += f"Статус: {status_text}\n"
         
-        markup = InlineKeyboardMarkup()
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Кнопка активации/деактивации — в зависимости от текущего статуса
         if is_active:
-            markup.add(InlineKeyboardButton("❌ Деактивировать", callback_data=f"promo:deactivate:{promocode_id}"))
-        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="promo:back"))
+            markup.add(InlineKeyboardButton("🔴 Деактивировать", callback_data=f"promo:deactivate:{promocode_id}"))
+        else:
+            markup.add(InlineKeyboardButton("✅ Активировать", callback_data=f"promo:activate:{promocode_id}"))
         
-        try:
-            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-        except:
-            bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+        markup.add(InlineKeyboardButton("◀️ Назад к списку", callback_data="promo:back_to_list"))
+        
+        # Редактируем текущее сообщение
+        bot_instance.edit_message_text(
+            text=text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
             
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_info_callback: {e}", exc_info=True)
@@ -250,3 +266,71 @@ def promo_back_callback(call):
             bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
+        
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("promo:activate:"))
+def promo_activate_callback(call):
+    try:
+        bot_instance.answer_callback_query(call.id, "✅ Промокод активирован")
+        promocode_id = int(call.data.split(":")[2])
+        
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        
+        with db_lock:
+            cursor.execute("UPDATE promocodes SET is_active = TRUE WHERE id = %s", (promocode_id,))
+            conn.commit()
+        
+        promo_info_callback(call)  # Обновляем карточку
+    except Exception as e:
+        logger.error(f"[PROMO] Ошибка активации: {e}", exc_info=True)
+        bot_instance.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+
+@bot_instance.callback_query_handler(func=lambda call: call.data == "promo:back_to_list")
+def promo_back_to_list_callback(call):
+    """Возврат к списку всех промокодов из карточки промокода"""
+    try:
+        bot_instance.answer_callback_query(call.id)
+        
+        # Используем ту же логику, что и в promo_command
+        promocodes = get_active_promocodes()  # или get_all_promocodes(), если добавил
+        
+        text = "🏷️ <b>Управление промокодами</b>\n\n"
+        text += "Задайте промокод, скидку и количество купонов.\n\n"
+        text += "Формат: <code>КОД СКИДКА КОЛИЧЕСТВО</code>\n"
+        text += "Пример: <code>NEW2026 20% 100</code>\n\n"
+        text += "<b>Все промокоды:</b>\n"
+        
+        if active_promocodes:
+            for promo in active_promocodes:
+                status = "✅" if promo.get('is_active', True) else "🔴"  # добавил .get на всякий
+                remaining = max(0, promo['total_uses'] - promo['used_count'])
+                exhausted = " (исчерпан)" if promo['used_count'] >= promo['total_uses'] else ""
+                discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} ₽"
+                text += f"{status} <code>{promo['code']}</code> — {discount_str} (осталось: {remaining}/{promo['total_uses']}{exhausted})\n"
+        else:
+            text += "Нет промокодов\n"
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        for promo in active_promocodes:
+            status = "✅" if promo.get('is_active', True) else "🔴"
+            remaining = max(0, promo['total_uses'] - promo['used_count'])
+            discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} ₽"
+            button_text = f"{status} {promo['code']} ({discount_str}, осталось: {remaining})"
+            if len(button_text) > 60:
+                button_text = button_text[:57] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"promo:info:{promo['id']}"))
+        
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="back_to_start_menu"))
+        
+        bot_instance.edit_message_text(
+            text=text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+        
+    except Exception as e:
+        logger.error(f"[PROMO] Ошибка в promo_back_to_list_callback: {e}", exc_info=True)
+        bot_instance.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
