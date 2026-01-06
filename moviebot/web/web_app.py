@@ -36,17 +36,20 @@ logger.info("[WEB APP] Flask приложение создано")
 
 # Глобальное логирование всех запросов
 @app.before_request
-def log_request_info():
+def log_all_requests():
     logger.info("=" * 80)
-    logger.info(f"[FLASK REQUEST] Method: {request.method}, Path: {request.path}")
-    logger.info(f"[FLASK REQUEST] IP: {request.remote_addr}")
-    logger.info(f"[FLASK REQUEST] Headers: {dict(request.headers)}")
+    logger.info("=== НОВЫЙ ЗАПРОС В FLASK ===")
+    logger.info(f"Path: {request.path}, Method: {request.method}, IP: {request.remote_addr}")
+    logger.info(f"Content-Type: {request.headers.get('content-type')}")
     if request.method == 'POST':
         try:
-            data_preview = request.get_data(as_text=True)[:200]
-            logger.info(f"[FLASK REQUEST] Data preview: {data_preview}...")
-        except:
-            logger.info(f"[FLASK REQUEST] Data preview: (не удалось прочитать)")
+            data_length = len(request.get_data())
+            logger.info(f"Data length: {data_length} bytes")
+            if data_length > 0:
+                data_preview = request.get_data(as_text=True)[:200]
+                logger.info(f"Data preview: {data_preview}...")
+        except Exception as e:
+            logger.info(f"Data preview: (не удалось прочитать: {e})")
     logger.info("=" * 80)
 
 # Проверяем переменные окружения при старте приложения
@@ -82,37 +85,31 @@ def create_web_app(bot_instance):
     
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
-        # Логируем ВСЕ запросы для диагностики
+        # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ В САМОМ НАЧАЛЕ
         logger.info("=" * 80)
-        logger.info(f"[WEBHOOK] ===== ЗАПРОС ПОЛУЧЕН =====")
-        logger.info(f"[WEBHOOK] Method: {request.method}")
-        logger.info(f"[WEBHOOK] Path: {request.path}")
-        logger.info(f"[WEBHOOK] Remote Address: {request.remote_addr}")
+        logger.info("=== WEBHOOK РОУТ СРАБОТАЛ! Запрос получен ===")
+        logger.info(f"Method: {request.method}")
+        logger.info(f"IP: {request.remote_addr}")
+        logger.info(f"Path: {request.path}")
+        logger.info(f"Content-Type: {request.headers.get('content-type')}")
+        logger.info(f"Raw data length: {len(request.get_data())} bytes")
+        logger.info("=" * 80)
         
         if request.method == 'GET':
             logger.info("[WEBHOOK] GET запрос - возвращаем 200")
-            return '', 200
+            return "OK", 200
         
         # Логируем POST запросы
         logger.info(f"[WEBHOOK] POST запрос получен")
-        logger.info(f"[WEBHOOK] Content-Type: {request.headers.get('content-type')}")
         logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
         
         if request.headers.get('content-type') == 'application/json':
-            json_string = request.get_data().decode('utf-8')
-            logger.info(f"[WEBHOOK] Размер JSON: {len(json_string)} байт")
-            # Проверяем, есть ли web_app_data в сыром JSON
-            if 'web_app_data' in json_string.lower():
-                logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ В JSON ЕСТЬ 'web_app_data'! ⚠️⚠️⚠️")
-            # Логируем первые 2000 символов JSON для отладки
-            logger.info(f"[WEBHOOK] JSON (первые 2000 символов): {json_string[:2000]}")
-            logger.info(f"[WEBHOOK] Полный JSON размер: {len(json_string)} байт")
-            
-            # Проверяем наличие web_app_data в сыром JSON ДО парсинга
-            if 'web_app_data' in json_string:
-                logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ В СЫРОМ JSON ЕСТЬ 'web_app_data'! ⚠️⚠️⚠️")
-            
-            update = telebot.types.Update.de_json(json_string)
+            json_string = request.get_data(as_text=True)
+            logger.info(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт")
+            logger.info(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...")
+            try:
+                update = telebot.types.Update.de_json(json_string)
+                logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update.update_id if hasattr(update, 'update_id') else 'N/A'}")
             logger.info(f"[WEBHOOK] Тип update: {type(update)}")
             logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
             
@@ -157,8 +154,7 @@ def create_web_app(bot_instance):
                         for entity in update.message.entities:
                             logger.info(f"[WEBHOOK] Entity: type={entity.type}, offset={entity.offset}, length={entity.length}")
             
-            # Обрабатываем обновление с обработкой ошибок
-            try:
+                # Обрабатываем обновление с обработкой ошибок
                 logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
                 logger.info(f"[WEBHOOK] Update ID: {update.update_id}, type: {type(update)}")
                 if hasattr(update, 'message') and update.message:
@@ -168,17 +164,16 @@ def create_web_app(bot_instance):
                 
                 bot_instance.process_new_updates([update])
                 logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
+                return '', 200
             except Exception as e:
-                logger.error(f"[WEBHOOK] ❌ Ошибка в bot.process_new_updates: {e}", exc_info=True)
+                logger.error(f"[WEBHOOK] ❌ Ошибка обработки update: {e}", exc_info=True)
                 import traceback
                 logger.error(f"[WEBHOOK] Traceback: {traceback.format_exc()}")
                 # Возвращаем 200, чтобы Telegram не повторял запрос
                 return '', 200
-            
-            return '', 200
         else:
-            logger.warning("[WEBHOOK] Неверный content-type")
-            abort(400)
+            logger.warning(f"[WEBHOOK] Неверный content-type: {request.headers.get('content-type')}")
+            return 'Forbidden', 403
     
     def process_yookassa_notification(event_json, is_test=False):
         """Обрабатывает уведомление от ЮKassa (можно вызывать из webhook или теста)"""
