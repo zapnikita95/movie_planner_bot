@@ -14,6 +14,12 @@ _conn = None
 _cursor = None
 db_lock = threading.Lock()
 
+# Семафор: разрешаем только 2 одновременные операции с БД
+# (на Railway CPU слабый, больше 2 — начинаются тормоза)
+db_semaphore = threading.Semaphore(2)
+
+logger.info("[DB] Семафор для БД инициализирован (макс. 2 одновременных операции)")
+
 def get_db_connection():
     """Получить подключение к БД"""
     global _conn

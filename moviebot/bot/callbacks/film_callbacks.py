@@ -5,7 +5,7 @@ import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.bot.bot_init import bot as bot_instance
-from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 from moviebot.api.kinopoisk_api import get_facts
 from moviebot.states import user_plan_state
 
@@ -30,9 +30,16 @@ def add_to_database_callback(call):
         logger.info(f"[ADD TO DATABASE] Пользователь {user_id} хочет добавить фильм kp_id={kp_id} в базу, chat_id={chat_id}")
         
         # Проверяем, есть ли фильм уже в базе
-        with db_lock:
-            cursor.execute('SELECT id, title, link, watched, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-            row = cursor.fetchone()
+        try:
+            with db_semaphore:
+                with db_lock:
+                    cursor.execute('SELECT id, title, link, watched, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor.fetchone()
+        except Exception as e:
+            logger.error(f"[ADD TO DATABASE] Ошибка при проверке фильма в базе: {e}", exc_info=True)
+            conn.rollback()
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка проверки базы", show_alert=True)
+            return
         
         if row:
             # Фильм уже в базе
@@ -109,32 +116,39 @@ def add_to_database_callback(call):
         logger.info(f"[ADD TO DATABASE] Добавляю фильм в базу: title={title}, year={year}, is_series={is_series}, link={link}")
         
         # Добавляем фильм в базу с полной информацией
-        with db_lock:
-            cursor.execute('''
-                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'button')
-                ON CONFLICT (chat_id, kp_id) DO UPDATE SET 
-                    link = EXCLUDED.link,
-                    title = EXCLUDED.title,
-                    year = COALESCE(EXCLUDED.year, movies.year),
-                    genres = COALESCE(EXCLUDED.genres, movies.genres),
-                    description = COALESCE(EXCLUDED.description, movies.description),
-                    director = COALESCE(EXCLUDED.director, movies.director),
-                    actors = COALESCE(EXCLUDED.actors, movies.actors),
-                    is_series = EXCLUDED.is_series
-                RETURNING id, title, watched, year, genres, description, director, actors
-            ''', (chat_id, link, kp_id, title, year, genres, description, director, actors, 1 if is_series else 0, user_id))
-            
-            result = cursor.fetchone()
-            film_id = result.get('id') if isinstance(result, dict) else result[0]
-            title_db = result.get('title') if isinstance(result, dict) else result[1]
-            watched = result.get('watched') if isinstance(result, dict) else result[2]
-            year_db = result.get('year') if isinstance(result, dict) else (result[3] if len(result) > 3 else None)
-            genres_db = result.get('genres') if isinstance(result, dict) else (result[4] if len(result) > 4 else None)
-            description_db = result.get('description') if isinstance(result, dict) else (result[5] if len(result) > 5 else None)
-            director_db = result.get('director') if isinstance(result, dict) else (result[6] if len(result) > 6 else None)
-            actors_db = result.get('actors') if isinstance(result, dict) else (result[7] if len(result) > 7 else None)
-            conn.commit()
+        try:
+            with db_semaphore:
+                with db_lock:
+                    cursor.execute('''
+                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'button')
+                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET 
+                            link = EXCLUDED.link,
+                            title = EXCLUDED.title,
+                            year = COALESCE(EXCLUDED.year, movies.year),
+                            genres = COALESCE(EXCLUDED.genres, movies.genres),
+                            description = COALESCE(EXCLUDED.description, movies.description),
+                            director = COALESCE(EXCLUDED.director, movies.director),
+                            actors = COALESCE(EXCLUDED.actors, movies.actors),
+                            is_series = EXCLUDED.is_series
+                        RETURNING id, title, watched, year, genres, description, director, actors
+                    ''', (chat_id, link, kp_id, title, year, genres, description, director, actors, 1 if is_series else 0, user_id))
+                    
+                    result = cursor.fetchone()
+                    film_id = result.get('id') if isinstance(result, dict) else result[0]
+                    title_db = result.get('title') if isinstance(result, dict) else result[1]
+                    watched = result.get('watched') if isinstance(result, dict) else result[2]
+                    year_db = result.get('year') if isinstance(result, dict) else (result[3] if len(result) > 3 else None)
+                    genres_db = result.get('genres') if isinstance(result, dict) else (result[4] if len(result) > 4 else None)
+                    description_db = result.get('description') if isinstance(result, dict) else (result[5] if len(result) > 5 else None)
+                    director_db = result.get('director') if isinstance(result, dict) else (result[6] if len(result) > 6 else None)
+                    actors_db = result.get('actors') if isinstance(result, dict) else (result[7] if len(result) > 7 else None)
+                    conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"[ADD TO DATABASE] Ошибка при добавлении фильма в базу: {e}", exc_info=True)
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка добавления в базу", show_alert=True)
+            return
         
         logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title_db}")
         bot_instance.answer_callback_query(call.id, f"✅ {title_db} добавлен в базу!", show_alert=False)
@@ -154,6 +168,10 @@ def add_to_database_callback(call):
         
     except Exception as e:
         logger.error(f"[ADD TO DATABASE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        try:
+            conn.rollback()
+        except:
+            pass
         try:
             bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except Exception as answer_e:

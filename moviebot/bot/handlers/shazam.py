@@ -4,6 +4,7 @@
 import logging
 import os
 import tempfile
+from threading import Thread
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.services.shazam_service import (
@@ -16,6 +17,188 @@ from moviebot.utils.helpers import has_recommendations_access
 from moviebot.states import shazam_state
 
 logger = logging.getLogger(__name__)
+
+
+def process_shazam_voice_async(message, loading_msg):
+    """Асинхронная обработка голосового сообщения Shazam"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    logger.info(f"[SHAZAM VOICE ASYNC] ===== START: user_id={user_id}, chat_id={chat_id}")
+    
+    try:
+        # Скачиваем голосовое сообщение
+        logger.info(f"[SHAZAM VOICE ASYNC] Скачиваем голосовое сообщение...")
+        from moviebot.bot.bot_init import bot
+        file_info = bot.get_file(message.voice.file_id)
+        logger.info(f"[SHAZAM VOICE ASYNC] file_info получен: file_path={file_info.file_path}, file_size={file_info.file_size}")
+        
+        ogg_path = os.path.join(tempfile.gettempdir(), f"voice_{user_id}_{message.voice.file_id}.ogg")
+        logger.info(f"[SHAZAM VOICE ASYNC] Сохраняем в {ogg_path}")
+        
+        downloaded_file = bot.download_file(file_info.file_path)
+        with open(ogg_path, 'wb') as f:
+            f.write(downloaded_file)
+        logger.info(f"[SHAZAM VOICE ASYNC] Файл скачан, размер: {os.path.getsize(ogg_path)} байт")
+        
+        # Конвертируем в WAV
+        logger.info(f"[SHAZAM VOICE ASYNC] Конвертируем OGG в WAV...")
+        wav_path = os.path.join(tempfile.gettempdir(), f"voice_{user_id}_{message.voice.file_id}.wav")
+        if not convert_ogg_to_wav(ogg_path, wav_path):
+            logger.error(f"[SHAZAM VOICE ASYNC] Ошибка конвертации OGG в WAV")
+            bot.edit_message_text(
+                "❌ Ошибка конвертации аудио. Попробуйте записать еще раз.",
+                loading_msg.chat.id,
+                loading_msg.message_id
+            )
+            shazam_state.pop(user_id, None)
+            try:
+                os.remove(ogg_path)
+            except:
+                pass
+            return
+        
+        logger.info(f"[SHAZAM VOICE ASYNC] Конвертация завершена, размер WAV: {os.path.getsize(wav_path)} байт")
+        
+        # Распознаем речь
+        logger.info(f"[SHAZAM VOICE ASYNC] Начинаем распознавание речи...")
+        text = transcribe_voice(wav_path)
+        logger.info(f"[SHAZAM VOICE ASYNC] Распознавание завершено, результат: '{text}'")
+        
+        # Удаляем временные файлы
+        try:
+            os.remove(ogg_path)
+            os.remove(wav_path)
+        except:
+            pass
+        
+        if not text:
+            logger.warning(f"[SHAZAM VOICE ASYNC] Не удалось распознать речь")
+            bot.edit_message_text(
+                "❌ Не удалось распознать речь. Попробуйте записать еще раз или опишите фильм текстом.",
+                loading_msg.chat.id,
+                loading_msg.message_id
+            )
+            shazam_state.pop(user_id, None)
+            return
+        
+        # Обновляем сообщение с распознанным текстом
+        logger.info(f"[SHAZAM VOICE ASYNC] Обновляем сообщение с распознанным текстом...")
+        try:
+            bot.edit_message_text(
+                f"🎤 Распознано: <i>{text}</i>\n\n🔍 Ищем фильмы...",
+                loading_msg.chat.id,
+                loading_msg.message_id,
+                parse_mode='HTML'
+            )
+            logger.info(f"[SHAZAM VOICE ASYNC] Сообщение обновлено")
+        except Exception as e:
+            logger.warning(f"[SHAZAM VOICE ASYNC] Не удалось обновить сообщение: {e}, продолжаем...")
+        
+        # Ищем фильмы
+        logger.info(f"[SHAZAM VOICE ASYNC] Начинаем поиск фильмов по запросу: '{text}'")
+        results = search_movies(text, top_k=5)
+        logger.info(f"[SHAZAM VOICE ASYNC] Поиск завершен, найдено результатов: {len(results)}")
+        
+        if not results:
+            bot.edit_message_text(
+                "❌ Не удалось найти подходящие фильмы. Попробуйте описать по-другому.",
+                loading_msg.chat.id,
+                loading_msg.message_id
+            )
+            shazam_state.pop(user_id, None)
+            return
+        
+        # Получаем информацию о фильмах из Kinopoisk
+        logger.info(f"[SHAZAM VOICE ASYNC] Получаем информацию о фильмах из Kinopoisk...")
+        films_info = []
+        for i, result in enumerate(results, 1):
+            imdb_id = result.get('imdb_id')
+            logger.info(f"[SHAZAM VOICE ASYNC] Обрабатываем фильм {i}/{len(results)}: imdb_id={imdb_id}")
+            try:
+                film_info = get_film_by_imdb_id(imdb_id)
+                if film_info:
+                    logger.info(f"[SHAZAM VOICE ASYNC] Получена информация о фильме {imdb_id}: {film_info.get('title')}")
+                    films_info.append({
+                        'kp_id': film_info.get('kp_id'),
+                        'title': film_info.get('title', result['title']),
+                        'year': film_info.get('year', result.get('year')),
+                        'imdb_id': imdb_id
+                    })
+                else:
+                    logger.warning(f"[SHAZAM VOICE ASYNC] Не удалось получить информацию о фильме {imdb_id} из Kinopoisk")
+                    films_info.append({
+                        'kp_id': None,
+                        'title': result['title'],
+                        'year': result.get('year'),
+                        'imdb_id': imdb_id
+                    })
+            except Exception as e:
+                logger.warning(f"[SHAZAM VOICE ASYNC] Ошибка при получении информации о фильме {imdb_id}: {e}", exc_info=True)
+                films_info.append({
+                    'kp_id': None,
+                    'title': result['title'],
+                    'year': result.get('year'),
+                    'imdb_id': imdb_id
+                })
+        
+        if not films_info:
+            bot.edit_message_text(
+                "❌ Не удалось получить информацию о найденных фильмах.",
+                loading_msg.chat.id,
+                loading_msg.message_id
+            )
+            shazam_state.pop(user_id, None)
+            return
+        
+        # Формируем ответ
+        logger.info(f"[SHAZAM VOICE ASYNC] Формируем ответ с {len(films_info)} фильмами...")
+        text_response = "🎬 <b>Вот наиболее подходящие фильмы по вашему описанию:</b>\n\n"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for i, film in enumerate(films_info[:5], 1):
+            title = film['title']
+            year = f" ({film['year']})" if film.get('year') else ""
+            text_response += f"{i}. {title}{year}\n"
+            
+            if film.get('kp_id'):
+                markup.add(InlineKeyboardButton(
+                    f"{i}. {title}{year}",
+                    callback_data=f"shazam:film:{film['kp_id']}"
+                ))
+        
+        markup.add(InlineKeyboardButton("⬅️ Вернуться к Шазаму", callback_data="shazam:start"))
+        
+        logger.info(f"[SHAZAM VOICE ASYNC] Отправляем финальное сообщение с результатами...")
+        bot.edit_message_text(
+            text_response,
+            loading_msg.chat.id,
+            loading_msg.message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+        logger.info(f"[SHAZAM VOICE ASYNC] ===== SUCCESS: Результаты отправлены пользователю")
+        
+        # Очищаем состояние
+        shazam_state.pop(user_id, None)
+        
+    except Exception as e:
+        logger.error(f"[SHAZAM VOICE ASYNC] ===== ERROR: {e}", exc_info=True)
+        try:
+            from moviebot.bot.bot_init import bot
+            bot.edit_message_text(
+                f"❌ Произошла ошибка при обработке голосового сообщения: {str(e)[:100]}\n\nПопробуйте еще раз или опишите фильм текстом.",
+                loading_msg.chat.id,
+                loading_msg.message_id
+            )
+        except Exception as edit_e:
+            logger.error(f"[SHAZAM VOICE ASYNC] Не удалось обновить сообщение об ошибке: {edit_e}")
+            try:
+                from moviebot.bot.bot_init import bot
+                bot.reply_to(message, f"❌ Произошла ошибка: {str(e)[:100]}")
+            except:
+                pass
+        shazam_state.pop(user_id, None)
 
 
 def register_shazam_handlers(bot):
@@ -241,7 +424,7 @@ def register_shazam_handlers(bot):
     
     @bot.message_handler(content_types=['voice'], func=lambda message: message.from_user.id in shazam_state and shazam_state[message.from_user.id].get('mode') == 'voice')
     def shazam_voice_handler(message):
-        """Обработчик голосового запроса"""
+        """Обработчик голосового запроса (асинхронная обработка)"""
         user_id = message.from_user.id
         chat_id = message.chat.id
         
@@ -262,183 +445,17 @@ def register_shazam_handlers(bot):
                 shazam_state.pop(user_id, None)
                 return
             
-            # Показываем анимацию загрузки
-            logger.info(f"[SHAZAM VOICE] Отправляем сообщение о распознавании...")
-            loading_msg = bot.reply_to(message, "🎤 Распознаю голосовое сообщение...")
-            logger.info(f"[SHAZAM VOICE] Сообщение отправлено, message_id={loading_msg.message_id}")
+            # Показываем анимацию загрузки и запускаем асинхронную обработку
+            logger.info(f"[SHAZAM VOICE] Отправляем сообщение о распознавании и запускаем асинхронную обработку...")
+            loading_msg = bot.reply_to(message, "🔮 Распознаю трек... Подожди секунду :)")
+            logger.info(f"[SHAZAM VOICE] Сообщение отправлено, message_id={loading_msg.message_id}, запускаем поток")
             
-            try:
-                # Скачиваем голосовое сообщение
-                logger.info(f"[SHAZAM VOICE] Скачиваем голосовое сообщение...")
-                file_info = bot.get_file(message.voice.file_id)
-                logger.info(f"[SHAZAM VOICE] file_info получен: file_path={file_info.file_path}, file_size={file_info.file_size}")
-                
-                ogg_path = os.path.join(tempfile.gettempdir(), f"voice_{user_id}_{message.voice.file_id}.ogg")
-                logger.info(f"[SHAZAM VOICE] Сохраняем в {ogg_path}")
-                
-                downloaded_file = bot.download_file(file_info.file_path)
-                with open(ogg_path, 'wb') as f:
-                    f.write(downloaded_file)
-                logger.info(f"[SHAZAM VOICE] Файл скачан, размер: {os.path.getsize(ogg_path)} байт")
-                
-                # Конвертируем в WAV
-                logger.info(f"[SHAZAM VOICE] Конвертируем OGG в WAV...")
-                wav_path = os.path.join(tempfile.gettempdir(), f"voice_{user_id}_{message.voice.file_id}.wav")
-                if not convert_ogg_to_wav(ogg_path, wav_path):
-                    logger.error(f"[SHAZAM VOICE] Ошибка конвертации OGG в WAV")
-                    bot.edit_message_text(
-                        "❌ Ошибка конвертации аудио. Попробуйте записать еще раз.",
-                        loading_msg.chat.id,
-                        loading_msg.message_id
-                    )
-                    shazam_state.pop(user_id, None)
-                    # Удаляем временные файлы
-                    try:
-                        os.remove(ogg_path)
-                    except:
-                        pass
-                    return
-                
-                logger.info(f"[SHAZAM VOICE] Конвертация завершена, размер WAV: {os.path.getsize(wav_path)} байт")
-                
-                # Распознаем речь
-                logger.info(f"[SHAZAM VOICE] Начинаем распознавание речи...")
-                text = transcribe_voice(wav_path)
-                logger.info(f"[SHAZAM VOICE] Распознавание завершено, результат: '{text}'")
-                
-                # Удаляем временные файлы
-                try:
-                    os.remove(ogg_path)
-                    os.remove(wav_path)
-                except:
-                    pass
-                
-                if not text:
-                    logger.warning(f"[SHAZAM VOICE] Не удалось распознать речь")
-                    bot.edit_message_text(
-                        "❌ Не удалось распознать речь. Попробуйте записать еще раз или опишите фильм текстом.",
-                        loading_msg.chat.id,
-                        loading_msg.message_id
-                    )
-                    shazam_state.pop(user_id, None)
-                    return
-                
-                # Обновляем сообщение с распознанным текстом
-                logger.info(f"[SHAZAM VOICE] Обновляем сообщение с распознанным текстом...")
-                try:
-                    bot.edit_message_text(
-                        f"🎤 Распознано: <i>{text}</i>\n\n🔍 Ищем фильмы...",
-                        loading_msg.chat.id,
-                        loading_msg.message_id,
-                        parse_mode='HTML'
-                    )
-                    logger.info(f"[SHAZAM VOICE] Сообщение обновлено")
-                except Exception as e:
-                    logger.warning(f"[SHAZAM VOICE] Не удалось обновить сообщение: {e}, продолжаем...")
-                
-                # Ищем фильмы (та же логика, что и в текстовом обработчике)
-                logger.info(f"[SHAZAM VOICE] Начинаем поиск фильмов по запросу: '{text}'")
-                results = search_movies(text, top_k=5)
-                logger.info(f"[SHAZAM VOICE] Поиск завершен, найдено результатов: {len(results)}")
-                
-                if not results:
-                    bot.edit_message_text(
-                        "❌ Не удалось найти подходящие фильмы. Попробуйте описать по-другому.",
-                        loading_msg.chat.id,
-                        loading_msg.message_id
-                    )
-                    shazam_state.pop(user_id, None)
-                    return
-                
-                # Получаем информацию о фильмах из Kinopoisk
-                logger.info(f"[SHAZAM VOICE] Получаем информацию о фильмах из Kinopoisk...")
-                films_info = []
-                for i, result in enumerate(results, 1):
-                    imdb_id = result.get('imdb_id')
-                    logger.info(f"[SHAZAM VOICE] Обрабатываем фильм {i}/{len(results)}: imdb_id={imdb_id}")
-                    try:
-                        film_info = get_film_by_imdb_id(imdb_id)
-                        if film_info:
-                            logger.info(f"[SHAZAM VOICE] Получена информация о фильме {imdb_id}: {film_info.get('title')}")
-                            films_info.append({
-                                'kp_id': film_info.get('kp_id'),
-                                'title': film_info.get('title', result['title']),
-                                'year': film_info.get('year', result.get('year')),
-                                'imdb_id': imdb_id
-                            })
-                        else:
-                            logger.warning(f"[SHAZAM VOICE] Не удалось получить информацию о фильме {imdb_id} из Kinopoisk")
-                            films_info.append({
-                                'kp_id': None,
-                                'title': result['title'],
-                                'year': result.get('year'),
-                                'imdb_id': imdb_id
-                            })
-                    except Exception as e:
-                        logger.warning(f"[SHAZAM VOICE] Ошибка при получении информации о фильме {imdb_id}: {e}", exc_info=True)
-                        films_info.append({
-                            'kp_id': None,
-                            'title': result['title'],
-                            'year': result.get('year'),
-                            'imdb_id': imdb_id
-                        })
-                
-                if not films_info:
-                    bot.edit_message_text(
-                        "❌ Не удалось получить информацию о найденных фильмах.",
-                        loading_msg.chat.id,
-                        loading_msg.message_id
-                    )
-                    shazam_state.pop(user_id, None)
-                    return
-                
-                # Формируем ответ
-                logger.info(f"[SHAZAM VOICE] Формируем ответ с {len(films_info)} фильмами...")
-                text_response = "🎬 <b>Вот наиболее подходящие фильмы по вашему описанию:</b>\n\n"
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                for i, film in enumerate(films_info[:5], 1):
-                    title = film['title']
-                    year = f" ({film['year']})" if film.get('year') else ""
-                    text_response += f"{i}. {title}{year}\n"
-                    
-                    if film.get('kp_id'):
-                        markup.add(InlineKeyboardButton(
-                            f"{i}. {title}{year}",
-                            callback_data=f"shazam:film:{film['kp_id']}"
-                        ))
-                
-                markup.add(InlineKeyboardButton("⬅️ Вернуться к Шазаму", callback_data="shazam:start"))
-                
-                logger.info(f"[SHAZAM VOICE] Отправляем финальное сообщение с результатами...")
-                bot.edit_message_text(
-                    text_response,
-                    loading_msg.chat.id,
-                    loading_msg.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                logger.info(f"[SHAZAM VOICE] ===== SUCCESS: Результаты отправлены пользователю")
-                
-                # Очищаем состояние
-                shazam_state.pop(user_id, None)
-                
-            except Exception as e:
-                logger.error(f"[SHAZAM VOICE] ===== ERROR в обработке голосового: {e}", exc_info=True)
-                try:
-                    bot.edit_message_text(
-                        f"❌ Произошла ошибка при обработке голосового сообщения: {str(e)[:100]}\n\nПопробуйте еще раз или опишите фильм текстом.",
-                        loading_msg.chat.id,
-                        loading_msg.message_id
-                    )
-                except Exception as edit_e:
-                    logger.error(f"[SHAZAM VOICE] Не удалось обновить сообщение об ошибке: {edit_e}")
-                    try:
-                        bot.reply_to(message, f"❌ Произошла ошибка: {str(e)[:100]}")
-                    except:
-                        pass
-                shazam_state.pop(user_id, None)
-        
+            # Запускаем обработку в отдельном потоке
+            thread = Thread(target=process_shazam_voice_async, args=(message, loading_msg))
+            thread.daemon = True
+            thread.start()
+            logger.info(f"[SHAZAM VOICE] Асинхронная обработка запущена в потоке, основной handler завершен")
+            
         except Exception as e:
             logger.error(f"[SHAZAM VOICE] ===== CRITICAL ERROR: {e}", exc_info=True)
             try:
