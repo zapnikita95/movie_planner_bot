@@ -58,7 +58,8 @@ SUBSCRIPTION_PRICES = {
         'notifications': {'month': 100},
         'recommendations': {'month': 100},
         'tickets': {'month': 150},
-        'all': {'month': 249, '3months': 599, 'year': 1799, 'lifetime': 2299}
+        'all': {'month': 249, '3months': 599, 'year': 1799, 'lifetime': 2299},
+        'test': {'test': 10}  # Тестовый тариф: 10₽, списание раз в 10 минут, только для владельца
     },
     'group': {
         '2': {  # На 2 пользователя (базовый тариф)
@@ -1977,6 +1978,12 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("📦 Все режимы - 3 месяца (599₽)", callback_data="payment:subscribe:personal:all:3months"))
                     markup.add(InlineKeyboardButton("📦 Все режимы - год (1799₽)", callback_data="payment:subscribe:personal:all:year"))
                     markup.add(InlineKeyboardButton("📦 Все режимы - навсегда (2299₽)", callback_data="payment:subscribe:personal:all:lifetime"))
+                    
+                    # Тестовый тариф только для владельца бота
+                    from moviebot.bot.handlers.promo import get_bot_owner_id
+                    owner_id = get_bot_owner_id()
+                    if owner_id and user_id == owner_id:
+                        markup.add(InlineKeyboardButton("🧪 Тестовый тариф (10₽, раз в 10 мин)", callback_data="payment:subscribe:personal:test:test"))
                 # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
                 back_callback = "payment:active:personal" if action == "tariffs:personal" and user_payment_state.get(user_id, {}).get('from_active') else "payment:tariffs"
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
@@ -4033,6 +4040,15 @@ def register_payment_callbacks(bot_instance):
                 # Создаем payload для инвойса (должен быть уникальным)
                 invoice_payload = f"stars_{payment_id}"
             
+                # Определяем subscription_period для подписок (кроме lifetime)
+                # Согласно документации: https://core.telegram.org/api/subscriptions#bot-subscriptions
+                # subscription_period должен быть 30*24*60*60 (месяц) для подписок
+                subscription_period = None
+                if period_type != 'lifetime':
+                    # Для всех периодических подписок используем месячный период (30 дней)
+                    subscription_period = 30 * 24 * 60 * 60  # 30 дней в секундах
+                    logger.info(f"[STARS] Создается подписка с периодом {subscription_period} секунд для period_type={period_type}")
+            
                 # Отправляем инвойс через Telegram Stars
                 try:
                     success = create_stars_invoice(
@@ -4041,7 +4057,8 @@ def register_payment_callbacks(bot_instance):
                         title=title,
                         description=description,
                         payload=invoice_payload,
-                        stars_amount=stars_amount
+                        stars_amount=stars_amount,
+                        subscription_period=subscription_period
                     )
                 
                     if success:
@@ -4564,10 +4581,10 @@ def register_payment_callbacks(bot_instance):
                     current_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type, 0)
                     upgrade_price = new_price - current_price
             
-                if upgrade_price <= 0:
-                    bot_instance.answer_callback_query(call.id, "Ошибка расчета цены", show_alert=True)
-                    return
-            
+                # Получаем информацию о следующем списании
+                next_payment_date = sub.get('next_payment_date')
+                current_price = sub.get('price', 0)
+                
                 # Формируем описание
                 plan_names = {
                     'notifications': '🔔 Уведомления о сериалах',
@@ -4575,15 +4592,54 @@ def register_payment_callbacks(bot_instance):
                     'tickets': '🎫 Билеты в кино',
                     'all': '📦 Все режимы'
                 }
+                
+                period_names = {
+                    'month': 'месяц',
+                    '3months': '3 месяца',
+                    'year': 'год',
+                    'lifetime': 'навсегда',
+                    'test': 'тестовый (10 минут)'
+                }
             
-                text = f"📦 <b>Обновление подписки</b>\n\n"
-                text += f"📋 <b>Текущая подписка:</b> {plan_names.get(current_plan_type, current_plan_type)}\n"
-                text += f"📋 <b>Новая подписка:</b> {plan_names.get(new_plan_type, new_plan_type)}\n\n"
-                text += f"💰 <b>Доплата:</b> {upgrade_price}₽\n\n"
-                text += f"После оплаты ваша подписка будет обновлена."
+                text = f"✏️ <b>Изменение подписки</b>\n\n"
+                text += f"📋 <b>Текущая подписка:</b>\n"
+                text += f"• {plan_names.get(current_plan_type, current_plan_type)}\n"
+                text += f"• Период: {period_names.get(period_type, period_type)}\n"
+                text += f"• Сумма: {current_price}₽\n\n"
+                
+                text += f"📋 <b>Новая подписка:</b>\n"
+                text += f"• {plan_names.get(new_plan_type, new_plan_type)}\n"
+                text += f"• Период: {period_names.get(period_type, period_type)}\n"
+                text += f"• Сумма: {new_price}₽\n\n"
+                
+                if next_payment_date:
+                    if isinstance(next_payment_date, datetime):
+                        next_payment_str = next_payment_date.strftime('%d.%m.%Y')
+                    else:
+                        try:
+                            from dateutil import parser
+                            next_payment_dt = parser.parse(str(next_payment_date))
+                            next_payment_str = next_payment_dt.strftime('%d.%m.%Y')
+                        except:
+                            next_payment_str = str(next_payment_date)
+                    text += f"📅 <b>Дата следующего списания:</b> {next_payment_str}\n\n"
             
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("💳 Оплатить", callback_data=f"payment:pay_upgrade:{subscription_id}:{new_plan_type}"))
+                
+                # Если сумма увеличивается - предлагаем два варианта
+                if upgrade_price > 0:
+                    text += f"💰 <b>Доплата:</b> {upgrade_price}₽\n\n"
+                    text += "Выберите вариант:\n"
+                    text += f"1️⃣ <b>Оплатить сейчас и изменить сумму подписки</b> — доплатите {upgrade_price}₽, подписка изменится сразу\n"
+                    text += "2️⃣ <b>Изменение суммы со следующего платежа</b> — подписка изменится без доплаты со следующего списания\n"
+                    
+                    markup.add(InlineKeyboardButton("1️⃣ Оплатить сейчас", callback_data=f"payment:pay_upgrade_now:{subscription_id}:{new_plan_type}"))
+                    markup.add(InlineKeyboardButton("2️⃣ Со следующего платежа", callback_data=f"payment:change_from_next:{subscription_id}:{new_plan_type}"))
+                else:
+                    # Если сумма уменьшается или не меняется - только изменение со следующего платежа
+                    text += "Подписка будет изменена со следующего списания.\n"
+                    markup.add(InlineKeyboardButton("✅ Подтвердить", callback_data=f"payment:change_from_next:{subscription_id}:{new_plan_type}"))
+                
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
                 try:
@@ -4593,14 +4649,90 @@ def register_payment_callbacks(bot_instance):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
         
-            if action.startswith("pay_upgrade:"):
-                # Создание платежа для обновления подписки
+            if action.startswith("change_from_next:"):
+                # Изменение подписки со следующего платежа (без доплаты)
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                except:
+                    pass
+                
+                # Парсим callback_data: payment:change_from_next:{subscription_id}:{new_plan_type}
+                parts = action.split(":")
+                if len(parts) < 3:
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                    return
+                
+                subscription_id = int(parts[1])
+                new_plan_type = parts[2]
+                
+                # Получаем информацию о текущей подписке
+                from moviebot.database.db_operations import get_subscription_by_id, update_subscription_plan_type
+                sub = get_subscription_by_id(subscription_id)
+                
+                if not sub or sub.get('user_id') != user_id:
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    return
+                
+                current_plan_type = sub.get('plan_type')
+                period_type = sub.get('period_type', 'month')
+                group_size = sub.get('group_size')
+                next_payment_date = sub.get('next_payment_date')
+                
+                # Вычисляем новую цену
+                group_size_str = str(group_size) if group_size else '2'
+                if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                else:
+                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
+                
+                # Обновляем подписку: меняем plan_type и price, но сохраняем next_payment_date
+                update_subscription_plan_type(subscription_id, new_plan_type, new_price)
+                
+                # Формируем сообщение
+                plan_names = {
+                    'notifications': '🔔 Уведомления о сериалах',
+                    'recommendations': '🎯 Персональные рекомендации',
+                    'tickets': '🎫 Билеты в кино',
+                    'all': '📦 Все режимы'
+                }
+                
+                if next_payment_date:
+                    if isinstance(next_payment_date, datetime):
+                        next_payment_str = next_payment_date.strftime('%d.%m.%Y')
+                    else:
+                        try:
+                            from dateutil import parser
+                            next_payment_dt = parser.parse(str(next_payment_date))
+                            next_payment_str = next_payment_dt.strftime('%d.%m.%Y')
+                        except:
+                            next_payment_str = str(next_payment_date)
+                else:
+                    next_payment_str = "не указана"
+                
+                text = "✅ <b>Готово!</b>\n\n"
+                text += f"Подписка будет изменена с {next_payment_str}\n\n"
+                text += f"📋 <b>Было:</b> {plan_names.get(current_plan_type, current_plan_type)}\n"
+                text += f"📋 <b>Будет:</b> {plan_names.get(new_plan_type, new_plan_type)}\n"
+                text += f"💰 <b>Сумма списания:</b> {new_price}₽"
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                
+                try:
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
+            
+            if action.startswith("pay_upgrade_now:"):
+                # Создание платежа для обновления подписки с оплатой сейчас
                 try:
                     bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
-                # Парсим callback_data: payment:pay_upgrade:{subscription_id}:{new_plan_type}
+                # Парсим callback_data: payment:pay_upgrade_now:{subscription_id}:{new_plan_type}
                 parts = action.split(":")
                 if len(parts) < 3:
                     bot_instance.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
@@ -4643,6 +4775,83 @@ def register_payment_callbacks(bot_instance):
                 if upgrade_price <= 0:
                     bot_instance.answer_callback_query(call.id, "Ошибка расчета цены", show_alert=True)
                     return
+                
+                # Показываем информацию о подписке перед оплатой
+                next_payment_date = sub.get('next_payment_date')
+                plan_names = {
+                    'notifications': '🔔 Уведомления о сериалах',
+                    'recommendations': '🎯 Персональные рекомендации',
+                    'tickets': '🎫 Билеты в кино',
+                    'all': '📦 Все режимы'
+                }
+                
+                text = f"💳 <b>Оплата доплаты</b>\n\n"
+                text += f"📋 <b>Текущая подписка:</b> {plan_names.get(current_plan_type, current_plan_type)}\n"
+                text += f"📋 <b>Новая подписка:</b> {plan_names.get(new_plan_type, new_plan_type)}\n"
+                if next_payment_date:
+                    if isinstance(next_payment_date, datetime):
+                        next_payment_str = next_payment_date.strftime('%d.%m.%Y')
+                    else:
+                        try:
+                            from dateutil import parser
+                            next_payment_dt = parser.parse(str(next_payment_date))
+                            next_payment_str = next_payment_dt.strftime('%d.%m.%Y')
+                        except:
+                            next_payment_str = str(next_payment_date)
+                    text += f"📅 <b>Дата следующего списания:</b> {next_payment_str}\n"
+                text += f"\n💰 <b>Доплата:</b> {upgrade_price}₽\n\n"
+                text += "После оплаты подписка будет изменена сразу."
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("💳 Оплатить", callback_data=f"payment:confirm_upgrade_pay:{subscription_id}:{new_plan_type}:{upgrade_price}"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:upgrade_plan:{subscription_id}:{new_plan_type}"))
+                
+                try:
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
+            
+            if action.startswith("confirm_upgrade_pay:"):
+                # Подтверждение оплаты доплаты для обновления подписки
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                except:
+                    pass
+                
+                # Парсим callback_data: payment:confirm_upgrade_pay:{subscription_id}:{new_plan_type}:{upgrade_price}
+                parts = action.split(":")
+                if len(parts) < 4:
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                    return
+                
+                subscription_id = int(parts[1])
+                new_plan_type = parts[2]
+                upgrade_price = float(parts[3])
+                
+                # Получаем информацию о текущей подписке
+                from moviebot.database.db_operations import get_subscription_by_id
+                sub = get_subscription_by_id(subscription_id)
+            
+                if not sub or sub.get('user_id') != user_id:
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    return
+            
+                current_plan_type = sub.get('plan_type')
+                period_type = sub.get('period_type', 'month')
+                group_size = sub.get('group_size')
+                chat_id = sub.get('chat_id')
+            
+                # Вычисляем цену для новой подписки
+                group_size_str = str(group_size) if group_size else '2'
+            
+                # Для отдельных функций (notifications, recommendations, tickets) доступна только месячная подписка
+                # Для "all" используем текущий период подписки
+                if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                    upgrade_period_type = 'month'
+                else:
+                    upgrade_period_type = period_type
             
                 # Создаем платеж для обновления подписки
                 # Используем существующую логику создания платежа, но с флагом upgrade

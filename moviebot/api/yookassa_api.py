@@ -68,7 +68,8 @@ def create_payment(
     return_url: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
     payment_method_id: Optional[str] = None,
-    capture: bool = True
+    capture: bool = True,
+    save_payment_method: bool = False
 ) -> Optional[Any]:
     """
     Создает платеж в YooKassa
@@ -80,6 +81,7 @@ def create_payment(
         metadata: Метаданные платежа (user_id, chat_id, subscription_type и т.д.)
         payment_method_id: ID сохраненного способа оплаты (для рекуррентных платежей)
         capture: Автоматически подтверждать платеж
+        save_payment_method: Сохранять способ оплаты для автоплатежей
     
     Returns:
         Объект Payment или None в случае ошибки
@@ -119,6 +121,10 @@ def create_payment(
                 "type": "redirect",
                 "return_url": return_url
             }
+            # Если нужно сохранить способ оплаты, добавляем параметр
+            if save_payment_method:
+                payment_data["save_payment_method"] = True
+                logger.info(f"[YOOKASSA] Параметр save_payment_method=True добавлен для сохранения способа оплаты")
         
         payment = Payment.create(payment_data)
         logger.info(f"[YOOKASSA] Платеж создан: id={payment.id}, status={payment.status}")
@@ -205,7 +211,8 @@ def create_subscription_payment(
         'month': 'месяц',
         '3months': '3 месяца',
         'year': 'год',
-        'lifetime': 'навсегда'
+        'lifetime': 'навсегда',
+        'test': 'тестовый (10 минут)'
     }
     period_name = period_names.get(period_type, period_type)
     
@@ -251,11 +258,17 @@ def create_subscription_payment(
     if upgrade_from_plan:
         metadata["upgrade_from_plan"] = upgrade_from_plan
     
+    # Определяем, нужно ли сохранять способ оплаты
+    # Сохраняем для всех периодических подписок (не lifetime)
+    # Для тестового тарифа тоже сохраняем, чтобы можно было проводить автоплатежи
+    save_payment_method = period_type != 'lifetime'
+    
     # Создаем платеж
     payment = create_payment(
         amount=amount,
         description=description,
-        metadata=metadata
+        metadata=metadata,
+        save_payment_method=save_payment_method
     )
     
     if not payment:

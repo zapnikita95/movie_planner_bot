@@ -110,9 +110,11 @@ scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='
 # Проверка подписок и отправка уведомлений за день до списания (каждый день в 9:00 МСК)
 scheduler.add_job(check_subscription_payments, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='check_subscription_payments')
 
-# Обработка рекуррентных платежей (каждый день в 9:00 МСК)
+# Обработка рекуррентных платежей (каждый день в 9:00 МСК и каждые 10 минут для тестовых подписок)
 if process_recurring_payments:
     scheduler.add_job(process_recurring_payments, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='process_recurring_payments')
+    # Для тестовых подписок проверяем каждые 10 минут
+    scheduler.add_job(process_recurring_payments, 'interval', minutes=10, id='process_recurring_payments_test')
 
 # Добавляем задачи очистки и голосования в scheduler
 scheduler.add_job(clean_home_plans, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='clean_home_plans')

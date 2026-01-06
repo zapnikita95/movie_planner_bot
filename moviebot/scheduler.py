@@ -1501,8 +1501,12 @@ def send_successful_payment_notification(chat_id, subscription_id, subscription_
         
         markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))
         
-        # Для личных подписок отправляем в личку, для групповых - в групповой чат
-        target_chat_id = sub.get('user_id') if subscription_type == 'personal' else chat_id
+        # Для личных подписок отправляем в личку пользователя, для групповых - в групповой чат
+        if subscription_type == 'personal':
+            target_chat_id = sub.get('user_id')
+        else:
+            # Для групповых подписок отправляем в группу
+            target_chat_id = chat_id
         
         try:
             bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
@@ -1525,8 +1529,12 @@ def process_recurring_payments():
         
         now = datetime.now(pytz.UTC)
         
-        # Находим подписки, у которых next_payment_date сегодня и есть payment_method_id
+        # Находим подписки, у которых next_payment_date наступил и есть payment_method_id
+        # Для тестовых подписок проверяем по времени (если прошло 10 минут)
+        # Для остальных - только в дневное время (9:00 МСК)
         with db_lock:
+            # Для тестовых подписок проверяем, если next_payment_date <= now
+            # Для остальных - только если сегодня и в дневное время (9:00-18:00 МСК)
             cursor.execute("""
                 SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
                        next_payment_date, payment_method_id, telegram_username, group_username, group_size
@@ -1534,8 +1542,17 @@ def process_recurring_payments():
                 WHERE is_active = TRUE
                 AND next_payment_date IS NOT NULL
                 AND payment_method_id IS NOT NULL
-                AND DATE(next_payment_date AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
-            """, (now,))
+                AND (
+                    -- Тестовые подписки: проверяем по времени (если прошло 10 минут)
+                    (period_type = 'test' AND next_payment_date <= %s)
+                    OR
+                    -- Остальные подписки: только в дневное время (9:00-18:00 МСК) и сегодня
+                    (period_type != 'test' 
+                     AND DATE(next_payment_date AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
+                     AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) >= 9
+                     AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) < 18)
+                )
+            """, (now, now))
             subscriptions = cursor.fetchall()
         
         for sub in subscriptions:
@@ -1588,7 +1605,8 @@ def process_recurring_payments():
                 period_names = {
                     'month': 'месяц',
                     '3months': '3 месяца',
-                    'year': 'год'
+                    'year': 'год',
+                    'test': 'тестовый (10 минут)'
                 }
                 period_name = period_names.get(period_type, period_type)
                 

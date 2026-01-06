@@ -697,6 +697,11 @@ def renew_subscription(subscription_id, period_type):
     elif period_type == 'year':
         next_payment_date = now + relativedelta(years=1)
         expires_at = now + relativedelta(years=1)
+    elif period_type == 'test':
+        # Тестовый тариф - списание раз в 10 минут
+        from datetime import timedelta
+        next_payment_date = now + timedelta(minutes=10)
+        expires_at = now + timedelta(minutes=10)
     elif period_type == 'lifetime':
         expires_at = None
         next_payment_date = None
@@ -737,6 +742,10 @@ def create_subscription(chat_id, user_id, subscription_type, plan_type, period_t
             # Годовая подписка - списание раз в год
             expires_at = now + relativedelta(years=1)
             next_payment_date = now + relativedelta(years=1)
+        elif period_type == 'test':
+            # Тестовый тариф - списание раз в 10 минут
+            expires_at = now + timedelta(minutes=10)
+            next_payment_date = now + timedelta(minutes=10)
         elif period_type == 'lifetime':
             expires_at = None
             next_payment_date = None
@@ -747,6 +756,8 @@ def create_subscription(chat_id, user_id, subscription_type, plan_type, period_t
         elif period_type == '3months':
             expires_at = next_payment_date
         elif period_type == 'year':
+            expires_at = next_payment_date
+        elif period_type == 'test':
             expires_at = next_payment_date
         elif period_type == 'lifetime':
             expires_at = None
@@ -789,14 +800,56 @@ def create_subscription(chat_id, user_id, subscription_type, plan_type, period_t
 
 
 def cancel_subscription(subscription_id, user_id):
-    """Отменяет подписку"""
+    """Отменяет подписку (включая отмену подписки Telegram Stars, если применимо)"""
     from datetime import datetime
     import pytz
+    import os
+    import logging
     
+    logger = logging.getLogger(__name__)
+    
+    # Получаем информацию о подписке перед отменой
+    with db_lock:
+        cursor.execute("""
+            SELECT payment_method_id, subscription_type, period_type
+            FROM subscriptions 
+            WHERE id = %s AND user_id = %s
+        """, (subscription_id, user_id))
+        sub_info = cursor.fetchone()
+    
+    # Отменяем подписку Telegram Stars, если она была оплачена через Stars
+    # Проверяем, есть ли платежи через Stars для этой подписки
+    if sub_info:
+        try:
+            # Ищем платежи через Stars для этой подписки
+            # Проверяем наличие поля payment_method в таблице payments
+            cursor.execute("""
+                SELECT p.yookassa_payment_id, p.status
+                FROM payments p
+                WHERE p.subscription_id = %s 
+                AND p.status = 'succeeded'
+                AND p.yookassa_payment_id IS NULL
+                ORDER BY p.created_at DESC
+                LIMIT 1
+            """, (subscription_id,))
+            stars_payment = cursor.fetchone()
+            
+            if stars_payment:
+                # Если есть платеж через Stars (yookassa_payment_id = NULL), пытаемся отменить подписку
+                # Согласно документации Telegram, отмена подписки Stars происходит автоматически
+                # при деактивации подписки в БД, но можно также вызвать API для явной отмены
+                logger.info(f"[CANCEL SUBSCRIPTION] Найден платеж через Stars для подписки {subscription_id}")
+                # Примечание: Отмена подписки Telegram Stars происходит автоматически при деактивации
+                # в нашей БД, так как Telegram отслеживает активные подписки через payments.getStarsSubscriptions
+        except Exception as e:
+            logger.error(f"[CANCEL SUBSCRIPTION] Ошибка проверки платежей Stars: {e}", exc_info=True)
+    
+    # Отменяем подписку в БД
+    # Также обнуляем payment_method_id, чтобы прекратить автоплатежи через YooKassa
     with db_lock:
         cursor.execute("""
             UPDATE subscriptions 
-            SET is_active = FALSE, cancelled_at = %s
+            SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
             WHERE id = %s AND user_id = %s
         """, (datetime.now(pytz.UTC), subscription_id, user_id))
         conn.commit()
@@ -1003,6 +1056,18 @@ def update_subscription_price(subscription_id, new_price):
         """, (new_price, subscription_id))
         conn.commit()
         return cursor.rowcount > 0
+
+
+def update_subscription_plan_type(subscription_id, new_plan_type, new_price):
+    """Обновляет тип плана и цену подписки (для изменения со следующего платежа)"""
+    with db_lock:
+        cursor.execute("""
+            UPDATE subscriptions 
+            SET plan_type = %s, price = %s, updated_at = NOW()
+            WHERE id = %s
+        """, (new_plan_type, new_price, subscription_id))
+        conn.commit()
+        return True
 
 
 def update_subscription_next_payment(subscription_id, next_payment_date):

@@ -262,6 +262,10 @@ def create_web_app(bot_instance):
                     telegram_username = metadata.get('telegram_username')
                     group_username = metadata.get('group_username')
                     
+                    # Проверяем, является ли это обновлением существующей подписки
+                    upgrade_subscription_id = metadata.get('upgrade_subscription_id')
+                    upgrade_from_plan = metadata.get('upgrade_from_plan')
+                    
                     # Проверяем, является ли это объединенным платежом
                     is_combined = metadata.get('is_combined', 'false').lower() == 'true'
                     combine_type = metadata.get('combine_type')
@@ -367,8 +371,65 @@ def create_web_app(bot_instance):
                         except Exception as sub_error:
                             logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                             subscription_id = None
+                    elif upgrade_subscription_id:
+                        # Обновление существующей подписки (оплата доплаты)
+                        try:
+                            upgrade_sub_id = int(upgrade_subscription_id)
+                            from moviebot.database.db_operations import get_subscription_by_id, update_subscription_plan_type
+                            
+                            # Получаем информацию о подписке для обновления
+                            upgrade_sub = get_subscription_by_id(upgrade_sub_id)
+                            if not upgrade_sub or upgrade_sub.get('user_id') != user_id:
+                                logger.error(f"[YOOKASSA] Подписка {upgrade_sub_id} не найдена или не принадлежит пользователю {user_id}")
+                                subscription_id = None
+                            else:
+                                # Вычисляем новую цену подписки
+                                group_size_upgrade = upgrade_sub.get('group_size')
+                                period_type_upgrade = upgrade_sub.get('period_type', 'month')
+                                
+                                # Импортируем SUBSCRIPTION_PRICES для расчета новой цены
+                                from moviebot.bot.callbacks.payment_callbacks import SUBSCRIPTION_PRICES
+                                
+                                if subscription_type == 'personal':
+                                    new_price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period_type_upgrade, 0)
+                                else:
+                                    group_size_str = str(group_size_upgrade) if group_size_upgrade else '2'
+                                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get(period_type_upgrade, 0)
+                                
+                                # Обновляем подписку: меняем plan_type и price
+                                update_subscription_plan_type(upgrade_sub_id, plan_type, new_price)
+                                
+                                # Обновляем payment_method_id, если он был сохранен
+                                if payment_method_id:
+                                    from moviebot.database.db_connection import get_db_connection, db_lock
+                                    conn_update = get_db_connection()
+                                    cursor_update = conn_update.cursor()
+                                    with db_lock:
+                                        cursor_update.execute("""
+                                            UPDATE subscriptions 
+                                            SET payment_method_id = %s, updated_at = NOW()
+                                            WHERE id = %s
+                                        """, (payment_method_id, upgrade_sub_id))
+                                        conn_update.commit()
+                                    logger.info(f"[YOOKASSA] payment_method_id {payment_method_id} обновлен в подписке {upgrade_sub_id}")
+                                
+                                subscription_id = upgrade_sub_id
+                                logger.info(f"[YOOKASSA] Подписка {upgrade_sub_id} обновлена: {upgrade_from_plan} -> {plan_type}, цена: {new_price}₽")
+                                
+                                # Отправляем уведомление об успешном платеже
+                                from moviebot.scheduler import send_successful_payment_notification
+                                send_successful_payment_notification(
+                                    chat_id=chat_id,
+                                    subscription_id=subscription_id,
+                                    subscription_type=subscription_type,
+                                    plan_type=plan_type,
+                                    period_type=period_type_upgrade
+                                )
+                        except Exception as upgrade_error:
+                            logger.error(f"[YOOKASSA] Ошибка при обновлении подписки: {upgrade_error}", exc_info=True)
+                            subscription_id = None
                     else:
-                        # Обычная логика (без объединения)
+                        # Обычная логика (без объединения и без обновления)
                         # Проверяем, есть ли уже активная подписка с такими же параметрами
                         from moviebot.database.db_operations import get_active_subscription, renew_subscription
                         existing_sub = get_active_subscription(chat_id, user_id, subscription_type)

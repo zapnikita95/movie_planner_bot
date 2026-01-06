@@ -162,19 +162,24 @@ def translate_to_english(text):
 
 def transcribe_with_whisper(audio_path):
     """Распознает речь с помощью Whisper"""
+    logger.info(f"[WHISPER] Начинаем распознавание: {audio_path}")
     whisper = get_whisper()
     if not whisper or whisper is False:
+        logger.warning(f"[WHISPER] Модель Whisper недоступна")
         return None
     
     try:
+        logger.info(f"[WHISPER] Вызываем модель Whisper...")
         result = whisper(audio_path)
+        logger.info(f"[WHISPER] Модель вернула результат: {type(result)}")
         text = result.get("text", "").strip()
         if text:
-            logger.info(f"Whisper распознал: '{text}'")
+            logger.info(f"[WHISPER] Распознано: '{text}'")
             return text
+        logger.warning(f"[WHISPER] Пустой результат распознавания")
         return None
     except Exception as e:
-        logger.error(f"Ошибка распознавания Whisper: {e}", exc_info=True)
+        logger.error(f"[WHISPER] Ошибка распознавания: {e}", exc_info=True)
         return None
 
 
@@ -537,18 +542,31 @@ def search_movies(query, top_k=5):
 
 def transcribe_voice(audio_path):
     """Распознает речь из аудио файла (Whisper → Vosk)"""
+    logger.info(f"[TRANSCRIBE] Начинаем распознавание: {audio_path}")
+    
     # Пробуем Whisper сначала
-    text = transcribe_with_whisper(audio_path)
-    if text:
-        return text
+    logger.info(f"[TRANSCRIBE] Пробуем Whisper...")
+    try:
+        text = transcribe_with_whisper(audio_path)
+        if text:
+            logger.info(f"[TRANSCRIBE] Whisper успешно распознал: '{text}'")
+            return text
+        logger.warning(f"[TRANSCRIBE] Whisper вернул пустой результат")
+    except Exception as e:
+        logger.error(f"[TRANSCRIBE] Ошибка при распознавании Whisper: {e}", exc_info=True)
     
     # Если Whisper не сработал, пробуем Vosk
-    logger.info("Whisper не распознал, пробуем Vosk...")
-    text = transcribe_with_vosk(audio_path)
-    if text:
-        return text
+    logger.info(f"[TRANSCRIBE] Whisper не распознал, пробуем Vosk...")
+    try:
+        text = transcribe_with_vosk(audio_path)
+        if text:
+            logger.info(f"[TRANSCRIBE] Vosk успешно распознал: '{text}'")
+            return text
+        logger.warning(f"[TRANSCRIBE] Vosk вернул пустой результат")
+    except Exception as e:
+        logger.error(f"[TRANSCRIBE] Ошибка при распознавании Vosk: {e}", exc_info=True)
     
-    logger.warning("Не удалось распознать речь ни Whisper, ни Vosk")
+    logger.warning(f"[TRANSCRIBE] Не удалось распознать речь ни Whisper, ни Vosk")
     return None
 
 
