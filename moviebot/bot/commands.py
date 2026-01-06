@@ -65,10 +65,6 @@ def register_all_handlers(bot):
     register_join_handlers(bot)
     logger.info("✅ join handlers зарегистрированы")
     
-    from moviebot.bot.handlers.shazam import register_shazam_handlers
-    register_shazam_handlers(bot)
-    logger.info("✅ shazam handlers зарегистрированы")
-    
     # Регистрируем callback handlers
     # КРИТИЧЕСКИ ВАЖНО: Импортируем модули с callback handlers для автоматической регистрации декораторов
     

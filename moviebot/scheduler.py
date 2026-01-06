@@ -256,16 +256,40 @@ def send_ticket_notification(chat_id, plan_id):
             logger.warning(f"[TICKET NOTIFICATION] Билеты не найдены для plan_id={plan_id}")
             return
         
-        text = f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>\n\nВаши билеты:"
-        
+        # Парсим билеты (может быть JSON массив или один file_id)
+        import json
+        ticket_files = []
         try:
-            bot.send_photo(chat_id, ticket_file_id, caption=text, parse_mode='HTML')
+            ticket_files = json.loads(ticket_file_id)
+            if not isinstance(ticket_files, list):
+                ticket_files = [ticket_file_id]
         except:
+            # Старый формат - один file_id
+            ticket_files = [ticket_file_id]
+        
+        text = f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>\n\nВаши билеты ({len(ticket_files)} шт.):"
+        
+        # Отправляем все билеты
+        sent_count = 0
+        for i, file_id in enumerate(ticket_files):
             try:
-                bot.send_document(chat_id, ticket_file_id, caption=text, parse_mode='HTML')
-            except Exception as e:
-                logger.error(f"[TICKET NOTIFICATION] Ошибка отправки билетов: {e}")
-                bot.send_message(chat_id, f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>", parse_mode='HTML')
+                if i == 0:
+                    caption = text
+                else:
+                    caption = f"🎟️ Билет {i+1}/{len(ticket_files)}"
+                
+                bot.send_photo(chat_id, file_id, caption=caption, parse_mode='HTML')
+                sent_count += 1
+            except:
+                try:
+                    bot.send_document(chat_id, file_id, caption=caption, parse_mode='HTML')
+                    sent_count += 1
+                except Exception as e:
+                    logger.error(f"[TICKET NOTIFICATION] Ошибка отправки билета {i+1}: {e}")
+        
+        if sent_count == 0:
+            # Если не удалось отправить ни одного билета, отправляем текстовое сообщение
+            bot.send_message(chat_id, f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>", parse_mode='HTML')
         
         # Отмечаем как отправленное в базе данных
         try:

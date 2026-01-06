@@ -15,13 +15,11 @@ faiss-cpu
 pandas
 numpy
 pydub
-ffmpeg-python
-torch
 transformers
+torch
 tqdm
 sentencepiece
 sacremoses
-# Дополнительные зависимости для Whisper и обработки аудио
+vosk
 librosa
 soundfile
-vosk

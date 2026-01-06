@@ -462,6 +462,80 @@ def handle_clean_imported_ratings_reply(message):
             pass
 
 
+def check_import_user_id_reply(message):
+    """Проверка для handler ответа на сообщение об импорте базы из Кинопоиска с ID пользователя"""
+    # Проверяем, что это ответ на сообщение бота
+    if not message.reply_to_message:
+        return False
+    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+        return False
+    
+    reply_text = message.reply_to_message.text or ""
+    # Проверяем, что это сообщение об импорте
+    if "Импорт базы из Кинопоиска" not in reply_text:
+        return False
+    if "Отправьте ID пользователя Кинопоиска или ссылку на профиль" not in reply_text:
+        return False
+    
+    # Проверяем, что есть текст в сообщении
+    if not message.text or not message.text.strip():
+        return False
+    
+    # Проверяем, что пользователь в состоянии импорта
+    from moviebot.states import user_import_state
+    user_id = message.from_user.id
+    if user_id not in user_import_state:
+        return False
+    
+    state = user_import_state[user_id]
+    if state.get('step') != 'waiting_user_id':
+        return False
+    
+    return True
+
+
+@bot_instance.message_handler(func=check_import_user_id_reply)
+def handle_import_user_id_reply(message):
+    """Обработчик ответа на сообщение об импорте базы из Кинопоиска с ID пользователя"""
+    logger.info(f"[IMPORT USER ID REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
+    try:
+        from moviebot.states import user_import_state
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        text = message.text.strip() if message.text else ""
+        
+        # Проверяем, что пользователь в состоянии импорта
+        if user_id not in user_import_state:
+            logger.warning(f"[IMPORT USER ID REPLY] Пользователь {user_id} не в состоянии user_import_state")
+            return
+        
+        state = user_import_state[user_id]
+        if state.get('step') != 'waiting_user_id':
+            logger.warning(f"[IMPORT USER ID REPLY] Неверный step в состоянии: {state.get('step')}")
+            return
+        
+        # Проверяем, что это ответ на правильное сообщение
+        prompt_message_id = state.get('prompt_message_id')
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            logger.warning(f"[IMPORT USER ID REPLY] Ответ не на правильное сообщение: prompt_message_id={prompt_message_id}, reply_to_message_id={message.reply_to_message.message_id}")
+            return
+        
+        # Обрабатываем ID пользователя
+        try:
+            from moviebot.bot.handlers.series import handle_import_user_id_internal
+            handle_import_user_id_internal(message, state)
+            logger.info(f"[IMPORT USER ID REPLY] ✅ Завершено")
+        except Exception as e:
+            logger.error(f"[IMPORT USER ID REPLY] Ошибка обработки: {e}", exc_info=True)
+            bot_instance.reply_to(message, "❌ Не получилось обработать ID пользователя. Проверьте правильность ввода.")
+    except Exception as e:
+        logger.error(f"[IMPORT USER ID REPLY] ❌ Критическая ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+        except:
+            pass
+
+
 def check_list_view_film_reply(message):
     """Проверка для handler ответа на промпт просмотра описания из /list"""
     if not message.reply_to_message:
@@ -1307,6 +1381,13 @@ def main_text_handler(message):
         # они обрабатываются через отдельный обработчик handle_admin_commands_reply
     )
     
+    # Пропускаем ответные сообщения об импорте - у них есть отдельный handler
+    if message.reply_to_message:
+        reply_text = message.reply_to_message.text or ""
+        if "Импорт базы из Кинопоиска" in reply_text and "Отправьте ID пользователя Кинопоиска" in reply_text:
+            logger.info(f"[MAIN TEXT HANDLER] Пропускаем ответное сообщение об импорте (обработает handle_import_user_id_reply)")
+            return
+    
     # Если пользователь в любом из состояний, пропускаем - специализированные handlers обработают
     if (user_id in user_ticket_state or user_id in user_search_state or 
         user_id in user_import_state or user_id in user_edit_state or 
@@ -1413,14 +1494,35 @@ def main_file_handler(message):
             
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
             
+            # Получаем существующие билеты и добавляем новый
+            import json
             with db_lock:
-                cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (file_id, plan_id))
+                cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))
+                ticket_row = cursor.fetchone()
+                existing_tickets = []
+                if ticket_row:
+                    ticket_data = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else ticket_row[0]
+                    if ticket_data:
+                        try:
+                            existing_tickets = json.loads(ticket_data)
+                            if not isinstance(existing_tickets, list):
+                                # Если это старый формат (один file_id), конвертируем в массив
+                                existing_tickets = [ticket_data]
+                        except:
+                            # Если не JSON, значит это старый формат (один file_id)
+                            existing_tickets = [ticket_data]
+                
+                # Добавляем новый билет
+                existing_tickets.append(file_id)
+                tickets_json = json.dumps(existing_tickets, ensure_ascii=False)
+                
+                cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
                 conn.commit()
             
             title = state.get('film_title', 'фильм')
             dt = state.get('plan_dt', '')
             
-            bot_instance.reply_to(message, f"✅ Билет прикреплён!\n\n<b>{title}</b> — {dt}\n\nМожете отправить ещё билеты или написать 'готово'.", parse_mode='HTML')
+            bot_instance.reply_to(message, f"✅ Билет прикреплён! (Всего билетов: {len(existing_tickets)})\n\n<b>{title}</b> — {dt}\n\nМожете отправить ещё билеты или написать 'готово'.", parse_mode='HTML')
             return
         
         if step == 'waiting_ticket_file':
@@ -1428,11 +1530,30 @@ def main_file_handler(message):
             plan_id = state.get('plan_id')
             if plan_id:
                 file_id = message.photo[-1].file_id if message.photo else message.document.file_id
-                # Сохраняем билет в БД
+                # Сохраняем билет в БД как массив
+                import json
                 with db_lock:
-                    cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (file_id, plan_id))
+                    # Получаем существующие билеты
+                    cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))
+                    ticket_row = cursor.fetchone()
+                    existing_tickets = []
+                    if ticket_row:
+                        ticket_data = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else ticket_row[0]
+                        if ticket_data:
+                            try:
+                                existing_tickets = json.loads(ticket_data)
+                                if not isinstance(existing_tickets, list):
+                                    existing_tickets = [ticket_data]
+                            except:
+                                existing_tickets = [ticket_data]
+                    
+                    # Добавляем новый билет
+                    existing_tickets.append(file_id)
+                    tickets_json = json.dumps(existing_tickets, ensure_ascii=False)
+                    
+                    cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
                     conn.commit()
-                logger.info(f"[TICKET FILE] Билет сохранен в БД для plan_id={plan_id}, file_id={file_id}")
+                logger.info(f"[TICKET FILE] Билет сохранен в БД для plan_id={plan_id}, file_id={file_id}, всего билетов: {len(existing_tickets)}")
                 
                 # Добавляем кнопки после сохранения билета
                 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -1441,12 +1562,47 @@ def main_file_handler(message):
                 markup.add(InlineKeyboardButton("➕ Добавить еще билет к сеансу", callback_data=f"add_ticket:{plan_id}"))
                 markup.add(InlineKeyboardButton("🎟️ Вернуться к билетам", callback_data="ticket_new"))
                 
-                bot_instance.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿", reply_markup=markup)
-                # Очищаем состояние пользователя, завершаем цикл работы с билетами
+                bot_instance.reply_to(message, f"✅ Файл получен. (Всего билетов: {len(existing_tickets)}) Можете отправить ещё билеты или написать 'готово'. 🍿", reply_markup=markup)
+                # НЕ очищаем состояние - пользователь может добавить ещё билеты
+                logger.info(f"[TICKET FILE] Состояние пользователя {user_id} сохранено для добавления дополнительных билетов")
+                return
+        
+        if step == 'add_more_tickets':
+            # Обработка добавления дополнительных билетов
+            plan_id = state.get('plan_id')
+            if not plan_id:
+                bot_instance.reply_to(message, "❌ Ошибка: план не найден.")
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
-                logger.info(f"[TICKET FILE] Состояние пользователя {user_id} очищено после сохранения билета")
                 return
+            
+            file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+            
+            # Получаем существующие билеты и добавляем новый
+            import json
+            with db_lock:
+                cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))
+                ticket_row = cursor.fetchone()
+                existing_tickets = []
+                if ticket_row:
+                    ticket_data = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else ticket_row[0]
+                    if ticket_data:
+                        try:
+                            existing_tickets = json.loads(ticket_data)
+                            if not isinstance(existing_tickets, list):
+                                existing_tickets = [ticket_data]
+                        except:
+                            existing_tickets = [ticket_data]
+                
+                # Добавляем новый билет
+                existing_tickets.append(file_id)
+                tickets_json = json.dumps(existing_tickets, ensure_ascii=False)
+                
+                cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
+                conn.commit()
+            
+            bot_instance.reply_to(message, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
+            return
         
         # Сохраняем file_id для последующей обработки
         file_id = message.photo[-1].file_id if message.photo else message.document.file_id

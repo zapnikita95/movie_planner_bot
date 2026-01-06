@@ -463,6 +463,15 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
     """Показывает список запланированных сеансов в кино"""
     logger.info(f"[SHOW SESSIONS] Показываем сеансы для пользователя {user_id}, chat_id={chat_id}, file_id={file_id}")
     try:
+        from datetime import datetime as dt_class
+        import pytz
+        now_utc = dt_class.now(pytz.utc)
+        user_tz = get_user_timezone_or_default(user_id)
+        now_local = now_utc.astimezone(user_tz)
+        # Получаем начало текущего дня в часовом поясе пользователя
+        today_start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start_utc = today_start.astimezone(pytz.utc)
+        
         with db_lock:
             cursor.execute('''
                 SELECT p.id, m.title, p.plan_datetime, 
@@ -470,9 +479,10 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.chat_id = %s AND p.plan_type = 'cinema'
+                  AND p.plan_datetime >= %s
                 ORDER BY p.plan_datetime
                 LIMIT 20
-            ''', (chat_id,))
+            ''', (chat_id, today_start_utc))
             sessions = cursor.fetchall()
         
         logger.info(f"[SHOW SESSIONS] Найдено сеансов: {len(sessions) if sessions else 0}")
@@ -2935,6 +2945,7 @@ def register_series_handlers(bot_param):
                 text += "🎟️ <b>Билеты загружены</b>\n\n"
                 text += "Билеты будут отправлены вам перед сеансом."
                 markup.add(InlineKeyboardButton("📎 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
+                markup.add(InlineKeyboardButton("➕ Добавить ещё билеты", callback_data=f"add_more_tickets:{plan_id}"))
                 markup.add(InlineKeyboardButton("🔄 Заменить билеты", callback_data=f"add_ticket:{plan_id}"))
             else:
                 text += "🎟️ <b>Билеты не загружены</b>\n\n"
@@ -3152,7 +3163,8 @@ def register_series_handlers(bot_param):
                 )
                 return
             
-            # Получаем ticket_file_id
+            # Получаем ticket_file_id (может быть JSON массив или один file_id)
+            import json
             with db_lock:
                 cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
                 ticket_row = cursor.fetchone()
@@ -3162,29 +3174,80 @@ def register_series_handlers(bot_param):
                 return
             
             if isinstance(ticket_row, dict):
-                ticket_file_id = ticket_row.get('ticket_file_id')
+                ticket_data = ticket_row.get('ticket_file_id')
             else:
-                ticket_file_id = ticket_row[0]
+                ticket_data = ticket_row[0]
             
-            if not ticket_file_id:
+            if not ticket_data:
                 bot_instance.answer_callback_query(call.id, "❌ Билеты не загружены", show_alert=True)
                 return
             
-            # Отправляем билеты
+            # Парсим билеты (может быть JSON массив или один file_id)
+            ticket_files = []
             try:
-                bot_instance.send_photo(chat_id, ticket_file_id, caption="🎟️ Ваши билеты")
-                bot_instance.answer_callback_query(call.id, "✅ Билеты отправлены")
-            except Exception as send_e:
-                logger.error(f"[SHOW TICKET] Ошибка отправки билетов: {send_e}", exc_info=True)
+                ticket_files = json.loads(ticket_data)
+                if not isinstance(ticket_files, list):
+                    ticket_files = [ticket_data]
+            except:
+                # Старый формат - один file_id
+                ticket_files = [ticket_data]
+            
+            # Отправляем все билеты
+            sent_count = 0
+            for i, ticket_file_id in enumerate(ticket_files):
                 try:
-                    # Пробуем отправить как документ
-                    bot_instance.send_document(chat_id, ticket_file_id, caption="🎟️ Ваши билеты")
-                    bot_instance.answer_callback_query(call.id, "✅ Билеты отправлены")
-                except Exception as doc_e:
-                    logger.error(f"[SHOW TICKET] Ошибка отправки билетов как документа: {doc_e}", exc_info=True)
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка отправки билетов", show_alert=True)
+                    if i == 0:
+                        caption = f"🎟️ Ваши билеты ({len(ticket_files)} шт.)"
+                    else:
+                        caption = f"🎟️ Билет {i+1}/{len(ticket_files)}"
+                    
+                    bot_instance.send_photo(chat_id, ticket_file_id, caption=caption)
+                    sent_count += 1
+                except:
+                    try:
+                        bot_instance.send_document(chat_id, ticket_file_id, caption=caption)
+                        sent_count += 1
+                    except Exception as e:
+                        logger.error(f"[SHOW TICKET] Ошибка отправки билета {i+1}: {e}", exc_info=True)
+            
+            if sent_count > 0:
+                bot_instance.answer_callback_query(call.id, f"✅ Отправлено билетов: {sent_count}/{len(ticket_files)}")
+            else:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка отправки билетов", show_alert=True)
         except Exception as e:
             logger.error(f"[SHOW TICKET] Ошибка: {e}", exc_info=True)
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
+    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_more_tickets:"))
+    def add_more_tickets_callback(call):
+        """Обработчик кнопки 'Добавить ещё билеты' - начинает загрузку дополнительных билетов"""
+        try:
+            from moviebot.states import user_ticket_state
+            
+            bot_instance.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            plan_id = int(call.data.split(":")[1])
+            
+            # Устанавливаем состояние для загрузки дополнительных билетов
+            user_ticket_state[user_id] = {
+                'step': 'add_more_tickets',
+                'plan_id': plan_id,
+                'chat_id': chat_id
+            }
+            
+            bot_instance.edit_message_text(
+                "📎 <b>Загрузка дополнительных билетов</b>\n\n"
+                "Отправьте файлы билетов. После загрузки всех билетов напишите 'готово'.",
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"[ADD MORE TICKETS] Ошибка: {e}", exc_info=True)
             try:
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
@@ -4751,16 +4814,46 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 has_plan = False
         logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}")
         
-        # Если фильм не в базе, добавляем кнопку "➕ Добавить в базу"
-        if not film_id:
-            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
-        
-        # Добавляем кнопку "Запланировать просмотр" только если фильм не запланирован
-        if not has_plan:
+        # Если фильм запланирован, показываем специальную логику кнопок
+        if has_plan:
+            # Если фильм запланирован, не показываем кнопки "добавить в базу" и "запланировать просмотр"
+            # Добавляем кнопку "Просмотрено" для обычных фильмов (не сериалов), если фильм еще не просмотрен
+            if not is_series and film_id:
+                if not watched:
+                    # Проверяем, просмотрел ли этот конкретный пользователь фильм
+                    user_watched = False
+                    if user_id:
+                        try:
+                            import threading
+                            lock_acquired = db_lock.acquire(timeout=1.0)
+                            if lock_acquired:
+                                try:
+                                    # Проверяем, есть ли у этого пользователя просмотр фильма
+                                    # Для обычных фильмов используем watched статус в movies, но нужно проверить по каждому участнику
+                                    # Для простоты показываем кнопку "Просмотрено" если фильм не просмотрен
+                                    user_watched = False
+                                finally:
+                                    db_lock.release()
+                        except:
+                            pass
+                    
+                    if not user_watched:
+                        markup.add(InlineKeyboardButton("✅ Просмотрено", callback_data=f"mark_watched_from_description:{film_id}"))
+            
+            # Добавляем кнопку "Выбрать онлайн-кинотеатр" только для планов типа 'home' (дома)
+            if plan_info and plan_info.get('type') == 'home':
+                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+        else:
+            # Если фильм не запланирован, показываем стандартные кнопки
+            # Если фильм не в базе, добавляем кнопку "➕ Добавить в базу"
+            if not film_id:
+                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
+            
+            # Добавляем кнопку "Запланировать просмотр"
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-        
-        # Добавляем кнопку "Выбрать онлайн-кинотеатр" для всех фильмов
-        markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+            
+            # Добавляем кнопку "Выбрать онлайн-кинотеатр" для всех фильмов (если не запланирован)
+            markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
         
         # Добавляем кнопки "Интересные факты" и "Оценить" всегда (для фильмов в базе и не в базе)
         logger.info(f"[SHOW FILM INFO] Добавление кнопок оценок для film_id={film_id}...")

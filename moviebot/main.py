@@ -233,6 +233,10 @@ from moviebot.bot.handlers.settings.join import register_join_handlers
 register_join_handlers(bot_instance)
 logger.info("✅ join handlers зарегистрированы")
 
+from moviebot.bot.handlers.shazam import register_shazam_handlers
+register_shazam_handlers(bot_instance)
+logger.info("✅ shazam handlers зарегистрированы")
+
 # Регистрируем callback handlers
 from moviebot.bot.callbacks.film_callbacks import register_film_callbacks
 register_film_callbacks(bot_instance)
@@ -262,6 +266,18 @@ logger.info("✅ text_messages handlers зарегистрированы")
 logger.info("=" * 80)
 logger.info("✅ ВСЕ ХЭНДЛЕРЫ ЗАРЕГИСТРИРОВАНЫ")
 logger.info("=" * 80)
+
+# Предзагрузка модели Whisper при старте бота (оптимизация)
+try:
+    logger.info("Предзагрузка модели Whisper...")
+    from moviebot.services.shazam_service import get_whisper
+    whisper = get_whisper()
+    if whisper and whisper is not False:
+        logger.info("✅ Модель Whisper предзагружена и готова к использованию")
+    else:
+        logger.warning("⚠️ Модель Whisper недоступна, будет использован Vosk как fallback")
+except Exception as e:
+    logger.warning(f"⚠️ Не удалось предзагрузить Whisper: {e}. Будет загружена при первом использовании.")
 
 # Debug-хэндлер для settings (после всех register)
 @bot.callback_query_handler(func=lambda call: 'settings' in call.data.lower())

@@ -736,3 +736,47 @@ def search_films(query, page=1):
 
 # Добавление и анонс
 
+
+def get_film_by_imdb_id(imdb_id):
+    """Получает информацию о фильме по IMDB ID"""
+    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+    
+    # Используем поиск по IMDB ID
+    url = "https://kinopoiskapiunofficial.tech/api/v2.2/films"
+    params = {
+        'order': 'RATING',
+        'type': 'ALL',
+        'ratingFrom': 0,
+        'ratingTo': 10,
+        'yearFrom': 1000,
+        'yearTo': 3000,
+        'imdbId': imdb_id,
+        'page': 1
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=15)
+        log_kinopoisk_api_request(f"/api/v2.2/films?imdbId={imdb_id}", 'GET', response.status_code, None, None, None)
+        
+        if response.status_code == 200:
+            data = response.json()
+            items = data.get('items', [])
+            if items and len(items) > 0:
+                film = items[0]
+                kp_id = film.get('kinopoiskId') or film.get('filmId')
+                title = film.get('nameRu') or film.get('nameOriginal', 'Без названия')
+                year = film.get('year')
+                
+                return {
+                    'kp_id': str(kp_id) if kp_id else None,
+                    'title': title,
+                    'year': year,
+                    'imdb_id': imdb_id
+                }
+        
+        logger.warning(f"Фильм с IMDB ID {imdb_id} не найден в Kinopoisk")
+        return None
+    except Exception as e:
+        logger.error(f"Ошибка get_film_by_imdb_id для {imdb_id}: {e}", exc_info=True)
+        return None
+

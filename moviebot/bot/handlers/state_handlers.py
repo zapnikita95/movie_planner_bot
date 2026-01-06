@@ -681,6 +681,10 @@ def check_ticket_message(message):
         # Для upload_ticket ожидаются файлы, но можно обработать "готово"
         return message.text.lower().strip() == 'готово'
     
+    if step == 'add_more_tickets':
+        # Для add_more_tickets ожидаются файлы, но можно обработать "готово"
+        return message.text.lower().strip() == 'готово'
+    
     return True
 
 
@@ -771,6 +775,37 @@ def handle_ticket(message):
                     ticket_done_internal(message, state)
                     return
                 logger.info(f"[TICKET HANDLER] Игнорируем текст в режиме upload_ticket (ожидаются фото/документы)")
+                return
+            
+            if step == 'add_more_tickets':
+                if text.lower().strip() == 'готово':
+                    plan_id = state.get('plan_id')
+                    chat_id_state = state.get('chat_id')
+                    if plan_id:
+                        import json
+                        from moviebot.database.db_connection import db_lock, cursor
+                        with db_lock:
+                            cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))
+                            ticket_row = cursor.fetchone()
+                            ticket_count = 0
+                            if ticket_row:
+                                ticket_data = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else ticket_row[0]
+                                if ticket_data:
+                                    try:
+                                        tickets_list = json.loads(ticket_data)
+                                        if isinstance(tickets_list, list):
+                                            ticket_count = len(tickets_list)
+                                        else:
+                                            ticket_count = 1
+                                    except:
+                                        ticket_count = 1
+                        
+                        bot_instance.reply_to(message, f"✅ Загрузка билетов завершена! Всего билетов: {ticket_count}")
+                        # Очищаем состояние
+                        if user_id in user_ticket_state:
+                            del user_ticket_state[user_id]
+                    return
+                logger.info(f"[TICKET HANDLER] Игнорируем текст в режиме add_more_tickets (ожидаются фото/документы)")
                 return
             
             if step == 'waiting_session_time':

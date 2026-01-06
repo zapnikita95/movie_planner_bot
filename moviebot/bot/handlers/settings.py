@@ -293,9 +293,10 @@ def handle_settings_callback(call):
             user_import_state[user_id] = {
                 'step': 'waiting_user_id',
                 'kp_user_id': None,
-                'count': None
+                'count': None,
+                'prompt_message_id': call.message.message_id
             }
-            bot_instance.edit_message_text(
+            msg = bot_instance.edit_message_text(
                 f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
                 f"Отправьте ID пользователя Кинопоиска или ссылку на профиль.\n\n"
                 f"Примеры:\n"
@@ -305,7 +306,13 @@ def handle_settings_callback(call):
                 call.message.message_id,
                 parse_mode='HTML'
             )
-            logger.info(f"[SETTINGS] Импорт базы - состояние установлено для user_id={user_id}")
+            # Сохраняем ID сообщения в состоянии для проверки ответного сообщения
+            if msg:
+                user_import_state[user_id]['prompt_message_id'] = msg.message_id
+            else:
+                # Если edit не удался, используем исходный message_id
+                user_import_state[user_id]['prompt_message_id'] = call.message.message_id
+            logger.info(f"[SETTINGS] Импорт базы - состояние установлено для user_id={user_id}, prompt_message_id={user_import_state[user_id]['prompt_message_id']}")
             return
         
         if action.startswith("random_events:example:"):
