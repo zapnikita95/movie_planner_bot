@@ -1427,7 +1427,10 @@ def handle_clean(message):
         state = user_clean_state[user_id]
         
         try:
-            if text == 'ДА, УДАЛИТЬ':
+            # Нормализуем текст: убираем пробелы, запятые, приводим к верхнему регистру
+            normalized_text = text.replace(' ', '').replace(',', '').upper()
+            # Проверяем различные варианты написания "ДА, УДАЛИТЬ"
+            if normalized_text == 'ДАУДАЛИТЬ':
                 from moviebot.bot.handlers.series import handle_clean_confirm_internal
                 handle_clean_confirm_internal(message)
             else:

@@ -144,6 +144,8 @@ def clean_action_choice(call):
                 bot_instance.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
         else:
             # В личном чате можно сразу удалить
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
             bot_instance.edit_message_text(
                 "⚠️ <b>Обнуление базы данных чата</b>\n\n"
                 "Это удалит <b>ВСЕ данные чата</b>:\n"
@@ -154,13 +156,15 @@ def clean_action_choice(call):
                 "• Все настройки\n\n"
                 "Это действие необратимо!\n\n"
                 "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
-                call.message.chat.id, call.message.message_id, parse_mode='HTML'
+                call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup
             )
             user_clean_state[user_id]['confirm_needed'] = True
             user_clean_state[user_id]['target'] = 'chat'
     
     elif action == 'user_db':
         # Обнуление базы пользователя - удаляет только данные конкретного пользователя в этом чате
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
         bot_instance.edit_message_text(
             "⚠️ <b>Обнуление базы данных пользователя</b>\n\n"
             "Это удалит <b>только ваши данные в этом чате</b>:\n"
@@ -171,7 +175,7 @@ def clean_action_choice(call):
             "• Ваши настройки (включая часовой пояс)\n\n"
             "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
             "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
-            call.message.chat.id, call.message.message_id, parse_mode='HTML'
+            call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup
         )
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'user'
@@ -247,6 +251,8 @@ def clean_action_choice(call):
                 bot_instance.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
         else:
             # В личном чате можно сразу удалить
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
             bot_instance.edit_message_text(
                 "⚠️ <b>Удаление непросмотренных фильмов</b>\n\n"
                 "Это удалит все фильмы, которые:\n"
@@ -254,13 +260,15 @@ def clean_action_choice(call):
                 "• У которых нет билетов\n"
                 "• Которые не участвуют ни в каких активностях\n\n"
                 "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
-                call.message.chat.id, call.message.message_id, parse_mode='HTML'
+                call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup
             )
             user_clean_state[user_id]['confirm_needed'] = True
             user_clean_state[user_id]['target'] = 'unwatched_movies'
     
     elif action == 'imported_ratings':
         # Удаление импортированных оценок пользователя
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
         bot_instance.edit_message_text(
             "⚠️ <b>Удаление импортированных оценок с Кинопоиска</b>\n\n"
             "Это удалит <b>только ваши импортированные оценки</b>:\n"
@@ -268,13 +276,15 @@ def clean_action_choice(call):
             "• Ваши обычные оценки останутся без изменений\n"
             "• Данные других пользователей останутся без изменений\n\n"
             "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
-            call.message.chat.id, call.message.message_id, parse_mode='HTML'
+            call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup
         )
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'imported_ratings'
     
     elif action == 'clean_imported_movies':
         # Удаление фильмов, которые были добавлены только из-за импорта
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
         bot_instance.edit_message_text(
             "⚠️ <b>Удаление фильмов, добавленных при импорте</b>\n\n"
             "Это удалит фильмы, которые:\n"
@@ -284,7 +294,7 @@ def clean_action_choice(call):
             "• Не находятся в планах\n"
             "• Не просмотрены (watched = 0)\n\n"
             "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
-            call.message.chat.id, call.message.message_id, parse_mode='HTML'
+            call.message.chat.id, call.message.message_id, parse_mode='HTML', reply_markup=markup
         )
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'clean_imported_movies'
