@@ -4683,6 +4683,29 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             if plan_info:
                 plan_type_text = "🎦 в кино" if plan_info['type'] == 'cinema' else "🏠 дома"
                 text += f"\n\n📅 <b>Запланирован {plan_type_text}</b> на {plan_info['date']}"
+                
+                # Для запланированных фильмов показываем среднюю оценку, если фильм просмотрен
+                if watched and film_id:
+                    try:
+                        import threading
+                        lock_acquired = db_lock.acquire(timeout=1.0)
+                        if lock_acquired:
+                            try:
+                                # Получаем среднюю оценку всех участников
+                                cursor.execute('''
+                                    SELECT AVG(rating) as avg FROM ratings 
+                                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                                ''', (chat_id, film_id))
+                                avg_result = cursor.fetchone()
+                                if avg_result:
+                                    avg_rating = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                                    avg_rating = float(avg_rating) if avg_rating is not None else None
+                                    if avg_rating:
+                                        text += f"\n⭐ <b>Средняя оценка: {avg_rating:.1f}/10</b>"
+                            finally:
+                                db_lock.release()
+                    except Exception as avg_e:
+                        logger.warning(f"[SHOW FILM INFO] Ошибка при запросе средней оценки для запланированного фильма: {avg_e}")
             logger.info(f"[SHOW FILM INFO] Обработка existing завершена")
         
         # Создаем кнопки
