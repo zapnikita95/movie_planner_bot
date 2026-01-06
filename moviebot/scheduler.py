@@ -10,7 +10,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.config import PLANS_TZ
 from moviebot.states import plan_notification_messages
 from moviebot.database.db_operations import print_daily_stats, get_user_timezone_or_default, get_notification_settings
-
+from telebot.apihelper import ApiTelegramException
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
@@ -2125,7 +2125,7 @@ def start_dice_game():
             try:
                 chat_info = bot.get_chat(chat_id)
                 if chat_info.type == 'private':
-                    continue  # Пропускаем личные чаты
+                    continue
             except Exception as e:
                 logger.warning(f"[DICE GAME] Не удалось получить информацию о чате {chat_id}: {e}")
                 continue
@@ -2134,14 +2134,17 @@ def start_dice_game():
             if not get_random_events_enabled(chat_id):
                 continue
             
-            # Проверяем, было ли уже отправлено какое-то событие/уведомление сегодня
-            if was_event_sent_today(chat_id, 'random_event') or was_event_sent_today(chat_id, 'weekend_reminder') or was_event_sent_today(chat_id, 'premiere_reminder'):
+            # Проверяем, было ли уже отправлено какое-то событие сегодня
+            if was_event_sent_today(chat_id, 'random_event') or \
+               was_event_sent_today(chat_id, 'weekend_reminder') or \
+               was_event_sent_today(chat_id, 'premiere_reminder'):
                 logger.info(f"[DICE GAME] Пропуск чата {chat_id} - уже было отправлено событие сегодня")
                 continue
             
             # Проверяем, когда последний раз запускали игру
-            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_dice_game_date'", (chat_id,))
-            last_date_row = cursor.fetchone()
+            with db_lock:
+                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_dice_game_date'", (chat_id,))
+                last_date_row = cursor.fetchone()
             
             if last_date_row:
                 last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
@@ -2153,61 +2156,98 @@ def start_dice_game():
                 except:
                     pass
             
-            # Получаем список активных участников
-            cursor.execute('''
-                SELECT DISTINCT user_id, username 
-                FROM stats 
-                WHERE chat_id = %s 
-                AND timestamp >= %s
-            ''', (chat_id, (now - timedelta(days=30)).isoformat()))
-            participants = cursor.fetchall()
+            # Получаем список активных участников (за последние 30 дней)
+            with db_lock:
+                cursor.execute('''
+                    SELECT DISTINCT user_id, username 
+                    FROM stats 
+                    WHERE chat_id = %s 
+                    AND timestamp >= %s
+                ''', (chat_id, (now - timedelta(days=30)).isoformat()))
+                participants = cursor.fetchall()
             
             if len(participants) < 2:
                 continue
             
-            # Отправляем сообщение с кнопкой
+            # ===== Отправка сообщения с кнопкой =====
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            from moviebot.states import dice_game_state
+            from telebot.apihelper import ApiTelegramException
+
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
+            markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+            markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+            
+            text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+            text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
+            
+            current_chat_id = chat_id  # будем использовать эту переменную для возможного обновления после миграции
+            
             try:
-                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                from moviebot.states import dice_game_state
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
-                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
-                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
-                
-                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
-                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании."
-                
                 msg = bot.send_message(
-                    chat_id,
-                    text,
+                    chat_id=current_chat_id,
+                    text=text,
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
                 
-                # Сохраняем состояние игры
-                dice_game_state[chat_id] = {
-                    'participants': {},
-                    'message_id': msg.message_id,
-                    'start_time': now,
-                    'dice_messages': {}
-                }
+                success = True
                 
-                # Отмечаем, что событие отправлено
-                mark_event_sent(chat_id, 'random_event')
+            except ApiTelegramException as e:
+                if e.error_code == 400 and 'upgraded to a supergroup chat' in str(e.description).lower():
+                    try:
+                        new_chat_id = e.result_json['parameters']['migrate_to_chat_id']
+                        logger.info(f"[DICE GAME] Чат {chat_id} мигрировал в супергруппу {new_chat_id}. Отправляем туда.")
+                        
+                        msg = bot.send_message(
+                            chat_id=new_chat_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                        
+                        current_chat_id = new_chat_id
+                        success = True
+                        
+                    except Exception as e2:
+                        logger.error(f"[DICE GAME] Не удалось отправить сообщение даже в новый чат {new_chat_id}: {e2}", exc_info=True)
+                        continue
+                else:
+                    logger.error(f"[DICE GAME] Ошибка Telegram API при отправке в чат {chat_id}: {e}", exc_info=True)
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"[DICE GAME] Непредвиденная ошибка при отправке в чат {chat_id}: {e}", exc_info=True)
+                continue
+            
+            else:
+                success = True
+            
+            if not success:
+                continue
                 
-                # Сохраняем дату последнего запуска
+            # ===== Сохраняем состояние игры (с учётом возможной миграции) =====
+            dice_game_state[current_chat_id] = {
+                'participants': {},           # сюда будут добавляться пользователи после броска
+                'message_id': msg.message_id,  # сообщение с кнопкой
+                'start_time': now,
+                'dice_messages': {}            # message_id кубика → user_id
+            }
+            
+            # Отмечаем, что событие отправлено
+            mark_event_sent(chat_id if current_chat_id == chat_id else current_chat_id, 'random_event')
+            
+            # Сохраняем дату последнего запуска (по актуальному chat_id)
+            with db_lock:
                 cursor.execute('''
                     INSERT INTO settings (chat_id, key, value)
                     VALUES (%s, 'last_dice_game_date', %s)
                     ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-                ''', (chat_id, now.date().isoformat()))
+                ''', (current_chat_id, now.date().isoformat()))
                 conn.commit()
-                
-                logger.info(f"[DICE GAME] Запущена игра в кубик для чата {chat_id}")
-            except Exception as e:
-                logger.error(f"[DICE GAME] Ошибка при запуске игры: {e}", exc_info=True)
+            
+            logger.info(f"[DICE GAME] Запущена игра в кубик для чата {current_chat_id}")
+            
     except Exception as e:
-        logger.error(f"[DICE GAME] Ошибка в start_dice_game: {e}", exc_info=True)
-
-
+        logger.error(f"[DICE GAME] Критическая ошибка в start_dice_game: {e}", exc_info=True)
