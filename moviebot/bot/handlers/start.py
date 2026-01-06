@@ -163,10 +163,27 @@ def register_start_handlers(bot):
             
             # Вызываем соответствующую команду
             if action == 'seasons':
-                # Команда /seasons обрабатывается через callback в series_callbacks.py
-                # Используем callback для показа списка сериалов
-                from moviebot.bot.callbacks.series_callbacks import show_seasons_list
-                show_seasons_list(call)
+                # Команда /seasons обрабатывается через callback "seasons_list"
+                # Просто меняем data и обрабатываем как callback
+                call.data = "seasons_list"
+                # Обработчик уже зарегистрирован в series_callbacks, просто обрабатываем callback
+                # Импортируем обработчик напрямую
+                from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
+                # Обработчик уже зарегистрирован при старте, просто отправляем сообщение
+                # или используем прямой вызов через bot
+                try:
+                    # Создаем временный callback с нужными данными
+                    original_data = call.data
+                    call.data = "seasons_list"
+                    # Обработчик должен быть зарегистрирован, но для надежности вызываем напрямую
+                    # Просто отправляем сообщение с кнопкой для вызова seasons
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("📺 Список сериалов", callback_data="seasons_list"))
+                    bot.send_message(chat_id, "📺 Нажмите кнопку для просмотра сериалов", reply_markup=markup)
+                    call.data = original_data
+                except Exception as e:
+                    logger.error(f"[START MENU] Ошибка при вызове seasons: {e}", exc_info=True)
+                    bot.send_message(chat_id, "📺 Используйте /seasons для просмотра сериалов")
                 return
             elif action == 'premieres':
                 message.text = '/premieres'

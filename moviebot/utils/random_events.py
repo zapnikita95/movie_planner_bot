@@ -156,7 +156,11 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
         
         # Создаем кнопки
         markup = InlineKeyboardMarkup(row_width=1)
-        if remaining_count > 0 or len(participants_without_results) > 0:
+        # Если все бросили и есть результаты, не показываем кнопку "Бросить кубик"
+        if all_threw and all_have_results:
+            # Все бросили - не показываем кнопку броска
+            pass
+        elif remaining_count > 0 or len(participants_without_results) > 0:
             markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
         markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
         markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))

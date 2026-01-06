@@ -1549,28 +1549,50 @@ def handle_admin(message):
                         target_id = int(target_id_str)
                         is_group = target_id < 0
                         
-                        from moviebot.bot.handlers.admin import cancel_subscription_by_id
-                        success, result_message, count = cancel_subscription_by_id(target_id, is_group)
-                        
-                        if success:
-                            text_result = f"✅ {result_message}\n\n"
-                            text_result += f"ID: <code>{target_id}</code>\n"
-                            text_result += f"Тип: {'Группа' if is_group else 'Пользователь'}"
+                        # Если это группа, отменяем сразу (как раньше)
+                        if is_group:
+                            from moviebot.bot.handlers.admin import cancel_subscription_by_id
+                            success, result_message, count = cancel_subscription_by_id(target_id, is_group)
                             
+                            if success:
+                                text_result = f"✅ {result_message}\n\n"
+                                text_result += f"ID: <code>{target_id}</code>\n"
+                                text_result += f"Тип: Группа"
+                                
+                                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                                markup = InlineKeyboardMarkup()
+                                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
+                                
+                                bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                            else:
+                                send_error_message(
+                                    message,
+                                    f"❌ {result_message}",
+                                    state=state,
+                                    back_callback="admin:back"
+                                )
+                            
+                            del user_unsubscribe_state[user_id]
+                        else:
+                            # Если это пользователь, показываем меню выбора типа отмены
                             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                            markup = InlineKeyboardMarkup()
+                            
+                            text_result = f"👤 <b>Пользователь: {target_id}</b>\n\n"
+                            text_result += "Что вы хотите отменить?\n\n"
+                            text_result += "• <b>Личная подписка</b> - все личные подписки этого пользователя\n"
+                            text_result += "• <b>Оплаченные подписки</b> - все подписки, которые были оплачены этим пользователем (личные и групповые)"
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            markup.add(InlineKeyboardButton("👤 Личная подписка", callback_data=f"unsubscribe:personal:{target_id}"))
+                            markup.add(InlineKeyboardButton("💳 Оплаченные подписки", callback_data=f"unsubscribe:paid:{target_id}"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
                             
+                            # Сохраняем target_id в состоянии для дальнейшей обработки
+                            state['target_id'] = target_id
+                            state['prompt_message_id'] = None  # Сбрасываем, так как теперь будем работать через callbacks
+                            
                             bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
-                        else:
-                            send_error_message(
-                                message,
-                                f"❌ {result_message}",
-                                state=state,
-                                back_callback="admin:back"
-                            )
-                        
-                        del user_unsubscribe_state[user_id]
+                            # НЕ удаляем user_unsubscribe_state, так как будем обрабатывать через callbacks
                     except ValueError:
                         send_error_message(
                             message,

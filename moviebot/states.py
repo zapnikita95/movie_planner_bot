@@ -62,3 +62,6 @@ user_promo_admin_state = {}  # user_id: {} - состояние ожидания
 user_unsubscribe_state = {}  # user_id: {'message_id': int} - состояние ожидания ввода ID для /unsubscribe
 user_add_admin_state = {}  # user_id: {'message_id': int} - состояние ожидания ввода ID для /add_admin
 
+# Состояния для личных сообщений (чтобы следующее сообщение без реплая обрабатывалось как ответ на prompt)
+private_chat_prompts = {}  # user_id: {'prompt_message_id': int, 'handler_type': str} - для обработки следующего сообщения в личке как реплая
+
