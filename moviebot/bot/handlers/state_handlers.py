@@ -487,6 +487,12 @@ def handle_promo(message):
         chat_id = message.chat.id
         text = message.text.strip()
         
+        # ────────────────────────────────────────────────────────────────
+        # Добавляем эту проверку в самом начале!
+        if message.text and message.text.startswith('/'):
+            return  # Это команда → пропускаем, пусть обработают command-handlers
+        # ────────────────────────────────────────────────────────────────
+        
         # Проверяем состояние
         if user_id in user_promo_state:
             state = user_promo_state[user_id]
@@ -644,7 +650,6 @@ def handle_promo(message):
             "❌ Не получилось обработать сообщение",
             back_callback="back_to_start_menu"
         )
-
 
 # ==================== HANDLER ДЛЯ БИЛЕТОВ ====================
 

@@ -8,7 +8,7 @@ import requests
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.bot.bot_init import bot
 from moviebot.config import KP_TOKEN
-from moviebot.services.shazam_service import search_movies, get_whisper
+from moviebot.services.shazam_service import search_movies, get_whisper, get_vosk, transcribe_with_vosk
 from moviebot.states import private_chat_prompts, shazam_state
 from moviebot.api.kinopoisk_api import extract_movie_info
 from moviebot.utils.helpers import has_recommendations_access
@@ -402,57 +402,66 @@ def register_shazam_handlers(bot):
                     tmp_path = tmp_file.name
                 
                 query = None
+                wav_path = None
                 try:
-                    # Используем Whisper для распознавания
-                    whisper = get_whisper()
+                    # Конвертируем OGG в WAV (нужно для обоих вариантов)
+                    from pydub import AudioSegment
+                    wav_path = tmp_path.replace('.ogg', '.wav')
                     
+                    try:
+                        # Конвертируем в WAV с правильными параметрами для Vosk (16kHz, mono)
+                        audio = AudioSegment.from_ogg(tmp_path)
+                        audio = audio.set_frame_rate(16000).set_channels(1)  # 16kHz, mono для Vosk
+                        audio.export(wav_path, format="wav")
+                    except Exception as conv_error:
+                        logger.error(f"[SHAZAM] Ошибка при конвертации аудио: {conv_error}", exc_info=True)
+                        # Пробуем стандартную конвертацию
+                        AudioSegment.from_ogg(tmp_path).export(wav_path, format="wav")
+                    
+                    # Пробуем Whisper (основной вариант)
+                    whisper = get_whisper()
                     if whisper:
-                        # Конвертируем OGG в WAV
-                        from pydub import AudioSegment
-                        wav_path = tmp_path.replace('.ogg', '.wav')
-                        
                         try:
-                            AudioSegment.from_ogg(tmp_path).export(wav_path, format="wav")
+                            logger.info("[SHAZAM] Используем Whisper для распознавания...")
                             result = whisper(wav_path)
                             query = result.get("text", "") if isinstance(result, dict) else str(result)
-                        except Exception as conv_error:
-                            logger.error(f"[SHAZAM] Ошибка при конвертации аудио: {conv_error}", exc_info=True)
-                            # Пробуем распознать напрямую OGG (если Whisper поддерживает)
-                            try:
-                                result = whisper(tmp_path)
-                                query = result.get("text", "") if isinstance(result, dict) else str(result)
-                            except:
-                                raise conv_error
-                        finally:
-                            # Удаляем временные файлы
-                            if os.path.exists(tmp_path):
-                                os.remove(tmp_path)
-                            if os.path.exists(wav_path):
-                                os.remove(wav_path)
-                    else:
-                        # Если Whisper недоступен, просим пользователя написать текстом
+                            if query and query.strip():
+                                logger.info(f"[SHAZAM] Whisper распознал: {query[:50]}...")
+                        except Exception as whisper_error:
+                            logger.warning(f"[SHAZAM] Whisper не смог распознать: {whisper_error}")
+                            query = None
+                    
+                    # Если Whisper не сработал, пробуем Vosk (запасной вариант)
+                    if not query or not query.strip():
+                        logger.info("[SHAZAM] Пробуем Vosk (запасной вариант)...")
+                        query = transcribe_with_vosk(wav_path)
+                        if query and query.strip():
+                            logger.info(f"[SHAZAM] Vosk распознал: {query[:50]}...")
+                    
+                    # Очищаем временные файлы
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                    if wav_path and os.path.exists(wav_path):
+                        os.remove(wav_path)
+                    
+                    if not query or not query.strip():
+                        # Если оба варианта не сработали
                         bot.edit_message_text(
-                            "❌ Распознавание голоса временно недоступно. Пожалуйста, опишите фильм текстом.",
+                            "❌ Не удалось распознать голосовое сообщение. Пожалуйста, опишите фильм текстом.",
                             chat_id,
                             loading_msg.message_id
                         )
-                        if os.path.exists(tmp_path):
-                            os.remove(tmp_path)
                         return True
+                        
                 except Exception as e:
                     logger.error(f"[SHAZAM] Ошибка при распознавании голоса: {e}", exc_info=True)
-                    bot.edit_message_text(
-                        "❌ Ошибка при распознавании голоса. Пожалуйста, опишите фильм текстом.",
-                        chat_id,
-                        loading_msg.message_id
-                    )
+                    # Очищаем временные файлы в случае ошибки
                     if os.path.exists(tmp_path):
                         os.remove(tmp_path)
-                    return True
-                
-                if not query or not query.strip():
+                    if wav_path and os.path.exists(wav_path):
+                        os.remove(wav_path)
                     bot.edit_message_text(
-                        "❌ Не удалось распознать текст. Попробуйте записать еще раз или опишите фильм текстом.",
+                        "❌ Ошибка при распознавании голоса. Пожалуйста, опишите фильм текстом.",
                         chat_id,
                         loading_msg.message_id
                     )

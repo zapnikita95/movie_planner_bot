@@ -327,7 +327,7 @@ def handle_settings_callback(call):
             
             if example_type == "with_user":
                 # Пример события с участником (выбор случайного участника)
-                from moviebot.bot.bot_init import BOT_ID
+                # BOT_ID уже импортирован глобально
                 with db_lock:
                     cursor.execute('''
                         SELECT DISTINCT user_id, username 
@@ -379,19 +379,13 @@ def handle_settings_callback(call):
                     return
                 
                 with db_lock:
-                    if BOT_ID:
-                        cursor.execute('''
-                            SELECT COUNT(DISTINCT user_id) 
-                            FROM stats 
-                            WHERE chat_id = %s 
-                            AND user_id != %s
-                        ''', (chat_id, BOT_ID))
-                    else:
-                        cursor.execute('''
-                            SELECT COUNT(DISTINCT user_id) 
-                            FROM stats 
-                            WHERE chat_id = %s
-                        ''', (chat_id,))
+                    # BOT_ID всегда должен быть определен при импорте
+                    cursor.execute('''
+                        SELECT COUNT(DISTINCT user_id) 
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND user_id != %s
+                    ''', (chat_id, BOT_ID))
                     participants_count_row = cursor.fetchone()
                     active_participants = participants_count_row.get('count') if isinstance(participants_count_row, dict) else (participants_count_row[0] if participants_count_row else 0)
                 

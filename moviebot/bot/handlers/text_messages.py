@@ -386,6 +386,82 @@ def handle_plan_link_reply(message):
             pass
 
 
+def check_clean_imported_ratings_reply(message):
+    """Проверка для handler ответа на сообщение об удалении импортированных оценок"""
+    # Проверяем, что это личный чат или реплай на сообщение бота
+    is_private = message.chat.type == 'private'
+    
+    if is_private:
+        # В личном чате проверяем состояние ожидания
+        from moviebot.states import user_private_handler_state
+        user_id = message.from_user.id
+        if user_id in user_private_handler_state:
+            state = user_private_handler_state[user_id]
+            if state.get('handler') == 'clean_imported_ratings':
+                text = message.text.strip().upper() if message.text else ""
+                if text == "ДА, УДАЛИТЬ":
+                    return True
+    
+    # Для групп проверяем реплай
+    if not message.reply_to_message:
+        return False
+    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+        return False
+    reply_text = message.reply_to_message.text or ""
+    if "Удаление импортированных оценок с Кинопоиска" not in reply_text:
+        return False
+    if not message.text or message.text.strip().upper() != "ДА, УДАЛИТЬ":
+        return False
+    return True
+
+
+@bot_instance.message_handler(func=check_clean_imported_ratings_reply)
+def handle_clean_imported_ratings_reply(message):
+    """Обработчик ответа на сообщение об удалении импортированных оценок - ТОЛЬКО для 'ДА, УДАЛИТЬ'"""
+    logger.info(f"[CLEAN IMPORTED RATINGS REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        text = message.text.strip().upper() if message.text else ""
+        
+        # Проверяем, что текст точно "ДА, УДАЛИТЬ"
+        if text != "ДА, УДАЛИТЬ":
+            logger.warning(f"[CLEAN IMPORTED RATINGS REPLY] Неверный текст подтверждения: '{text}'")
+            return
+        
+        # Проверяем, что пользователь в состоянии user_clean_state с target='imported_ratings'
+        from moviebot.states import user_clean_state, user_private_handler_state
+        if user_id not in user_clean_state:
+            logger.warning(f"[CLEAN IMPORTED RATINGS REPLY] Пользователь {user_id} не в состоянии user_clean_state")
+            # Очищаем состояние для личных чатов, если оно есть
+            if user_id in user_private_handler_state:
+                del user_private_handler_state[user_id]
+            return
+        
+        state = user_clean_state[user_id]
+        if state.get('target') != 'imported_ratings':
+            logger.warning(f"[CLEAN IMPORTED RATINGS REPLY] Неверный target в состоянии: {state.get('target')}")
+            # Очищаем состояние для личных чатов, если оно есть
+            if user_id in user_private_handler_state:
+                del user_private_handler_state[user_id]
+            return
+        
+        # Очищаем состояние для личных чатов после обработки
+        if user_id in user_private_handler_state:
+            del user_private_handler_state[user_id]
+        
+        # Вызываем обработчик удаления импортированных оценок
+        from moviebot.bot.handlers.series import handle_clean_confirm_internal
+        handle_clean_confirm_internal(message)
+        logger.info(f"[CLEAN IMPORTED RATINGS REPLY] ✅ Завершено")
+    except Exception as e:
+        logger.error(f"[CLEAN IMPORTED RATINGS REPLY] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+        except:
+            pass
+
+
 def check_list_view_film_reply(message):
     """Проверка для handler ответа на промпт просмотра описания из /list"""
     if not message.reply_to_message:
@@ -858,6 +934,14 @@ def handle_rate_list_reply(message):
         logger.info(f"[HANDLE RATE LIST REPLY] Пропуск команды")
         return
     
+    # Пропускаем сообщения для clean handler'а
+    reply_text = message.reply_to_message.text or "" if message.reply_to_message else ""
+    if "Удаление импортированных оценок с Кинопоиска" in reply_text:
+        text = message.text.strip().upper() if message.text else ""
+        if text == "ДА, УДАЛИТЬ":
+            logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - это сообщение для clean handler'а")
+            return
+    
     user_id = message.from_user.id
     
     # ВАЖНО: Пропускаем сообщения, если пользователь в любом состоянии
@@ -1162,6 +1246,44 @@ def main_text_handler(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     text = message.text.strip() if message.text else ""
+    
+    # ЛОГИКА ДЛЯ ЛИЧНЫХ ЧАТОВ: проверяем, есть ли ожидающее сообщение для handler'а
+    is_private = message.chat.type == 'private'
+    if is_private:
+        from moviebot.states import user_private_handler_state
+        if user_id in user_private_handler_state:
+            state = user_private_handler_state[user_id]
+            handler_name = state.get('handler')
+            prompt_message_id = state.get('prompt_message_id')
+            
+            logger.info(f"[MAIN TEXT HANDLER] Личный чат: найдено ожидающее состояние handler='{handler_name}', prompt_message_id={prompt_message_id}")
+            
+            # Обрабатываем через соответствующий handler
+            if handler_name == 'clean_imported_ratings':
+                # Создаем fake reply_to_message для совместимости
+                class FakeReplyMessage:
+                    def __init__(self, message_id):
+                        self.message_id = message_id
+                        self.from_user = type('User', (), {'id': BOT_ID})()
+                        self.text = "⚠️ Удаление импортированных оценок с Кинопоиска"
+                
+                # Сохраняем оригинальный reply_to_message, если он есть
+                original_reply = getattr(message, 'reply_to_message', None)
+                message.reply_to_message = FakeReplyMessage(prompt_message_id)
+                
+                # Вызываем handler
+                handle_clean_imported_ratings_reply(message)
+                
+                # Восстанавливаем оригинальный reply_to_message
+                if original_reply:
+                    message.reply_to_message = original_reply
+                else:
+                    message.reply_to_message = None
+                
+                return
+            
+            # Для других handlers можно добавить аналогичную логику
+            # После обработки состояние очищается в самом handler'е
     
     # Пропускаем сообщения со ссылками на Кинопоиск без реплая - они обрабатываются отдельным handler
     if text and ('kinopoisk.ru' in text.lower() or 'kinopoisk.com' in text.lower()):

@@ -24,3 +24,4 @@ sacremoses
 # Дополнительные зависимости для Whisper и обработки аудио
 librosa
 soundfile
+vosk

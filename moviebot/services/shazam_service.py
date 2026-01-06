@@ -41,6 +41,8 @@ DATA_PATH = os.path.join(DATA_DIR, 'imdb_movies.csv')
 # Глобальные переменные для моделей (lazy loading)
 _model = None
 _translator = None
+_whisper = None
+_vosk = None
 _index = None
 _movies = None
 
@@ -521,12 +523,134 @@ def get_index_and_movies():
     return _index, _movies
 
 def get_whisper():
-    """Ленивая загрузка модели распознавания речи (для fallback)"""
-    # В основном используем Telegram API, но оставляем Whisper как fallback
+    """Ленивая загрузка модели Whisper (основной вариант для распознавания речи)"""
+    global _whisper
+    if _whisper is None:
+        logger.info("Загрузка модели Whisper (основной вариант)...")
+        try:
+            from transformers import pipeline
+            _whisper = pipeline("automatic-speech-recognition", model="openai/whisper-small", device=-1)
+            logger.info("Whisper загружен успешно")
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить Whisper: {e}")
+            _whisper = False
+    return _whisper if _whisper is not False else None
+
+def get_vosk():
+    """Ленивая загрузка модели Vosk (запасной вариант для распознавания речи)"""
+    global _vosk
+    if _vosk is None:
+        logger.info("Загрузка модели Vosk (запасной вариант)...")
+        try:
+            import vosk
+            import json
+            
+            # Используем легкую русско-английскую модель
+            # Модель будет скачана автоматически при первом использовании
+            model_name = "vosk-model-small-ru-0.22"  # Легкая модель для русского и английского
+            
+            # Путь к модели (в data/vosk или /data/vosk на Railway)
+            model_path = os.path.join(DATA_DIR, '..', 'vosk', model_name)
+            if not os.path.exists(model_path):
+                # Пробуем альтернативный путь
+                alt_model_path = os.path.join(BASE_DIR, 'data', 'vosk', model_name)
+                if os.path.exists(alt_model_path):
+                    model_path = alt_model_path
+                else:
+                    # Используем встроенную модель если доступна
+                    logger.warning(f"Модель Vosk не найдена по пути {model_path}, пробуем использовать встроенную...")
+                    model_path = None
+            
+            if model_path and os.path.exists(model_path):
+                model = vosk.Model(model_path)
+            else:
+                # Пробуем использовать встроенную модель или скачать
+                try:
+                    # Vosk может работать с минимальной моделью
+                    model = vosk.Model(lang="ru")  # Пробуем встроенную
+                except:
+                    # Если не получилось, возвращаем None
+                    logger.warning("Не удалось загрузить модель Vosk")
+                    _vosk = False
+                    return None
+            
+            recognizer = vosk.KaldiRecognizer(model, 16000)  # 16kHz sample rate
+            _vosk = {'model': model, 'recognizer': recognizer}
+            logger.info("Vosk загружен успешно")
+        except ImportError:
+            logger.warning("Vosk не установлен. Установите: pip install vosk")
+            _vosk = False
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить Vosk: {e}")
+            _vosk = False
+    
+    return _vosk if _vosk is not False else None
+
+def transcribe_with_vosk(audio_path):
+    """
+    Распознает речь с помощью Vosk
+    
+    Args:
+        audio_path: путь к WAV файлу (16kHz, mono)
+    
+    Returns:
+        str: распознанный текст или None
+    """
     try:
-        from transformers import pipeline
-        return pipeline("automatic-speech-recognition", model="openai/whisper-small", device=-1)
-    except:
+        vosk_data = get_vosk()
+        if not vosk_data:
+            return None
+        
+        import vosk
+        import wave
+        import json
+        
+        wf = wave.open(audio_path, "rb")
+        
+        # Проверяем формат
+        if wf.getnchannels() != 1:
+            logger.warning("Vosk требует mono WAV файл, конвертируем...")
+            wf.close()
+            # Конвертируем в mono если нужно
+            from pydub import AudioSegment
+            audio = AudioSegment.from_wav(audio_path)
+            audio = audio.set_channels(1)
+            mono_path = audio_path.replace('.wav', '_mono.wav')
+            audio.export(mono_path, format="wav")
+            wf = wave.open(mono_path, "rb")
+            audio_path = mono_path
+        
+        # Создаем новый recognizer с правильной частотой
+        sample_rate = wf.getframerate()
+        model = vosk_data['model']
+        recognizer = vosk.KaldiRecognizer(model, sample_rate)
+        recognizer.SetWords(True)
+        
+        results = []
+        while True:
+            data = wf.readframes(4000)
+            if len(data) == 0:
+                break
+            if recognizer.AcceptWaveform(data):
+                result = json.loads(recognizer.Result())
+                if 'text' in result and result['text']:
+                    results.append(result['text'])
+        
+        # Получаем финальный результат
+        final_result = json.loads(recognizer.FinalResult())
+        if 'text' in final_result and final_result['text']:
+            results.append(final_result['text'])
+        
+        wf.close()
+        
+        # Удаляем временный mono файл если создавали
+        if audio_path.endswith('_mono.wav') and os.path.exists(audio_path):
+            os.remove(audio_path)
+        
+        text = ' '.join(results).strip()
+        return text if text else None
+    except Exception as e:
+        logger.error(f"Ошибка при распознавании с Vosk: {e}", exc_info=True)
         return None
 
 def search_movies(query, top_k=5):

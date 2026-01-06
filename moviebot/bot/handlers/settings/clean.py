@@ -261,17 +261,33 @@ def clean_action_choice(call):
     
     elif action == 'imported_ratings':
         # Удаление импортированных оценок пользователя
-        bot_instance.edit_message_text(
-            "⚠️ <b>Удаление импортированных оценок с Кинопоиска</b>\n\n"
-            "Это удалит <b>только ваши импортированные оценки</b>:\n"
-            "• Все оценки с пометкой is_imported = TRUE\n"
-            "• Ваши обычные оценки останутся без изменений\n"
-            "• Данные других пользователей останутся без изменений\n\n"
-            "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
-            call.message.chat.id, call.message.message_id, parse_mode='HTML'
-        )
+        try:
+            sent_msg = bot_instance.edit_message_text(
+                "⚠️ <b>Удаление импортированных оценок с Кинопоиска</b>\n\n"
+                "Это удалит <b>только ваши импортированные оценки</b>:\n"
+                "• Все оценки с пометкой is_imported = TRUE\n"
+                "• Ваши обычные оценки останутся без изменений\n"
+                "• Данные других пользователей останутся без изменений\n\n"
+                "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+                call.message.chat.id, call.message.message_id, parse_mode='HTML'
+            )
+            # edit_message_text возвращает True/False, а не объект сообщения
+            prompt_message_id = call.message.message_id
+        except Exception as e:
+            logger.error(f"[CLEAN] Ошибка при редактировании сообщения: {e}")
+            prompt_message_id = call.message.message_id
+        
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'imported_ratings'
+        
+        # Для личных чатов сохраняем состояние ожидания следующего сообщения
+        if call.message.chat.type == 'private':
+            from moviebot.states import user_private_handler_state
+            user_private_handler_state[user_id] = {
+                'handler': 'clean_imported_ratings',
+                'prompt_message_id': prompt_message_id
+            }
+            logger.info(f"[CLEAN] Сохранено состояние для личного чата: user_id={user_id}, prompt_message_id={prompt_message_id}")
     
     elif action == 'clean_imported_movies':
         # Удаление фильмов, которые были добавлены только из-за импорта
