@@ -65,3 +65,5 @@ user_add_admin_state = {}  # user_id: {'message_id': int} - состояние �
 # Состояния КиноШазам
 shazam_state = {}  # user_id: {'mode': 'text' or 'voice', 'chat_id': int} - состояние ожидания запроса для КиноШазам
 
+# Состояние для личных чатов - ожидание следующего сообщения после промпта handler'а
+user_private_handler_state = {}  # user_id: {'handler': str, 'prompt_message_id': int, 'handler_func': callable}
