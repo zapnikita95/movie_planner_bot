@@ -154,7 +154,13 @@ import moviebot.bot.callbacks.series_callbacks  # noqa: F401
 import moviebot.bot.callbacks.payment_callbacks  # noqa: F401
 import moviebot.bot.callbacks.premieres_callbacks  # noqa: F401
 import moviebot.bot.handlers.admin  # noqa: F401
-import moviebot.bot.handlers.promo  # noqa: F401
+try:
+    import moviebot.bot.handlers.promo  # noqa: F401
+    logger.info("✅ promo handlers импортированы")
+except Exception as e:
+    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ИМПОРТЕ promo.py: {e}", exc_info=True)
+    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
+    sys.exit(1)
 import moviebot.bot.handlers.state_handlers  # noqa: F401 - состояния (промокоды, оценки и т.д.) должны быть выше!
 import moviebot.bot.handlers.text_messages  # noqa: F401 - теперь будет ниже
 
