@@ -328,15 +328,43 @@ def handle_settings_callback(call):
             if example_type == "with_user":
                 # Пример события с участником (выбор случайного участника)
                 # BOT_ID уже импортирован глобально
+                # Получаем BOT_ID, если он не определен
+                if BOT_ID is None:
+                    try:
+                        bot_info = bot_instance.get_me()
+                        current_bot_id = bot_info.id
+                    except:
+                        current_bot_id = None
+                else:
+                    current_bot_id = BOT_ID
+                
                 with db_lock:
-                    cursor.execute('''
-                        SELECT DISTINCT user_id, username 
-                        FROM stats 
-                        WHERE chat_id = %s 
-                        AND user_id != %s
-                        LIMIT 10
-                    ''', (chat_id, BOT_ID))
+                    if current_bot_id:
+                        cursor.execute('''
+                            SELECT DISTINCT user_id, username 
+                            FROM stats 
+                            WHERE chat_id = %s 
+                            AND user_id != %s
+                            LIMIT 10
+                        ''', (chat_id, current_bot_id))
+                    else:
+                        # Если BOT_ID не определен, получаем всех и фильтруем вручную
+                        cursor.execute('''
+                            SELECT DISTINCT user_id, username 
+                            FROM stats 
+                            WHERE chat_id = %s 
+                            LIMIT 10
+                        ''', (chat_id,))
                     participants = cursor.fetchall()
+                
+                # Дополнительная фильтрация: исключаем бота из списка участников
+                if current_bot_id:
+                    filtered_participants = []
+                    for p in participants:
+                        p_user_id = p.get('user_id') if isinstance(p, dict) else p[0]
+                        if p_user_id != current_bot_id:
+                            filtered_participants.append(p)
+                    participants = filtered_participants
                 
                 if participants:
                     participant = random.choice(participants)
