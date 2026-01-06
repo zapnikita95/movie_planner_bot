@@ -1318,8 +1318,8 @@ def main_text_handler(message):
     """
     import sys
     print(f"[MAIN TEXT HANDLER] ===== START (FALLBACK): message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else None}'", file=sys.stdout, flush=True)
-    Этот handler обрабатывает только специальные случаи и реплаи, которые не попали в другие handlers
-    """
+    #Этот handler обрабатывает только специальные случаи и реплаи, которые не попали в другие handlers
+    ""
     logger.info(f"[MAIN TEXT HANDLER] ===== START (FALLBACK): message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else ''}'")
     
     user_id = message.from_user.id
@@ -1439,7 +1439,7 @@ def main_text_handler(message):
     return
 @bot_instance.message_handler(content_types=['photo', 'document'])
 def main_file_handler(message):
-    """Единый хэндлер для всех фото и документов"""
+    #Единый хэндлер для всех фото и документов
     logger.info(f"[MAIN FILE HANDLER] Получено фото/документ от {message.from_user.id}")
     
     user_id = message.from_user.id
