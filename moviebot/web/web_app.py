@@ -80,6 +80,21 @@ check_environment_variables()
 
 def create_web_app(bot_instance):
     """Создает Flask приложение с webhook обработчиками"""
+    # КРИТИЧЕСКИ ВАЖНО: Проверяем, что это тот же экземпляр бота, что используется в обработчиках
+    from moviebot.bot.bot_init import bot as bot_from_init
+    print(f"[WEB APP] bot_instance: {bot_instance}, id: {id(bot_instance)}", flush=True)
+    print(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}", flush=True)
+    print(f"[WEB APP] bot_instance == bot_from_init: {bot_instance is bot_from_init}", flush=True)
+    logger.info(f"[WEB APP] bot_instance: {bot_instance}, id: {id(bot_instance)}")
+    logger.info(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}")
+    logger.info(f"[WEB APP] bot_instance == bot_from_init: {bot_instance is bot_from_init}")
+    
+    # Если это разные экземпляры, используем bot_from_init (тот, на котором зарегистрированы обработчики)
+    if bot_instance is not bot_from_init:
+        print("[WEB APP] ⚠️ ВНИМАНИЕ: bot_instance != bot_from_init! Используем bot_from_init", flush=True)
+        logger.warning("[WEB APP] ⚠️ ВНИМАНИЕ: bot_instance != bot_from_init! Используем bot_from_init")
+        bot_instance = bot_from_init
+    
     # Получаем ID бота для исключения из подсчета участников
     try:
         bot_info = bot_instance.get_me()
