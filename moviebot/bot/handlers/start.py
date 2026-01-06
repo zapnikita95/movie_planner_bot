@@ -19,6 +19,13 @@ def register_start_handlers(bot):
     
     @bot.message_handler(commands=['start', 'menu'])
     def send_welcome(message):
+        logger.info("=" * 80)
+        logger.info(f"[START HANDLER] ===== ОБРАБОТЧИК /start ВЫЗВАН =====")
+        logger.info(f"[START HANDLER] User ID: {message.from_user.id if message.from_user else 'N/A'}")
+        logger.info(f"[START HANDLER] Chat ID: {message.chat.id}")
+        logger.info(f"[START HANDLER] Chat Type: {message.chat.type}")
+        logger.info(f"[START HANDLER] Message Text: {message.text}")
+        logger.info(f"[START HANDLER] Message ID: {message.message_id}")
         try:
             message_text = message.text or ""
             command_type = '/start' if message_text.startswith('/start') else '/menu'

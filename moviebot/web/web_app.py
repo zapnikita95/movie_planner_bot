@@ -62,6 +62,19 @@ def create_web_app(bot_instance):
         logger.warning(f"[WEB APP] Не удалось получить ID бота: {e}")
         BOT_ID = None
     
+    # Добавляем middleware для логирования всех запросов
+    @app.before_request
+    def log_request_info():
+        logger.info("=" * 80)
+        logger.info(f"[FLASK] ===== ПОЛУЧЕН HTTP ЗАПРОС =====")
+        logger.info(f"[FLASK] Method: {request.method}")
+        logger.info(f"[FLASK] Path: {request.path}")
+        logger.info(f"[FLASK] Remote Address: {request.remote_addr}")
+        logger.info(f"[FLASK] Headers: {dict(request.headers)}")
+        if request.method == 'POST':
+            logger.info(f"[FLASK] Content-Type: {request.content_type}")
+            logger.info(f"[FLASK] Content-Length: {request.content_length}")
+    
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
         # Логируем ВСЕ запросы, включая GET
@@ -244,14 +257,18 @@ def create_web_app(bot_instance):
                     if payment:
                         amount = float(payment.amount.value)
                         # Сохраняем payment_method_id для рекуррентных платежей
+                        # Важно: сохраняем только если payment_method.saved == True
                         payment_method_id = None
                         if hasattr(payment, 'payment_method') and payment.payment_method:
-                            if hasattr(payment.payment_method, 'id'):
-                                payment_method_id = payment.payment_method.id
-                            elif hasattr(payment.payment_method, 'saved'):
-                                # Если карта сохранена, получаем payment_method_id из объекта
+                            # Проверяем, что способ оплаты сохранен
+                            is_saved = getattr(payment.payment_method, 'saved', False)
+                            if is_saved:
                                 payment_method_id = getattr(payment.payment_method, 'id', None)
-                        logger.info(f"[YOOKASSA] payment_method_id: {payment_method_id}")
+                                logger.info(f"[YOOKASSA] Способ оплаты сохранен, payment_method_id: {payment_method_id}")
+                            else:
+                                logger.info(f"[YOOKASSA] Способ оплаты не сохранен (saved=False), payment_method_id не будет использован")
+                        else:
+                            logger.info(f"[YOOKASSA] payment_method отсутствует в платеже")
                     else:
                         amount = float(payment_data['amount'])
                         payment_method_id = None
@@ -304,6 +321,17 @@ def create_web_app(bot_instance):
                                     logger.info(f"[YOOKASSA] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
                                 except Exception as add_error:
                                     logger.error(f"[YOOKASSA] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
+                            
+                            # Отправляем уведомление об успешном платеже
+                            if subscription_id:
+                                from moviebot.scheduler import send_successful_payment_notification
+                                send_successful_payment_notification(
+                                    chat_id=chat_id,
+                                    subscription_id=subscription_id,
+                                    subscription_type=subscription_type,
+                                    plan_type=plan_type,
+                                    period_type=period_type
+                                )
                         except Exception as sub_error:
                             logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                             subscription_id = None
@@ -340,6 +368,17 @@ def create_web_app(bot_instance):
                                     logger.info(f"[YOOKASSA] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
                                 except Exception as add_error:
                                     logger.error(f"[YOOKASSA] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
+                            
+                            # Отправляем уведомление об успешном платеже
+                            if subscription_id:
+                                from moviebot.scheduler import send_successful_payment_notification
+                                send_successful_payment_notification(
+                                    chat_id=chat_id,
+                                    subscription_id=subscription_id,
+                                    subscription_type=subscription_type,
+                                    plan_type='all',
+                                    period_type=period_type
+                                )
                         except Exception as sub_error:
                             logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                             subscription_id = None
@@ -363,6 +402,20 @@ def create_web_app(bot_instance):
                                 # Продлеваем подписку
                                 renew_subscription(subscription_id, period_type)
                                 logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
+                                
+                                # Обновляем payment_method_id в подписке, если он был сохранен
+                                if payment_method_id:
+                                    from moviebot.database.db_connection import get_db_connection, db_lock
+                                    conn_update = get_db_connection()
+                                    cursor_update = conn_update.cursor()
+                                    with db_lock:
+                                        cursor_update.execute("""
+                                            UPDATE subscriptions 
+                                            SET payment_method_id = %s, updated_at = NOW()
+                                            WHERE id = %s
+                                        """, (payment_method_id, subscription_id))
+                                        conn_update.commit()
+                                    logger.info(f"[YOOKASSA] payment_method_id {payment_method_id} обновлен в подписке {subscription_id}")
                                 
                                 # Отправляем уведомление об успешном платеже
                                 from moviebot.scheduler import send_successful_payment_notification
@@ -397,6 +450,17 @@ def create_web_app(bot_instance):
                                             logger.info(f"[YOOKASSA] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
                                         except Exception as add_error:
                                             logger.error(f"[YOOKASSA] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
+                                    
+                                    # Отправляем уведомление об успешном платеже
+                                    if subscription_id:
+                                        from moviebot.scheduler import send_successful_payment_notification
+                                        send_successful_payment_notification(
+                                            chat_id=chat_id,
+                                            subscription_id=subscription_id,
+                                            subscription_type=subscription_type,
+                                            plan_type=plan_type,
+                                            period_type=period_type
+                                        )
                                 except Exception as sub_error:
                                     logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                                     subscription_id = None
@@ -424,6 +488,17 @@ def create_web_app(bot_instance):
                                         logger.info(f"[YOOKASSA] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
                                     except Exception as add_error:
                                         logger.error(f"[YOOKASSA] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
+                                
+                                # Отправляем уведомление об успешном платеже
+                                if subscription_id:
+                                    from moviebot.scheduler import send_successful_payment_notification
+                                    send_successful_payment_notification(
+                                        chat_id=chat_id,
+                                        subscription_id=subscription_id,
+                                        subscription_type=subscription_type,
+                                        plan_type=plan_type,
+                                        period_type=period_type
+                                    )
                             except Exception as sub_error:
                                 logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
                                 subscription_id = None
