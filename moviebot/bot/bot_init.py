@@ -8,8 +8,17 @@ from moviebot.config import TOKEN
 
 logger = logging.getLogger(__name__)
 
-# Создаем экземпляр бота
-bot = telebot.TeleBot(TOKEN)
+# Создаем экземпляр бота с отключённым privacy mode
+bot = telebot.TeleBot(
+    TOKEN,
+    parse_mode='HTML',           # Удобно для всех сообщений
+    disable_web_page_preview=True,
+    threaded=False
+)
+
+# ВАЖНО: Отключаем privacy mode — бот будет видеть ВСЕ сообщения в группах (включая команды без @)
+bot.privacy_mode = False
+logger.info("[BOT INIT] Privacy mode отключён — бот видит все сообщения и команды в группах")
 
 # Scheduler будет установлен при инициализации в main.py
 scheduler = None
@@ -55,7 +64,7 @@ def setup_bot_commands(bot_instance=None):
     Args:
         bot_instance: Экземпляр бота. Если None, используется глобальный bot.
     """
-    bot_to_use = bot_instance
+    bot_to_use = bot_instance or bot
     
     # Определяем все scope для установки команд
     scopes = [
@@ -91,4 +100,3 @@ def sync_commands_periodically(bot_instance):
     """
     logger.info("Периодическая синхронизация команд...")
     setup_bot_commands(bot_instance)
-
