@@ -248,7 +248,17 @@ def create_web_app(bot_instance):
                     print(f"[WEBHOOK] Ошибка при проверке обработчиков: {e}", flush=True)
                 
                 try:
-                    bot_instance.process_new_updates([update])
+                    # КРИТИЧЕСКИ ВАЖНО: Проверяем, что обработчики действительно зарегистрированы на этом экземпляре
+                    print(f"[WEBHOOK] Проверка обработчиков перед process_new_updates", flush=True)
+                    if hasattr(bot_instance, 'message_handlers'):
+                        print(f"[WEBHOOK] Первые 5 message handlers:", flush=True)
+                        for i, handler in enumerate(bot_instance.message_handlers[:5]):
+                            print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
+                    
+                    # Пробуем вызвать обработчики напрямую для диагностики
+                    print(f"[WEBHOOK] Вызываем process_new_updates...", flush=True)
+                    result = bot_instance.process_new_updates([update])
+                    print(f"[WEBHOOK] process_new_updates вернул: {result}", flush=True)
                     print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)
                     logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
                 except Exception as process_error:
