@@ -1180,8 +1180,9 @@ def main_text_handler(message):
         user_ticket_state, user_search_state, user_import_state,
         user_edit_state, user_settings_state, user_plan_state,
         user_clean_state, user_promo_state, user_promo_admin_state,
-        user_cancel_subscription_state, user_refund_state,
-        user_unsubscribe_state, user_add_admin_state, user_view_film_state
+        user_cancel_subscription_state, user_view_film_state
+        # НЕ включаем админские состояния (user_refund_state, user_unsubscribe_state, user_add_admin_state) - 
+        # они обрабатываются через отдельный обработчик handle_admin_commands_reply
     )
     
     # Если пользователь в любом из состояний, пропускаем - специализированные handlers обработают
@@ -1190,8 +1191,7 @@ def main_text_handler(message):
         user_id in user_settings_state or user_id in user_plan_state or
         user_id in user_clean_state or user_id in user_promo_state or 
         user_id in user_promo_admin_state or user_id in user_cancel_subscription_state or
-        user_id in user_refund_state or user_id in user_unsubscribe_state or
-        user_id in user_add_admin_state or user_id in user_view_film_state):
+        user_id in user_view_film_state):
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в состоянии, пропускаем (обработает специализированный handler)")
         return
     
