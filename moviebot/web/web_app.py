@@ -255,29 +255,38 @@ def create_web_app(bot_instance):
                         for i, handler in enumerate(bot_instance.message_handlers[:5]):
                             print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
                     
-                    # КРИТИЧЕСКИЙ ФИКС: Используем внутренний метод telebot для обработки обновлений
-                    # process_new_updates может не работать правильно, используем process_new_messages напрямую
+                    # КРИТИЧЕСКИЙ ФИКС: Используем process_new_updates, но с правильной обработкой
+                    # process_new_messages может не вызывать обработчики команд правильно
                     print(f"[WEBHOOK] Вызываем process_new_updates...", flush=True)
                     
-                    # Пробуем вызвать обработчики через внутренний механизм telebot
-                    if hasattr(update, 'message') and update.message:
-                        print(f"[WEBHOOK] Пробуем вызвать process_new_messages напрямую", flush=True)
-                        try:
-                            # Используем внутренний метод telebot для обработки сообщений
-                            if hasattr(bot_instance, 'process_new_messages'):
-                                bot_instance.process_new_messages([update.message])
-                                print(f"[WEBHOOK] process_new_messages вызван успешно", flush=True)
-                            else:
-                                print(f"[WEBHOOK] process_new_messages не найден, используем process_new_updates", flush=True)
-                                bot_instance.process_new_updates([update])
-                        except Exception as direct_error:
-                            print(f"[WEBHOOK] Ошибка при прямом вызове: {direct_error}", flush=True)
-                            # Пробуем стандартный способ
-                            bot_instance.process_new_updates([update])
-                    else:
-                        # Для callback_query и других типов обновлений используем стандартный способ
+                    # ВАЖНО: process_new_updates должен вызывать все обработчики, включая команды
+                    # Но если это не работает, пробуем альтернативные способы
+                    try:
+                        # Сначала пробуем стандартный способ
                         result = bot_instance.process_new_updates([update])
                         print(f"[WEBHOOK] process_new_updates вернул: {result}", flush=True)
+                        
+                        # Если process_new_updates не вызвал обработчики, пробуем process_new_messages
+                        # Но только для сообщений, не для команд (команды должны обрабатываться через process_new_updates)
+                        if hasattr(update, 'message') and update.message:
+                            # Проверяем, не является ли это командой
+                            is_command = update.message.text and update.message.text.strip().startswith('/')
+                            if not is_command:
+                                # Для не-команд пробуем process_new_messages как дополнительный способ
+                                if hasattr(bot_instance, 'process_new_messages'):
+                                    print(f"[WEBHOOK] Дополнительно вызываем process_new_messages для не-команды", flush=True)
+                                    bot_instance.process_new_messages([update.message])
+                    except Exception as process_error:
+                        print(f"[WEBHOOK] Ошибка в process_new_updates: {process_error}", flush=True)
+                        import traceback
+                        print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
+                        # Пробуем альтернативный способ
+                        if hasattr(update, 'message') and update.message:
+                            if hasattr(bot_instance, 'process_new_messages'):
+                                try:
+                                    bot_instance.process_new_messages([update.message])
+                                except:
+                                    pass
                     
                     print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)
                     logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
