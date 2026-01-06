@@ -4583,7 +4583,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     lock_acquired = False
                     try:
                         # Короткий таймаут 1 секунда - если lock занят, просто пропускаем запрос
-                        lock_acquired = db_lock.acquire(timeout=1.0)
+                        lock_acquired = db_lock.acquire(timeout=3.0)
                         if lock_acquired:
                             logger.info(f"[SHOW FILM INFO] db_lock получен, выполняю запрос AVG...")
                             try:
@@ -4648,7 +4648,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         lock_acquired = False
                         try:
                             # Короткий таймаут 1 секунда - если lock занят, просто пропускаем запрос
-                            lock_acquired = db_lock.acquire(timeout=1.0)
+                            lock_acquired = db_lock.acquire(timeout=3.0)
                             if lock_acquired:
                                 try:
                                     cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
@@ -4688,7 +4688,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 if watched and film_id:
                     try:
                         import threading
-                        lock_acquired = db_lock.acquire(timeout=1.0)
+                        lock_acquired = db_lock.acquire(timeout=3.0)
                         if lock_acquired:
                             try:
                                 # Получаем среднюю оценку всех участников
@@ -4712,68 +4712,47 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         logger.info(f"[SHOW FILM INFO] Создание кнопок...")
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Проверка премьеры — максимально надёжно
-        logger.info("[SHOW FILM INFO] Проверка премьеры...")
+        # Проверяем премьеру
+        logger.info(f"[SHOW FILM INFO] Проверка премьеры...")
+        russia_release = info.get('russia_release')
         premiere_date = None
         premiere_date_str = ""
-        try:
-            # 1. Пытаемся взять из уже полученных данных (info)
-            russia_release = info.get('russia_release')
-            if russia_release and russia_release.get('date'):
-                premiere_date = russia_release.get('date')
-                premiere_date_str = russia_release.get('date_str') or (premiere_date.strftime('%d.%m.%Y') if premiere_date else "")
-                logger.info(f"[SHOW FILM INFO] Премьера из info: {premiere_date_str}")
-            
-            # 2. Если нет — fallback-запрос к API (с таймаутом)
-            if not premiere_date:
-                try:
-                    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-                    url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-                    response_main = requests.get(url_main, headers=headers, timeout=8)  # уменьшили таймаут
-                    if response_main.status_code == 200:
-                        data_main = response_main.json()
-                        date_fields = ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']
-                        for field in date_fields:
-                            date_value = data_main.get(field)
-                            if date_value:
-                                try:
-                                    date_str = str(date_value)
-                                    if 'T' in date_str:
-                                        date_str = date_str.split('T')[0]
-                                    premiere_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                                    logger.info(f"[SHOW FILM INFO] Премьера из fallback API ({field}): {premiere_date_str}")
-                                    break
-                                except Exception as parse_e:
-                                    logger.debug(f"[SHOW FILM INFO] Не удалось распарсить дату из {field}: {parse_e}")
-                                    continue
-                    else:
-                        logger.warning(f"[SHOW FILM INFO] Fallback API вернул статус {response_main.status_code}")
-                except Exception as api_e:
-                    logger.warning(f"[SHOW FILM INFO] Ошибка fallback-запроса к API премьеры: {api_e}")
         
-        except Exception as prem_e:
-            logger.error(f"[SHOW FILM INFO] Критическая ошибка проверки премьеры: {prem_e}", exc_info=True)
-            premiere_date = None
-            premiere_date_str = ""
-        
-        # Добавляем кнопку уведомления о премьере, только если дата в будущем
-        if premiere_date:
+        if russia_release and russia_release.get('date'):
+            premiere_date = russia_release['date']
+            premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
+        else:
             try:
-                from datetime import date
-                today = date.today()
-                if premiere_date > today:
-                    # Заменяем точки на дефисы для callback_data (Telegram не любит точки в data)
-                    date_for_callback = premiere_date_str.replace('.', '-') if premiere_date_str else ''
-                    markup.add(InlineKeyboardButton(
-                        "🔔 Уведомить о премьере",
-                        callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"
-                    ))
-                    logger.info(f"[SHOW FILM INFO] Добавлена кнопка уведомления о премьере: {premiere_date_str}")
-            except Exception as button_e:
-                logger.error(f"[SHOW FILM INFO] Ошибка добавления кнопки премьеры: {button_e}", exc_info=True)
+                headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+                url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+                response_main = requests.get(url_main, headers=headers, timeout=15)
+                if response_main.status_code == 200:
+                    data_main = response_main.json()
+                    from datetime import date as date_class
+                    today = date_class.today()
+                    
+                    for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
+                        date_value = data_main.get(date_field)
+                        if date_value:
+                            try:
+                                if 'T' in str(date_value):
+                                    premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
+                                else:
+                                    premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
+                                premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                                break
+                            except:
+                                continue
+            except Exception as e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
         
-        logger.info(f"[SHOW FILM INFO] Проверка премьеры завершена: {premiere_date_str or 'не найдена'}")
+        # Если премьера еще не состоялась, добавляем кнопку
+        if premiere_date:
+            from datetime import date as date_class
+            today = date_class.today()
+            if premiere_date > today:
+                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+                markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
         
         # Получаем film_id для проверки оценок и планов
         logger.info(f"[SHOW FILM INFO] Получение film_id...")
@@ -4804,12 +4783,17 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 film_id = None
             logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}")
         
-        # Проверка планов — 100% надёжно, без крашей и без пропуска корректных планов
+        # Проверяем, есть ли уже план для этого фильма (чтение безопасно без lock)
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         has_plan = False
         plan_info = None
         if film_id:
             try:
+                # КРИТИЧЕСКИЙ ФИКС: Обернуто в try-except с таймаутом для предотвращения зависания
+                import threading
+                from moviebot.database.db_operations import get_user_timezone_or_default
+                
+                # Пробуем получить lock с таймаутом
                 lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
                     try:
@@ -4817,116 +4801,81 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                             SELECT id, plan_type, plan_datetime 
                             FROM plans 
                             WHERE film_id = %s AND chat_id = %s 
-                            ORDER BY plan_datetime ASC
                             LIMIT 1
                         ''', (film_id, chat_id))
                         plan_row = cursor.fetchone()
-                        
-                        if plan_row:
-                            # Безопасное извлечение данных
-                            plan_id = None
-                            plan_type = None
-                            plan_dt_value = None
-                            
+                        has_plan = plan_row is not None
+                        if has_plan:
                             if isinstance(plan_row, dict):
                                 plan_id = plan_row.get('id')
                                 plan_type = plan_row.get('plan_type')
                                 plan_dt_value = plan_row.get('plan_datetime')
-                            else:  # tuple
-                                if len(plan_row) >= 1:
-                                    plan_id = plan_row[0]
-                                if len(plan_row) >= 2:
-                                    plan_type = plan_row[1]
-                                if len(plan_row) >= 3:
-                                    plan_dt_value = plan_row[2]
-                            
-                            # Проверяем, что обязательные поля есть и корректны
-                            if plan_id is not None and plan_type in ('home', 'cinema'):
-                                # Форматируем дату
-                                date_str = "не указана"
-                                if plan_dt_value:
-                                    try:
-                                        if isinstance(plan_dt_value, datetime):
-                                            dt = plan_dt_value
-                                        else:
-                                            # Обрабатываем строку ISO
-                                            dt_str = str(plan_dt_value).replace('Z', '+00:00')
-                                            dt = datetime.fromisoformat(dt_str)
-                                        
-                                        # Применяем часовой пояс пользователя
-                                        user_tz = get_user_timezone_or_default(user_id)
-                                        if dt.tzinfo is None:
-                                            dt = pytz.utc.localize(dt)
-                                        dt = dt.astimezone(user_tz)
-                                        date_str = dt.strftime('%d.%m.%Y %H:%M')
-                                    except Exception as dt_e:
-                                        logger.warning(f"[SHOW FILM INFO] Не удалось отформатировать дату плана: {dt_e}")
-                                        date_str = str(plan_dt_value)[:16]
-                                
-                                plan_info = {
-                                    'id': plan_id,
-                                    'type': plan_type,
-                                    'date': date_str
-                                }
-                                has_plan = True
-                                logger.info(f"[SHOW FILM INFO] План успешно загружен: {plan_type} на {date_str}")
                             else:
-                                logger.warning(f"[SHOW FILM INFO] plan_row найден, но данные некорректны (plan_id={plan_id}, plan_type={plan_type}) — пропускаем")
-                        else:
-                            logger.info("[SHOW FILM INFO] План не найден — нормально")
-                    except Exception as db_e:
-                        logger.error(f"[SHOW FILM INFO] Ошибка БД при запросе планов: {db_e}", exc_info=True)
+                                plan_id = plan_row[0]
+                                plan_type = plan_row[1]
+                                plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
+                            
+                            # Форматируем дату
+                            if plan_dt_value and user_id:
+                                user_tz = get_user_timezone_or_default(user_id)
+                                try:
+                                    if isinstance(plan_dt_value, datetime):
+                                        if plan_dt_value.tzinfo is None:
+                                            dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                                        else:
+                                            dt = plan_dt_value.astimezone(user_tz)
+                                    else:
+                                        dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                                    date_str = dt.strftime('%d.%m.%Y %H:%M')
+                                except:
+                                    date_str = str(plan_dt_value)[:16]
+                            else:
+                                date_str = "не указана"
+                            
+                            plan_info = {
+                                'id': plan_id,
+                                'type': plan_type,
+                                'date': date_str
+                            }
+                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (с lock), has_plan={has_plan}")
                     finally:
                         db_lock.release()
-                        logger.info("[SHOW FILM INFO] db_lock освобождён после проверки планов")
+                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов")
                 else:
-                    logger.warning("[SHOW FILM INFO] db_lock timeout (3 сек) — планы временно недоступны")
-            except Exception as e:
-                logger.error(f"[SHOW FILM INFO] Критическая ошибка при проверке планов: {e}", exc_info=True)
+                    logger.warning(f"[SHOW FILM INFO] db_lock timeout (5 сек) - пропускаем проверку планов (не критично)")
+                    has_plan = False
+            except Exception as plan_e:
+                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при проверке планов (пропускаем): {plan_e}", exc_info=True)
+                has_plan = False
+                plan_info = None
+        logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}")
         
-        logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}, plan_info={plan_info}")
-
         # Если фильм запланирован, показываем специальную логику кнопок
         if has_plan:
-            # Если фильм запланирован, НЕ показываем "Добавить в базу" и "Запланировать просмотр"
-            # Добавляем кнопку "Просмотрено" для обычных фильмов, если ещё не просмотрен
-            if not is_series and film_id and not watched:
-                markup.add(InlineKeyboardButton("✅ Просмотрено", callback_data=f"mark_watched_from_description:{film_id}"))
+            # Если фильм запланирован, не показываем кнопки "добавить в базу" и "запланировать просмотр"
+            # Добавляем кнопку "Просмотрено" для обычных фильмов (не сериалов), если фильм еще не просмотрен
+            if not is_series and film_id:
+                if not watched:
+                    # Проверяем, просмотрел ли этот конкретный пользователь фильм
+                    user_watched = False
+                    if user_id:
+                        try:
+                            import threading
+                            lock_acquired = db_lock.acquire(timeout=3.0)
+                            if lock_acquired:
+                                try:
+                                    # Проверяем, есть ли у этого пользователя просмотр фильма
+                                    # Для обычных фильмов используем watched статус в movies, но нужно проверить по каждому участнику
+                                    # Для простоты показываем кнопку "Просмотрено" если фильм не просмотрен
+                                    user_watched = False
+                                finally:
+                                    db_lock.release()
+                        except:
+                            pass
+                    
+                    if not user_watched:
+                        markup.add(InlineKeyboardButton("✅ Просмотрено", callback_data=f"mark_watched_from_description:{film_id}"))
             
-            # Кнопки "Изменить" и "Удалить" план
-            markup.row(
-                InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan:{plan_info['id']}"),
-                InlineKeyboardButton("🗑️ Удалить", callback_data=f"remove_from_calendar:{plan_info['id']}")
-            )
-            
-            # Дополнительно: если план "в кино" — показываем кнопку билетов (с проверкой доступа)
-            if plan_info.get('type') == 'cinema':
-                try:
-                    has_tickets = has_tickets_access(chat_id, user_id)
-                except Exception as e:
-                    logger.warning(f"[SHOW FILM INFO] Ошибка проверки доступа к билетам: {e}")
-                    has_tickets = False
-                
-                if has_tickets:
-                    markup.add(InlineKeyboardButton("🎟️ Добавить/просмотреть билеты", callback_data=f"ticket_session:{plan_info['id']}"))
-                else:
-                    markup.add(InlineKeyboardButton("🔒 Добавить/просмотреть билеты", callback_data=f"ticket_locked:{plan_info['id']}"))
-        else:
-            # Фильм не запланирован — стандартные кнопки
-            if not film_id:
-                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
-            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-        
-        # Общие кнопки (факты, оценка)
-        markup.row(
-            InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-            InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
-        )
-        
-        # Сериалы — отдельная логика (оставил как было, с try-except)
-        if is_series and user_id:
-            # ... твоя существующая логика сериалов с try-except ...
-            pass  # (оставь как есть, или тоже добавь timeout, если нужно)
             # Добавляем кнопку "Выбрать онлайн-кинотеатр" только для планов типа 'home' (дома)
             if plan_info and plan_info.get('type') == 'home':
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
@@ -4952,7 +4901,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             try:
                 import threading
                 # КРИТИЧЕСКИЙ ФИКС: Увеличен таймаут до 5 секунд и добавлена обработка ошибок
-                lock_acquired = db_lock.acquire(timeout=5.0)
+                lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
                     try:
                         # Получаем среднюю оценку
@@ -5020,72 +4969,53 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if is_series and user_id:
             if film_id:
                 # Фильм в базе - проверяем доступ к функциям уведомлений
-                # Проверяем доступ к функциям уведомлений
                 has_access = has_notifications_access(chat_id, user_id)
                 logger.info(f"[SHOW FILM INFO] Сериал: is_series=True, user_id={user_id}, chat_id={chat_id}, has_notifications_access={has_access}")
                 
                 if has_access:
-                    # Проверяем, все ли серии просмотрены
-                    logger.info(f"[SHOW FILM INFO] Получение данных о сезонах для kp_id={kp_id}...")
-                    seasons_data = get_seasons_data(kp_id)
-                    logger.info(f"[SHOW FILM INFO] Данные о сезонах получены: {seasons_data is not None}")
-                    all_episodes_watched = False
-                    if seasons_data and film_id:
-                        # Проверяем, выходит ли сериал
-                        logger.info(f"[SHOW FILM INFO] Проверка статуса выхода сериала для kp_id={kp_id}...")
-                        is_airing, _ = get_series_airing_status(kp_id)
-                        logger.info(f"[SHOW FILM INFO] Статус выхода сериала: is_airing={is_airing}")
-                        
-                        # Получаем просмотренные эпизоды
-                        with db_lock:
-                            cursor.execute('''
-                                SELECT season_number, episode_number 
-                                FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                            ''', (chat_id, film_id, user_id))
-                            watched_rows = cursor.fetchall()
-                            watched_set = set()
-                            for w_row in watched_rows:
-                                if isinstance(w_row, dict):
-                                    watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                                else:
-                                    watched_set.add((str(w_row[0]), str(w_row[1])))
-                        
-                        # Подсчитываем эпизоды
-                        total_episodes, watched_episodes = count_episodes_for_watch_check(
-                            seasons_data, is_airing, watched_set, chat_id, film_id, user_id
-                        )
-                        
-                        if total_episodes > 0 and watched_episodes == total_episodes:
-                            all_episodes_watched = True
+                    # КРИТИЧЕСКИЙ ФИКС: НЕ загружаем сезоны при открытии карточки - только по клику на кнопку
+                    # Показываем базовые кнопки без загрузки данных о сезонах
+                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                    
+                    # Проверяем подписку на новые серии (легкий запрос без загрузки сезонов)
+                    is_subscribed = False
+                    try:
+                        import threading
+                        lock_acquired = db_lock.acquire(timeout=3.0)
+                        if lock_acquired:
+                            try:
+                                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s LIMIT 1', (chat_id, film_id, user_id))
+                                sub_row = cursor.fetchone()
+                                if sub_row:
+                                    is_subscribed = sub_row[0] if not isinstance(sub_row, dict) else sub_row.get('subscribed')
+                                    logger.info(f"[SHOW FILM INFO] Подписка проверена: is_subscribed={is_subscribed}")
+                            finally:
+                                db_lock.release()
+                        else:
+                            logger.warning(f"[SHOW FILM INFO] db_lock timeout (3 сек) - пропускаем проверку подписки (не критично)")
+                    except Exception as sub_e:
+                        logger.warning(f"[SHOW FILM INFO] Ошибка при проверке подписки (не критично): {sub_e}")
+                    
+                    if is_subscribed:
+                        markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
                             # Отмечаем сериал как просмотренный в БД
                             with db_lock:
                                 cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
                                 conn.commit()
                     
-                    # Проверка подписки на новые серии — с таймаутом
+                    # Проверяем подписку
                     is_subscribed = False
-                    try:
-                        lock_acquired = db_lock.acquire(timeout=2.0)
-                        if lock_acquired:
-                            try:
-                                cursor.execute('''
-                                    SELECT subscribed 
-                                    FROM series_subscriptions 
-                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                                ''', (chat_id, film_id, user_id))
-                                sub_row = cursor.fetchone()
-                                if sub_row:
-                                    is_subscribed = sub_row[0] if not isinstance(sub_row, dict) else sub_row.get('subscribed', False)
-                            finally:
-                                db_lock.release()
-                                logger.info("[SHOW FILM INFO] db_lock освобождён после проверки подписки на серии")
-                        else:
-                            logger.warning("[SHOW FILM INFO] db_lock timeout при проверке подписки на серии — считаем неподписанным")
-                    except Exception as sub_e:
-                        logger.error(f"[SHOW FILM INFO] Ошибка проверки подписки на серии: {sub_e}", exc_info=True)
-                        is_subscribed = False
-                        
+                    if film_id:
+                        with db_lock:
+                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                            sub_row = cursor.fetchone()
+                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+                    
                     # Добавляем строку о статусе подписки в текст (чтобы текст всегда менялся)
                     if is_subscribed:
                         text += f"\n\n🔔 <b>Статус подписки: ✅ Подписан</b>"
@@ -5126,7 +5056,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             try:
                 # КРИТИЧЕСКИЙ ФИКС: Обернуто в try-except с таймаутом для предотвращения зависания
                 import threading
-                lock_acquired = db_lock.acquire(timeout=5.0)
+                lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
                     try:
                         cursor.execute('''
@@ -5156,7 +5086,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 if plan_type == 'cinema':
                     try:
                         import threading
-                        lock_acquired = db_lock.acquire(timeout=1.0)
+                        lock_acquired = db_lock.acquire(timeout=3.0)
                         if lock_acquired:
                             try:
                                 cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
@@ -5251,16 +5181,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # ГАРАНТИРОВАННАЯ ОТПРАВКА: Всегда отправляем сообщение
         logger.info(f"[SHOW FILM INFO] ===== ГАРАНТИРОВАННАЯ ОТПРАВКА СООБЩЕНИЯ =====")
         logger.info(f"[SHOW FILM INFO] Отправляю сообщение в чат...")
-
-        # Обрезаем текст, если слишком длинный (лимит Telegram ~4096 символов)
-        original_length = len(text)
-        if original_length > 4000:
-            text = text[:4000] + "\n\n... (описание обрезано)"
-            logger.info(f"[SHOW FILM INFO] Текст обрезан до 4000 символов (было {original_length})")
-
-        # Логируем финальные параметры перед отправкой
-        buttons_count = len(markup.keyboard) if markup else 0
-        logger.info(f"[SHOW FILM INFO] Финальный текст длина={len(text)}, кнопок={buttons_count}")
         
         # Отправляем или обновляем сообщение
         if message_id:
