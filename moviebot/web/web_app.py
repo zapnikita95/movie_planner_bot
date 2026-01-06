@@ -255,31 +255,30 @@ def create_web_app(bot_instance):
                         for i, handler in enumerate(bot_instance.message_handlers[:5]):
                             print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
                     
-                    # КРИТИЧЕСКИЙ ФИКС: Пробуем вызвать обработчики вручную, если process_new_updates не работает
-                    # Это может быть проблема с telebot - иногда process_new_updates не вызывает обработчики
+                    # КРИТИЧЕСКИЙ ФИКС: Используем внутренний метод telebot для обработки обновлений
+                    # process_new_updates может не работать правильно, используем process_new_messages напрямую
                     print(f"[WEBHOOK] Вызываем process_new_updates...", flush=True)
                     
-                    # Пробуем альтернативный способ - вызываем обработчики напрямую
+                    # Пробуем вызвать обработчики через внутренний механизм telebot
                     if hasattr(update, 'message') and update.message:
-                        print(f"[WEBHOOK] Пробуем вызвать обработчики напрямую для message", flush=True)
-                        # Получаем все message handlers
-                        if hasattr(bot_instance, 'message_handlers'):
-                            for handler in bot_instance.message_handlers:
-                                try:
-                                    # Проверяем, подходит ли handler для этого сообщения
-                                    if hasattr(handler, 'filters') and handler.filters:
-                                        # Проверяем фильтры
-                                        if handler.filters.check(update.message):
-                                            print(f"[WEBHOOK] Handler прошел проверку фильтров: {handler}", flush=True)
-                                            handler.function(update.message)
-                                            print(f"[WEBHOOK] Handler вызван успешно", flush=True)
-                                            break
-                                except Exception as handler_error:
-                                    print(f"[WEBHOOK] Ошибка в handler: {handler_error}", flush=True)
+                        print(f"[WEBHOOK] Пробуем вызвать process_new_messages напрямую", flush=True)
+                        try:
+                            # Используем внутренний метод telebot для обработки сообщений
+                            if hasattr(bot_instance, 'process_new_messages'):
+                                bot_instance.process_new_messages([update.message])
+                                print(f"[WEBHOOK] process_new_messages вызван успешно", flush=True)
+                            else:
+                                print(f"[WEBHOOK] process_new_messages не найден, используем process_new_updates", flush=True)
+                                bot_instance.process_new_updates([update])
+                        except Exception as direct_error:
+                            print(f"[WEBHOOK] Ошибка при прямом вызове: {direct_error}", flush=True)
+                            # Пробуем стандартный способ
+                            bot_instance.process_new_updates([update])
+                    else:
+                        # Для callback_query и других типов обновлений используем стандартный способ
+                        result = bot_instance.process_new_updates([update])
+                        print(f"[WEBHOOK] process_new_updates вернул: {result}", flush=True)
                     
-                    # Все равно вызываем process_new_updates
-                    result = bot_instance.process_new_updates([update])
-                    print(f"[WEBHOOK] process_new_updates вернул: {result}", flush=True)
                     print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)
                     logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
                 except Exception as process_error:
