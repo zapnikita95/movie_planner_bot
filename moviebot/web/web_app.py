@@ -31,6 +31,9 @@ app = Flask(__name__)
 # Отключаем логирование Flask встроенным способом
 app.logger.disabled = True
 
+# Добавляем логирование при создании приложения
+logger.info("[WEB APP] Flask приложение создано")
+
 # Проверяем переменные окружения при старте приложения
 def check_environment_variables():
     """Проверяет наличие необходимых переменных окружения"""
@@ -64,13 +67,21 @@ def create_web_app(bot_instance):
     
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
-        # Логируем только POST запросы (GET - это проверки доступности)
+        # Логируем ВСЕ запросы для диагностики
+        logger.info("=" * 80)
+        logger.info(f"[WEBHOOK] ===== ЗАПРОС ПОЛУЧЕН =====")
+        logger.info(f"[WEBHOOK] Method: {request.method}")
+        logger.info(f"[WEBHOOK] Path: {request.path}")
+        logger.info(f"[WEBHOOK] Remote Address: {request.remote_addr}")
+        
         if request.method == 'GET':
+            logger.info("[WEBHOOK] GET запрос - возвращаем 200")
             return '', 200
         
         # Логируем POST запросы
         logger.info(f"[WEBHOOK] POST запрос получен")
         logger.info(f"[WEBHOOK] Content-Type: {request.headers.get('content-type')}")
+        logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
         
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')

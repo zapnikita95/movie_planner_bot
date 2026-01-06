@@ -373,7 +373,13 @@ if IS_PRODUCTION:
     # Запускаем Flask приложение
     port = int(os.getenv('PORT', 8080))
     logger.info(f"🚀 Запуск Flask приложения на порту {port} (PRODUCTION)")
-    app.run(host='0.0.0.0', port=port)
+    logger.info(f"[FLASK] Приложение готово принимать запросы на http://0.0.0.0:{port}")
+    logger.info(f"[FLASK] Webhook endpoint: {WEBHOOK_URL}/webhook")
+    try:
+        app.run(host='0.0.0.0', port=port, threaded=True)
+    except Exception as e:
+        logger.critical(f"[FLASK] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ FLASK: {e}", exc_info=True)
+        raise
 elif USE_WEBHOOK and WEBHOOK_URL:
     # Режим webhook
     from moviebot.web.web_app import create_web_app
@@ -389,7 +395,12 @@ elif USE_WEBHOOK and WEBHOOK_URL:
     # Запускаем Flask приложение
     port = int(os.getenv('PORT', 5000))
     logger.info(f"Запуск Flask приложения на порту {port}")
-    app.run(host='0.0.0.0', port=port)
+    logger.info(f"[FLASK] Приложение готово принимать запросы на http://0.0.0.0:{port}")
+    try:
+        app.run(host='0.0.0.0', port=port, threaded=True)
+    except Exception as e:
+        logger.critical(f"[FLASK] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ FLASK: {e}", exc_info=True)
+        raise
 else:
     # Режим polling
     logger.info("Запуск бота в режиме polling...")
