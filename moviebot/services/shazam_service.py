@@ -49,13 +49,20 @@ os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sent
 
 logger.info(f"[CACHE] Используется кэш моделей: {CACHE_DIR}")
 
+# Кэш для IMDB данных
+IMDB_CACHE_DIR = CACHE_DIR / 'imdb'
+IMDB_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Индексы и обработанные данные остаются в DATA_DIR (могут пересоздаваться)
 INDEX_PATH = DATA_DIR / 'imdb_index.faiss'
 DATA_PATH = DATA_DIR / 'imdb_movies.csv'
-BASICS_PATH = DATA_DIR / 'title.basics.tsv'
-RATINGS_PATH = DATA_DIR / 'title.ratings.tsv'
-PLOT_PATH = DATA_DIR / 'title.plot.summary.tsv'
-KEYWORDS_PATH = DATA_DIR / 'keywords.list'
-KEYWORDS_TSV_PATH = DATA_DIR / 'title.keywords.tsv'
+
+# IMDB исходные данные кэшируются в volume
+BASICS_PATH = IMDB_CACHE_DIR / 'title.basics.tsv'
+RATINGS_PATH = IMDB_CACHE_DIR / 'title.ratings.tsv'
+PLOT_PATH = IMDB_CACHE_DIR / 'title.plot.summary.tsv'
+KEYWORDS_PATH = IMDB_CACHE_DIR / 'keywords.list'
+KEYWORDS_TSV_PATH = IMDB_CACHE_DIR / 'title.keywords.tsv'
 
 # Настройки фильтрации
 MIN_VOTES = 5000  # Минимальное количество голосов для популярности
@@ -336,36 +343,48 @@ def extract_gzip_with_progress(gz_path, tsv_path):
 
 
 def download_imdb_data():
-    """Скачивает данные IMDB"""
-    logger.info("Проверка данных IMDB...")
+    """Скачивает и распаковывает датасеты IMDB, если они отсутствуют"""
+    logger.info(f"Проверка данных IMDB в кэше: {IMDB_CACHE_DIR}")
     
-    urls = {
-        'basics': ('https://datasets.imdbws.com/title.basics.tsv.gz', DATA_DIR / 'title.basics.tsv.gz'),
-        'ratings': ('https://datasets.imdbws.com/title.ratings.tsv.gz', DATA_DIR / 'title.ratings.tsv.gz'),
-        'plot': ('https://datasets.imdbws.com/title.plot.summary.tsv.gz', DATA_DIR / 'title.plot.summary.tsv.gz'),
-        'keywords': ('https://datasets.imdbws.com/title.keywords.tsv.gz', DATA_DIR / 'title.keywords.tsv.gz'),
-    }
+    datasets = [
+        ('https://datasets.imdbws.com/title.basics.tsv.gz', 'title.basics.tsv.gz', BASICS_PATH),
+        ('https://datasets.imdbws.com/title.ratings.tsv.gz', 'title.ratings.tsv.gz', RATINGS_PATH),
+        ('https://datasets.imdbws.com/title.plot.summary.tsv.gz', 'title.plot.summary.tsv.gz', PLOT_PATH),
+        ('https://datasets.imdbws.com/title.keywords.tsv.gz', 'title.keywords.tsv.gz', KEYWORDS_TSV_PATH),
+    ]
     
     # Пробуем скачать keywords.list (старый формат) если TSV недоступен
     keywords_list_url = 'https://datasets.imdbws.com/keywords.list.gz'
-    keywords_list_path = DATA_DIR / 'keywords.list.gz'
+    keywords_list_gz_path = IMDB_CACHE_DIR / 'keywords.list.gz'
     
-    for key, (url, gz_path) in urls.items():
-        tsv_path = gz_path.with_suffix('')
-        if not tsv_path.exists():
-            if not gz_path.exists():
-                logger.info(f"Скачиваем {key}...")
-                if not download_file_with_progress(url, gz_path):
-                    if key == 'keywords':
-                        # Пробуем старый формат
-                        logger.info("Пробуем скачать keywords.list...")
-                        if download_file_with_progress(keywords_list_url, keywords_list_path):
-                            if extract_gzip_with_progress(keywords_list_path, DATA_DIR / 'keywords.list'):
-                                continue
-                    continue
-            
-            logger.info(f"Распаковываем {key}...")
-            extract_gzip_with_progress(gz_path, tsv_path)
+    for url, gz_file, tsv_path in datasets:
+        gz_path = IMDB_CACHE_DIR / gz_file
+        
+        # Проверяем, существует ли уже распакованный файл
+        if tsv_path.exists():
+            logger.info(f"{tsv_path.name} уже существует в кэше — пропускаем")
+            continue
+        
+        # Если TSV нет, проверяем наличие gz файла
+        if not gz_path.exists():
+            logger.info(f"Скачивание {gz_file}...")
+            if not download_file_with_progress(url, gz_path):
+                # Для keywords пробуем старый формат
+                if 'keywords' in gz_file:
+                    logger.info("Пробуем скачать keywords.list (старый формат)...")
+                    if download_file_with_progress(keywords_list_url, keywords_list_gz_path):
+                        if extract_gzip_with_progress(keywords_list_gz_path, KEYWORDS_PATH):
+                            logger.info(f"{KEYWORDS_PATH.name} скачан и распакован")
+                            continue
+                logger.warning(f"Не удалось скачать {gz_file}, пропускаем")
+                continue
+        
+        # Распаковываем gz файл
+        logger.info(f"Распаковка {gz_file}...")
+        if extract_gzip_with_progress(gz_path, tsv_path):
+            logger.info(f"{gz_file} скачан и распакован в {tsv_path}")
+        else:
+            logger.warning(f"Не удалось распаковать {gz_file}")
 
 
 def parse_keywords_list(keywords_path):
