@@ -2,6 +2,7 @@
 Обработчики команды /seasons
 """
 import logging
+import json
 from datetime import datetime as dt
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -10,6 +11,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.utils.helpers import has_notifications_access
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
 from moviebot.bot.bot_init import bot as bot_instance
+from moviebot.states import user_episodes_state
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -98,16 +100,12 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
                                 break
                             except:
                                 continue
-                        # Считаем только вышедшие эпизоды
                         if release_date and release_date <= now:
                             should_count = True
                     except:
                         pass
-                else:
-                    # Если дата не указана - считаем как вышедший (для старых сериалов)
-                    should_count = True
             else:
-                # Для завершённых сериалов считаем все эпизоды
+                # Для завершенных сериалов считаем все эпизоды
                 should_count = True
             
             if should_count:
@@ -118,614 +116,191 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
     return total_episodes, watched_episodes
 
 
-def seasons_command(message):
-    """Команда /seasons - просмотр сезонов сериалов"""
-    logger.info(f"[HANDLER] /seasons вызван от {message.from_user.id}")
-    username = message.from_user.username or f"user_{message.from_user.id}"
-    log_request(message.from_user.id, username, '/seasons', message.chat.id)
-    
-    chat_id = message.chat.id
-    user_id = message.from_user.id
-    
-    # Проверяем доступ к функциям уведомлений
-    has_access = has_notifications_access(chat_id, user_id)
-    
-    with db_lock:
-        cursor.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
-        series = cursor.fetchall()
-    
-    if not series:
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("🔍 Найти сериалы", callback_data="search_series_from_seasons"))
-        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-        bot_instance.reply_to(
-            message,
-            "📺 Нет сериалов в базе. Используйте /search, чтобы найти и добавить сериалы, или просто пришлите ссылку на Кинопоиск на сериал",
-            reply_markup=markup
-        )
-        return
-    
-    # Разделяем сериалы на категории
-    fully_watched_series = []  # Все серии просмотрены
-    partially_watched_series = []  # Частично просмотрены
-    not_watched_series = []  # Не просмотрены
-    
-    for row in series:
-        if isinstance(row, dict):
-            title = row.get('title')
-            kp_id = row.get('kp_id')
-            film_id = row.get('id')
-        else:
-            film_id = row[0]
-            title = row[1]
-            kp_id = row[2]
+def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=None, message_thread_id=None):
+    """Показывает страницу эпизодов сезона с пагинацией"""
+    try:
+        logger.info(f"[SHOW EPISODES PAGE] Начало: kp_id={kp_id}, season={season_num}, chat_id={chat_id}, user_id={user_id}, page={page}, message_id={message_id}, message_thread_id={message_thread_id}")
+        EPISODES_PER_PAGE = 20
         
-        # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
-        is_subscribed = False
-        if has_access:
-            with db_lock:
-                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                sub_row = cursor.fetchone()
-                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-    
-    # Разделяем сериалы на категории
-    fully_watched_series = []  # Все серии просмотрены
-    partially_watched_series = []  # Частично просмотрены
-    not_watched_series = []  # Не просмотрены
-    
-    for row in series:
-        if isinstance(row, dict):
-            title = row.get('title')
-            kp_id = row.get('kp_id')
-            film_id = row.get('id')
-        else:
-            film_id = row[0]
-            title = row[1]
-            kp_id = row[2]
-        
-        # Проверяем статус выхода сериала (для всех, независимо от доступа)
-        is_airing = False
-        try:
-            is_airing, _ = get_series_airing_status(kp_id)
-        except Exception as e:
-            logger.warning(f"[SEASONS] Ошибка проверки статуса выхода для kp_id={kp_id}: {e}")
-        
-        # Проверяем статус просмотра в БД (для всех, независимо от доступа)
-        watched_in_db = False
+        # Получаем film_id
         with db_lock:
-            cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-            watched_row = cursor.fetchone()
-            if watched_row:
-                watched_in_db = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            row = cursor.fetchone()
+            if not row:
+                logger.warning(f"[SHOW EPISODES PAGE] Сериал не найден: chat_id={chat_id}, kp_id={kp_id}")
+                return False
+            
+            film_id = row.get('id') if isinstance(row, dict) else row[0]
+            title = row.get('title') if isinstance(row, dict) else row[1]
+            logger.info(f"[SHOW EPISODES PAGE] Сериал найден: film_id={film_id}, title='{title}'")
         
-        # Проверяем статус просмотра эпизодов (только если есть доступ)
-        all_episodes_watched = False
-        has_some_watched = False
-        if has_access:
-            seasons_data = get_seasons_data(kp_id)
-            if seasons_data:
-                # Получаем просмотренные эпизоды
-                with db_lock:
-                    cursor.execute('''
-                        SELECT season_number, episode_number 
-                        FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
-                    watched_rows = cursor.fetchall()
-                    watched_set = set()
-                    for w_row in watched_rows:
-                        if isinstance(w_row, dict):
-                            watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                        else:
-                            watched_set.add((str(w_row[0]), str(w_row[1])))
+        # Получаем эпизоды сезона
+        seasons_data = get_seasons_data(kp_id)
+        season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
+        if not season:
+            logger.warning(f"[SHOW EPISODES PAGE] Сезон не найден: season={season_num}, kp_id={kp_id}")
+            return False
+        
+        episodes = season.get('episodes', [])
+        total_episodes = len(episodes)
+        total_pages = (total_episodes + EPISODES_PER_PAGE - 1) // EPISODES_PER_PAGE
+        page = max(1, min(page, total_pages))
+        
+        # Вычисляем диапазон эпизодов для текущей страницы
+        start_idx = (page - 1) * EPISODES_PER_PAGE
+        end_idx = min(start_idx + EPISODES_PER_PAGE, total_episodes)
+        page_episodes = episodes[start_idx:end_idx]
+        
+        # Формируем текст
+        text = f"📺 <b>{title}</b> - Сезон {season_num}\n\n"
+        if total_episodes > EPISODES_PER_PAGE:
+            text += f"Страница {page}/{total_pages}\n\n"
+        
+        # Создаем разметку
+        markup = InlineKeyboardMarkup(row_width=2)
+        
+        # Добавляем кнопки эпизодов
+        for ep in page_episodes:
+            ep_num = ep.get('episodeNumber', '')
+            
+            # Проверяем, просмотрен ли эпизод
+            with db_lock:
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                watched_row = cursor.fetchone()
+                is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+            
+            mark = "✅" if is_watched else "⬜"
+            button_text = f"{mark} {ep_num}"
+            if len(button_text) > 20:
+                button_text = button_text[:17] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}"))
+        
+        # Добавляем пагинацию, если страниц больше 1
+        if total_pages > 1:
+            pagination_buttons = []
+            
+            # Если страниц немного (<= 20), показываем все
+            if total_pages <= 20:
+                for p in range(1, total_pages + 1):
+                    label = f"•{p}" if p == page else str(p)
+                    pagination_buttons.append(InlineKeyboardButton(label, callback_data=f"episodes_page:{kp_id}:{season_num}:{p}"))
+                # Разбиваем кнопки на строки по 10 штук
+                for i in range(0, len(pagination_buttons), 10):
+                    markup.row(*pagination_buttons[i:i+10])
+            else:
+                # Для большого количества страниц используем умную пагинацию
+                start_page = max(1, page - 2)
+                end_page = min(total_pages, page + 2)
                 
-                # Подсчитываем эпизоды
-                total_episodes, watched_episodes = count_episodes_for_watch_check(
-                    seasons_data, is_airing, watched_set, chat_id, film_id, user_id
-                )
+                # Если текущая страница далеко от начала, показываем первую страницу и "..."
+                if start_page > 2:
+                    pagination_buttons.append(InlineKeyboardButton("1", callback_data=f"episodes_page:{kp_id}:{season_num}:1"))
+                    pagination_buttons.append(InlineKeyboardButton("...", callback_data="noop"))
+                elif start_page == 2:
+                    pagination_buttons.append(InlineKeyboardButton("1", callback_data=f"episodes_page:{kp_id}:{season_num}:1"))
                 
-                if total_episodes > 0:
-                    if watched_episodes == total_episodes:
-                        all_episodes_watched = True
-                    elif watched_episodes > 0:
-                        has_some_watched = True
+                # Добавляем страницы вокруг текущей
+                for p in range(start_page, end_page + 1):
+                    label = f"•{p}" if p == page else str(p)
+                    pagination_buttons.append(InlineKeyboardButton(label, callback_data=f"episodes_page:{kp_id}:{season_num}:{p}"))
+                
+                # Если текущая страница далеко от конца, показываем "..." и последнюю страницу
+                if end_page < total_pages - 1:
+                    pagination_buttons.append(InlineKeyboardButton("...", callback_data="noop"))
+                    pagination_buttons.append(InlineKeyboardButton(str(total_pages), callback_data=f"episodes_page:{kp_id}:{season_num}:{total_pages}"))
+                elif end_page < total_pages:
+                    pagination_buttons.append(InlineKeyboardButton(str(total_pages), callback_data=f"episodes_page:{kp_id}:{season_num}:{total_pages}"))
+                
+                # Разбиваем на строки по 10 кнопок
+                for i in range(0, len(pagination_buttons), 10):
+                    markup.row(*pagination_buttons[i:i+10])
+                
+                # Добавляем кнопки навигации
+                nav_buttons = []
+                if page > 1:
+                    nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"episodes_page:{kp_id}:{season_num}:{page-1}"))
+                nav_buttons.append(InlineKeyboardButton(f"Страница {page}/{total_pages}", callback_data="noop"))
+                if page < total_pages:
+                    nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"episodes_page:{kp_id}:{season_num}:{page+1}"))
+                if nav_buttons:
+                    markup.row(*nav_buttons)
         
-        # Если сериал помечен как просмотренный в БД, считаем его полностью просмотренным
-        if watched_in_db:
-            all_episodes_watched = True
+        text += "Нажмите на эпизод, чтобы отметить как просмотренный"
         
-        # Классифицируем сериал
-        series_info = {
-            'title': title,
+        # Проверяем, все ли эпизоды просмотрены
+        all_watched = True
+        with db_lock:
+            for ep in episodes:
+                ep_num = ep.get('episodeNumber', '')
+                cursor.execute('''
+                    SELECT watched FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND season_number = %s AND episode_number = %s
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                watched_row = cursor.fetchone()
+                is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                if not is_watched:
+                    all_watched = False
+                    break
+        
+        logger.info(f"[SHOW EPISODES PAGE] Все эпизоды просмотрены: {all_watched}, страница {page}/{total_pages}")
+        
+        # Добавляем кнопку "Все просмотрены" если не все просмотрены
+        if not all_watched:
+            markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
+        
+        # Всегда добавляем кнопку "Назад"
+        markup.add(InlineKeyboardButton("◀️ К сезонам", callback_data=f"series_track:{kp_id}"))
+        
+        # Сохраняем состояние
+        user_episodes_state[user_id] = {
             'kp_id': kp_id,
-            'film_id': film_id,
-            'is_subscribed': is_subscribed,
-            'all_watched': all_episodes_watched,
-            'is_airing': is_airing
+            'season_num': season_num,
+            'page': page,
+            'total_pages': total_pages,
+            'chat_id': chat_id
         }
         
-        if all_episodes_watched:
-            fully_watched_series.append(series_info)
-        elif has_some_watched:
-            partially_watched_series.append(series_info)
+        if message_id:
+            try:
+                logger.info(f"[SHOW EPISODES PAGE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
+                # Для обновления сообщения в треде используем API напрямую
+                if message_thread_id:
+                    # Используем API напрямую для поддержки тредов
+                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
+                    params = {
+                        'chat_id': chat_id,
+                        'message_id': message_id,
+                        'text': text,
+                        'parse_mode': 'HTML',
+                        'message_thread_id': message_thread_id
+                    }
+                    if reply_markup_json:
+                        params['reply_markup'] = reply_markup_json
+                    bot_instance.api_call('editMessageText', params)
+                else:
+                    bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                logger.info(f"[SHOW EPISODES PAGE] Сообщение обновлено успешно")
+            except Exception as e:
+                logger.error(f"[SHOW EPISODES PAGE] Ошибка редактирования сообщения: {e}", exc_info=True)
+                # При ошибке отправляем новое сообщение
+                if message_thread_id:
+                    bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                else:
+                    bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         else:
-            not_watched_series.append(series_info)
-    
-    # Формируем разметку: сначала частично просмотренные, потом не просмотренные
-    markup = InlineKeyboardMarkup(row_width=1)
-    
-    # Частично просмотренные сериалы (приоритетные) - в начале
-    for series_info in partially_watched_series:
-        # Добавляем статус выхода сериала
-        airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
-        # Добавляем колокольчик, если есть подписка
-        subscription_emoji = "🔔 " if series_info.get('is_subscribed', False) else ""
-        button_text = f"👁️ {airing_emoji} {subscription_emoji}{series_info['title']}"
-        if len(button_text) > 30:
-            button_text = button_text[:27] + "..."
-        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
-    
-    # Не просмотренные сериалы
-    for series_info in not_watched_series:
-        # Добавляем статус выхода сериала
-        airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
-        # Добавляем колокольчик, если есть подписка
-        subscription_emoji = "🔔 " if series_info.get('is_subscribed', False) else ""
-        button_text = f"{airing_emoji} {subscription_emoji}{series_info['title']}"
-        if len(button_text) > 30:
-            button_text = button_text[:27] + "..."
-        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
-    
-    # Добавляем кнопку "Просмотренные сериалы" если есть просмотренные сериалы
-    if fully_watched_series:
-        watched_button_text = "✅ Просмотренные"
-        if len(fully_watched_series) > 0:
-            # Показываем количество просмотренных сериалов
-            watched_button_text = f"✅ Просмотренные ({len(fully_watched_series)})"
-        markup.add(InlineKeyboardButton(watched_button_text, callback_data="watched_series_list"))
-    
-    # Добавляем кнопку "Назад в меню"
-    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-    
-    # Сохраняем message_id для возможности вернуться назад
-    bot_instance.reply_to(message, "📺 <b>Выберите сериал:</b>", reply_markup=markup, parse_mode='HTML')
-
-
-def register_seasons_handlers(bot):
-    """Регистрирует обработчики команды /seasons"""
-    
-    @bot.message_handler(commands=['seasons'])
-    def _seasons_command_handler(message):
-        """Обертка для регистрации команды /seasons"""
-        seasons_command(message)
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("seasons_locked:"))
-    def seasons_locked_callback(call):
-        """Обработчик заблокированных кнопок сериалов"""
-        try:
-            bot.answer_callback_query(
-                call.id, 
-                "🔒 Функционал можно подключить через /payment", 
-                show_alert=True
-            )
-        except Exception as e:
-            logger.error(f"[SEASONS] ERROR in seasons_locked_callback: {e}", exc_info=True)
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
-    def show_seasons_callback(call):
-        """Показывает описание выбранного сериала"""
-        try:
-            kp_id = call.data.split(":")[1]
-            chat_id = call.message.chat.id
-            user_id = call.from_user.id
-            
-            logger.info(f"[SHOW SEASONS] Начало: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}")
-            
-            # Отвечаем на callback_query сразу для улучшения отзывчивости
-            bot_instance.answer_callback_query(call.id)
-            
-            # Получаем информацию о сериале из базы (или добавляем, если пользователь отметил хотя бы одну серию)
-            with db_lock:
-                cursor.execute("SELECT id, title, link FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                row = cursor.fetchone()
-                
-                if not row:
-                    # Сериал не в базе - проверяем, есть ли отметки в series_tracking
-                    # Если есть хотя бы одна отметка, добавляем в базу
-                    cursor.execute('''
-                        SELECT COUNT(*) FROM series_tracking 
-                        WHERE chat_id = %s AND kp_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, kp_id, user_id))
-                    count_row = cursor.fetchone()
-                    has_watched_episodes = count_row and (count_row.get('count', 0) if isinstance(count_row, dict) else count_row[0]) > 0
-                    
-                    if has_watched_episodes:
-                        # Есть отметки - добавляем в базу
-                        from moviebot.bot.handlers.series import ensure_movie_in_database
-                        link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-                        info = extract_movie_info(link)
-                        if info:
-                            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-                            if was_inserted:
-                                bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
-                            if film_id:
-                                # Получаем данные о сериале
-                                cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
-                                movie_row = cursor.fetchone()
-                                title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
-                                watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
-                            else:
-                                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
-                                return
-                        else:
-                            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
-                            return
-                    else:
-                        # Нет отметок - не добавляем в базу, просто показываем сообщение
-                        bot_instance.answer_callback_query(call.id, "ℹ️ Отметьте хотя бы одну серию как просмотренную, чтобы добавить сериал в базу", show_alert=True)
-                    return
-                else:
-                    film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    title = row.get('title') if isinstance(row, dict) else row[1]
-                    link = row.get('link') if isinstance(row, dict) else row[2]
-                
-                # Проверяем, просмотрен ли сериал
-                cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                watched_row = cursor.fetchone()
-                watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
-            
-            # Получаем информацию о сериале через API
-            info = extract_movie_info(link)
-            
-            if not info:
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
-                return
-            
-            # Формируем existing для передачи в show_film_info_with_buttons
-            existing = (film_id, title, watched)
-            
-            # Показываем описание сериала со всеми кнопками
-            from moviebot.bot.handlers.series import show_film_info_with_buttons
-            
-            # Получаем message_thread_id из сообщения, если оно есть
-            message_thread_id = None
-            if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
-                message_thread_id = call.message.message_thread_id
-            
-            # Обновляем существующее сообщение с описанием сериала
-            show_film_info_with_buttons(
-                chat_id, 
-                user_id, 
-                info, 
-                link, 
-                kp_id, 
-                existing=existing,
-                message_id=call.message.message_id,
-                message_thread_id=message_thread_id
-            )
-            
-        except Exception as e:
-            logger.error(f"[SEASONS] Ошибка: {e}", exc_info=True)
-            try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
-
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "seasons_list")
-    def seasons_list_callback(call):
-        """Обработчик возврата к списку сериалов"""
-        try:
-            bot_instance.answer_callback_query(call.id)
-            chat_id = call.message.chat.id
-            message_id = call.message.message_id
-            
-            # Получаем список сериалов
-            with db_lock:
-                cursor.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
-                series = cursor.fetchall()
-            
-            if not series:
-                bot.edit_message_text("📺 Нет сериалов в базе.", chat_id, message_id, parse_mode='HTML')
-                return
-            
-            # Разделяем сериалы на категории
-            fully_watched_series = []
-            partially_watched_series = []
-            not_watched_series = []
-            
-            user_id = call.from_user.id
-            
-            # Проверяем доступ к функциям уведомлений
-            has_access = has_notifications_access(chat_id, user_id)
-            
-            for row in series:
-                if isinstance(row, dict):
-                    title = row.get('title')
-                    kp_id = row.get('kp_id')
-                    film_id = row.get('id')
-                else:
-                    film_id = row[0]
-                    title = row[1]
-                    kp_id = row[2]
-                
-                # Проверяем, подписан ли пользователь на этот сериал (только если есть доступ)
-                is_subscribed = False
-                if has_access:
-                    with db_lock:
-                        cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                        sub_row = cursor.fetchone()
-                        is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                
-                # Проверяем статус выхода сериала (для всех, независимо от доступа)
-                is_airing = False
-                try:
-                    is_airing, _ = get_series_airing_status(kp_id)
-                except Exception as e:
-                    logger.warning(f"[SEASONS LIST] Ошибка проверки статуса выхода для kp_id={kp_id}: {e}")
-                
-                # Проверяем статус просмотра в БД (для всех, независимо от доступа)
-                watched_in_db = False
-                with db_lock:
-                    cursor.execute("SELECT watched FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                    watched_row = cursor.fetchone()
-                    if watched_row:
-                        watched_in_db = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
-                
-                # Проверяем статус просмотра эпизодов (только если есть доступ)
-                all_episodes_watched = False
-                has_some_watched = False
-                if has_access:
-                    seasons_data = get_seasons_data(kp_id)
-                    if seasons_data:
-                        # Получаем просмотренные эпизоды
-                        with db_lock:
-                            cursor.execute('''
-                                SELECT season_number, episode_number 
-                                FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                            ''', (chat_id, film_id, user_id))
-                            watched_rows = cursor.fetchall()
-                            watched_set = set()
-                            for w_row in watched_rows:
-                                if isinstance(w_row, dict):
-                                    watched_set.add((str(w_row.get('season_number')), str(w_row.get('episode_number'))))
-                                else:
-                                    watched_set.add((str(w_row[0]), str(w_row[1])))
-                        
-                        # Подсчитываем эпизоды
-                        total_episodes, watched_episodes = count_episodes_for_watch_check(
-                            seasons_data, is_airing, watched_set, chat_id, film_id, user_id
-                        )
-                        
-                        if total_episodes > 0:
-                            if watched_episodes == total_episodes:
-                                all_episodes_watched = True
-                            elif watched_episodes > 0:
-                                has_some_watched = True
-                
-                # Если сериал помечен как просмотренный в БД, считаем его полностью просмотренным
-                if watched_in_db:
-                    all_episodes_watched = True
-                
-                # Классифицируем сериал
-                series_info = {
-                    'title': title,
-                    'kp_id': kp_id,
-                    'film_id': film_id,
-                    'is_subscribed': is_subscribed,
-                    'all_watched': all_episodes_watched,
-                    'is_airing': is_airing
-                }
-                
-                if all_episodes_watched:
-                    fully_watched_series.append(series_info)
-                elif has_some_watched:
-                    partially_watched_series.append(series_info)
-                else:
-                    not_watched_series.append(series_info)
-            
-            # Формируем разметку: сначала частично просмотренные, потом не просмотренные
-            markup = InlineKeyboardMarkup(row_width=1)
-            
-            # Частично просмотренные сериалы (приоритетные) - в начале
-            for series_info in partially_watched_series:
-                # Добавляем статус выхода сериала
-                airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
-                # Добавляем колокольчик, если есть подписка
-                subscription_emoji = "🔔 " if series_info.get('is_subscribed', False) else ""
-                button_text = f"👁️ {airing_emoji} {subscription_emoji}{series_info['title']}"
-                if len(button_text) > 30:
-                    button_text = button_text[:27] + "..."
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
-            
-            # Не просмотренные сериалы
-            for series_info in not_watched_series:
-                # Добавляем статус выхода сериала
-                airing_emoji = "🟢" if series_info.get('is_airing', False) else "🔴"
-                # Добавляем колокольчик, если есть подписка
-                subscription_emoji = "🔔 " if series_info.get('is_subscribed', False) else ""
-                button_text = f"{airing_emoji} {subscription_emoji}{series_info['title']}"
-                if len(button_text) > 30:
-                    button_text = button_text[:27] + "..."
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
-            
-            # Добавляем кнопку "Просмотренные сериалы" если есть просмотренные
-            if fully_watched_series:
-                watched_button_text = "✅ Просмотренные"
-                if len(fully_watched_series) > 0:
-                    watched_button_text = f"✅ Просмотренные ({len(fully_watched_series)})"
-                markup.add(InlineKeyboardButton(watched_button_text, callback_data="watched_series_list"))
-            
-            bot.edit_message_text("📺 <b>Выберите сериал:</b>", chat_id, message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception as e:
-            logger.error(f"[SEASONS LIST] Ошибка: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
-
-    @bot.callback_query_handler(func=lambda call: call.data == "watched_series_list")
-    def watched_series_list_callback(call):
-        """Обработчик показа просмотренных сериалов (не выходящие + все серии просмотрены)"""
-        try:
-            bot.answer_callback_query(call.id)
-            chat_id = call.message.chat.id
-            user_id = call.from_user.id
-            message_id = call.message.message_id
-            
-            # Проверяем доступ к функциям уведомлений
-            has_access = has_notifications_access(chat_id, user_id)
-            
-            # Получаем все сериалы
-            with db_lock:
-                cursor.execute('SELECT id, title, kp_id, watched FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
-                series = cursor.fetchall()
-            
-            if not series:
-                bot.edit_message_text("📺 Нет сериалов в базе.", chat_id, message_id, parse_mode='HTML')
-                return
-            
-            watched_series = []
-            now = dt.now()
-            
-            for row in series:
-                if isinstance(row, dict):
-                    film_id = row.get('id')
-                    title = row.get('title')
-                    kp_id = row.get('kp_id')
-                    watched_in_db = bool(row.get('watched'))
-                else:
-                    film_id = row[0]
-                    title = row[1]
-                    kp_id = row[2]
-                    watched_in_db = bool(row[3]) if len(row) > 3 else False
-                
-                # Если сериал помечен как просмотренный в БД, добавляем его в список
-                if watched_in_db:
-                    watched_series.append({
-                        'title': title,
-                        'kp_id': kp_id,
-                        'film_id': film_id,
-                        'total_episodes': 0  # Не важно для отображения
-                    })
-                    continue
-                
-                # Если нет доступа, пропускаем проверку эпизодов
-                if not has_access:
-                    continue
-                
-                # Получаем данные о сезонах
-                seasons_data = get_seasons_data(kp_id)
-                if not seasons_data:
-                    continue
-                
-                # Проверяем, выходит ли сериал (есть ли будущие эпизоды)
-                is_airing = False
-                for season in seasons_data:
-                    episodes = season.get('episodes', [])
-                    for ep in episodes:
-                        release_str = ep.get('releaseDate', '')
-                        if release_str and release_str != '—':
-                            try:
-                                release_date = None
-                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                    try:
-                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                        break
-                                    except:
-                                        continue
-                                
-                                if release_date and release_date > now:
-                                    is_airing = True
-                                    break
-                            except:
-                                pass
-                    if is_airing:
-                        break
-                
-                # Если сериал выходит, пропускаем
-                if is_airing:
-                    continue
-                
-                # Проверяем, все ли серии просмотрены
-                all_watched = True
-                total_episodes = 0
-                watched_episodes = 0
-                
-                # Получаем просмотренные эпизоды из базы
-                with db_lock:
-                    cursor.execute('''
-                        SELECT season_number, episode_number 
-                        FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
-                    watched_rows = cursor.fetchall()
-                    watched_set = set()
-                    for w_row in watched_rows:
-                        if isinstance(w_row, dict):
-                            watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                        else:
-                            watched_set.add((w_row[0], w_row[1]))
-                
-                # Проверяем все эпизоды
-                for season in seasons_data:
-                    episodes = season.get('episodes', [])
-                    season_num = season.get('number', '')
-                    for ep in episodes:
-                        total_episodes += 1
-                        ep_num = str(ep.get('episodeNumber', ''))
-                        if (season_num, ep_num) in watched_set:
-                            watched_episodes += 1
-                        else:
-                            all_watched = False
-                
-                # Если все серии просмотрены и сериал не выходит, добавляем в список просмотренных
-                if all_watched and total_episodes > 0:
-                    watched_series.append({
-                        'title': title,
-                        'kp_id': kp_id,
-                        'film_id': film_id,
-                        'total_episodes': total_episodes
-                    })
-            
-            if not watched_series:
-                text = "✅ <b>Просмотренные сериалы</b>\n\n"
-                text += "Нет полностью просмотренных сериалов, которые больше не выходят."
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
-                bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=markup)
-                return
-            
-            # Формируем список
-            text = f"✅ <b>Просмотренные сериалы</b>\n\n"
-            text += f"Найдено сериалов: <b>{len(watched_series)}</b>\n\n"
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            for series_info in watched_series:
-                button_text = series_info['title']
-                
-                # Проверяем, есть ли подписка на уведомления
-                with db_lock:
-                    cursor.execute('''
-                        SELECT subscribed FROM series_subscriptions 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND subscribed = TRUE
-                    ''', (chat_id, series_info['film_id'], user_id))
-                    has_subscription = cursor.fetchone() is not None
-                
-                if has_subscription:
-                    button_text = f"🔔 {button_text}"
-                
-                if len(button_text) > 30:
-                    button_text = button_text[:27] + "..."
-                
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{series_info['kp_id']}"))
-            
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="seasons_list"))
-            
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
-        except Exception as e:
-            logger.error(f"[WATCHED SERIES LIST] Ошибка: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
+            logger.info(f"[SHOW EPISODES PAGE] Отправка нового сообщения")
+            if message_thread_id:
+                bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+            else:
+                bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        
+        logger.info(f"[SHOW EPISODES PAGE] Завершено успешно")
+        return True
+    except Exception as e:
+        logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
+        return False
