@@ -4712,47 +4712,68 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         logger.info(f"[SHOW FILM INFO] Создание кнопок...")
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Проверяем премьеру
-        logger.info(f"[SHOW FILM INFO] Проверка премьеры...")
-        russia_release = info.get('russia_release')
+        # Проверка премьеры — максимально надёжно
+        logger.info("[SHOW FILM INFO] Проверка премьеры...")
         premiere_date = None
         premiere_date_str = ""
+        try:
+            # 1. Пытаемся взять из уже полученных данных (info)
+            russia_release = info.get('russia_release')
+            if russia_release and russia_release.get('date'):
+                premiere_date = russia_release.get('date')
+                premiere_date_str = russia_release.get('date_str') or (premiere_date.strftime('%d.%m.%Y') if premiere_date else "")
+                logger.info(f"[SHOW FILM INFO] Премьера из info: {premiere_date_str}")
+            
+            # 2. Если нет — fallback-запрос к API (с таймаутом)
+            if not premiere_date:
+                try:
+                    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+                    url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+                    response_main = requests.get(url_main, headers=headers, timeout=8)  # уменьшили таймаут
+                    if response_main.status_code == 200:
+                        data_main = response_main.json()
+                        date_fields = ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']
+                        for field in date_fields:
+                            date_value = data_main.get(field)
+                            if date_value:
+                                try:
+                                    date_str = str(date_value)
+                                    if 'T' in date_str:
+                                        date_str = date_str.split('T')[0]
+                                    premiere_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
+                                    logger.info(f"[SHOW FILM INFO] Премьера из fallback API ({field}): {premiere_date_str}")
+                                    break
+                                except Exception as parse_e:
+                                    logger.debug(f"[SHOW FILM INFO] Не удалось распарсить дату из {field}: {parse_e}")
+                                    continue
+                    else:
+                        logger.warning(f"[SHOW FILM INFO] Fallback API вернул статус {response_main.status_code}")
+                except Exception as api_e:
+                    logger.warning(f"[SHOW FILM INFO] Ошибка fallback-запроса к API премьеры: {api_e}")
         
-        if russia_release and russia_release.get('date'):
-            premiere_date = russia_release['date']
-            premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
-        else:
-            try:
-                headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-                url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-                response_main = requests.get(url_main, headers=headers, timeout=15)
-                if response_main.status_code == 200:
-                    data_main = response_main.json()
-                    from datetime import date as date_class
-                    today = date_class.today()
-                    
-                    for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-                        date_value = data_main.get(date_field)
-                        if date_value:
-                            try:
-                                if 'T' in str(date_value):
-                                    premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                                else:
-                                    premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                                premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                                break
-                            except:
-                                continue
-            except Exception as e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
+        except Exception as prem_e:
+            logger.error(f"[SHOW FILM INFO] Критическая ошибка проверки премьеры: {prem_e}", exc_info=True)
+            premiere_date = None
+            premiere_date_str = ""
         
-        # Если премьера еще не состоялась, добавляем кнопку
+        # Добавляем кнопку уведомления о премьере, только если дата в будущем
         if premiere_date:
-            from datetime import date as date_class
-            today = date_class.today()
-            if premiere_date > today:
-                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
+            try:
+                from datetime import date
+                today = date.today()
+                if premiere_date > today:
+                    # Заменяем точки на дефисы для callback_data (Telegram не любит точки в data)
+                    date_for_callback = premiere_date_str.replace('.', '-') if premiere_date_str else ''
+                    markup.add(InlineKeyboardButton(
+                        "🔔 Уведомить о премьере",
+                        callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"
+                    ))
+                    logger.info(f"[SHOW FILM INFO] Добавлена кнопка уведомления о премьере: {premiere_date_str}")
+            except Exception as button_e:
+                logger.error(f"[SHOW FILM INFO] Ошибка добавления кнопки премьеры: {button_e}", exc_info=True)
+        
+        logger.info(f"[SHOW FILM INFO] Проверка премьеры завершена: {premiere_date_str or 'не найдена'}")
         
         # Получаем film_id для проверки оценок и планов
         logger.info(f"[SHOW FILM INFO] Получение film_id...")
@@ -4864,7 +4885,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.error(f"[SHOW FILM INFO] Критическая ошибка при проверке планов: {e}", exc_info=True)
         
         logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}, plan_info={plan_info}")
-        
+
         # Если фильм запланирован, показываем специальную логику кнопок
         if has_plan:
             # Если фильм запланирован, НЕ показываем "Добавить в базу" и "Запланировать просмотр"
