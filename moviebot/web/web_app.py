@@ -108,21 +108,38 @@ def create_web_app(bot_instance):
         logger.info("=" * 80)
         
         if request.method == 'GET':
+            print("[WEBHOOK] GET запрос - возвращаем 200", flush=True)
             logger.info("[WEBHOOK] GET запрос - возвращаем 200")
             return "OK", 200
         
         # Логируем POST запросы
+        print("[WEBHOOK] POST запрос получен", flush=True)
         logger.info(f"[WEBHOOK] POST запрос получен")
+        print(f"[WEBHOOK] Headers: {dict(request.headers)}", flush=True)
         logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
         
-        if request.headers.get('content-type') == 'application/json':
-            json_string = request.get_data(as_text=True)
-            logger.info(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт")
-            logger.info(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...")
+        content_type = request.headers.get('content-type')
+        print(f"[WEBHOOK] Content-Type проверка: '{content_type}'", flush=True)
+        
+        if content_type == 'application/json':
+            print("[WEBHOOK] Content-Type правильный, обрабатываем JSON", flush=True)
+            try:
+                json_string = request.get_data(as_text=True)
+                print(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт", flush=True)
+                logger.info(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт")
+                print(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...", flush=True)
+                logger.info(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...")
+            except Exception as e:
+                print(f"[WEBHOOK] ОШИБКА при чтении данных: {e}", flush=True)
+                logger.error(f"[WEBHOOK] ОШИБКА при чтении данных: {e}", exc_info=True)
+                return '', 200
             
             try:
+                print("[WEBHOOK] Начинаем парсинг JSON в Update", flush=True)
                 update = telebot.types.Update.de_json(json_string)
-                logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update.update_id if hasattr(update, 'update_id') else 'N/A'}")
+                update_id = update.update_id if hasattr(update, 'update_id') else 'N/A'
+                print(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}", flush=True)
+                logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}")
                 logger.info(f"[WEBHOOK] Тип update: {type(update)}")
                 logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
                 
@@ -168,6 +185,7 @@ def create_web_app(bot_instance):
                                 logger.info(f"[WEBHOOK] Entity: type={entity.type}, offset={entity.offset}, length={entity.length}")
                 
                 # Обрабатываем обновление с обработкой ошибок
+                print(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления", flush=True)
                 logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
                 logger.info(f"[WEBHOOK] Update ID: {update.update_id}, type: {type(update)}")
                 if hasattr(update, 'message') and update.message:
@@ -175,17 +193,22 @@ def create_web_app(bot_instance):
                 if hasattr(update, 'callback_query') and update.callback_query:
                     logger.info(f"[WEBHOOK] Callback query data: {update.callback_query.data[:100] if update.callback_query.data else 'None'}")
                 
+                print(f"[WEBHOOK] Вызываем bot_instance.process_new_updates([update])", flush=True)
                 bot_instance.process_new_updates([update])
+                print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)
                 logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
                 return '', 200
             except Exception as e:
-                logger.error(f"[WEBHOOK] ❌ Ошибка обработки update: {e}", exc_info=True)
+                print(f"[WEBHOOK] ❌ ОШИБКА обработки update: {e}", flush=True)
                 import traceback
+                print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
+                logger.error(f"[WEBHOOK] ❌ Ошибка обработки update: {e}", exc_info=True)
                 logger.error(f"[WEBHOOK] Traceback: {traceback.format_exc()}")
                 # Возвращаем 200, чтобы Telegram не повторял запрос
                 return '', 200
         else:
-            logger.warning(f"[WEBHOOK] Неверный content-type: {request.headers.get('content-type')}")
+            print(f"[WEBHOOK] Неверный content-type: {content_type}", flush=True)
+            logger.warning(f"[WEBHOOK] Неверный content-type: {content_type}")
             return 'Forbidden', 403
     
     def process_yookassa_notification(event_json, is_test=False):
