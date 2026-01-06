@@ -109,6 +109,42 @@ def get_all_promocodes():
         logger.error(f"Ошибка при получении всех промокодов: {e}", exc_info=True)
         return []
 
+
+def get_active_promocodes():
+    """
+    Получает только активные промокоды (is_active = TRUE и не исчерпанные)
+    """
+    try:
+        with db_lock:
+            cursor.execute('''
+                SELECT id, code, discount_type, discount_value, total_uses, used_count, is_active
+                FROM promocodes
+                WHERE is_active = TRUE
+                ORDER BY created_at DESC
+            ''')
+            rows = cursor.fetchall()
+            
+            result = []
+            for row in rows:
+                if isinstance(row, dict):
+                    promo = row
+                else:
+                    promo = {
+                        'id': row[0],
+                        'code': row[1],
+                        'discount_type': row[2],
+                        'discount_value': float(row[3]),
+                        'total_uses': row[4],
+                        'used_count': row[5],
+                        'is_active': bool(row[6])
+                    }
+                promo['discount_value'] = float(promo['discount_value'])
+                result.append(promo)
+            return result
+    except Exception as e:
+        logger.error(f"Ошибка при получении активных промокодов: {e}", exc_info=True)
+        return []
+
 def get_promocode_info(code):
     """
     Получает информацию о промокоде

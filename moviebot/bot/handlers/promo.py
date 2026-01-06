@@ -6,7 +6,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.states import user_promo_admin_state
-from moviebot.utils.promo import get_active_promocodes, deactivate_promocode, get_promocode_info
+from moviebot.utils.promo import get_active_promocodes, get_all_promocodes, deactivate_promocode, get_promocode_info
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,8 @@ def promo_command(message):
         
         logger.info(f"[PROMO] Команда /promo вызвана от {user_id}")
         
-        # Получаем список активных промокодов
-        active_promocodes = get_active_promocodes()
+        # Получаем список всех промокодов
+        promocodes = get_all_promocodes()
         
         text = "🏷️ <b>Управление промокодами</b>\n\n"
         text += "Задайте промокод, скидку и количество купонов.\n\n"
@@ -293,7 +293,7 @@ def promo_back_to_list_callback(call):
         bot_instance.answer_callback_query(call.id)
         
         # Используем ту же логику, что и в promo_command
-        promocodes = get_active_promocodes()  # или get_all_promocodes(), если добавил
+        promocodes = get_all_promocodes()
         
         text = "🏷️ <b>Управление промокодами</b>\n\n"
         text += "Задайте промокод, скидку и количество купонов.\n\n"
@@ -301,9 +301,9 @@ def promo_back_to_list_callback(call):
         text += "Пример: <code>NEW2026 20% 100</code>\n\n"
         text += "<b>Все промокоды:</b>\n"
         
-        if active_promocodes:
-            for promo in active_promocodes:
-                status = "✅" if promo.get('is_active', True) else "🔴"  # добавил .get на всякий
+        if promocodes:
+            for promo in promocodes:
+                status = "✅" if promo.get('is_active', True) else "🔴"
                 remaining = max(0, promo['total_uses'] - promo['used_count'])
                 exhausted = " (исчерпан)" if promo['used_count'] >= promo['total_uses'] else ""
                 discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} ₽"
@@ -312,7 +312,7 @@ def promo_back_to_list_callback(call):
             text += "Нет промокодов\n"
 
         markup = InlineKeyboardMarkup(row_width=1)
-        for promo in active_promocodes:
+        for promo in promocodes:
             status = "✅" if promo.get('is_active', True) else "🔴"
             remaining = max(0, promo['total_uses'] - promo['used_count'])
             discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} ₽"
