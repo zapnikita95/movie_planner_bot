@@ -5198,6 +5198,16 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # ГАРАНТИРОВАННАЯ ОТПРАВКА: Всегда отправляем сообщение
         logger.info(f"[SHOW FILM INFO] ===== ГАРАНТИРОВАННАЯ ОТПРАВКА СООБЩЕНИЯ =====")
         logger.info(f"[SHOW FILM INFO] Отправляю сообщение в чат...")
+
+        # Обрезаем текст, если слишком длинный (лимит Telegram ~4096 символов)
+        original_length = len(text)
+        if original_length > 4000:
+            text = text[:4000] + "\n\n... (описание обрезано)"
+            logger.info(f"[SHOW FILM INFO] Текст обрезан до 4000 символов (было {original_length})")
+
+        # Логируем финальные параметры перед отправкой
+        buttons_count = len(markup.keyboard) if markup else 0
+        logger.info(f"[SHOW FILM INFO] Финальный текст длина={len(text)}, кнопок={buttons_count}")
         
         # Отправляем или обновляем сообщение
         if message_id:
