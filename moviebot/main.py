@@ -32,13 +32,12 @@ root_logger.addHandler(stdout_handler)
 # Отключаем логирование Werkzeug (Flask) и других библиотек, которые могут перехватывать логи
 werkzeug_logger = logging.getLogger('werkzeug')
 werkzeug_logger.setLevel(logging.WARNING)
-werkzeug_logger.propagate = False  # Не передаем логи Werkzeug в root logger
+werkzeug_logger.propagate = False
 
 flask_logger = logging.getLogger('flask')
 flask_logger.setLevel(logging.WARNING)
 flask_logger.propagate = False
 
-# Отключаем логирование urllib3 и других HTTP библиотек
 urllib3_logger = logging.getLogger('urllib3')
 urllib3_logger.setLevel(logging.WARNING)
 urllib3_logger.propagate = False
@@ -113,7 +112,6 @@ scheduler.add_job(check_subscription_payments, 'cron', hour=9, minute=0, timezon
 # Обработка рекуррентных платежей (каждый день в 9:00 МСК и каждые 10 минут для тестовых подписок)
 if process_recurring_payments:
     scheduler.add_job(process_recurring_payments, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='process_recurring_payments')
-    # Для тестовых подписок проверяем каждые 10 минут
     scheduler.add_job(process_recurring_payments, 'interval', minutes=10, id='process_recurring_payments_test')
 
 # Добавляем задачи очистки и голосования в scheduler
@@ -123,32 +121,14 @@ scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minut
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
 # Случайные события и уведомления
-# Проверка выходных без планов домашнего просмотра - каждую пятницу в 10:00
 scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri', hour=10, minute=0, timezone=PLANS_TZ, id='check_weekend_schedule')
-# Проверка премьер без планов - каждую пятницу в 10:30 (чтобы не конфликтовать с check_weekend_schedule)
 scheduler.add_job(check_premiere_reminder, 'cron', day_of_week='fri', hour=10, minute=30, timezone=PLANS_TZ, id='check_premiere_reminder')
-# Выбор случайного участника - каждый день в 12:00 (проверяет 14 дней)
 scheduler.add_job(choose_random_participant, 'cron', day_of_week='mon-sun', hour=12, minute=0, timezone=PLANS_TZ, id='choose_random_participant')
-# Игра в кубик - каждый день в 14:00 (проверяет 14 дней)
 scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minute=0, timezone=PLANS_TZ, id='start_dice_game')
 
-# Регистрация ВСЕХ хэндлеров (явно, в одном месте)
-# Оборачиваем в try-except для обработки ошибок импорта
-try:
-    logger.info("=" * 80)
-    logger.info("[MAIN] ===== РЕГИСТРАЦИЯ ВСЕХ HANDLERS =====")
-    bot_instance = bot  # Используем bot из bot_init
-except (SyntaxError, ImportError, IndentationError) as e:
-    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ИМПОРТЕ МОДУЛЕЙ: {e}")
-    logger.critical(f"[MAIN] Файл: {getattr(e, 'filename', 'неизвестно')}")
-    logger.critical(f"[MAIN] Строка: {getattr(e, 'lineno', 'неизвестно')}")
-    logger.critical(f"[MAIN] Текст: {getattr(e, 'text', 'неизвестно')}")
-    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
-    sys.exit(1)
-except Exception as e:
-    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ИНИЦИАЛИЗАЦИИ: {e}", exc_info=True)
-    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
-    sys.exit(1)
+# Регистрация ВСЕХ хэндлеров
+logger.info("=" * 80)
+logger.info("[MAIN] ===== РЕГИСТРАЦИЯ ВСЕХ HANDLERS =====")
 
 # Импортируем модули с callback handlers для автоматической регистрации декораторов
 import moviebot.bot.callbacks.film_callbacks  # noqa: F401
@@ -156,126 +136,111 @@ import moviebot.bot.callbacks.series_callbacks  # noqa: F401
 import moviebot.bot.callbacks.payment_callbacks  # noqa: F401
 import moviebot.bot.callbacks.premieres_callbacks  # noqa: F401
 import moviebot.bot.handlers.admin  # noqa: F401
+
 try:
     import moviebot.bot.handlers.promo  # noqa: F401
     logger.info("✅ promo handlers импортированы")
 except Exception as e:
     logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ИМПОРТЕ promo.py: {e}", exc_info=True)
-    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
     sys.exit(1)
-import moviebot.bot.handlers.state_handlers  # noqa: F401 - состояния (промокоды, оценки и т.д.) должны быть выше!
-import moviebot.bot.handlers.text_messages  # noqa: F401 - теперь будет ниже
+
+import moviebot.bot.handlers.state_handlers  # noqa: F401
+import moviebot.bot.handlers.text_messages  # noqa: F401
 
 # Регистрируем handlers команд и callbacks
 from moviebot.bot.handlers.start import register_start_handlers
-register_start_handlers(bot_instance)
+register_start_handlers(bot)
 logger.info("✅ start handlers зарегистрированы")
 
 from moviebot.bot.handlers.list import register_list_handlers
-register_list_handlers(bot_instance)
+register_list_handlers(bot)
 logger.info("✅ list handlers зарегистрированы")
 
 from moviebot.bot.handlers.seasons import register_seasons_handlers
-register_seasons_handlers(bot_instance)
+register_seasons_handlers(bot)
 logger.info("✅ seasons handlers зарегистрированы")
 
 from moviebot.bot.handlers.plan import register_plan_handlers
-register_plan_handlers(bot_instance)
+register_plan_handlers(bot)
 logger.info("✅ plan handlers зарегистрированы (включая plan_type: callback)")
 
 from moviebot.bot.handlers.payment import register_payment_handlers
-register_payment_handlers(bot_instance)
+register_payment_handlers(bot)
 logger.info("✅ payment handlers зарегистрированы")
 
 from moviebot.bot.handlers.series import register_series_handlers
-register_series_handlers(bot_instance)
+register_series_handlers(bot)
 logger.info("✅ series handlers зарегистрированы (включая search_type: callback)")
 
 try:
     from moviebot.bot.handlers.rate import register_rate_handlers
-    register_rate_handlers(bot_instance)
+    register_rate_handlers(bot)
     logger.info("✅ rate handlers зарегистрированы")
-except (SyntaxError, IndentationError) as e:
-    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА СИНТАКСИСА В rate.py: {e}")
-    logger.critical(f"[MAIN] Файл: {getattr(e, 'filename', 'неизвестно')}")
-    logger.critical(f"[MAIN] Строка: {getattr(e, 'lineno', 'неизвестно')}")
-    logger.critical(f"[MAIN] Текст: {getattr(e, 'text', 'неизвестно')}")
-    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
-    sys.exit(1)
-except ImportError as e:
-    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ИМПОРТА rate.py: {e}")
-    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
-    sys.exit(1)
 except Exception as e:
-    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ РЕГИСТРАЦИИ rate handlers: {e}", exc_info=True)
-    logger.critical("[MAIN] Процесс завершается с кодом 1 для перезапуска Railway")
+    logger.critical(f"[MAIN] ❌ ОШИБКА ПРИ РЕГИСТРАЦИИ rate handlers: {e}", exc_info=True)
     sys.exit(1)
 
 from moviebot.bot.handlers.stats import register_stats_handlers
-register_stats_handlers(bot_instance)
+register_stats_handlers(bot)
 logger.info("✅ stats handlers зарегистрированы")
 
-# Импортируем из файла settings.py (не из директории settings/)
-# Используем importlib для обхода конфликта имен (есть и файл settings.py, и директория settings/)
+# Settings (обход конфликта имен)
 import importlib.util
 import os
-# __file__ в main.py указывает на moviebot/main.py, поэтому dirname даст moviebot/
-# Нужно получить путь к moviebot/bot/handlers/settings.py
-base_dir = os.path.dirname(__file__)  # moviebot/
+base_dir = os.path.dirname(__file__)
 settings_file_path = os.path.join(base_dir, 'bot', 'handlers', 'settings.py')
 spec = importlib.util.spec_from_file_location("settings_module", settings_file_path)
 settings_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(settings_module)
-settings_module.register_settings_handlers(bot_instance)
+settings_module.register_settings_handlers(bot)
 logger.info("✅ settings handlers зарегистрированы")
 
 from moviebot.bot.handlers.settings.edit import register_edit_handlers
-register_edit_handlers(bot_instance)
+register_edit_handlers(bot)
 logger.info("✅ edit handlers зарегистрированы")
 
 from moviebot.bot.handlers.settings.clean import register_clean_handlers
-register_clean_handlers(bot_instance)
+register_clean_handlers(bot)
 logger.info("✅ clean handlers зарегистрированы")
 
 from moviebot.bot.handlers.settings.join import register_join_handlers
-register_join_handlers(bot_instance)
+register_join_handlers(bot)
 logger.info("✅ join handlers зарегистрированы")
 
 from moviebot.bot.handlers.shazam import register_shazam_handlers
-register_shazam_handlers(bot_instance)
+register_shazam_handlers(bot)
 logger.info("✅ shazam handlers зарегистрированы")
 
-# Регистрируем callback handlers
+# Callbacks
 from moviebot.bot.callbacks.film_callbacks import register_film_callbacks
-register_film_callbacks(bot_instance)
+register_film_callbacks(bot)
 logger.info("✅ film_callbacks зарегистрированы")
 
 from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
-register_series_callbacks(bot_instance)
+register_series_callbacks(bot)
 logger.info("✅ series_callbacks зарегистрированы")
 
 from moviebot.bot.callbacks.payment_callbacks import register_payment_callbacks
-register_payment_callbacks(bot_instance)
+register_payment_callbacks(bot)
 logger.info("✅ payment_callbacks зарегистрированы")
 
 from moviebot.bot.callbacks.premieres_callbacks import register_premieres_callbacks
-register_premieres_callbacks(bot_instance)
+register_premieres_callbacks(bot)
 logger.info("✅ premieres_callbacks зарегистрированы")
 
 from moviebot.bot.callbacks.random_callbacks import register_random_callbacks
-register_random_callbacks(bot_instance)
+register_random_callbacks(bot)
 logger.info("✅ random_callbacks зарегистрированы")
 
-# Регистрируем главный обработчик текстовых сообщений
 from moviebot.bot.handlers.text_messages import register_text_message_handlers
-register_text_message_handlers(bot_instance)
+register_text_message_handlers(bot)
 logger.info("✅ text_messages handlers зарегистрированы")
 
 logger.info("=" * 80)
 logger.info("✅ ВСЕ ХЭНДЛЕРЫ ЗАРЕГИСТРИРОВАНЫ")
 logger.info("=" * 80)
 
-# Предзагрузка модели Whisper при старте бота (оптимизация)
+# Предзагрузка модели Whisper
 try:
     logger.info("Предзагрузка модели Whisper...")
     from moviebot.services.shazam_service import get_whisper
@@ -287,7 +252,7 @@ try:
 except Exception as e:
     logger.warning(f"⚠️ Не удалось предзагрузить Whisper: {e}. Будет загружена при первом использовании.")
 
-# Debug-хэндлер для settings (после всех register)
+# Debug-хэндлер для settings
 @bot.callback_query_handler(func=lambda call: 'settings' in call.data.lower())
 def debug_settings(call):
     logger.info(f"[DEBUG SETTINGS] СРАБОТАЛ! data={call.data}, user={call.from_user.id}")
@@ -295,7 +260,7 @@ def debug_settings(call):
 
 logger.info("✅ Debug-хэндлер для settings зарегистрирован")
 
-# Периодическая синхронизация команд каждый час
+# Периодическая синхронизация команд
 scheduler.add_job(
     sync_commands_periodically,
     'interval',
@@ -308,9 +273,8 @@ scheduler.add_job(
 # Устанавливаем команды бота
 setup_bot_commands(bot)
 
-# Инициализация Watchdog для мониторинга критических компонентов
+# Watchdog
 try:
-    # Watchdog находится в корневой директории utils/
     import sys
     import os
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -326,277 +290,64 @@ except Exception as e:
     logger.error(f"[INIT] ❌ Ошибка инициализации Watchdog: {e}", exc_info=True)
     watchdog = None
 
-# Определяем режим запуска (webhook или polling)
+# Режим запуска
 IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False').lower() == 'true'
 USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
-# Детальное логирование переменных окружения для диагностики
 logger.info("=" * 80)
 logger.info("[MAIN] Проверка переменных окружения:")
-logger.info(f"[MAIN] IS_PRODUCTION: {IS_PRODUCTION} (значение: '{os.getenv('IS_PRODUCTION', 'НЕ УСТАНОВЛЕН')}')")
-logger.info(f"[MAIN] USE_WEBHOOK: {USE_WEBHOOK} (значение: '{os.getenv('USE_WEBHOOK', 'НЕ УСТАНОВЛЕН')}')")
-logger.info(f"[MAIN] WEBHOOK_URL: '{WEBHOOK_URL}' (тип: {type(WEBHOOK_URL).__name__})")
+logger.info(f"[MAIN] IS_PRODUCTION: {IS_PRODUCTION}")
+logger.info(f"[MAIN] USE_WEBHOOK: {USE_WEBHOOK}")
+logger.info(f"[MAIN] WEBHOOK_URL: '{WEBHOOK_URL}'")
 logger.info(f"[MAIN] PORT: '{os.getenv('PORT', 'НЕ УСТАНОВЛЕН')}'")
 logger.info(f"[MAIN] RAILWAY_PUBLIC_DOMAIN: '{os.getenv('RAILWAY_PUBLIC_DOMAIN', 'НЕ УСТАНОВЛЕН')}'")
 logger.info(f"[MAIN] RAILWAY_STATIC_URL: '{os.getenv('RAILWAY_STATIC_URL', 'НЕ УСТАНОВЛЕН')}'")
 logger.info("=" * 80)
 
-# В production используем только webhook, чтобы избежать конфликта 409
 if IS_PRODUCTION:
     logger.info("🚀 PRODUCTION режим: запуск только webhook (polling отключен)")
     
-    # Проверяем WEBHOOK_URL (может быть None или пустая строка)
     if not WEBHOOK_URL or not WEBHOOK_URL.strip():
-        # Пробуем использовать RAILWAY_PUBLIC_DOMAIN как fallback
-        railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
+        railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN') or os.getenv('RAILWAY_STATIC_URL')
         if railway_domain and railway_domain.strip():
             WEBHOOK_URL = f"https://{railway_domain.strip()}"
-            logger.info(f"[MAIN] Используется RAILWAY_PUBLIC_DOMAIN: {WEBHOOK_URL}")
+            logger.info(f"[MAIN] Fallback на RAILWAY domain: {WEBHOOK_URL}")
         else:
-            logger.error("❌ IS_PRODUCTION=True, но WEBHOOK_URL не установлен!")
-            logger.error("   Установите в Railway одну из переменных:")
-            logger.error("   - WEBHOOK_URL=https://your-domain.com")
-            logger.error("   - RAILWAY_PUBLIC_DOMAIN=your-domain.railway.app (будет использован как https://your-domain.railway.app)")
-            raise ValueError("WEBHOOK_URL required in production mode")
-    
+            logger.error("❌ WEBHOOK_URL не задан в production!")
+            raise ValueError("WEBHOOK_URL required")
+
     from moviebot.web.web_app import create_web_app
     app = create_web_app(bot)
     
-    # Устанавливаем webhook
     try:
         bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
         logger.info(f"✅ Webhook установлен: {WEBHOOK_URL}/webhook")
     except Exception as e:
-        logger.error(f"❌ Ошибка установки webhook: {e}")
+        logger.error(f"Ошибка установки webhook: {e}")
     
-    # Запускаем Flask приложение
     port = int(os.getenv('PORT', 8080))
-    logger.info(f"🚀 Запуск Flask приложения на порту {port} (PRODUCTION)")
-    logger.info(f"[FLASK] Приложение готово принимать запросы на http://0.0.0.0:{port}")
-    logger.info(f"[FLASK] Webhook endpoint: {WEBHOOK_URL}/webhook")
-    try:
-        app.run(host='0.0.0.0', port=port, threaded=True)
-    except Exception as e:
-        logger.critical(f"[FLASK] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ FLASK: {e}", exc_info=True)
-        raise
+    logger.info(f"🚀 Запуск Flask на порту {port}")
+    app.run(host='0.0.0.0', port=port, threaded=True)
+
 elif USE_WEBHOOK and WEBHOOK_URL:
-    # Режим webhook
+    logger.info("Режим webhook (не production)")
     from moviebot.web.web_app import create_web_app
     app = create_web_app(bot)
     
-    # Устанавливаем webhook
     try:
         bot.set_webhook(url=f"{WEBHOOK_URL}/webhook")
         logger.info(f"Webhook установлен: {WEBHOOK_URL}/webhook")
     except Exception as e:
         logger.error(f"Ошибка установки webhook: {e}")
     
-    # Запускаем Flask приложение
     port = int(os.getenv('PORT', 5000))
-    logger.info(f"Запуск Flask приложения на порту {port}")
-    logger.info(f"[FLASK] Приложение готово принимать запросы на http://0.0.0.0:{port}")
-    try:
-        app.run(host='0.0.0.0', port=port, threaded=True)
-    except Exception as e:
-        logger.critical(f"[FLASK] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ FLASK: {e}", exc_info=True)
-        raise
-else:
-    # Режим polling - ОТКЛЮЧЕН В PRODUCTION
-    logger.warning("⚠️ Polling режим отключен в production. Используйте webhook.")
-    logger.warning("⚠️ Для локальной разработки установите USE_WEBHOOK=true или IS_PRODUCTION=false")
-    sys.exit(1)
-    
-    # ЗАКОММЕНТИРОВАНО - не используется в production
-    """
-    import time
-    from telebot.apihelper import ApiTelegramException
-    
-    # Дополнительная проверка: убеждаемся, что старый файл не запущен
-    import sys
-    if 'moviebot.py' in sys.modules or 'moviebot.py.OLD_DO_NOT_USE' in str(sys.modules):
-        logger.error("❌ ОБНАРУЖЕН ИМПОРТ СТАРОГО ФАЙЛА! Проверьте импорты.")
-    
-    # Проверяем, что используется правильный entry point
-    if __name__ != '__main__' and 'moviebot.main' not in sys.argv[0]:
-        logger.warning(f"⚠️ Неожиданный entry point: {sys.argv[0]}")
-    
-    # Функция для очистки webhook и подготовки к запуску
-    def prepare_for_polling():
-        """Подготовка к запуску polling: очистка webhook и проверки"""
-        try:
-            # Агрессивная очистка webhook
-            bot.remove_webhook()
-            logger.info("Webhook очищен")
-            time.sleep(2)
-            
-            # Проверяем, что webhook действительно удален
-            try:
-                webhook_info = bot.get_webhook_info()
-                if webhook_info.url:
-                    logger.warning(f"⚠️ Обнаружен активный webhook: {webhook_info.url}, удаляю...")
-                    bot.remove_webhook()
-                    time.sleep(3)  # Увеличиваем задержку после удаления
-                    # Проверяем еще раз
-                    webhook_info = bot.get_webhook_info()
-                    if webhook_info.url:
-                        logger.error(f"❌ Webhook не удалось удалить: {webhook_info.url}")
-                    else:
-                        logger.info("✅ Webhook успешно удален")
-            except Exception as webhook_check_e:
-                logger.warning(f"Не удалось проверить webhook: {webhook_check_e}")
-        except Exception as e:
-            logger.warning(f"Ошибка при подготовке к polling: {e}")
-    
-    # Запуск polling с автоматическим перезапуском при ошибке 409
-    # ВАЖНО: При ошибке 409 нужно правильно остановить старый polling перед запуском нового
-    # чтобы избежать конфликта нескольких экземпляров
-    
-    max_retries = 5  # Максимальное количество попыток перезапуска
-    retry_count = 0
-    base_delay = 5  # Базовая задержка между попытками (секунды)
-    
-    while retry_count < max_retries:
-        try:
-            # Подготовка к запуску
-            prepare_for_polling()
-            
-            logger.info(f"✅ Запуск polling (попытка {retry_count + 1}/{max_retries})...")
-            logger.info(f"✅ Используется правильный entry point: moviebot.main")
-            
-            # Запускаем polling
-            # none_stop=True означает, что polling будет продолжать работать даже при ошибках
-            bot.polling(none_stop=True, interval=0, timeout=20, long_polling_timeout=20)
-            
-            # Если polling завершился без ошибки (например, KeyboardInterrupt), выходим
-            logger.info("Polling завершен нормально")
-            break
-            
-        except KeyboardInterrupt:
-            logger.info("Остановка бота по запросу пользователя...")
-            try:
-                bot.stop_polling()
-            except:
-                pass
-            scheduler.shutdown()
-            if watchdog:
-                watchdog.stop()
-            break
-            
-        except ApiTelegramException as e:
-            error_code = getattr(e, 'error_code', None)
-            error_str = str(e)
-            
-            # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
-            if error_code == 409 or "409" in error_str or "Conflict" in error_str or "terminated by other getUpdates" in error_str:
-                retry_count += 1
-                logger.error(f"❌ ОШИБКА 409 (попытка {retry_count}/{max_retries}): Обнаружен конфликт!")
-                logger.error(f"   Возможные причины:")
-                logger.error(f"   1. Активный webhook конфликтует с polling")
-                logger.error(f"   2. Старый процесс polling не завершился полностью")
-                logger.error(f"   3. Другой экземпляр бота запущен")
-                
-                # КРИТИЧЕСКИ ВАЖНО: Останавливаем текущий polling перед повторной попыткой
-                try:
-                    logger.info("Останавливаю текущий polling...")
-                    bot.stop_polling()
-                    logger.info("Polling остановлен")
-                except Exception as stop_e:
-                    logger.warning(f"Не удалось остановить polling явно: {stop_e}")
-                
-                # Увеличиваем задержку с каждой попыткой
-                delay = base_delay * retry_count
-                logger.info(f"⏳ Ожидание {delay} секунд перед повторной попыткой (для полной остановки старого polling)...")
-                time.sleep(delay)
-                
-                # Агрессивная очистка webhook перед повторной попыткой
-                try:
-                    bot.remove_webhook()
-                    time.sleep(2)
-                    webhook_info = bot.get_webhook_info()
-                    if webhook_info.url:
-                        logger.warning(f"⚠️ Webhook все еще активен: {webhook_info.url}, удаляю еще раз...")
-                        bot.remove_webhook()
-                        time.sleep(3)
-                except Exception as webhook_e:
-                    logger.warning(f"Ошибка при очистке webhook: {webhook_e}")
-                
-                if retry_count >= max_retries:
-                    logger.error(f"❌ Достигнуто максимальное количество попыток ({max_retries}). Бот завершает работу.")
-                    scheduler.shutdown()
-                    if watchdog:
-                        watchdog.stop()
-                    sys.exit(1)
-                else:
-                    logger.info(f"🔄 Повторная попытка запуска polling...")
-                    continue  # Продолжаем цикл
-            else:
-                # Другие ошибки Telegram API - логируем и пробрасываем дальше
-                logger.error(f"❌ Telegram API ошибка: {e}", exc_info=True)
-                logger.error(f"   error_code={error_code}, result_json={getattr(e, 'result_json', {})}")
-                try:
-                    bot.stop_polling()
-                except:
-                    pass
-                scheduler.shutdown()
-                if watchdog:
-                    watchdog.stop()
-                raise
-                
-        except Exception as e:
-            error_str = str(e)
-            # Проверяем, является ли это ошибкой 409 (конфликт нескольких экземпляров)
-            if "409" in error_str or "Conflict" in error_str or "terminated by other getUpdates" in error_str:
-                retry_count += 1
-                logger.error(f"❌ ОШИБКА 409 (попытка {retry_count}/{max_retries}): Обнаружен конфликт!")
-                logger.error(f"   Возможные причины:")
-                logger.error(f"   1. Активный webhook конфликтует с polling")
-                logger.error(f"   2. Старый процесс polling не завершился полностью")
-                logger.error(f"   3. Другой экземпляр бота запущен")
-                
-                # КРИТИЧЕСКИ ВАЖНО: Останавливаем текущий polling перед повторной попыткой
-                try:
-                    logger.info("Останавливаю текущий polling...")
-                    bot.stop_polling()
-                    logger.info("Polling остановлен")
-                except Exception as stop_e:
-                    logger.warning(f"Не удалось остановить polling явно: {stop_e}")
-                
-                # Увеличиваем задержку с каждой попыткой
-                delay = base_delay * retry_count
-                logger.info(f"⏳ Ожидание {delay} секунд перед повторной попыткой (для полной остановки старого polling)...")
-                time.sleep(delay)
-                
-                # Агрессивная очистка webhook перед повторной попыткой
-                try:
-                    bot.remove_webhook()
-                    time.sleep(2)
-                    webhook_info = bot.get_webhook_info()
-                    if webhook_info.url:
-                        logger.warning(f"⚠️ Webhook все еще активен: {webhook_info.url}, удаляю еще раз...")
-                        bot.remove_webhook()
-                        time.sleep(3)
-                except Exception as webhook_e:
-                    logger.warning(f"Ошибка при очистке webhook: {webhook_e}")
-                
-                if retry_count >= max_retries:
-                    logger.error(f"❌ Достигнуто максимальное количество попыток ({max_retries}). Бот завершает работу.")
-                    scheduler.shutdown()
-                    if watchdog:
-                        watchdog.stop()
-                    sys.exit(1)
-                else:
-                    logger.info(f"🔄 Повторная попытка запуска polling...")
-                    continue  # Продолжаем цикл
-            else:
-                # Другие ошибки - логируем и пробрасываем дальше
-                logger.error(f"❌ Критическая ошибка при запуске polling: {e}", exc_info=True)
-                try:
-                    bot.stop_polling()
-                except:
-                    pass
-                scheduler.shutdown()
-                if watchdog:
-                    watchdog.stop()
-                raise
+    logger.info(f"Запуск Flask на порту {port}")
+    app.run(host='0.0.0.0', port=port, threaded=True)
 
+else:
+    logger.warning("⚠️ Polling режим отключен в production. Для локальной разработки установите USE_WEBHOOK=true или IS_PRODUCTION=false")
+    sys.exit(1)
+
+# Полling закомментирован полностью (не нужен в production)
+# Если понадобится локально — раскомментируй и запусти с IS_PRODUCTION=false
