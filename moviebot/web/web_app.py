@@ -118,7 +118,6 @@ def create_web_app(bot_instance):
         print(f"Method: {request.method}", file=sys.stdout, flush=True)
         print(f"IP: {request.remote_addr}", file=sys.stdout, flush=True)
         
-        # НЕ ЧИТАЕМ request.get_data() здесь - это может вызвать проблемы
         print("[WEBHOOK] Шаг 1: Логирование базовой информации", flush=True)
         try:
             logger.info("=" * 80)
@@ -140,10 +139,9 @@ def create_web_app(bot_instance):
                 pass
             return "OK", 200
         
-        # Логируем POST запросы
         print("[WEBHOOK] Шаг 3: POST запрос получен - продолжаем обработку", flush=True)
         try:
-            logger.info(f"[WEBHOOK] POST запрос получен")
+            logger.info("[WEBHOOK] POST запрос получен")
         except:
             pass
         
@@ -155,187 +153,65 @@ def create_web_app(bot_instance):
         except:
             pass
         
-        if content_type == 'application/json':
-            print("[WEBHOOK] Content-Type правильный, обрабатываем JSON", flush=True)
-            try:
-                json_string = request.get_data(as_text=True)
-                print(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт", flush=True)
-                logger.info(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт")
-                print(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...", flush=True)
-                logger.info(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...")
-            except Exception as e:
-                print(f"[WEBHOOK] ОШИБКА при чтении данных: {e}", flush=True)
-                logger.error(f"[WEBHOOK] ОШИБКА при чтении данных: {e}", exc_info=True)
-                return '', 200
-            
-            try:
-                print("[WEBHOOK] Начинаем парсинг JSON в Update", flush=True)
-                update = telebot.types.Update.de_json(json_string)
-                update_id = update.update_id if hasattr(update, 'update_id') else 'N/A'
-                print(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}", flush=True)
-                logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}")
-                logger.info(f"[WEBHOOK] Тип update: {type(update)}")
-                logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
-                
-                # КРИТИЧНО: Проверяем наличие successful_payment на уровне update
-                if hasattr(update, 'message') and update.message and hasattr(update.message, 'successful_payment') and update.message.successful_payment:
-                    logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment НА УРОВНЕ UPDATE! ⭐⭐⭐")
-                    logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
-                    logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
-                    logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
-                
-                # Проверяем наличие pre_checkout_query (хотя для Stars не должен прийти)
-                if hasattr(update, 'pre_checkout_query') and update.pre_checkout_query:
-                    logger.info(f"[WEBHOOK] ⚠️ PRE CHECKOUT QUERY пришел! (хотя для Stars не должен)")
-                    logger.info(f"[WEBHOOK] pre_checkout_query.currency={update.pre_checkout_query.currency}")
-                    logger.info(f"[WEBHOOK] pre_checkout_query.invoice_payload={update.pre_checkout_query.invoice_payload}")
-                
-                # Логируем информацию о реплае для отладки
-                if update.message:
-                    logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")
-                    logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
-                    logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
-                    
-                    # КРИТИЧНО: Логируем successful_payment если есть
-                    if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
-                        logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment! ⭐⭐⭐")
-                        logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
-                        logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
-                        logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
-                        logger.info(f"[WEBHOOK] successful_payment.telegram_payment_charge_id={getattr(update.message.successful_payment, 'telegram_payment_charge_id', 'N/A')}")
-                    
-                    # Проверяем наличие web_app_data
-                    if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
-                        logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
-                        logger.info(f"[WEBHOOK] web_app_data.data={update.message.web_app_data.data if hasattr(update.message.web_app_data, 'data') else 'НЕТ'}")
-                        logger.info(f"[WEBHOOK] web_app_data.button_text={update.message.web_app_data.button_text if hasattr(update.message.web_app_data, 'button_text') else 'НЕТ'}")
-                    
-                    # Проверяем, является ли сообщение командой
-                    if update.message.text and update.message.text.startswith('/'):
-                        logger.info(f"[WEBHOOK] ⚠️ Обнаружена команда: '{update.message.text}'")
-                        # Проверяем entities для команд
-                        if hasattr(update.message, 'entities') and update.message.entities:
-                            for entity in update.message.entities:
-                                logger.info(f"[WEBHOOK] Entity: type={entity.type}, offset={entity.offset}, length={entity.length}")
-                
-                # Обрабатываем обновление с обработкой ошибок
-                print(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления", flush=True)
-                logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
-                logger.info(f"[WEBHOOK] Update ID: {update.update_id}, type: {type(update)}")
-                
-                # Детальное логирование типа update
-                if hasattr(update, 'message') and update.message:
-                    msg_type = update.message.content_type if hasattr(update.message, 'content_type') else 'unknown'
-                    print(f"[WEBHOOK] Update содержит message, type: {msg_type}", flush=True)
-                    logger.info(f"[WEBHOOK] Message type: {msg_type}")
-                    if update.message.text:
-                        print(f"[WEBHOOK] Message text: {update.message.text[:100]}", flush=True)
-                    if update.message.from_user:
-                        print(f"[WEBHOOK] Message from user_id: {update.message.from_user.id}", flush=True)
-                
-                if hasattr(update, 'callback_query') and update.callback_query:
-                    callback_data = update.callback_query.data[:100] if update.callback_query.data else 'None'
-                    print(f"[WEBHOOK] Update содержит callback_query, data: {callback_data}", flush=True)
-                    logger.info(f"[WEBHOOK] Callback query data: {callback_data}")
-                    if update.callback_query.from_user:
-                        print(f"[WEBHOOK] Callback from user_id: {update.callback_query.from_user.id}", flush=True)
-                
-                print(f"[WEBHOOK] Вызываем bot_instance.process_new_updates([update])", flush=True)
-                print(f"[WEBHOOK] bot_instance: {bot_instance}, type: {type(bot_instance)}, id: {id(bot_instance)}", flush=True)
-                
-                # Проверяем количество зарегистрированных обработчиков
-                try:
-                    message_handlers_count = len(bot_instance.message_handlers) if hasattr(bot_instance, 'message_handlers') else 0
-                    callback_handlers_count = len(bot_instance.callback_query_handlers) if hasattr(bot_instance, 'callback_query_handlers') else 0
-                    print(f"[WEBHOOK] Зарегистрировано обработчиков: message={message_handlers_count}, callback={callback_handlers_count}", flush=True)
-                    logger.info(f"[WEBHOOK] Зарегистрировано обработчиков: message={message_handlers_count}, callback={callback_handlers_count}")
-                except Exception as e:
-                    print(f"[WEBHOOK] Ошибка при проверке обработчиков: {e}", flush=True)
-                
-                try:
-                    # КРИТИЧЕСКИ ВАЖНО: Проверяем, что обработчики действительно зарегистрированы на этом экземпляре
-                    print(f"[WEBHOOK] Проверка обработчиков перед process_new_updates", flush=True)
-                    if hasattr(bot_instance, 'message_handlers'):
-                        print(f"[WEBHOOK] Первые 5 message handlers:", flush=True)
-                        for i, handler in enumerate(bot_instance.message_handlers[:5]):
-                            print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
-                    
-                    # КРИТИЧЕСКИЙ ФИКС: Используем ТОЛЬКО process_new_updates для всех типов обновлений
-                    # process_new_messages может не вызывать обработчики команд правильно
-                    print(f"[WEBHOOK] Вызываем process_new_updates для всех типов обновлений...", flush=True)
-                    
-                try:
-                    # КРИТИЧЕСКИЙ ФИКС: process_new_updates может не вызывать обработчики
-                    # Пробуем вызвать обработчики вручную для команд
-                    handler_called = False
-                    if hasattr(update, 'message') and update.message:
-                        message = update.message
-                        is_command = message.text and message.text.strip().startswith('/')
-                        
-                        if is_command:
-                            print(f"[WEBHOOK] Это команда, пробуем вызвать обработчики вручную", flush=True)
-                            # Ищем обработчики команд
-                            if hasattr(bot_instance, 'message_handlers'):
-                                for handler in bot_instance.message_handlers:
-                                    try:
-                                        # Проверяем, подходит ли handler для команды
-                                        filters = handler.get('filters', {})
-                                        if 'commands' in filters:
-                                            commands = filters.get('commands', [])
-                                            command_text = message.text.strip().split()[0] if message.text else ''
-                                            command_name = command_text.replace('/', '') if command_text.startswith('/') else ''
-                                            
-                                            if command_name in commands or command_text in commands:
-                                                print(f"[WEBHOOK] Найден обработчик для команды {command_name}: {handler.get('function', 'N/A')}", flush=True)
-                                                # Вызываем обработчик
-                                                handler_func = handler.get('function')
-                                                if handler_func:
-                                                    print(f"[WEBHOOK] Вызываем обработчик команды напрямую...", flush=True)
-                                                    handler_func(message)
-                                                    print(f"[WEBHOOK] ✅ Обработчик команды вызван напрямую", flush=True)
-                                                    handler_called = True
-                                                    break
-                                    except Exception as handler_error:
-                                        print(f"[WEBHOOK] ❌ Ошибка в обработчике команды: {handler_error}", flush=True)
-                                        import traceback
-                                        print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
-                                        logger.error(f"[WEBHOOK] ❌ Ошибка в обработчике команды: {handler_error}", exc_info=True)
-                    
-                    # Вызываем process_new_updates для остальных типов обновлений или если команда не обработана
-                    if not handler_called:
-                        print(f"[WEBHOOK] Вызываем process_new_updates (handler_called={handler_called})", flush=True)
-                        result = bot_instance.process_new_updates([update])
-                        print(f"[WEBHOOK] process_new_updates завершен, результат: {result}", flush=True)
-                    else:
-                        print(f"[WEBHOOK] Пропускаем process_new_updates, так как обработчик уже вызван вручную", flush=True)
-                except Exception as process_error:
-                    print(f"[WEBHOOK] ❌ ОШИБКА в process_new_updates: {process_error}", flush=True)
-                    import traceback
-                    print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
-                    logger.error(f"[WEBHOOK] ❌ Ошибка в process_new_updates: {process_error}", exc_info=True)
-                    
-                    print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)
-                    logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
-                except Exception as process_error:
-                    print(f"[WEBHOOK] ❌ ОШИБКА в process_new_updates: {process_error}", flush=True)
-                    import traceback
-                    print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
-                    logger.error(f"[WEBHOOK] ❌ Ошибка в process_new_updates: {process_error}", exc_info=True)
-                    # Все равно возвращаем 200, чтобы Telegram не повторял
-                
-                return '', 200
-            except Exception as e:
-                print(f"[WEBHOOK] ❌ ОШИБКА обработки update: {e}", flush=True)
-                import traceback
-                print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
-                logger.error(f"[WEBHOOK] ❌ Ошибка обработки update: {e}", exc_info=True)
-                logger.error(f"[WEBHOOK] Traceback: {traceback.format_exc()}")
-                # Возвращаем 200, чтобы Telegram не повторял запрос
-                return '', 200
-        else:
+        if content_type != 'application/json':
             print(f"[WEBHOOK] Неверный content-type: {content_type}", flush=True)
             logger.warning(f"[WEBHOOK] Неверный content-type: {content_type}")
             return 'Forbidden', 403
+        
+        print("[WEBHOOK] Content-Type правильный, обрабатываем JSON", flush=True)
+        try:
+            json_string = request.get_data(as_text=True)
+            print(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт", flush=True)
+            logger.info(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт")
+            print(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...", flush=True)
+            logger.info(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...")
+            
+            print("[WEBHOOK] Начинаем парсинг JSON в Update", flush=True)
+            update = telebot.types.Update.de_json(json_string)
+            update_id = update.update_id if hasattr(update, 'update_id') else 'N/A'
+            print(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}", flush=True)
+            logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}")
+            
+            # Логирование деталей update (оставил как было)
+            if hasattr(update, 'message') and update.message:
+                logger.info(f"[WEBHOOK] Update.message.content_type={getattr(update.message, 'content_type', 'НЕТ')}")
+                logger.info(f"[WEBHOOK] Update.message.text='{getattr(update.message, 'text', None)[:200] if hasattr(update.message, 'text') else None}'")
+                logger.info(f"[WEBHOOK] Update.message.from_user.id={getattr(update.message.from_user, 'id', None) if update.message.from_user else None}")
+                
+                if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
+                    sp = update.message.successful_payment
+                    logger.info("[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment! ⭐⭐⭐")
+                    logger.info(f"[WEBHOOK] successful_payment.currency={sp.currency}")
+                    logger.info(f"[WEBHOOK] successful_payment.total_amount={sp.total_amount}")
+                    logger.info(f"[WEBHOOK] successful_payment.invoice_payload={sp.invoice_payload}")
+                    logger.info(f"[WEBHOOK] successful_payment.telegram_payment_charge_id={getattr(sp, 'telegram_payment_charge_id', 'N/A')}")
+                
+                if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
+                    logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
+                    logger.info(f"[WEBHOOK] web_app_data.data={getattr(update.message.web_app_data, 'data', 'НЕТ')}")
+                    logger.info(f"[WEBHOOK] web_app_data.button_text={getattr(update.message.web_app_data, 'button_text', 'НЕТ')}")
+            
+            # Проверка обработчиков
+            print(f"[WEBHOOK] Проверка обработчиков перед process_new_updates", flush=True)
+            if hasattr(bot_instance, 'message_handlers'):
+                print(f"[WEBHOOK] Первые 5 message handlers:", flush=True)
+                for i, handler in enumerate(bot_instance.message_handlers[:5]):
+                    print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
+            
+            # Основной вызов
+            print(f"[WEBHOOK] Вызываем bot_instance.process_new_updates([update])", flush=True)
+            bot_instance.process_new_updates([update])
+            print(f"[WEBHOOK] process_new_updates завершен", flush=True)
+            logger.info("[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
+            
+            return '', 200
+            
+        except Exception as e:
+            print(f"[WEBHOOK] ❌ КРИТИЧЕСКАЯ ошибка при обработке webhook: {e}", flush=True)
+            import traceback
+            print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
+            logger.error(f"[WEBHOOK] ❌ Ошибка при обработке webhook: {e}", exc_info=True)
+            return '', 200
     
     def process_yookassa_notification(event_json, is_test=False):
         """Обрабатывает уведомление от ЮKassa (можно вызывать из webhook или теста)"""
