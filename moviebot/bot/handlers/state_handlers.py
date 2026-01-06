@@ -1518,6 +1518,13 @@ def handle_admin(message):
                     if state_chat_id and message.chat.id != state_chat_id:
                         return
                     
+                    # Проверяем, что сообщение является реплаем на prompt_message_id
+                    prompt_message_id = state.get('prompt_message_id')
+                    if prompt_message_id:
+                        if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
+                            logger.info(f"[REFUND] Сообщение не является реплаем на prompt_message_id={prompt_message_id}, игнорируем")
+                            return
+                    
                     charge_id = text.strip()
                     if charge_id:
                         del user_refund_state[user_id]
@@ -1528,6 +1535,14 @@ def handle_admin(message):
             # Отмена подписки по ID
             if user_id in user_unsubscribe_state:
                 state = user_unsubscribe_state[user_id]
+                
+                # Проверяем, что сообщение является реплаем на prompt_message_id
+                prompt_message_id = state.get('prompt_message_id')
+                if prompt_message_id:
+                    if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
+                        logger.info(f"[UNSUBSCRIBE] Сообщение не является реплаем на prompt_message_id={prompt_message_id}, игнорируем")
+                        return
+                
                 target_id_str = text.strip()
                 if target_id_str:
                     try:
@@ -1568,6 +1583,14 @@ def handle_admin(message):
             # Добавление администратора
             if user_id in user_add_admin_state:
                 state = user_add_admin_state[user_id]
+                
+                # Проверяем, что сообщение является реплаем на prompt_message_id
+                prompt_message_id = state.get('prompt_message_id')
+                if prompt_message_id:
+                    if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
+                        logger.info(f"[ADD_ADMIN] Сообщение не является реплаем на prompt_message_id={prompt_message_id}, игнорируем")
+                        return
+                
                 admin_id_str = text.strip()
                 if admin_id_str:
                     try:

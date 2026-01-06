@@ -31,7 +31,11 @@ def register_series_callbacks(bot_instance):
     def series_track_callback(call):
         """Обработчик для отметки сезонов/серий как просмотренных"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            # Пытаемся ответить на callback query, но не падаем, если query истек
+            try:
+                bot_instance.answer_callback_query(call.id)
+            except Exception as e:
+                logger.warning(f"[SERIES TRACK] Не удалось ответить на callback query (возможно, истек): {e}")
             
             kp_id = call.data.split(":")[1]
             chat_id = call.message.chat.id

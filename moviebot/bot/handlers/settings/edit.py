@@ -35,6 +35,7 @@ def edit_command(message):
     markup.add(InlineKeyboardButton("👁️ Удалить просмотр", callback_data="edit:delete_watched"))
     markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="edit:delete_plan"))
     markup.add(InlineKeyboardButton("🎬 Удалить фильм из базы", callback_data="edit:delete_movie"))
+    markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
     
     help_text = (
         "✏️ <b>Что вы хотите изменить?</b>\n\n"
