@@ -155,8 +155,8 @@ import moviebot.bot.callbacks.payment_callbacks  # noqa: F401
 import moviebot.bot.callbacks.premieres_callbacks  # noqa: F401
 import moviebot.bot.handlers.admin  # noqa: F401
 import moviebot.bot.handlers.promo  # noqa: F401
-import moviebot.bot.handlers.text_messages  # noqa: F401 - критично для регистрации декораторов
-import moviebot.bot.handlers.state_handlers  # noqa: F401 - handlers для состояний (оценки, промокоды и т.д.)
+import moviebot.bot.handlers.state_handlers  # noqa: F401 - состояния (промокоды, оценки и т.д.) должны быть выше!
+import moviebot.bot.handlers.text_messages  # noqa: F401 - теперь будет ниже
 
 # Регистрируем handlers команд и callbacks
 from moviebot.bot.handlers.start import register_start_handlers

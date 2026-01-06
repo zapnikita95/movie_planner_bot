@@ -526,6 +526,9 @@ if update.message:
 
 
 
-
+cd /Users/nikitazaporohzets/Desktop/Кино/movie_planner_bot
+git add .
+git commit -m "Fix: апдейт броска кубика"
+git push origin main
 
 
