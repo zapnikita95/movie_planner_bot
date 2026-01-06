@@ -4764,7 +4764,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             logger.info(f"[SHOW FILM INFO] Запрос film_id из БД...")
             try:
                 import threading
-                lock_acquired = db_lock.acquire(timeout=1.0)
+                lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
                     try:
                         cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
@@ -5001,41 +5001,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     else:
                         markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
-                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
-                            # Отмечаем сериал как просмотренный в БД
-                            with db_lock:
-                                cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                                conn.commit()
-                    
-                    # Проверяем подписку
-                    is_subscribed = False
-                    if film_id:
-                        with db_lock:
-                            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-                            sub_row = cursor.fetchone()
-                            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
-                    
-                    # Добавляем строку о статусе подписки в текст (чтобы текст всегда менялся)
-                    if is_subscribed:
-                        text += f"\n\n🔔 <b>Статус подписки: ✅ Подписан</b>"
-                    else:
-                        text += f"\n\n🔔 <b>Статус подписки: ❌ Не подписан</b>"
-                    
-                    # Показываем соответствующую кнопку
-                    if all_episodes_watched:
-                        markup.add(InlineKeyboardButton("✅ Просмотрено", callback_data=f"series_track:{kp_id}"))
-                    else:
-                        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                    
-                    # Кнопка подписки
-                    if is_subscribed:
-                        markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
-                    else:
-                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-                else:
-                    # Нет доступа - показываем заблокированные кнопки
-                    logger.info(f"[SHOW FILM INFO] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}, показываем заблокированные кнопки")
                     markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
             else:
