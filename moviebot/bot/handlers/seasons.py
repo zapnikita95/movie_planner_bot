@@ -304,3 +304,15 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
         return False
+
+
+def register_seasons_handlers(bot):
+    """Регистрирует обработчики для команды /seasons
+    
+    Примечание: Основные обработчики сезонов и серий регистрируются через
+    register_series_callbacks в series_callbacks.py. Эта функция добавлена
+    для совместимости с main.py.
+    """
+    # Обработчики сезонов и серий регистрируются в series_callbacks.py
+    # через функцию register_series_callbacks
+    pass
