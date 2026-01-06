@@ -236,7 +236,17 @@ def create_web_app(bot_instance):
                         print(f"[WEBHOOK] Callback from user_id: {update.callback_query.from_user.id}", flush=True)
                 
                 print(f"[WEBHOOK] Вызываем bot_instance.process_new_updates([update])", flush=True)
-                print(f"[WEBHOOK] bot_instance: {bot_instance}, type: {type(bot_instance)}", flush=True)
+                print(f"[WEBHOOK] bot_instance: {bot_instance}, type: {type(bot_instance)}, id: {id(bot_instance)}", flush=True)
+                
+                # Проверяем количество зарегистрированных обработчиков
+                try:
+                    message_handlers_count = len(bot_instance.message_handlers) if hasattr(bot_instance, 'message_handlers') else 0
+                    callback_handlers_count = len(bot_instance.callback_query_handlers) if hasattr(bot_instance, 'callback_query_handlers') else 0
+                    print(f"[WEBHOOK] Зарегистрировано обработчиков: message={message_handlers_count}, callback={callback_handlers_count}", flush=True)
+                    logger.info(f"[WEBHOOK] Зарегистрировано обработчиков: message={message_handlers_count}, callback={callback_handlers_count}")
+                except Exception as e:
+                    print(f"[WEBHOOK] Ошибка при проверке обработчиков: {e}", flush=True)
+                
                 try:
                     bot_instance.process_new_updates([update])
                     print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)

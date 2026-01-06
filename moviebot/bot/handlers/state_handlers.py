@@ -6,11 +6,16 @@
 - Обработки ошибок с кнопками
 """
 import logging
+import sys
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.bot.bot_init import BOT_ID
 
 logger = logging.getLogger(__name__)
+
+# Логируем при импорте модуля
+print(f"[STATE HANDLERS] Модуль импортирован, bot_instance: {bot_instance}, id: {id(bot_instance)}", file=sys.stdout, flush=True)
+logger.info(f"[STATE HANDLERS] Модуль импортирован, bot_instance: {bot_instance}, id: {id(bot_instance)}")
 
 
 def _process_promo_success(message, state, promo_code, discounted_price, message_text, promocode_id, user_id, chat_id):
