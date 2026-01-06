@@ -7,7 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_operations import log_request
 from moviebot.database.db_operations import is_bot_participant
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot as bot_instance
+from moviebot.bot.bot_init import bot as bot_instance, BOT_ID
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -37,13 +37,14 @@ def join_command(message):
         if chat_id < 0:  # Групповой чат
             try:
                 # Получаем всех участников бота из stats
+                from moviebot.bot.bot_init import BOT_ID
                 with db_lock:
                     cursor.execute('''
                         SELECT DISTINCT user_id, username 
                         FROM stats 
-                        WHERE chat_id = %s
+                        WHERE chat_id = %s AND user_id != %s
                         ORDER BY username
-                    ''', (chat_id,))
+                    ''', (chat_id, BOT_ID if BOT_ID else 0))
                     bot_participants = cursor.fetchall()
                 
                 bot_participant_ids = set()
@@ -51,6 +52,9 @@ def join_command(message):
                 for row in bot_participants:
                     p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
                     p_username = row.get('username') if isinstance(row, dict) else row[1]
+                    # Исключаем бота из списка участников
+                    if BOT_ID and p_user_id == BOT_ID:
+                        continue
                     bot_participant_ids.add(p_user_id)
                     bot_participants_dict[p_user_id] = p_username
                 
@@ -84,12 +88,16 @@ def join_command(message):
                     if not_added or bot_participants:
                         response_text += "\n\n"
                         
-                        # Показываем участников бота
+                        # Показываем участников бота (исключая бота)
                         if bot_participants:
                             response_text += "✅ <b>Участники бота:</b>\n"
                             for row in bot_participants:
                                 p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
                                 p_username = row.get('username') if isinstance(row, dict) else row[1]
+                                
+                                # Пропускаем бота
+                                if p_user_id == BOT_ID:
+                                    continue
                                 
                                 # Проверяем, есть ли у пользователя платный доступ
                                 has_premium = False
@@ -120,11 +128,17 @@ def join_command(message):
                             return
                 except Exception as e:
                     logger.warning(f"[JOIN] Не удалось получить список администраторов: {e}")
-                    # Если не удалось получить администраторов, просто показываем участников бота
+                    # Если не удалось получить администраторов, просто показываем участников бота (исключая бота)
                     if bot_participants:
                         response_text += "\n\n✅ <b>Участники бота:</b>\n"
                         for row in bot_participants:
+                            p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
                             p_username = row.get('username') if isinstance(row, dict) else row[1]
+                            
+                            # Пропускаем бота
+                            if p_user_id == BOT_ID:
+                                continue
+                            
                             display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
                             response_text += f"• {display_name}\n"
             except Exception as e:

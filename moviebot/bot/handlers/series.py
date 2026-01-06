@@ -3282,6 +3282,22 @@ def register_series_handlers(bot_param):
             chat_id = call.message.chat.id
             message_id = call.message.message_id
             
+            # Удаляем состояние игры кубика, если оно есть
+            if chat_id in dice_game_state:
+                game_state = dice_game_state[chat_id]
+                # Удаляем все сообщения с кубиками
+                dice_messages = game_state.get('dice_messages', {})
+                for dice_msg_id in dice_messages.keys():
+                    try:
+                        bot_instance.delete_message(chat_id, dice_msg_id)
+                        logger.info(f"[RANDOM EVENTS] Удалено сообщение с кубиком {dice_msg_id}")
+                    except Exception as e:
+                        logger.warning(f"[RANDOM EVENTS] Не удалось удалить сообщение с кубиком {dice_msg_id}: {e}")
+                
+                # Удаляем состояние игры
+                del dice_game_state[chat_id]
+                logger.info(f"[RANDOM EVENTS] Состояние игры кубика удалено для чата {chat_id}")
+            
             # Удаляем сообщение
             try:
                 bot_instance.delete_message(chat_id, message_id)
@@ -3339,7 +3355,15 @@ def register_series_handlers(bot_param):
             
             # Проверяем, не бросил ли уже пользователь кубик
             if user_id in game_state.get('participants', {}) and 'dice_message_id' in game_state['participants'][user_id]:
-                bot_instance.answer_callback_query(call.id, "Вы уже бросили кубик!", show_alert=True)
+                # Проверяем, все ли участники уже бросили
+                participants_with_results = {uid: p for uid, p in game_state.get('participants', {}).items() if 'value' in p and p.get('value') is not None}
+                all_participants = len(game_state.get('participants', {}))
+                all_have_results = len(participants_with_results) == all_participants and all_participants >= 2
+                
+                if all_have_results:
+                    bot_instance.answer_callback_query(call.id, "🎲 Кости уже брошены", show_alert=True)
+                else:
+                    bot_instance.answer_callback_query(call.id, "Вы уже бросили кубик!", show_alert=True)
                 return
             
             # Отправляем стикер игральной кости

@@ -120,10 +120,10 @@ def register_start_handlers(bot):
             logger.info(f"[START MENU] Обработка действия: {action}, user_id={user_id}, chat_id={chat_id}")
             
             # Импортируем обработчики команд (они будут зарегистрированы в commands.py)
-            from moviebot.bot.handlers.seasons import seasons_command
             from moviebot.bot.handlers.plan import show_schedule
             from moviebot.bot.handlers.payment import payment_command
             from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
+            # Команда /seasons обрабатывается через callback в series_callbacks.py
             # Используем importlib для обхода конфликта имен (есть и файл settings.py, и директория settings/)
             import importlib.util
             settings_spec = importlib.util.spec_from_file_location("settings_module", "moviebot/bot/handlers/settings.py")
@@ -163,8 +163,11 @@ def register_start_handlers(bot):
             
             # Вызываем соответствующую команду
             if action == 'seasons':
-                message.text = '/seasons'
-                seasons_command(message)
+                # Команда /seasons обрабатывается через callback в series_callbacks.py
+                # Используем callback для показа списка сериалов
+                from moviebot.bot.callbacks.series_callbacks import show_seasons_list
+                show_seasons_list(call)
+                return
             elif action == 'premieres':
                 message.text = '/premieres'
                 premieres_command(message)
