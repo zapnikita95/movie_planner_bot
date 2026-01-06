@@ -18,8 +18,10 @@ def _process_refund(message, charge_id):
     """Обрабатывает возврат звезд по charge_id"""
     try:
         logger.info(f"[REFUND] Запрос на возврат для charge_id: {charge_id}")
+        logger.info(f"[REFUND] Длина charge_id: {len(charge_id)} символов")
         
         # Ищем платеж в БД по telegram_payment_charge_id
+        # Сначала пробуем точное совпадение
         with db_lock:
             cursor.execute("""
                 SELECT payment_id, user_id, chat_id, amount, status, telegram_payment_charge_id
@@ -28,9 +30,67 @@ def _process_refund(message, charge_id):
             """, (charge_id,))
             row = cursor.fetchone()
         
+        # Если не найдено, пробуем поиск по началу charge_id (на случай, если он был обрезан при сохранении)
         if not row:
-            bot_instance.reply_to(message, f"❌ Платеж с ID операции '{charge_id}' не найден в базе данных.")
-            logger.warning(f"[REFUND] Платеж не найден: charge_id={charge_id}")
+            logger.info(f"[REFUND] Точное совпадение не найдено, пробуем поиск по началу charge_id...")
+            # Берем первые 50 символов для поиска
+            charge_id_prefix = charge_id[:50] if len(charge_id) > 50 else charge_id
+            with db_lock:
+                cursor.execute("""
+                    SELECT payment_id, user_id, chat_id, amount, status, telegram_payment_charge_id
+                    FROM payments 
+                    WHERE telegram_payment_charge_id LIKE %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (f"{charge_id_prefix}%",))
+                row = cursor.fetchone()
+                if row:
+                    stored_charge_id = row.get('telegram_payment_charge_id') if isinstance(row, dict) else (row[5] if len(row) > 5 else None)
+                    logger.info(f"[REFUND] Найден платеж по префиксу. Запрошенный charge_id: {charge_id[:50]}..., сохраненный: {stored_charge_id[:50] if stored_charge_id else 'None'}...")
+        
+        # Если все еще не найдено, пробуем поиск по части charge_id (для отладки)
+        if not row:
+            logger.info(f"[REFUND] Поиск по префиксу не дал результатов, пробуем поиск по части charge_id...")
+            # Берем первые 30 символов для более широкого поиска
+            charge_id_part = charge_id[:30] if len(charge_id) > 30 else charge_id
+            with db_lock:
+                cursor.execute("""
+                    SELECT payment_id, user_id, chat_id, amount, status, telegram_payment_charge_id
+                    FROM payments 
+                    WHERE telegram_payment_charge_id LIKE %s
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """, (f"%{charge_id_part}%",))
+                rows = cursor.fetchall()
+                if rows:
+                    logger.info(f"[REFUND] Найдено {len(rows)} платежей по части charge_id. Показываем первые 3:")
+                    for i, r in enumerate(rows[:3]):
+                        stored_id = r.get('telegram_payment_charge_id') if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
+                        logger.info(f"[REFUND]   {i+1}. payment_id={r.get('payment_id') if isinstance(r, dict) else r[0]}, stored_charge_id={stored_id[:50] if stored_id else 'None'}...")
+                    # Берем первый найденный платеж
+                    row = rows[0]
+        
+        if not row:
+            # Для отладки: показываем последние платежи с telegram_payment_charge_id
+            logger.info(f"[REFUND] Платеж не найден. Проверяем последние платежи с telegram_payment_charge_id...")
+            with db_lock:
+                cursor.execute("""
+                    SELECT payment_id, user_id, chat_id, amount, status, telegram_payment_charge_id, created_at
+                    FROM payments 
+                    WHERE telegram_payment_charge_id IS NOT NULL
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """)
+                recent_payments = cursor.fetchall()
+                if recent_payments:
+                    logger.info(f"[REFUND] Последние платежи с telegram_payment_charge_id:")
+                    for i, p in enumerate(recent_payments):
+                        stored_id = p.get('telegram_payment_charge_id') if isinstance(p, dict) else (p[5] if len(p) > 5 else None)
+                        logger.info(f"[REFUND]   {i+1}. payment_id={p.get('payment_id') if isinstance(p, dict) else p[0]}, charge_id={stored_id[:50] if stored_id else 'None'}..., created_at={p.get('created_at') if isinstance(p, dict) else (p[6] if len(p) > 6 else 'N/A')}")
+            
+            bot_instance.reply_to(message, f"❌ Платеж с ID операции '{charge_id[:50]}...' не найден в базе данных.\n\n"
+                                          f"Проверьте правильность ID операции. Убедитесь, что вы скопировали полный ID из сообщения об успешной оплате.")
+            logger.warning(f"[REFUND] Платеж не найден: charge_id={charge_id[:50]}... (полная длина: {len(charge_id)})")
             return
         
         # Извлекаем данные платежа
