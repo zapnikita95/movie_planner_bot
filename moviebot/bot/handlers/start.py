@@ -19,6 +19,13 @@ def register_start_handlers(bot):
     
     @bot.message_handler(commands=['start', 'menu'])
     def send_welcome(message):
+        import sys
+        print("=" * 80, file=sys.stdout, flush=True)
+        print("[START HANDLER] ===== ОБРАБОТЧИК /start ВЫЗВАН =====", file=sys.stdout, flush=True)
+        print(f"[START HANDLER] User ID: {message.from_user.id if message.from_user else 'N/A'}", file=sys.stdout, flush=True)
+        print(f"[START HANDLER] Chat ID: {message.chat.id}", file=sys.stdout, flush=True)
+        print(f"[START HANDLER] Message Text: {message.text}", file=sys.stdout, flush=True)
+        
         logger.info("=" * 80)
         logger.info(f"[START HANDLER] ===== ОБРАБОТЧИК /start ВЫЗВАН =====")
         logger.info(f"[START HANDLER] User ID: {message.from_user.id if message.from_user else 'N/A'}")

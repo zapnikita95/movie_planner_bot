@@ -202,15 +202,37 @@ def create_web_app(bot_instance):
                 print(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления", flush=True)
                 logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
                 logger.info(f"[WEBHOOK] Update ID: {update.update_id}, type: {type(update)}")
+                
+                # Детальное логирование типа update
                 if hasattr(update, 'message') and update.message:
-                    logger.info(f"[WEBHOOK] Message type: {update.message.content_type if hasattr(update.message, 'content_type') else 'unknown'}")
+                    msg_type = update.message.content_type if hasattr(update.message, 'content_type') else 'unknown'
+                    print(f"[WEBHOOK] Update содержит message, type: {msg_type}", flush=True)
+                    logger.info(f"[WEBHOOK] Message type: {msg_type}")
+                    if update.message.text:
+                        print(f"[WEBHOOK] Message text: {update.message.text[:100]}", flush=True)
+                    if update.message.from_user:
+                        print(f"[WEBHOOK] Message from user_id: {update.message.from_user.id}", flush=True)
+                
                 if hasattr(update, 'callback_query') and update.callback_query:
-                    logger.info(f"[WEBHOOK] Callback query data: {update.callback_query.data[:100] if update.callback_query.data else 'None'}")
+                    callback_data = update.callback_query.data[:100] if update.callback_query.data else 'None'
+                    print(f"[WEBHOOK] Update содержит callback_query, data: {callback_data}", flush=True)
+                    logger.info(f"[WEBHOOK] Callback query data: {callback_data}")
+                    if update.callback_query.from_user:
+                        print(f"[WEBHOOK] Callback from user_id: {update.callback_query.from_user.id}", flush=True)
                 
                 print(f"[WEBHOOK] Вызываем bot_instance.process_new_updates([update])", flush=True)
-                bot_instance.process_new_updates([update])
-                print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)
-                logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
+                print(f"[WEBHOOK] bot_instance: {bot_instance}, type: {type(bot_instance)}", flush=True)
+                try:
+                    bot_instance.process_new_updates([update])
+                    print(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно", flush=True)
+                    logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
+                except Exception as process_error:
+                    print(f"[WEBHOOK] ❌ ОШИБКА в process_new_updates: {process_error}", flush=True)
+                    import traceback
+                    print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
+                    logger.error(f"[WEBHOOK] ❌ Ошибка в process_new_updates: {process_error}", exc_info=True)
+                    # Все равно возвращаем 200, чтобы Telegram не повторял
+                
                 return '', 200
             except Exception as e:
                 print(f"[WEBHOOK] ❌ ОШИБКА обработки update: {e}", flush=True)
