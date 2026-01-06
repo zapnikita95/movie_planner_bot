@@ -402,9 +402,13 @@ elif USE_WEBHOOK and WEBHOOK_URL:
         logger.critical(f"[FLASK] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ЗАПУСКЕ FLASK: {e}", exc_info=True)
         raise
 else:
-    # Режим polling
-    logger.info("Запуск бота в режиме polling...")
+    # Режим polling - ОТКЛЮЧЕН В PRODUCTION
+    logger.warning("⚠️ Polling режим отключен в production. Используйте webhook.")
+    logger.warning("⚠️ Для локальной разработки установите USE_WEBHOOK=true или IS_PRODUCTION=false")
+    sys.exit(1)
     
+    # ЗАКОММЕНТИРОВАНО - не используется в production
+    """
     import time
     from telebot.apihelper import ApiTelegramException
     

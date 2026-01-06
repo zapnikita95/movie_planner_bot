@@ -34,6 +34,21 @@ app.logger.disabled = True
 # Добавляем логирование при создании приложения
 logger.info("[WEB APP] Flask приложение создано")
 
+# Глобальное логирование всех запросов
+@app.before_request
+def log_request_info():
+    logger.info("=" * 80)
+    logger.info(f"[FLASK REQUEST] Method: {request.method}, Path: {request.path}")
+    logger.info(f"[FLASK REQUEST] IP: {request.remote_addr}")
+    logger.info(f"[FLASK REQUEST] Headers: {dict(request.headers)}")
+    if request.method == 'POST':
+        try:
+            data_preview = request.get_data(as_text=True)[:200]
+            logger.info(f"[FLASK REQUEST] Data preview: {data_preview}...")
+        except:
+            logger.info(f"[FLASK REQUEST] Data preview: (не удалось прочитать)")
+    logger.info("=" * 80)
+
 # Проверяем переменные окружения при старте приложения
 def check_environment_variables():
     """Проверяет наличие необходимых переменных окружения"""
@@ -1508,6 +1523,9 @@ def create_web_app(bot_instance):
             logger.error(f"[YOOKASSA TEST] Ошибка: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
     
+    logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
+    logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
+    logger.info(f"[WEB APP] Возвращаем app: {app}")
     return app
 
 
