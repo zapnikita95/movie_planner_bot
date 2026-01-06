@@ -9,7 +9,7 @@ from moviebot.database.db_operations import (
     get_active_group_subscription_by_chat_id,
     log_request
 )
-from moviebot.utils.helpers import has_tickets_access
+from moviebot.utils.helpers import has_tickets_access, has_recommendations_access
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +238,18 @@ def register_start_handlers(bot):
             elif action == 'help':
                 message.text = '/help'
                 help_command(message)
+            elif action == 'shazam':
+                # Импортируем handler для КиноШазам
+                from moviebot.bot.handlers.shazam import shazam_start_callback
+                # Создаем фиктивный callback для вызова
+                class FakeCall:
+                    def __init__(self):
+                        self.id = "fake"
+                        self.from_user = call.from_user
+                        self.message = call.message
+                        self.data = "start_menu:shazam"
+                fake_call = FakeCall()
+                shazam_start_callback(fake_call)
             
             # Удаляем сообщение с меню после успешной отправки нового сообщения
             # (только если не было return выше)
@@ -273,6 +285,15 @@ def register_start_handlers(bot):
 
             # Создаём меню с кнопками
             markup = InlineKeyboardMarkup(row_width=1)
+            # КиноШазам доступен только с подпиской Рекомендации или Полная
+            try:
+                if has_recommendations_access(chat_id, user_id):
+                    markup.add(InlineKeyboardButton("🔮 КиноШазам", callback_data="start_menu:shazam"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 КиноШазам", callback_data="start_menu:shazam"))
+            except Exception as e:
+                logger.warning(f"Ошибка при проверке доступа к КиноШазам для user_id={user_id}: {e}")
+                markup.add(InlineKeyboardButton("🔒 КиноШазам", callback_data="start_menu:shazam"))
             markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
             markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
             markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))

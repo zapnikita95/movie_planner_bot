@@ -24,9 +24,16 @@ DISABLE_TRANSLATION = os.environ.get('DISABLE_TRANSLATION', 'false').lower() == 
 logger = logging.getLogger(__name__)
 
 # Путь к данным (относительно корня проекта)
+# На Railway используем /data если доступно (Railway Volume), иначе локальная папка
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DATA_DIR = os.path.join(BASE_DIR, 'data', 'shazam')
+if os.path.exists('/data'):
+    # Railway Volume для постоянного хранения
+    DATA_DIR = '/data/shazam'
+else:
+    # Локальное хранилище (для разработки)
+    DATA_DIR = os.path.join(BASE_DIR, 'data', 'shazam')
 os.makedirs(DATA_DIR, exist_ok=True)
+logger.info(f"[SHAZAM] Используется директория данных: {DATA_DIR}")
 
 INDEX_PATH = os.path.join(DATA_DIR, 'imdb_index.faiss')
 DATA_PATH = os.path.join(DATA_DIR, 'imdb_movies.csv')
@@ -225,14 +232,98 @@ def extract_gzip_with_progress(gz_path, tsv_path, description):
         logger.error(f"Ошибка при распаковке {description}: {e}")
         return False
 
+def parse_keywords_list(keywords_path):
+    """
+    Парсит keywords.list файл и возвращает словарь tconst -> [keywords]
+    
+    Формат файла:
+    tt1234567: keyword1
+    tt1234567: keyword2
+    tt7890123: keyword3
+    """
+    keywords_dict = {}
+    
+    if not os.path.exists(keywords_path):
+        logger.warning(f"Файл keywords.list не найден: {keywords_path}")
+        return keywords_dict
+    
+    logger.info("Парсим keywords.list...")
+    try:
+        with open(keywords_path, 'r', encoding='utf-8', errors='ignore') as f:
+            line_count = 0
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Формат: tt1234567: keyword
+                if ':' in line:
+                    parts = line.split(':', 1)
+                    if len(parts) == 2:
+                        tconst = parts[0].strip()
+                        keyword = parts[1].strip()
+                        
+                        if tconst.startswith('tt') and keyword:
+                            if tconst not in keywords_dict:
+                                keywords_dict[tconst] = []
+                            keywords_dict[tconst].append(keyword)
+                            line_count += 1
+                            
+                            if line_count % 100000 == 0:
+                                logger.info(f"Обработано {line_count} ключевых слов...")
+        
+        logger.info(f"Загружено {len(keywords_dict)} фильмов с ключевыми словами (всего {line_count} ключевых слов)")
+        return keywords_dict
+    except Exception as e:
+        logger.error(f"Ошибка при парсинге keywords.list: {e}", exc_info=True)
+        return keywords_dict
+
+def parse_keywords_tsv(keywords_tsv_path):
+    """
+    Парсит keywords TSV файл (если доступен) и возвращает словарь tconst -> [keywords]
+    
+    Формат TSV: tconst, keyword
+    """
+    keywords_dict = {}
+    
+    if not os.path.exists(keywords_tsv_path):
+        return keywords_dict
+    
+    logger.info("Парсим keywords TSV...")
+    try:
+        keywords_df = pd.read_csv(keywords_tsv_path, sep='\t', low_memory=False, header=None, names=['tconst', 'keyword'])
+        
+        for _, row in keywords_df.iterrows():
+            tconst = str(row['tconst']).strip()
+            keyword = str(row['keyword']).strip()
+            
+            if tconst.startswith('tt') and keyword and keyword != 'nan':
+                if tconst not in keywords_dict:
+                    keywords_dict[tconst] = []
+                keywords_dict[tconst].append(keyword)
+        
+        logger.info(f"Загружено {len(keywords_dict)} фильмов с ключевыми словами из TSV")
+        return keywords_dict
+    except Exception as e:
+        logger.warning(f"Ошибка при парсинге keywords TSV: {e}")
+        return keywords_dict
+
 def download_imdb_data():
     basics_url = 'https://datasets.imdbws.com/title.basics.tsv.gz'
     ratings_url = 'https://datasets.imdbws.com/title.ratings.tsv.gz'
     plot_url = 'https://datasets.imdbws.com/title.plot.summary.tsv.gz'
+    # Пробуем несколько возможных URL для keywords
+    keywords_urls = [
+        'https://datasets.imdbws.com/keywords.list.gz',
+        'https://www.imdb.com/interfaces/keywords.list.gz',
+        'https://datasets.imdbws.com/title.keywords.tsv.gz',  # Альтернативный формат
+    ]
 
     basics_path = os.path.join(DATA_DIR, 'title.basics.tsv.gz')
     ratings_path = os.path.join(DATA_DIR, 'title.ratings.tsv.gz')
     plot_path = os.path.join(DATA_DIR, 'title.plot.summary.tsv.gz')
+    keywords_path_gz = os.path.join(DATA_DIR, 'keywords.list.gz')
+    keywords_path = os.path.join(DATA_DIR, 'keywords.list')
 
     if not download_file_with_progress(basics_url, basics_path, "IMDB basics"):
         raise Exception("Не удалось скачать IMDB basics")
@@ -244,6 +335,37 @@ def download_imdb_data():
     plots_available = download_file_with_progress(plot_url, plot_path, "IMDB plots")
     if not plots_available:
         logger.warning("IMDB plots недоступен")
+    
+    # Пробуем скачать keywords
+    keywords_available = False
+    keywords_tsv_path = os.path.join(DATA_DIR, 'title.keywords.tsv')
+    keywords_tsv_path_gz = os.path.join(DATA_DIR, 'title.keywords.tsv.gz')
+    
+    # Сначала пробуем TSV формат (более структурированный)
+    if not os.path.exists(keywords_tsv_path):
+        keywords_tsv_url = 'https://datasets.imdbws.com/title.keywords.tsv.gz'
+        if download_file_with_progress(keywords_tsv_url, keywords_tsv_path_gz, "IMDB keywords TSV"):
+            keywords_available = True
+            if extract_gzip_with_progress(keywords_tsv_path_gz, keywords_tsv_path, "keywords TSV"):
+                logger.info("Keywords TSV успешно загружен")
+            else:
+                keywords_available = False
+    else:
+        keywords_available = True
+        logger.info("keywords TSV уже существует")
+    
+    # Если TSV не удалось, пробуем list формат
+    if not keywords_available and not os.path.exists(keywords_path):
+        for url in keywords_urls:
+            logger.info(f"Пробуем скачать keywords list с {url}...")
+            if download_file_with_progress(url, keywords_path_gz, "IMDB keywords list"):
+                keywords_available = True
+                break
+        else:
+            logger.warning("Не удалось скачать keywords ни с одного URL")
+    elif os.path.exists(keywords_path):
+        keywords_available = True
+        logger.info("keywords.list уже существует")
 
     basics_tsv = os.path.join(DATA_DIR, 'title.basics.tsv')
     if not extract_gzip_with_progress(basics_path, basics_tsv, "basics"):
@@ -259,7 +381,12 @@ def download_imdb_data():
         if not extract_gzip_with_progress(plot_path, plot_tsv, "plots"):
             plots_available = False
     
-    return plots_available, ratings_available
+    # Распаковываем keywords если скачали
+    if keywords_available and os.path.exists(keywords_path_gz) and not os.path.exists(keywords_path):
+        if not extract_gzip_with_progress(keywords_path_gz, keywords_path, "keywords"):
+            keywords_available = False
+    
+    return plots_available, ratings_available, keywords_available
 
 def build_imdb_index():
     """Создаёт индекс IMDB фильмов (минимум 5000 оценок, все годы)"""
@@ -273,7 +400,7 @@ def build_imdb_index():
         except Exception as e:
             logger.warning(f"Ошибка загрузки индекса: {e}, пересоздаём...")
 
-    plots_available, ratings_available = download_imdb_data()
+    plots_available, ratings_available, keywords_available = download_imdb_data()
 
     logger.info("Загружаем IMDB данные...")
     basics = pd.read_csv(os.path.join(DATA_DIR, 'title.basics.tsv'), sep='\t', low_memory=False)
@@ -309,6 +436,26 @@ def build_imdb_index():
     else:
         logger.warning("Рейтинги недоступны")
 
+    # Загружаем keywords (приоритет TSV формату)
+    keywords_dict = {}
+    if keywords_available:
+        keywords_tsv_path = os.path.join(DATA_DIR, 'title.keywords.tsv')
+        keywords_list_path = os.path.join(DATA_DIR, 'keywords.list')
+        
+        # Сначала пробуем TSV формат
+        if os.path.exists(keywords_tsv_path):
+            keywords_dict = parse_keywords_tsv(keywords_tsv_path)
+            if keywords_dict:
+                logger.info(f"Загружено ключевых слов для {len(keywords_dict)} фильмов из TSV")
+        # Если TSV не доступен, пробуем list формат
+        elif os.path.exists(keywords_list_path):
+            keywords_dict = parse_keywords_list(keywords_list_path)
+            if keywords_dict:
+                logger.info(f"Загружено ключевых слов для {len(keywords_dict)} фильмов из list")
+        
+        if not keywords_dict:
+            logger.warning("Не удалось загрузить keywords ни из одного формата")
+
     # Слияние с описаниями
     if plots_available and os.path.exists(os.path.join(DATA_DIR, 'title.plot.summary.tsv')):
         try:
@@ -328,6 +475,24 @@ def build_imdb_index():
             axis=1
         )
         movies = movies.dropna(subset=['description'])
+
+    # Добавляем keywords к описаниям
+    if keywords_dict:
+        logger.info("Добавляем keywords к описаниям фильмов...")
+        def add_keywords_to_description(row):
+            tconst = row['tconst']
+            description = row['description']
+            
+            if tconst in keywords_dict:
+                keywords = keywords_dict[tconst]
+                # Берем первые 10 keywords, чтобы не перегружать описание
+                keywords_str = ', '.join(keywords[:10])
+                description = f"{description} Keywords: {keywords_str}"
+            
+            return description
+        
+        movies['description'] = movies.apply(add_keywords_to_description, axis=1)
+        logger.info("Keywords добавлены к описаниям")
 
     movies['title'] = movies['primaryTitle']
     movies['year'] = movies['startYear'].astype('Int64')

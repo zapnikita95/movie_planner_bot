@@ -9,3 +9,18 @@ gunicorn
 psycopg2-binary
 python-dotenv
 yookassa
+# Зависимости для КиноШазам
+sentence-transformers
+faiss-cpu
+pandas
+numpy
+pydub
+ffmpeg-python
+torch
+transformers
+tqdm
+sentencepiece
+sacremoses
+# Дополнительные зависимости для Whisper и обработки аудио
+librosa
+soundfile

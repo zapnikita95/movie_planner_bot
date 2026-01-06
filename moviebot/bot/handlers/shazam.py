@@ -2,17 +2,18 @@
 Обработчики для КиноШазам - поиск фильмов по описанию
 """
 import logging
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import os
+import tempfile
 import requests
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from moviebot.bot.bot_init import bot
 from moviebot.config import KP_TOKEN
-from moviebot.services.shazam_service import search_movies
-from moviebot.states import private_chat_prompts
+from moviebot.services.shazam_service import search_movies, get_whisper
+from moviebot.states import private_chat_prompts, shazam_state
 from moviebot.api.kinopoisk_api import extract_movie_info
+from moviebot.utils.helpers import has_recommendations_access
 
 logger = logging.getLogger(__name__)
-
-# Состояния для КиноШазам
-shazam_state = {}  # user_id: {'mode': 'text' or 'voice', 'message_id': int}
 
 
 def get_film_by_imdb_id(imdb_id):
@@ -68,6 +69,28 @@ def register_shazam_handlers(bot):
             
             if chat_id != user_id:
                 bot.send_message(chat_id, "🔮 КиноШазам доступен только в личных сообщениях с ботом.")
+                return
+            
+            # Проверяем подписку (Рекомендации или Полная)
+            if not has_recommendations_access(chat_id, user_id):
+                text = "🔮 <b>КиноШазам</b>\n\n"
+                text += "КиноШазам доступен только с подпиской <b>\"Рекомендации\"</b> или <b>\"Полная\"</b>.\n\n"
+                text += "Используйте /payment для оформления подписки."
+                
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("💳 К подписке", callback_data="payment:tariffs:personal"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                
+                try:
+                    bot.edit_message_text(
+                        text,
+                        chat_id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                except:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 return
             
             text = "🔮 <b>Мы найдем для вас любой фильм, опишите его или расскажите о нем</b>"
@@ -207,7 +230,8 @@ def register_shazam_handlers(bot):
     
     @bot.message_handler(func=lambda message: message.chat.type == 'private' and 
                          message.from_user.id in private_chat_prompts and 
-                         private_chat_prompts.get(message.from_user.id, {}).get('handler_type') == 'shazam')
+                         private_chat_prompts.get(message.from_user.id, {}).get('handler_type') == 'shazam' and
+                         message.text and not message.text.startswith('/'))
     def shazam_text_handler(message):
         """Обработчик текстового запроса для КиноШазам"""
         try:
@@ -222,6 +246,14 @@ def register_shazam_handlers(bot):
             state = shazam_state.get(user_id, {})
             if state.get('mode') != 'text':
                 return False
+            
+            # Проверяем, что это либо реплай на наше сообщение, либо следующее сообщение после промпта
+            prompt_message_id = prompt_info.get('prompt_message_id')
+            if message.reply_to_message:
+                # Если это реплай, проверяем, что это реплай на наш промпт
+                if message.reply_to_message.message_id != prompt_message_id:
+                    return False
+            # Если не реплай, это должно быть следующее сообщение после промпта
             
             query = message.text.strip()
             if not query:
@@ -326,6 +358,14 @@ def register_shazam_handlers(bot):
             if state.get('mode') != 'voice':
                 return False
             
+            # Проверяем, что это либо реплай на наше сообщение, либо следующее сообщение после промпта
+            prompt_message_id = prompt_info.get('prompt_message_id')
+            if message.reply_to_message:
+                # Если это реплай, проверяем, что это реплай на наш промпт
+                if message.reply_to_message.message_id != prompt_message_id:
+                    return False
+            # Если не реплай, это должно быть следующее сообщение после промпта
+            
             # Удаляем состояние
             if user_id in shazam_state:
                 del shazam_state[user_id]
@@ -336,10 +376,6 @@ def register_shazam_handlers(bot):
             loading_msg = bot.send_message(chat_id, "🎤 Распознаю голосовое сообщение...")
             
             try:
-                # Используем Telegram API для распознавания голоса
-                # Для этого нужно использовать Telegram Bot API напрямую
-                import telebot.apihelper as apihelper
-                
                 # Получаем информацию о голосовом сообщении
                 voice = message.voice
                 file_id = voice.file_id
@@ -348,51 +384,51 @@ def register_shazam_handlers(bot):
                 file_info = bot.get_file(file_id)
                 file_path = file_info.file_path
                 
-                # Для распознавания через Telegram API нужно использовать метод transcribeAudio
-                # Но pyTelegramBotAPI не поддерживает этот метод напрямую
-                # Используем прямой вызов API
-                import json
-                
-                # Создаем InputPeer для личного чата
-                peer = {
-                    '_': 'inputPeerUser',
-                    'user_id': user_id,
-                    'access_hash': 0  # Для ботов не нужен
-                }
-                
-                # Вызываем messages.transcribeAudio через raw API
-                # Это требует использования Telegram Client API, а не Bot API
-                # Поэтому используем альтернативный подход - скачиваем файл и используем Whisper
+                # Примечание: Telegram Bot API не поддерживает messages.transcribeAudio напрямую
+                # Это метод из Telegram Client API (MTProto). Для его использования нужна библиотека
+                # Telethon или Pyrogram. Пока используем Whisper как fallback.
+                # В будущем можно добавить интеграцию с Telegram Client API для использования
+                # нативного распознавания голоса Telegram.
                 
                 # Скачиваем голосовое сообщение
                 file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_path}"
-                import tempfile
-                import os
                 
                 with tempfile.NamedTemporaryFile(delete=False, suffix='.ogg') as tmp_file:
-                    response = requests.get(file_url, stream=True)
+                    response = requests.get(file_url, stream=True, timeout=30)
                     response.raise_for_status()
                     for chunk in response.iter_content(chunk_size=8192):
-                        tmp_file.write(chunk)
+                        if chunk:
+                            tmp_file.write(chunk)
                     tmp_path = tmp_file.name
                 
+                query = None
                 try:
-                    # Используем Whisper для распознавания (если доступен)
-                    from moviebot.services.shazam_service import get_whisper
+                    # Используем Whisper для распознавания
                     whisper = get_whisper()
                     
                     if whisper:
                         # Конвертируем OGG в WAV
                         from pydub import AudioSegment
                         wav_path = tmp_path.replace('.ogg', '.wav')
-                        AudioSegment.from_ogg(tmp_path).export(wav_path, format="wav")
                         
-                        result = whisper(wav_path)
-                        query = result["text"]
-                        
-                        # Удаляем временные файлы
-                        os.remove(tmp_path)
-                        os.remove(wav_path)
+                        try:
+                            AudioSegment.from_ogg(tmp_path).export(wav_path, format="wav")
+                            result = whisper(wav_path)
+                            query = result.get("text", "") if isinstance(result, dict) else str(result)
+                        except Exception as conv_error:
+                            logger.error(f"[SHAZAM] Ошибка при конвертации аудио: {conv_error}", exc_info=True)
+                            # Пробуем распознать напрямую OGG (если Whisper поддерживает)
+                            try:
+                                result = whisper(tmp_path)
+                                query = result.get("text", "") if isinstance(result, dict) else str(result)
+                            except:
+                                raise conv_error
+                        finally:
+                            # Удаляем временные файлы
+                            if os.path.exists(tmp_path):
+                                os.remove(tmp_path)
+                            if os.path.exists(wav_path):
+                                os.remove(wav_path)
                     else:
                         # Если Whisper недоступен, просим пользователя написать текстом
                         bot.edit_message_text(
@@ -400,7 +436,8 @@ def register_shazam_handlers(bot):
                             chat_id,
                             loading_msg.message_id
                         )
-                        os.remove(tmp_path)
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
                         return True
                 except Exception as e:
                     logger.error(f"[SHAZAM] Ошибка при распознавании голоса: {e}", exc_info=True)
