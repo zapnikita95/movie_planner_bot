@@ -4783,7 +4783,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 film_id = None
             logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}")
         
-        # Проверка планов — максимально надёжно, без пропуска
+        # Проверка планов — безопасно
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         has_plan = False
         plan_info = None
@@ -4792,9 +4792,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
                     try:
-                        # Явно указываем колонки — чтобы psycopg2 всегда возвращал dict
                         cursor.execute('''
-                            SELECT id, plan_type, COALESCE(plan_datetime::text, '') AS plan_datetime_str
+                            SELECT id, plan_type, plan_datetime 
                             FROM plans 
                             WHERE film_id = %s AND chat_id = %s 
                             ORDER BY plan_datetime ASC
@@ -4803,23 +4802,30 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         plan_row = cursor.fetchone()
                         
                         if plan_row:
-                            # Теперь plan_row — всегда dict (благодаря AS)
-                            plan_id = plan_row.get('id')
-                            plan_type = plan_row.get('plan_type')
-                            plan_dt_str = plan_row.get('plan_datetime_str', '')
+                            # Безопасно извлекаем данные
+                            if isinstance(plan_row, dict):
+                                plan_id = plan_row.get('id')
+                                plan_type = plan_row.get('plan_type')
+                                plan_dt_value = plan_row.get('plan_datetime')
+                            else:
+                                plan_id = plan_row[0] if len(plan_row) > 0 else None
+                                plan_type = plan_row[1] if len(plan_row) > 1 else None
+                                plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
                             
                             if plan_id is not None and plan_type is not None:
                                 # Форматируем дату
                                 date_str = "не указана"
-                                if plan_dt_str and user_id:
+                                if plan_dt_value and user_id:
+                                    user_tz = get_user_timezone_or_default(user_id)
                                     try:
-                                        # Пытаемся распарсить как ISO
-                                        dt = datetime.fromisoformat(plan_dt_str.replace('Z', '+00:00'))
-                                        user_tz = get_user_timezone_or_default(user_id)
-                                        dt = dt.astimezone(user_tz) if dt.tzinfo else pytz.utc.localize(dt).astimezone(user_tz)
+                                        if isinstance(plan_dt_value, datetime):
+                                            dt = plan_dt_value.astimezone(user_tz) if plan_dt_value.tzinfo else pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                                        else:
+                                            dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
                                         date_str = dt.strftime('%d.%m.%Y %H:%M')
-                                    except:
-                                        date_str = plan_dt_str[:16]  # fallback
+                                    except Exception as dt_e:
+                                        logger.warning(f"[SHOW FILM INFO] Ошибка форматирования даты плана: {dt_e}")
+                                        date_str = str(plan_dt_value)[:16]
                                 
                                 plan_info = {
                                     'id': plan_id,
@@ -4827,22 +4833,19 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                                     'date': date_str
                                 }
                                 has_plan = True
-                                logger.info(f"[SHOW FILM INFO] План найден и успешно обработан: type={plan_type}, date={date_str}")
+                                logger.info(f"[SHOW FILM INFO] План найден: type={plan_type}, date={date_str}")
                             else:
-                                logger.warning(f"[SHOW FILM INFO] plan_row неполный: {plan_row}")
+                                logger.warning("[SHOW FILM INFO] plan_row найден, но данные неполные — пропускаем")
                         else:
-                            logger.info("[SHOW FILM INFO] План не найден — нормально")
-                    except Exception as db_e:
-                        logger.error(f"[SHOW FILM INFO] Ошибка БД при запросе планов: {db_e}", exc_info=True)
-                        # НЕ пропускаем — попробуем fallback ниже
+                            logger.info("[SHOW FILM INFO] План не найден")
                     finally:
                         db_lock.release()
                 else:
-                    logger.warning("[SHOW FILM INFO] db_lock timeout — планы недоступны временно")
-            except Exception as e:
-                logger.error(f"[SHOW FILM INFO] Критическая ошибка проверки планов: {e}", exc_info=True)
+                    logger.warning("[SHOW FILM INFO] db_lock timeout — пропускаем проверку планов")
+            except Exception as plan_e:
+                logger.error(f"[SHOW FILM INFO] Ошибка при проверке планов: {plan_e}", exc_info=True)
         
-        logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}, plan_info={plan_info}")
+        logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}")
         
         # Если фильм запланирован, показываем специальную логику кнопок
         if has_plan:
