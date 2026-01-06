@@ -845,7 +845,7 @@ def handle_rate_list_reply(message):
         user_id in user_refund_state or
         user_id in user_unsubscribe_state or
         user_id in user_add_admin_state):
-        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии (plan={user_id in user_plan_state}, ticket={user_id in user_ticket_state}), передаем в main_text_handler")
+        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в админском состоянии (refund={user_id in user_refund_state}, unsubscribe={user_id in user_unsubscribe_state}, add_admin={user_id in user_add_admin_state}), передаем в state_handlers")
         return
     
     # Обрабатываем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages
