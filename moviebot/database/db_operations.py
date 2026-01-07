@@ -1418,250 +1418,73 @@ def is_bot_participant(chat_id, user_id):
 
 
 def add_and_announce(link, chat_id, user_id=None, source='unknown'):
-    """Добавляет фильм в базу данных и отправляет сообщение с информацией о фильме"""
+    """Обрабатывает присланную ссылку на фильм/сериал.
+    Показывает соответствующую карточку в зависимости от наличия фильма в базе.
+    НЕ добавляет фильм автоматически в базу при обработке ссылки."""
+    
     from moviebot.api.kinopoisk_api import extract_movie_info
     from moviebot.bot.bot_init import bot
-    from moviebot.bot.handlers.series import show_film_info_with_buttons
+    from moviebot.bot.handlers.series import show_film_info_with_buttons, show_film_info_without_adding
 
     info = extract_movie_info(link)
     if not info:
-        logger.warning(f"Не удалось извлечь информацию о фильме: {link}")
+        logger.warning(f"[ADD_AND_ANNOUNCE] Не удалось получить данные о фильме: {link}")
+        try:
+            bot.send_message(chat_id, "❌ Не удалось загрузить информацию о фильме. Проверьте ссылку.")
+        except:
+            pass
         return False
-    
-    kp_id = info.get('kp_id')
-    logger.info(f"[DUPLICATE CHECK] Проверяем фильм kp_id={kp_id}, title={info.get('title')}, chat_id={chat_id}")
 
-    # Первая проверка дубликата
+    kp_id = info.get('kp_id')
+    if not kp_id:
+        logger.warning(f"[ADD_AND_ANNOUNCE] kp_id не найден")
+        return False
+
+    logger.info(f"[ADD_AND_ANNOUNCE] Обработка kp_id={kp_id}, chat_id={chat_id}")
+
+    # Проверяем, есть ли фильм в базе
     with db_lock:
         cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
         existing = cursor.fetchone()
-    
-    if existing:
-        film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
-        existing_title = existing.get('title') if isinstance(existing, dict) else existing[1]
-        watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
-        
-        logger.info(f"[DUPLICATE FOUND] Фильм уже в базе: id={film_id}, title={existing_title}, watched={watched}")
-        
-        try:
+
+    try:
+        if existing:
+            # Фильм уже в базе — показываем полную карточку со всеми кнопками
+            film_id = existing[0] if not isinstance(existing, dict) else existing.get('id')
+            title = existing[1] if not isinstance(existing, dict) else existing.get('title')
+            watched = existing[2] if not isinstance(existing, dict) else existing.get('watched')
+
+            logger.info(f"[ADD_AND_ANNOUNCE] Фильм уже в базе (id={film_id}) — показываем полную карточку")
             show_film_info_with_buttons(
                 chat_id=chat_id,
                 user_id=user_id,
                 info=info,
                 link=link,
                 kp_id=kp_id,
-                existing=(film_id, existing_title, watched)
+                existing=(film_id, title, watched)
             )
-            logger.info(f"[DUPLICATE] Полноценная карточка показана вместо сообщения о дубликате (первая проверка)")
-        except Exception as e:
-            logger.error(f"[DUPLICATE] Ошибка при показе карточки для дубликата: {e}", exc_info=True)
-            bot.send_message(chat_id, f"🎞️ <b>{existing_title}</b> уже в базе.\n\n<a href='{link}'>Кинопоиск</a>", parse_mode='HTML')
-        
-        return False
-
-    # Добавляем новый фильм
-    inserted = False
-    try:
-        with db_lock:
-            # Очистка транзакции на всякий случай
-            try:
-                cursor.execute('SELECT 1')
-                cursor.fetchone()
-            except:
-                conn.rollback()
-
-            # Вторая проверка (на гонку условий)
-            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, info['kp_id']))
-            existing_row = cursor.fetchone()
-            
-            if existing_row:
-                logger.info(f"[DUPLICATE CHECK 2] Фильм уже существует (вторая проверка)")
-                film_id = existing_row.get('id') if isinstance(existing_row, dict) else existing_row[0]
-                existing_title = existing_row.get('title') if isinstance(existing_row, dict) else existing_row[1]
-                watched = existing_row.get('watched') if isinstance(existing_row, dict) else existing_row[2]
-                
-                try:
-                    show_film_info_with_buttons(
-                        chat_id=chat_id,
-                        user_id=user_id,
-                        info=info,
-                        link=link,
-                        kp_id=kp_id,
-                        existing=(film_id, existing_title, watched)
-                    )
-                    logger.info(f"[DUPLICATE] Полноценная карточка показана (вторая проверка)")
-                except Exception as e:
-                    logger.error(f"[DUPLICATE] Ошибка при показе карточки (вторая проверка): {e}", exc_info=True)
-                    bot.send_message(chat_id, f"🎞️ <b>{existing_title}</b> уже в базе.\n\n<a href='{link}'>Кинопоиск</a>", parse_mode='HTML')
-                
-                return False
-            else:
-                # Добавляем новый
-                cursor.execute('''
-                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), %s)
-                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
-                ''', (
-                    chat_id, link, info['kp_id'], info['title'], info['year'],
-                    info['genres'], info['description'], info['director'], info['actors'],
-                    1 if info.get('is_series') else 0, user_id, source
-                ))
-                conn.commit()
-                inserted = True
-                logger.info(f"Фильм успешно добавлен: {info['title']}")
+        else:
+            # Новый фильм — показываем карточку БЕЗ добавления, с кнопкой "Добавить в базу"
+            logger.info(f"[ADD_AND_ANNOUNCE] Новый фильм — показываем карточку с кнопкой добавления")
+            show_film_info_without_adding(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id
+            )
     except Exception as e:
-        logger.error(f"Критическая ошибка при добавлении в БД: {e}", exc_info=True)
+        logger.error(f"[ADD_AND_ANNOUNCE] Ошибка при показе карточки: {e}", exc_info=True)
+        # Фолбек — простое сообщение с названием и ссылкой
         try:
-            conn.rollback()
-        except:
-            pass
-        inserted = False
+            title = info.get('title', 'Фильм')
+            bot.send_message(
+                chat_id,
+                f"🎬 <b>{title}</b>\n\n<a href='{link}'>Кинопоиск</a>",
+                parse_mode='HTML',
+                disable_web_page_preview=False
+            )
+        except Exception as send_e:
+            logger.error(f"[ADD_AND_ANNOUNCE] Не удалось отправить фолбек: {send_e}")
 
-    logger.info(f"Результат: inserted={inserted}")
-
-    if inserted:
-        # Здесь идёт твой оригинальный код объявления нового фильма
-        # (ты показал только начало — оставь остальное как было)
-        is_series = info.get('is_series', False)
-        type_emoji = "📺" if is_series else "🎬"
-        text = f"{type_emoji} <b>Добавлено в базу!</b>\n\n"
-        text += f"<b>{info['title']}</b> ({info['year'] or '—'})\n"
-        text += f"<i>Режиссёр:</i> {info['director']}\n"
-        text += f"<i>Жанры:</i> {info['genres']}\n"
-        text += f"<i>В ролях:</i> {info['actors']}\n\n"
-        text += f"<i>Кратко:</i> {info['description']}\n\n"
-        
-        if is_series:
-            kp_id = info.get('kp_id')
-            if kp_id:
-                try:
-                    is_airing, next_episode = get_series_airing_status(kp_id)
-                    if is_airing and next_episode:
-                        text += f"🟢 <b>Сериал выходит сейчас</b>\n"
-                        text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n\n"
-                    else:
-                        text += f"🔴 <b>Сериал не выходит</b>\n\n"
-                except Exception as e:
-                    logger.warning(f"[ADD_AND_ANNOUNCE] Ошибка get_series_airing_status: {e}")
-        
-        text += f"<a href='{link}'>Кинопоиск</a>"
-        
-        markup = InlineKeyboardMarkup(row_width=1)
-        kp_id = info.get('kp_id')
-        if kp_id:
-            russia_release = info.get('russia_release')
-            premiere_date = None
-            premiere_date_str = ""
-            
-            if russia_release and russia_release.get('date'):
-                premiere_date = russia_release['date']
-                premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
-            else:
-                try:
-                    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-                    url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-                    response_main = requests.get(url_main, headers=headers, timeout=15)
-                    if response_main.status_code == 200:
-                        data_main = response_main.json()
-                        from datetime import date as date_class
-                        today = date_class.today()
-                        
-                        for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-                            date_value = data_main.get(date_field)
-                            if date_value:
-                                try:
-                                    if 'T' in str(date_value):
-                                        premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                                    else:
-                                        premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                                    premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                                    break
-                                except:
-                                    continue
-                except Exception as e:
-                    logger.warning(f"[ADD_AND_ANNOUNCE] Ошибка получения информации о премьере: {e}")
-            
-            if premiere_date:
-                from datetime import date as date_class
-                today = date_class.today()
-                if premiere_date > today:
-                    date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                    markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
-            
-            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-            
-            with db_lock:
-                cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                film_row = cursor.fetchone()
-                if film_row:
-                    film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                    markup.row(
-                        InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-                        InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
-                    )
-                    
-                    if is_series:
-                        if user_id and has_notifications_access(chat_id, user_id):
-                            markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                            markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-                        else:
-                            markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-                            markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
-        
-        try:
-            logger.info(f"Отправляем сообщение в чат {chat_id}")
-            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-            bot_messages[msg.message_id] = link
-            
-            if is_series and user_id:
-                try:
-                    has_access = has_notifications_access(chat_id, user_id)
-                    series_text = f"📺 <b>Сериал добавлен в базу!</b>\n\n"
-                    if has_access:
-                        series_text += f"Вы можете:\n"
-                        series_text += f"• ✅ Отметить просмотренные сезоны и серии\n"
-                        series_text += f"• 🔔 Подписаться на уведомления о новых сериях\n\n"
-                        series_text += f"Используйте команду /seasons для управления сериалами."
-                    else:
-                        series_text += f"🔒 <b>Функционал доступен с подпиской на уведомления о сериалах</b>\n\n"
-                        series_text += f"Используйте /payment для оформления подписки."
-                    
-                    series_markup = InlineKeyboardMarkup(row_width=1)
-                    if has_access:
-                        series_markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                        series_markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-                    else:
-                        series_markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-                        series_markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
-                    
-                    bot.send_message(chat_id, series_text, parse_mode='HTML', reply_markup=series_markup)
-                    logger.info(f"[ADD SERIES] Отправлено сообщение о планировании серий для {info.get('title')}")
-                except Exception as e:
-                    logger.error(f"[ADD SERIES] Ошибка отправки сообщения о планировании серий: {e}", exc_info=True)
-            
-            with db_lock:
-                cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
-                film_row = cursor.fetchone()
-                if film_row:
-                    film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                    added_movie_messages[msg.message_id] = {
-                        'chat_id': chat_id,
-                        'film_id': film_id,
-                        'kp_id': kp_id,
-                        'link': link,
-                        'title': info['title']
-                    }
-            
-            logger.info(f"✅ Сообщение успешно отправлено! Новый фильм добавлен: {info['title']}, message_id={msg.message_id}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Ошибка при отправке сообщения: {e}", exc_info=True)
-            return False
-    else:
-        try:
-            bot.send_message(chat_id, "⚠️ Карточка не отправлена, фильм НЕ сохранён в базу из-за ошибки. Проверь логи.")
-            logger.warning(f"Фильм не был вставлен в БД, отправлено предупреждение пользователю")
-        except Exception as e:
-            logger.error(f"Ошибка при отправке предупреждения: {e}", exc_info=True)
-    return False
-
+    return True
