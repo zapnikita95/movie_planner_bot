@@ -86,7 +86,7 @@ def send_welcome(message):
         
         # Кнопки до Рандома
         markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
-        markup.add(InlineKeyboardButton("📅 Премььеры", callback_data="start_menu:premieres"))
+        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
         markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
         
         # Нативный поиск — сразу после Рандома
