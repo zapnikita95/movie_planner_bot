@@ -389,8 +389,10 @@ def premiere_detail_handler(call):
             markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
         
         # Если фильма нет в базе, показываем кнопку "Добавить в базу"
-        if not film_in_db:
-            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"premiere_add:{kp_id}"))
+        if in_database:
+            markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
+        else:
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
         
         # Добавляем кнопку "Назад" - возвращаемся к списку премьер
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{period}"))

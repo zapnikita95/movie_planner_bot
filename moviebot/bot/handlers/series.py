@@ -5380,13 +5380,15 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
             except Exception as e:
                 logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
         
-        # Проверяем, есть ли фильм в базе и запланирован ли он
+        # Проверяем, есть ли фильм в базе
+        in_database = False
         film_id = None
         has_plan = False
         with db_lock:
             cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
             film_row = cursor.fetchone()
             if film_row:
+                in_database = True
                 film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
                 # Проверяем наличие планов
                 cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
@@ -5402,7 +5404,9 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
                 markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
         
         # Кнопка "Добавить в базу" — только если фильма нет в базе
-        if not film_id:
+        if in_database:
+            markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
+        else:
             markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
         
         # Кнопка "Запланировать просмотр" — только если фильм УЖЕ в базе и ещё не запланирован

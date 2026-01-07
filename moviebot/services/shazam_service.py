@@ -267,11 +267,61 @@ def build_tmdb_index():
         except Exception as e:
             logger.warning(f"Ошибка загрузки индекса: {e}, пересоздаем...")
     
+    # Автоматическое скачивание TMDB если нет
     if not TMDB_PARQUET_PATH.exists():
-        logger.error(f"TMDB файл не найден: {TMDB_PARQUET_PATH}")
-        logger.info("Скачай с Kaggle и положи в /app/cache/")
-        return None, None
+        logger.info("TMDB parquet не найден — скачиваем с Kaggle...")
+        try:
+            import kagglehub
+            import zipfile
+            import glob
+            import shutil
+            
+            # Скачиваем весь датасет (он в zip)
+            dataset_path = kagglehub.dataset_download("asaniczka/tmdb-movies-dataset-2023-930k-movies")
+            logger.info(f"Датасет скачан в: {dataset_path}")
+            
+            # Находим zip файл(ы)
+            zip_files = glob.glob(os.path.join(dataset_path, "*.zip"))
+            if not zip_files:
+                raise Exception("Zip файл не найден в датасете")
+            
+            # Распаковываем первый zip
+            with zipfile.ZipFile(zip_files[0], 'r') as zip_ref:
+                zip_ref.extractall(CACHE_DIR)
+            
+            # Находим parquet и перемещаем/переименовываем
+            parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*.parquet"), recursive=True)
+            if not parquet_files:
+                raise Exception("Parquet не найден после распаковки")
+            
+            main_parquet = parquet_files[0]
+            shutil.move(main_parquet, TMDB_PARQUET_PATH)
+            logger.info(f"TMDB parquet готов: {TMDB_PARQUET_PATH}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка скачивания TMDB: {e}")
+            return None, None
     
+    # Vosk модель (опционально, если используешь fallback)
+    vosk_model_dir = DATA_DIR / 'vosk-model-small-ru-0.22'
+    if not vosk_model_dir.exists():
+        logger.info("Vosk модель не найдена — скачиваем...")
+        try:
+            import requests
+            from io import BytesIO
+            from zipfile import ZipFile
+            
+            url = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+            r = requests.get(url)
+            r.raise_for_status()
+            
+            with ZipFile(BytesIO(r.content)) as z:
+                z.extractall(DATA_DIR)
+            
+            logger.info(f"Vosk модель готова: {vosk_model_dir}")
+        except Exception as e:
+            logger.warning(f"Не удалось скачать Vosk: {e} — fallback не будет работать")
+            
     logger.info("Загружаем TMDB датасет...")
     df = pd.read_parquet(TMDB_PARQUET_PATH)
     logger.info(f"Загружено {len(df)} записей")

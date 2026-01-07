@@ -993,20 +993,30 @@ def register_series_callbacks(bot_instance):
             if row:
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
             
-            # Если фильма нет в базе, просто отправляем сообщение с просьбой оценить
-            # Фильм будет добавлен в базу только при успешной оценке (через handle_rating_internal)
             if not film_id:
                 # Получаем информацию о фильме для отображения названия
                 link = f"https://www.kinopoisk.ru/film/{kp_id}/"
                 info = extract_movie_info(link)
                 title = info.get('title', 'Фильм') if info else 'Фильм'
                 
-                # Отправляем сообщение с просьбой оценить и добавляем его в rating_messages с kp_id
-                # Используем специальный формат для хранения kp_id вместо film_id
+                # Отправляем сообщение с просьбой оценить
                 msg = bot_instance.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.\n\nФильм будет добавлен в базу при успешной оценке.", parse_mode='Markdown')
-                # Сохраняем kp_id в rating_messages с префиксом "kp_id:" для идентификации
-                rating_messages[msg.message_id] = f"kp_id:{kp_id}"
-                logger.info(f"[RATE FILM] Сообщение {msg.message_id} добавлено в rating_messages для kp_id={kp_id}")
+                
+                # Добавляем фильм в базу ПРЕДВАРИТЕЛЬНО, чтобы получить film_id
+                if info:
+                    film_id, _ = ensure_movie_in_database(chat_id, kp_id, link, info, call.from_user.id)
+                else:
+                    # Если API не дал info — добавляем минимально
+                    film_id, _ = ensure_movie_in_database(chat_id, kp_id, link, {}, call.from_user.id)
+                
+                # Сохраняем film_id в rating_messages
+                if film_id:
+                    rating_messages[msg.message_id] = film_id
+                    logger.info(f"[RATE FILM] Сообщение {msg.message_id} добавлено в rating_messages для film_id={film_id} (предварительно добавлен в базу)")
+                else:
+                    # rating_messages[msg.message_id] = f"kp_id:{kp_id}"  # закомментировано, теперь сохраняем film_id  # fallback на старый способ
+                    logger.warning(f"[RATE FILM] Не удалось добавить фильм в базу заранее, используем kp_id fallback")
+                
                 bot_instance.answer_callback_query(call.id)
                 return
             

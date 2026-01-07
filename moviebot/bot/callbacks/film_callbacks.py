@@ -520,7 +520,7 @@ def handle_plan_type(call):
             bot_instance.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
         except Exception as e:
             logger.warning(f"[CALLBACK] Не удалось ответить на callback: {e}")
-            
+
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
 def show_film_description_callback(call):
     """Обработчик кнопки '◀️ Вернуться к описанию' - показывает описание фильма из БД без API запроса"""
@@ -975,6 +975,55 @@ def toggle_watched_from_description_callback(call):
     finally:
         logger.info(f"[TOGGLE WATCHED] ===== END: callback_id={call.id}")
 
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("remove_from_database:"))
+def remove_from_database_prompt(call):
+    try:
+        bot_instance.answer_callback_query(call.id)
+    except:
+        pass
+
+    kp_id = call.data.split(":")[1]
+    chat_id = call.message.chat.id
+
+    # Получаем название для подтверждения
+    with db_lock:
+        cursor.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+        row = cursor.fetchone()
+        title = row[0] if row else "фильм"
+
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("✅ Удалить", callback_data=f"confirm_remove:{kp_id}"),
+        InlineKeyboardButton("⬅️ Назад", callback_data=f"view_film_description:{kp_id}")
+    )
+    bot_instance.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=f"Точно удалить из базы <b>{title}</b>?",
+        reply_markup=markup,
+        parse_mode='HTML'
+    )
+
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("confirm_remove:"))
+def confirm_remove(call):
+    try:
+        bot_instance.answer_callback_query(call.id)
+    except:
+        pass
+
+    kp_id = call.data.split(":")[1]
+    chat_id = call.message.chat.id
+
+    with db_lock:
+        cursor.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+        conn.commit()
+
+    bot_instance.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text="✅ Фильм удалён из базы.",
+        reply_markup=None
+    )
 
 def register_film_callbacks(bot_instance):
     """Регистрирует callback handlers для карточки фильма (уже зарегистрированы через декораторы)"""

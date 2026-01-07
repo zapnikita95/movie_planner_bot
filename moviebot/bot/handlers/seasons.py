@@ -353,7 +353,7 @@ def show_seasons_list(chat_id: int, user_id: int, message_id: int = None):
         lower_buttons += 1
 
     num_series = len(markup.keyboard) - lower_buttons
-    text = f"📺 Сериалы в базе ({num_series})"
+    text = f"📺 Активные сериалы в базе ({num_series})"
 
     if message_id:
         bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
@@ -507,7 +507,7 @@ def handle_seasons_kp(call):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data == "show_completed_series")
 def handle_show_completed_series(call):
-    bot_instance.answer_callback_query(call.id)
+    bot_instance.answer_callback_query(call.id, "⏳ Загружаем просмотренные...")  # ← прелоадер
     chat_id = call.message.chat.id
     user_id = call.from_user.id
     message_id = call.message.message_id
@@ -515,19 +515,33 @@ def handle_show_completed_series(call):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data == "back_to_seasons_list")
 def handle_back_to_seasons_list(call):
-    bot_instance.answer_callback_query(call.id)
+    bot_instance.answer_callback_query(call.id, "⏳ Возвращаемся...")  # ← прелоадер
     chat_id = call.message.chat.id
     user_id = call.from_user.id
     message_id = call.message.message_id
     show_seasons_list(chat_id, user_id, message_id=message_id)
 
-def register_seasons_handlers(bot):  # ← добавь параметр bot
+def register_seasons_handlers(bot):  # параметр bot оставляем
     """Регистрируем обработчики в основной init"""
     @bot.message_handler(commands=['seasons'])
     def handle_seasons_command(message):
         log_request(message)
         chat_id = message.chat.id
         user_id = message.from_user.id
-        message_thread_id = message.message_thread_id if hasattr(message, 'message_thread_id') else None
+        message_thread_id = getattr(message, 'message_thread_id', None)
         
+        # ← Прелоадер: отправляем временное сообщение
+        preload_msg = bot_instance.send_message(
+            chat_id, 
+            "⏳ Загружаем сериалы и сезоны...", 
+            message_thread_id=message_thread_id
+        )
+        
+        # Показываем список
         show_seasons_list(chat_id, user_id, message_thread_id=message_thread_id)
+        
+        # Удаляем прелоадер после загрузки (добавь этот try в конец show_seasons_list, если хочешь универсально, или здесь)
+        try:
+            bot_instance.delete_message(chat_id, preload_msg.message_id, message_thread_id=message_thread_id)
+        except Exception as e:
+            logger.warning(f"[SEASONS COMMAND] Не удалось удалить прелоадер: {e}")
