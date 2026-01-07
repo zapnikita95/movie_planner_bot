@@ -113,7 +113,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         EPISODES_PER_PAGE = 20
         
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
             row = cursor.fetchone()
             if not row:
                 logger.warning(f"[SHOW EPISODES PAGE] Сериал не найден: chat_id={chat_id}, kp_id={kp_id}")
@@ -429,7 +429,7 @@ def handle_seasons_kp(call):
         markup = InlineKeyboardMarkup(row_width=1)
 
         with db_lock:
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
             row = cursor.fetchone()
             film_id = row[0] if row else None
 
