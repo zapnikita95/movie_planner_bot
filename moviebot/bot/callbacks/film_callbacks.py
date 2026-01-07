@@ -586,11 +586,11 @@ def mark_watched_from_description_kp_callback(call):
         from moviebot.bot.handlers.series import ensure_movie_in_database
         film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
         
-                    if not film_id:
-                        from moviebot.bot.bot_init import safe_answer_callback_query
-                        safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
-                        return
-        
+        if not film_id:
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+            return
+
         # Отмечаем фильм как просмотренный
         with db_lock:
             cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
