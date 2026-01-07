@@ -166,8 +166,13 @@ def register_start_handlers(bot):
 
             if action == 'seasons':
                 bot.answer_callback_query(call.id, "⏳ Загружаем сериалы и сезоны...")
-                show_seasons_list(chat_id=chat_id, user_id=user_id, message_id=message_id, message_thread_id=message_thread_id)
-
+                show_seasons_list(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    message_id=message_id,
+                    message_thread_id=message_thread_id,
+                    bot=bot  # ← вот так передаём экземпляр бота
+                )
             elif action == 'premieres':
                 msg = call.message
                 msg.text = '/premieres'
