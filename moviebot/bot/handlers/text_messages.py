@@ -286,15 +286,8 @@ def handle_list_plan_reply(message):
 
 def check_plan_datetime_reply(message):
     """Проверка для handler ответа на промпт даты/времени планирования (step=3)"""
-    if not message.reply_to_message:
-        return False
-    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
-        return False
-    reply_text = message.reply_to_message.text or ""
-    if "Когда планируете смотреть" not in reply_text:
-        return False
-    if not message.text or not message.text.strip():
-        return False
+    # КРИТИЧЕСКИЙ ФИКС: В личке принимаем следующее сообщение, в группах - только реплай
+    is_private = message.chat.type == 'private'
     
     # Проверяем, что пользователь в состоянии планирования с step=3
     from moviebot.states import user_plan_state
@@ -305,10 +298,34 @@ def check_plan_datetime_reply(message):
     if state.get('step') != 3:
         return False
     
-    # Проверяем, что это ответ на правильный промпт
-    prompt_message_id = state.get('prompt_message_id')
-    if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+    if not message.text or not message.text.strip():
         return False
+    
+    # В группах принимаем только реплаи
+    if not is_private:
+        if not message.reply_to_message:
+            return False
+        if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+            return False
+        reply_text = message.reply_to_message.text or ""
+        if "Когда планируете смотреть" not in reply_text:
+            return False
+        # Проверяем, что это ответ на правильный промпт
+        prompt_message_id = state.get('prompt_message_id')
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            return False
+    else:
+        # В личке принимаем реплай или следующее сообщение
+        if message.reply_to_message:
+            # Если это реплай, проверяем, что это ответ на правильный промпт
+            if message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
+                reply_text = message.reply_to_message.text or ""
+                if "Когда планируете смотреть" not in reply_text:
+                    return False
+                prompt_message_id = state.get('prompt_message_id')
+                if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                    return False
+        # Если не реплай, но состояние активно - принимаем как следующее сообщение
     
     return True
 
@@ -337,15 +354,8 @@ def handle_plan_datetime_reply(message):
 
 def check_plan_link_reply(message):
     """Проверка для handler ответа на промпт ссылки/ID планирования (step=1)"""
-    if not message.reply_to_message:
-        return False
-    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
-        return False
-    reply_text = message.reply_to_message.text or ""
-    if "Пришлите ссылку или ID фильма" not in reply_text:
-        return False
-    if not message.text or not message.text.strip():
-        return False
+    # КРИТИЧЕСКИЙ ФИКС: В личке принимаем следующее сообщение, в группах - только реплай
+    is_private = message.chat.type == 'private'
     
     # Проверяем, что пользователь в состоянии планирования с step=1
     from moviebot.states import user_plan_state
@@ -356,10 +366,34 @@ def check_plan_link_reply(message):
     if state.get('step') != 1:
         return False
     
-    # Проверяем, что это ответ на правильный промпт
-    prompt_message_id = state.get('prompt_message_id')
-    if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+    if not message.text or not message.text.strip():
         return False
+    
+    # В группах принимаем только реплаи
+    if not is_private:
+        if not message.reply_to_message:
+            return False
+        if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+            return False
+        reply_text = message.reply_to_message.text or ""
+        if "Пришлите ссылку или ID фильма" not in reply_text:
+            return False
+        # Проверяем, что это ответ на правильный промпт
+        prompt_message_id = state.get('prompt_message_id')
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            return False
+    else:
+        # В личке принимаем реплай или следующее сообщение
+        if message.reply_to_message:
+            # Если это реплай, проверяем, что это ответ на правильный промпт
+            if message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
+                reply_text = message.reply_to_message.text or ""
+                if "Пришлите ссылку или ID фильма" not in reply_text:
+                    return False
+                prompt_message_id = state.get('prompt_message_id')
+                if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                    return False
+        # Если не реплай, но состояние активно - принимаем как следующее сообщение
     
     return True
 
@@ -1318,8 +1352,8 @@ def main_text_handler(message):
     """
     import sys
     print(f"[MAIN TEXT HANDLER] ===== START (FALLBACK): message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else None}'", file=sys.stdout, flush=True)
-    #Этот handler обрабатывает только специальные случаи и реплаи, которые не попали в другие handlers
-    ""
+    Этот handler обрабатывает только специальные случаи и реплаи, которые не попали в другие handlers
+    """
     logger.info(f"[MAIN TEXT HANDLER] ===== START (FALLBACK): message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}, text='{message.text[:100] if message.text else ''}'")
     
     user_id = message.from_user.id
@@ -1439,7 +1473,7 @@ def main_text_handler(message):
     return
 @bot_instance.message_handler(content_types=['photo', 'document'])
 def main_file_handler(message):
-    #Единый хэндлер для всех фото и документов
+    ""Единый хэндлер для всех фото и документов"""
     logger.info(f"[MAIN FILE HANDLER] Получено фото/документ от {message.from_user.id}")
     
     user_id = message.from_user.id

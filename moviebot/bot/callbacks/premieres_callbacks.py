@@ -759,6 +759,7 @@ def premiere_notify_handler(call):
         confirm_text += f"Если это ошибка, нажмите кнопку ниже для отмены."
         
         markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🔗 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
         markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"premiere_cancel:{kp_id}:{plan_id}"))
         
         bot_instance.send_message(chat_id, confirm_text, parse_mode='HTML', reply_markup=markup)

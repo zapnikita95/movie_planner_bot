@@ -1084,35 +1084,35 @@ def handle_timezone_callback(call):
             # Проверяем user_plan_state
             if user_id in user_plan_state:
                 state = user_plan_state[user_id]
+                # КРИТИЧЕСКИЙ ФИКС: Продолжаем планирование, если есть все необходимые данные
+                # (pending_text не обязателен, главное - link, plan_type, pending_plan_dt)
+                link = state.get('link')
+                plan_type = state.get('type')
+                pending_plan_dt = state.get('pending_plan_dt')
+                pending_message_date_utc = state.get('pending_message_date_utc')
+                chat_id_from_state = state.get('chat_id', chat_id)
                 pending_text = state.get('pending_text')
-                if pending_text:
-                    logger.info(f"[TIMEZONE CALLBACK] Продолжаем планирование с сохраненным текстом: '{pending_text}'")
-                    # Продолжаем планирование с сохраненными данными
-                    link = state.get('link')
-                    plan_type = state.get('type')
-                    pending_plan_dt = state.get('pending_plan_dt')
-                    pending_message_date_utc = state.get('pending_message_date_utc')
-                    chat_id_from_state = state.get('chat_id', chat_id)
-                    
-                    if link and plan_type and pending_plan_dt:
-                        # Импортируем process_plan из handlers/plan
-                        from moviebot.bot.handlers.plan import process_plan
-                        # Вызываем process_plan с сохраненными данными
-                        result = process_plan(bot_instance, user_id, chat_id_from_state, link, plan_type, pending_plan_dt, pending_message_date_utc)
-                        if result:
-                            # Очищаем сохраненные данные
-                            if 'pending_text' in state:
-                                del state['pending_text']
-                            if 'pending_plan_dt' in state:
-                                del state['pending_plan_dt']
-                            if 'pending_message_date_utc' in state:
-                                del state['pending_message_date_utc']
-                            del user_plan_state[user_id]
-                            logger.info(f"[TIMEZONE CALLBACK] Планирование успешно завершено")
-                        else:
-                            logger.warning(f"[TIMEZONE CALLBACK] Ошибка при продолжении планирования")
+                
+                if link and plan_type and pending_plan_dt:
+                    logger.info(f"[TIMEZONE CALLBACK] Продолжаем планирование: link={link}, plan_type={plan_type}, pending_plan_dt={pending_plan_dt}")
+                    # Импортируем process_plan из handlers/plan
+                    from moviebot.bot.handlers.plan import process_plan
+                    # Вызываем process_plan с сохраненными данными
+                    result = process_plan(bot_instance, user_id, chat_id_from_state, link, plan_type, pending_plan_dt, pending_message_date_utc)
+                    if result:
+                        # Очищаем сохраненные данные
+                        if 'pending_text' in state:
+                            del state['pending_text']
+                        if 'pending_plan_dt' in state:
+                            del state['pending_plan_dt']
+                        if 'pending_message_date_utc' in state:
+                            del state['pending_message_date_utc']
+                        del user_plan_state[user_id]
+                        logger.info(f"[TIMEZONE CALLBACK] Планирование успешно завершено")
                     else:
-                        logger.warning(f"[TIMEZONE CALLBACK] Недостаточно данных для продолжения планирования: link={link}, plan_type={plan_type}, pending_plan_dt={pending_plan_dt}")
+                        logger.warning(f"[TIMEZONE CALLBACK] Ошибка при продолжении планирования")
+                else:
+                    logger.warning(f"[TIMEZONE CALLBACK] Недостаточно данных для продолжения планирования: link={link}, plan_type={plan_type}, pending_plan_dt={pending_plan_dt}")
         else:
             bot_instance.answer_callback_query(call.id, "Ошибка сохранения часового пояса", show_alert=True)
     except Exception as e:

@@ -393,7 +393,7 @@ def show_schedule(message):
                        m.watched
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.chat_id = %s AND m.watched = 0
+                WHERE p.chat_id = %s AND m.watched = 0 AND p.film_id IS NOT NULL
                 ORDER BY p.plan_type DESC, p.plan_datetime ASC
             ''', (chat_id,))
             rows = cursor.fetchall()
@@ -981,17 +981,28 @@ def get_plan_link_internal(message, state):
     chat_id = message.chat.id
     link = None
     
-    # Проверяем, что сообщение является реплаем на сообщение бота
+    # КРИТИЧЕСКИЙ ФИКС: В личке принимаем следующее сообщение, в группах - только реплай
     from moviebot.bot.bot_init import BOT_ID
+    is_private = message.chat.type == 'private'
     is_reply = (message.reply_to_message and 
                message.reply_to_message.from_user and 
                message.reply_to_message.from_user.id == BOT_ID)
     
     prompt_message_id = state.get('prompt_message_id')
-    # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
-    if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
-        logger.info(f"[PLAN LINK] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
-        return
+    
+    # В группах принимаем только реплаи
+    if not is_private:
+        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+            logger.info(f"[PLAN LINK] В группе сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+            return
+    else:
+        # В личке принимаем реплай или следующее сообщение (если состояние активно)
+        if is_reply:
+            # Проверяем, что это ответ на правильное сообщение
+            if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                logger.info(f"[PLAN LINK] В личке реплай не на правильное сообщение, игнорируем")
+                return
+        # Если не реплай, но состояние активно - принимаем как следующее сообщение
     
     # Извлекаем ссылку или ID из текста сообщения
     message_text = message.text or ''
@@ -1044,16 +1055,26 @@ def get_plan_day_or_date_internal(message, state):
     
     logger.info(f"[PLAN DAY/DATE INTERNAL] prompt_message_id={prompt_message_id}, reply_to_message={message.reply_to_message.message_id if message.reply_to_message else None}")
     
-    # КРИТИЧЕСКИ ВАЖНО: Проверяем, что это реплай на правильное сообщение бота
+    # КРИТИЧЕСКИЙ ФИКС: В личке принимаем следующее сообщение, в группах - только реплай
     from moviebot.bot.bot_init import BOT_ID
+    is_private = message.chat.type == 'private'
     is_reply = (message.reply_to_message and 
                message.reply_to_message.from_user and 
                message.reply_to_message.from_user.id == BOT_ID)
     
-    # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
-    if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
-        logger.info(f"[PLAN DAY/DATE INTERNAL] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
-        return
+    # В группах принимаем только реплаи
+    if not is_private:
+        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+            logger.info(f"[PLAN DAY/DATE INTERNAL] В группе сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+            return
+    else:
+        # В личке принимаем реплай или следующее сообщение (если состояние активно)
+        if is_reply:
+            # Проверяем, что это ответ на правильное сообщение
+            if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                logger.info(f"[PLAN DAY/DATE INTERNAL] В личке реплай не на правильное сообщение, игнорируем")
+                return
+        # Если не реплай, но состояние активно - принимаем как следующее сообщение
     
     # Берем текст из сообщения пользователя (не из реплая)
     text = message.text.strip() if message.text else ""

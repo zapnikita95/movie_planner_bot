@@ -119,6 +119,62 @@ def search_type_callback(call):
         logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
 
 
+@bot_instance.callback_query_handler(func=lambda call: call.data == "search:retry")
+def search_retry_callback(call):
+    """Обработчик кнопки 'Повторить запрос' - возвращает промпт поиска"""
+    try:
+        bot_instance.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        is_private = call.message.chat.type == 'private'
+        
+        # Получаем тип поиска из состояния, если есть
+        search_type = user_search_state.get(user_id, {}).get('search_type', 'mixed')
+        type_text = "🎬 фильмы" if search_type == 'film' else "📺 сериалы" if search_type == 'series' else "🎬📺 фильмы и сериалы"
+        
+        # Создаем кнопки для выбора типа поиска
+        markup = InlineKeyboardMarkup(row_width=2)
+        if search_type == 'film':
+            markup.add(
+                InlineKeyboardButton("🎬 Найти фильм ✅", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+            )
+        elif search_type == 'series':
+            markup.add(
+                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Найти сериал ✅", callback_data="search_type:series")
+            )
+        else:
+            markup.add(
+                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+            )
+        markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
+        
+        # Отправляем новое сообщение с промптом
+        prompt_text = f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик"
+        if is_private:
+            prompt_text += "\n\n📝 В личке можно отправить запрос следующим сообщением или в ответ на это сообщение."
+        else:
+            prompt_text += "\n\n📝 В группе отправьте запрос в ответ на это сообщение."
+        
+        prompt_msg = bot_instance.send_message(chat_id, prompt_text, reply_markup=markup)
+        
+        # Устанавливаем состояние для ожидания запроса
+        user_search_state[user_id] = {
+            'chat_id': chat_id,
+            'message_id': prompt_msg.message_id,
+            'search_type': search_type
+        }
+        logger.info(f"[SEARCH RETRY] Состояние поиска установлено для user_id={user_id}: {user_search_state[user_id]}")
+    except Exception as e:
+        logger.error(f"[SEARCH RETRY] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
 # Вспомогательная функция для поиска с фильтрацией по типу
 def search_films_with_type(query, page=1, search_type='mixed'):
     """
@@ -171,7 +227,10 @@ def handle_search(message):
         search_type = user_search_state.get(message.from_user.id, {}).get('search_type', 'mixed')
         films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
         if not films:
-            bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🔄 Повторить запрос", callback_data="search:retry"))
+            markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
+            bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
             return
         
         # Формируем сообщение с результатами
@@ -3853,7 +3912,10 @@ def handle_kinopoisk_link(message):
             
             if not films:
                 logger.warning(f"[SEARCH REPLY] Ничего не найдено по запросу '{query}'")
-                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🔄 Повторить запрос", callback_data="search:retry"))
+                markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
+                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
                 # Очищаем состояние
                 del user_search_state[user_id]
                 return
@@ -3945,6 +4007,16 @@ def handle_kinopoisk_link(message):
         
         logger.info(f"[KINOPOISK LINK] Текст сообщения: '{text[:100]}'")
         
+        # КРИТИЧЕСКИЙ ФИКС: Проверяем, не находится ли пользователь в состоянии планирования
+        from moviebot.states import user_plan_state, user_view_film_state
+        if user_id in user_plan_state:
+            state = user_plan_state[user_id]
+            # Если пользователь в процессе планирования (step=1), пропускаем обработку ссылки
+            # Ссылка будет обработана в get_plan_link_internal
+            if state.get('step') == 1:
+                logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в процессе планирования (step=1), пропускаем обработку ссылки")
+                return
+        
         # Проверяем, не является ли это ответом на промпт планирования
         if message.reply_to_message:
             reply_text = message.reply_to_message.text or ""
@@ -3964,9 +4036,6 @@ def handle_kinopoisk_link(message):
             return
         
         logger.info(f"[KINOPOISK LINK] Получена ссылка от {user_id}: {text}")
-        
-        # Проверяем, не находится ли пользователь в состоянии планирования
-        from moviebot.states import user_plan_state, user_view_film_state
         
         if user_id in user_plan_state:
             logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии планирования, прерываем планирование и обрабатываем ссылку")
@@ -4070,30 +4139,39 @@ def add_film_from_search_callback(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        # Формируем ссылку на Кинопоиск
-        link = f"https://kinopoisk.ru/film/{kp_id}"
-        
-        # Получаем информацию о фильме
-        from moviebot.api.kinopoisk_api import extract_movie_info
-        info = extract_movie_info(link)
-        
-        if not info:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-            return
-        
-        # Добавляем фильм в базу
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
-        show_film_info_with_buttons(
-            chat_id=chat_id,
-            user_id=user_id,
-            info=info,
-            link=link,
-            kp_id=kp_id,
-            existing=None,
-            message_id=None
-        )
-        
-        bot_instance.answer_callback_query(call.id, "✅ Фильм добавлен")
+            # Определяем тип фильма и формируем правильную ссылку
+            is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
+            
+            if is_series:
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            else:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            # Получаем информацию о фильме
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            info = extract_movie_info(link)
+            
+            if not info:
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            # Убеждаемся, что is_series правильно установлен в info
+            if is_series:
+                info['is_series'] = True
+            
+            # Показываем карточку фильма БЕЗ автоматического добавления в базу
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=None,
+                message_id=None
+            )
+            
+            bot_instance.answer_callback_query(call.id, "✅ Информация о фильме")
         
     except Exception as e:
         logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
@@ -4213,7 +4291,10 @@ def handle_search_reply(message):
             
             if not films:
                 logger.warning(f"[SEARCH REPLY] Ничего не найдено по запросу '{query}'")
-                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🔄 Повторить запрос", callback_data="search:retry"))
+                markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
+                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
                 # Очищаем состояние
                 del user_search_state[user_id]
                 return
@@ -4707,6 +4788,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         logger.info(f"[SHOW FILM INFO] Создание кнопок...")
         markup = InlineKeyboardMarkup(row_width=1)
         
+        # Флаг для отслеживания, добавлены ли уже кнопки "Интересные факты" и "Оценить"
+        facts_and_rate_added = False
+        
         # Проверяем премьеру
         logger.info(f"[SHOW FILM INFO] Проверка премьеры...")
         russia_release = info.get('russia_release')
@@ -4947,17 +5031,21 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 rating_text = "💬 Оценить"
             logger.info(f"[SHOW FILM INFO] Оценки получены, rating_text={rating_text}")
             
-            markup.row(
-                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-                InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}")
-            )
+            if not facts_and_rate_added:
+                markup.row(
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                    InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}")
+                )
+                facts_and_rate_added = True
         else:
             # Фильм не в базе - добавляем кнопки "Интересные факты" и "Оценить"
-            markup.row(
-                InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
-            )
-        logger.info(f"[SHOW FILM INFO] Кнопки оценок добавлены")
+            if not facts_and_rate_added:
+                markup.row(
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+                    InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+                )
+                facts_and_rate_added = True
+        logger.info(f"[SHOW FILM INFO] Кнопки оценок добавлены, facts_and_rate_added={facts_and_rate_added}")
         
         # Если это сериал, добавляем кнопки для сериалов (для фильмов в базе и не в базе)
         logger.info(f"[SHOW FILM INFO] Проверка сериала: is_series={is_series}, user_id={user_id}")
