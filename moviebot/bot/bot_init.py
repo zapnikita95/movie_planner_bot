@@ -128,3 +128,6 @@ def safe_answer_callback_query(bot_instance, callback_query_id, text=None, show_
         else:
             logger.warning(f"[SAFE CALLBACK] Ошибка при ответе на callback query {callback_query_id}: {e}")
         return False
+    
+# Основной экземпляр бота для использования во всех handlers и webhook
+bot_instance = bot

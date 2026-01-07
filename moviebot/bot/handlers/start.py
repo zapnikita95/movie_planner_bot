@@ -2,15 +2,15 @@
 Обработчики команды /start и главного меню
 """
 import logging
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot_instance.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot  # Глобальный экземпляр бота (только bot, без bot_instance)
-from moviebot.database.db_operations import (
+from moviebot.bot.bot_init import bot_instance  # ТОЛЬКО bot_instance
+from moviebot_instance.database.db_operations import (
     get_active_subscription,
     get_active_group_subscription_by_chat_id,
     log_request
 )
-from moviebot.utils.helpers import has_tickets_access, has_recommendations_access
+from moviebot_instance.utils.helpers import has_tickets_access, has_recommendations_access
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ logger.info("[START.PY] Модуль start.py загружен — глобал�
 
 # ==================== ГЛОБАЛЬНЫЕ ОБРАБОТЧИКИ ====================
 
-@bot.message_handler(commands=['start', 'menu'])
+@bot_instance.message_handler(commands=['start', 'menu'])
 def send_welcome(message):
     logger.info(f"[START] СРАБОТАЛ /start от user_id={message.from_user.id}, chat_id={message.chat.id}")
 
@@ -33,7 +33,7 @@ def send_welcome(message):
     except Exception as e:
         logger.error(f"[SEND_WELCOME] Ошибка в начале функции: {e}", exc_info=True)
         try:
-            bot.reply_to(message, "❌ Произошла ошибка. Попробуйте еще раз.")
+            bot_instance.reply_to(message, "❌ Произошла ошибка. Попробуйте еще раз.")
         except:
             pass
         return
@@ -115,21 +115,21 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
-        bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
+        bot_instance.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
         logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
 
     except Exception as e:
         logger.error(f"❌ Ошибка при отправке ответа на /start: {e}", exc_info=True)
         try:
-            bot.reply_to(message, "❌ Произошла ошибка при загрузке меню. Попробуйте еще раз.")
+            bot_instance.reply_to(message, "❌ Произошла ошибка при загрузке меню. Попробуйте еще раз.")
         except:
             pass
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("start_menu:"))
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("start_menu:"))
 def start_menu_callback(call):
     try:
-        from moviebot.bot.bot_init import safe_answer_callback_query
+        from moviebot_instance.bot_instance.bot_init import safe_answer_callback_query
         safe_answer_callback_query(bot, call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -140,9 +140,9 @@ def start_menu_callback(call):
         logger.info(f"[START MENU] Обработка действия: {action}, user_id={user_id}, chat_id={chat_id}")
 
         # Убрали импорт seasons_command (его нет)
-        from moviebot.bot.handlers.plan import show_schedule
-        from moviebot.bot.handlers.payment import payment_command
-        from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
+        from moviebot_instance.bot_instance.handlers.plan import show_schedule
+        from moviebot_instance.bot_instance.handlers.payment import payment_command
+        from moviebot_instance.bot_instance.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
 
         import importlib.util
         settings_spec = importlib.util.spec_from_file_location("settings_module", "moviebot/bot/handlers/settings.py")
@@ -157,15 +157,15 @@ def start_menu_callback(call):
             markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             try:
-                bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
             except Exception as e:
                 logger.warning(f"[START MENU] Не удалось отредактировать сообщение: {e}")
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
             return
 
         if action == 'seasons':
-            bot.answer_callback_query(call.id, "⏳ Загружаем сериалы и сезоны...")  # ← прелоадер (теперь bot)
-            from moviebot.bot.handlers.seasons import show_seasons_list
+            bot_instance.answer_callback_query(call.id, "⏳ Загружаем сериалы и сезоны...")  # ← прелоадер (теперь bot)
+            from moviebot_instance.bot_instance.handlers.seasons import show_seasons_list
             show_seasons_list(chat_id, user_id, message_id=message_id)
 
         elif action == 'premieres':
@@ -193,10 +193,10 @@ def start_menu_callback(call):
                 markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                 try:
-                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                    bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
                 except Exception as e:
                     logger.warning(f"[START MENU] Не удалось отредактировать сообщение: {e}")
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                    bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
                 return
             else:
                 message = call.message
@@ -218,7 +218,7 @@ def start_menu_callback(call):
         # Удаляем старое меню только если не seasons (там мы уже отредактировали)
         if action != 'seasons':
             try:
-                bot.delete_message(chat_id, message_id)
+                bot_instance.delete_message(chat_id, message_id)
             except:
                 pass
 
@@ -226,15 +226,15 @@ def start_menu_callback(call):
     except Exception as e:
         logger.error(f"[START MENU] Ошибка в start_menu_callback: {e}", exc_info=True)
         try:
-            bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+            bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
         except:
             pass
         
-@bot.callback_query_handler(func=lambda call: call.data == "back_to_start_menu")
+@bot_instance.callback_query_handler(func=lambda call: call.data == "back_to_start_menu")
 def back_to_start_menu_callback(call):
     """Универсальный обработчик для всех кнопок 'Назад в меню'"""
     try:
-        bot.answer_callback_query(call.id, "⏳ Возвращаемся...")  # ← прелоадер через bot
+        bot_instance.answer_callback_query(call.id, "⏳ Возвращаемся...")  # ← прелоадер через bot
 
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -297,7 +297,7 @@ def back_to_start_menu_callback(call):
         markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
-        bot.edit_message_text(
+        bot_instance.edit_message_text(
             welcome_text,
             chat_id,
             message_id,
@@ -311,6 +311,6 @@ def back_to_start_menu_callback(call):
     except Exception as e:
         logger.error(f"[BACK TO MENU] Ошибка: {e}", exc_info=True)
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка возврата в меню", show_alert=True)
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка возврата в меню", show_alert=True)
         except:
             pass
