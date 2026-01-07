@@ -31,8 +31,10 @@ def set_scheduler(scheduler_instance):
 # BOT_ID будет установлен при инициализации бота
 BOT_ID = None
 
+def init_bot_id(bot_instance=None):
     """Инициализирует BOT_ID из bot.get_me()"""
     global BOT_ID
+    bot_to_use = bot_instance if bot_instance is not None else bot
     try:
         bot_info = bot_to_use.get_me()
         BOT_ID = bot_info.id
@@ -54,12 +56,15 @@ BOT_COMMANDS = [
     BotCommand("settings", "Настройки")
 ]
 
+def setup_bot_commands(bot_instance=None):
     """
     Устанавливает команды бота для всех scope (личные чаты и группы).
     Эта функция должна вызываться при старте бота и периодически для синхронизации.
     
     Args:
+        bot_instance: Экземпляр бота. Если None, используется глобальный bot.
     """
+    bot_to_use = bot_instance or bot
     
     # Определяем все scope для установки команд
     scopes = [
@@ -88,20 +93,21 @@ BOT_COMMANDS = [
     
     return success_count == len(scopes)
 
-def sync_commands_periodically(bot):
+def sync_commands_periodically(bot_instance):
     """
     Периодическая синхронизация команд (вызывается планировщиком).
     Гарантирует, что команды всегда актуальны в Telegram API.
     """
     logger.info("Периодическая синхронизация команд...")
-    setup_bot_commands(bot)
+    setup_bot_commands(bot_instance)
 
-def safe_answer_callback_query(bot, callback_query_id, text=None, show_alert=False, url=None, cache_time=None):
+def safe_answer_callback_query(bot_instance, callback_query_id, text=None, show_alert=False, url=None, cache_time=None):
     """
     Безопасный вызов answer_callback_query с обработкой ошибок.
     Не падает на устаревших callback'ах (query is too old).
     
     Args:
+        bot_instance: Экземпляр бота
         callback_query_id: ID callback query
         text: Текст ответа (опционально)
         show_alert: Показывать ли alert (опционально)
@@ -112,7 +118,7 @@ def safe_answer_callback_query(bot, callback_query_id, text=None, show_alert=Fal
         bool: True если успешно, False если ошибка
     """
     try:
-        bot.answer_callback_query(callback_query_id, text=text, show_alert=show_alert, url=url, cache_time=cache_time)
+        bot_instance.answer_callback_query(callback_query_id, text=text, show_alert=show_alert, url=url, cache_time=cache_time)
         return True
     except Exception as e:
         error_msg = str(e).lower()
@@ -122,5 +128,6 @@ def safe_answer_callback_query(bot, callback_query_id, text=None, show_alert=Fal
         else:
             logger.warning(f"[SAFE CALLBACK] Ошибка при ответе на callback query {callback_query_id}: {e}")
         return False
-    
+
 # Основной экземпляр бота для использования во всех handlers и webhook
+# (глобальный bot — единственный источник правды)
