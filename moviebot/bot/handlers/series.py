@@ -4174,15 +4174,15 @@ def add_film_from_search_callback(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-            # Определяем тип фильма и формируем правильную ссылку
-            is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
-            
-            if is_series:
-                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            else:
-                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            
-            # Получаем информацию о фильме
+        # Определяем тип фильма и формируем правильную ссылку
+        is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
+        
+        if is_series:
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+        else:
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # Получаем информацию о фильме
             from moviebot.api.kinopoisk_api import extract_movie_info
             info = extract_movie_info(link)
             
