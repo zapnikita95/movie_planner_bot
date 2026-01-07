@@ -40,7 +40,8 @@ def add_to_database_callback(call):
             
             with db_semaphore:
                 with db_lock:
-                    cursor.execute('SELECT id, title, link, watched, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    # ← ФИКС: str(kp_id) — чтобы избежать "text = integer"
+                    cursor.execute('SELECT id, title, link, watched, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                     row = cursor.fetchone()
         except Exception as e:
             logger.error(f"[ADD TO DATABASE] Ошибка при проверке фильма в базе: {e}", exc_info=True)
@@ -129,6 +130,7 @@ def add_to_database_callback(call):
         try:
             with db_semaphore:
                 with db_lock:
+                    # ← ФИКС: str(kp_id) везде
                     cursor.execute('''
                         INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'button')
@@ -142,7 +144,7 @@ def add_to_database_callback(call):
                             actors = COALESCE(EXCLUDED.actors, movies.actors),
                             is_series = EXCLUDED.is_series
                         RETURNING id, title, watched, year, genres, description, director, actors
-                    ''', (chat_id, link, kp_id, title, year, genres, description, director, actors, 1 if is_series else 0, user_id))
+                    ''', (chat_id, link, str(kp_id), title, year, genres, description, director, actors, 1 if is_series else 0, user_id))
                     
                     result = cursor.fetchone()
                     film_id = result.get('id') if isinstance(result, dict) else result[0]
@@ -189,14 +191,13 @@ def add_to_database_callback(call):
     finally:
         logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 
-
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
 def plan_from_added_callback(call):
-    """Обработчик планирования из добавленного фильма — с автоматическим добавлением в базу, если нужно"""
+    """Обработчик 'Запланировать просмотр' — добавляет фильм в базу, если его нет, и запускает планирование"""
     logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
     logger.info(f"[PLAN FROM ADDED] Получен callback: call.data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
     try:
-        bot_instance.answer_callback_query(call.id)  # Отвечаем сразу, чтобы убрать "крутилку"
+        bot_instance.answer_callback_query(call.id)
         
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -204,13 +205,12 @@ def plan_from_added_callback(call):
         
         logger.info(f"[PLAN FROM ADDED] Пользователь {user_id} хочет запланировать фильм kp_id={kp_id}")
         
-        # 1. Получаем информацию о фильме из сообщения (текст карточки)
+        # Извлекаем информацию из сообщения карточки
         message_text = call.message.text or call.message.caption or ""
         if not message_text:
-            bot_instance.send_message(chat_id, "❌ Не удалось получить информацию о фильме.")
+            bot_instance.send_message(chat_id, "❌ Не удалось прочитать информацию о фильме.")
             return
         
-        # Извлекаем title и определяем is_series
         import re
         title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
         title = title_match.group(1) if title_match else f"Фильм {kp_id}"
@@ -218,7 +218,7 @@ def plan_from_added_callback(call):
         is_series = '📺' in message_text
         link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
         
-        # 2. Убеждаемся, что фильм в базе (добавляем, если нет)
+        # Добавляем фильм в базу, если его нет
         film_id = None
         try:
             with db_semaphore:
@@ -229,7 +229,6 @@ def plan_from_added_callback(call):
                         film_id = row[0] if not isinstance(row, dict) else row.get('id')
                     
                     if not film_id:
-                        # Добавляем с минимальной информацией
                         cursor.execute('''
                             INSERT INTO movies (chat_id, kp_id, title, link, is_series, added_by, added_at, source)
                             VALUES (%s, %s, %s, %s, %s, %s, NOW(), 'plan_button')
@@ -240,8 +239,6 @@ def plan_from_added_callback(call):
                         if result:
                             film_id = result[0] if not isinstance(result, dict) else result.get('id')
                         conn.commit()
-                    
-                    logger.info(f"[PLAN FROM ADDED] film_id после проверки/добавления: {film_id}")
         except Exception as db_e:
             conn.rollback()
             logger.error(f"[PLAN FROM ADDED] Ошибка БД при добавлении фильма: {db_e}", exc_info=True)
@@ -252,10 +249,11 @@ def plan_from_added_callback(call):
             bot_instance.send_message(chat_id, "❌ Не удалось добавить фильм в базу.")
             return
         
-        # 3. Переходим к планированию
+        logger.info(f"[PLAN FROM ADDED] Фильм готов к планированию: film_id={film_id}, kp_id={kp_id}")
+        
+        # Запускаем планирование
         from moviebot.bot.handlers.plan import start_plan_home_or_cinema
         
-        # Имитируем сообщение с /plan и передаём film_id
         fake_message = type('obj', (object,), {
             'chat': type('obj', (object,), {'id': chat_id}),
             'from_user': type('obj', (object,), {'id': user_id}),
@@ -265,17 +263,12 @@ def plan_from_added_callback(call):
         
         start_plan_home_or_cinema(fake_message, pre_selected_film_id=film_id)
         
-        logger.info(f"[PLAN FROM ADDED] Переход к планированию для film_id={film_id}, kp_id={kp_id}")
-        
     except Exception as e:
         logger.error(f"[PLAN FROM ADDED] Критическая ошибка: {e}", exc_info=True)
-        try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка планирования", show_alert=True)
-        except:
-            pass
+        bot_instance.answer_callback_query(call.id, "❌ Ошибка планирования", show_alert=True)
     finally:
         logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
-        
+
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
 def show_facts_callback(call):
     """Обработчик кнопки 'Интересные факты'"""
