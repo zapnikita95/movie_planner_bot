@@ -149,7 +149,7 @@ import moviebot.bot.handlers.text_messages  # noqa: F401
 
 # Регистрируем handlers команд и callbacks
 #from moviebot.bot.handlers.start import register_start_handlers
-register_start_handlers(bot)
+# register_start_handlers(bot)
 logger.info("✅ start handlers зарегистрированы")
 
 from moviebot.bot.handlers.list import register_list_handlers
