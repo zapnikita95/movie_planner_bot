@@ -29,7 +29,8 @@ from moviebot.states import (
     plan_notification_messages, settings_messages, user_expected_text
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
-from moviebot.bot.handlers.series import search_films_with_type, show_film_info_with_buttons, show_film_info_without_adding
+# Не импортируем search_films_with_type здесь, чтобы избежать циклического импорта
+# Импортируем внутри функции process_search_query
 from moviebot.bot.handlers.list import handle_view_film_reply_internal
 from moviebot.bot.bot_init import BOT_ID
 # Импортируем обработчики промокодов для автоматической регистрации
@@ -910,6 +911,9 @@ def expect_text_from_user(user_id: int, chat_id: int, expected_for: str = 'searc
 # ==================== ОБЩАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ПОИСКА ====================
 def process_search_query(message, query, reply_to_message=None):
     """Единая логика поиска и отправки результатов. Используется обоими обработчиками."""
+    # Ленивый импорт для избежания циклического импорта
+    from moviebot.bot.handlers.series import search_films_with_type
+    
     user_id = message.from_user.id
     chat_id = message.chat.id
     
