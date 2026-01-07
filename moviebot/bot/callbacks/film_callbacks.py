@@ -7,6 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 from moviebot.api.kinopoisk_api import get_facts
 from moviebot.states import user_plan_state
+from moviebot.bot.bot_init import bot
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()

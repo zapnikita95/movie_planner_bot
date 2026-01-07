@@ -13,6 +13,7 @@ from moviebot.database.db_operations import get_notification_settings, log_reque
 from moviebot.api.kinopoisk_api import get_premieres_for_period, extract_movie_info
 from moviebot.bot.handlers.series import ensure_movie_in_database
 from moviebot.config import KP_TOKEN
+from moviebot.bot.bot_init import bot
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()

@@ -9,6 +9,8 @@ import pytz
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_watched_emojis, get_watched_custom_emoji_ids
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
