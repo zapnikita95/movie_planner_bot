@@ -299,6 +299,9 @@ def show_seasons_list(chat_id: int, user_id: int, message_id: int = None):
         return
 
     markup = InlineKeyboardMarkup(row_width=1)
+
+    has_completed = False  # Флаг, чтобы знать, добавлять ли кнопку "Просмотренные"
+
     for row in series:
         film_id = row[0] if not isinstance(row, dict) else row.get('id')
         title = row[1] if not isinstance(row, dict) else row.get('title')
@@ -321,30 +324,99 @@ def show_seasons_list(chat_id: int, user_id: int, message_id: int = None):
 
         total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
 
+        # ← ФИЛЬТРАЦИЯ: пропускаем полностью просмотренные и завершённые (не выходящие)
+        if total_ep == watched_ep and total_ep > 0 and not is_airing:
+            has_completed = True  # Помечаем, что есть просмотренные
+            continue  # Не добавляем в основной список
+
+        # Статус только эмодзи в начале (как в фиксе №2)
         status = ""
         if is_airing:
-            status = "🟢 Выходит"
-        elif total_ep == watched_ep and total_ep > 0:
-            status = "✅ Просмотрено"
+            status = "🟢 "
         elif watched_ep > 0:
-            status = f"⏳ {watched_ep}/{total_ep}"
+            status = f"⏳ {watched_ep}/{total_ep} "
+        # Если ничего не просмотрено — статуса нет (можно добавить ⌛ или оставить пусто)
 
-        button_text = f"{title}"
-        if status:
-            button_text += f"  {status}"
+        button_text = f"{status}{title}"
 
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
 
-    markup.add(InlineKeyboardButton("🔄 Обновить", callback_data="refresh_seasons_list"))
+    # Кнопки внизу
+    if has_completed:
+        markup.add(InlineKeyboardButton("✅ Просмотренные", callback_data="show_completed_series"))
+
+    # markup.add(InlineKeyboardButton("🔄 Обновить", callback_data="refresh_seasons_list"))
+
     markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
 
-    text = f"📺 Сериалы в базе ({len(series)})"
+    text = f"📺 Сериалы в базе ({len(markup.inline_keyboard) - (1 if has_completed else 0) - 1})"  # Считаем только кнопки с сериалами
 
     if message_id:
         bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
     else:
         bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
+def show_completed_series_list(chat_id: int, user_id: int, message_id: int = None):
+    """
+    Показывает список полностью просмотренных сериалов (аналогично show_seasons_list, но только completed).
+    """
+    logger.info(f"[SHOW_COMPLETED_SERIES_LIST] chat_id={chat_id}, user_id={user_id}, message_id={message_id}")
+
+    has_access = has_notifications_access(chat_id, user_id)
+    
+    with db_lock:
+        cursor.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
+        all_series = cursor.fetchall()
+    
+    completed_series = []
+    for row in all_series:
+        film_id = row[0] if not isinstance(row, dict) else row.get('id')
+        title = row[1] if not isinstance(row, dict) else row.get('title')
+        kp_id = row[2] if not isinstance(row, dict) else row.get('kp_id')
+
+        is_airing, _ = get_series_airing_status(kp_id)
+        seasons_data = get_seasons_data(kp_id)
+
+        watched_set = set()
+        with db_lock:
+            cursor.execute('''
+                SELECT season_number, episode_number FROM series_tracking 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+            ''', (chat_id, film_id, user_id))
+            for w_row in cursor.fetchall():
+                s_num = str(w_row[0] if not isinstance(w_row, dict) else w_row.get('season_number'))
+                e_num = str(w_row[1] if not isinstance(w_row, dict) else w_row.get('episode_number'))
+                watched_set.add((s_num, e_num))
+
+        total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
+
+        if total_ep == watched_ep and total_ep > 0 and not is_airing:  # Только полностью просмотренные и не выходящие
+            status = "✅ "  # Эмодзи в начале
+            button_text = f"{status}{title}"
+            completed_series.append((kp_id, button_text))
+
+    if not completed_series:
+        text = "Нет полностью просмотренных сериалов."
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("◀️ К активным сериалам", callback_data="back_to_seasons_list"))
+        if message_id:
+            bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+        else:
+            bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        return
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for kp_id, button_text in completed_series:
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+
+    markup.add(InlineKeyboardButton("◀️ К активным сериалам", callback_data="back_to_seasons_list"))
+
+    text = f"✅ Просмотренные сериалы ({len(completed_series)})"
+
+    if message_id:
+        bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+    else:
+        bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
 def handle_seasons_kp(call):
@@ -428,7 +500,23 @@ def handle_seasons_kp(call):
             bot_instance.answer_callback_query(call.id, "❌ Ошибка загрузки", show_alert=True)
         except:
             pass
-        
+
+@bot_instance.callback_query_handler(func=lambda call: call.data == "show_completed_series")
+def handle_show_completed_series(call):
+    bot_instance.answer_callback_query(call.id)
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    message_id = call.message.message_id
+    show_completed_series_list(chat_id, user_id, message_id=message_id)
+
+@bot_instance.callback_query_handler(func=lambda call: call.data == "back_to_seasons_list")
+def handle_back_to_seasons_list(call):
+    bot_instance.answer_callback_query(call.id)
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    message_id = call.message.message_id
+    show_seasons_list(chat_id, user_id, message_id=message_id)
+
 def register_seasons_handlers(bot):  # ← добавь параметр bot
     """Регистрируем обработчики в основной init"""
     @bot.message_handler(commands=['seasons'])
