@@ -4,7 +4,7 @@
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot, bot_instance
+from moviebot.bot.bot_init import bot  # Глобальный экземпляр бота (только bot, без bot_instance)
 from moviebot.database.db_operations import (
     get_active_subscription,
     get_active_group_subscription_by_chat_id,
@@ -164,7 +164,7 @@ def start_menu_callback(call):
             return
 
         if action == 'seasons':
-            bot_instance.answer_callback_query(call.id, "⏳ Загружаем сериалы и сезоны...")  # ← всплывающий прелоадер
+            bot.answer_callback_query(call.id, "⏳ Загружаем сериалы и сезоны...")  # ← прелоадер (теперь bot)
             from moviebot.bot.handlers.seasons import show_seasons_list
             show_seasons_list(chat_id, user_id, message_id=message_id)
 
@@ -230,11 +230,11 @@ def start_menu_callback(call):
         except:
             pass
         
-@bot_instance.callback_query_handler(func=lambda call: call.data == "back_to_start_menu")
+@bot.callback_query_handler(func=lambda call: call.data == "back_to_start_menu")
 def back_to_start_menu_callback(call):
     """Универсальный обработчик для всех кнопок 'Назад в меню'"""
     try:
-        bot_instance.answer_callback_query(call.id, "⏳ Возвращаемся...")
+        bot.answer_callback_query(call.id, "⏳ Возвращаемся...")  # ← прелоадер через bot
 
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -259,7 +259,6 @@ def back_to_start_menu_callback(call):
                 subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
             else:
                 subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
-        # Если в группе — можно добавить group_sub, но в твоём send_welcome это есть, если нужно — добавь
 
         welcome_text = f"""
 🎬 <b>Главное меню</b>{subscription_info}
@@ -298,7 +297,7 @@ def back_to_start_menu_callback(call):
         markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
         
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             welcome_text,
             chat_id,
             message_id,
@@ -312,6 +311,6 @@ def back_to_start_menu_callback(call):
     except Exception as e:
         logger.error(f"[BACK TO MENU] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка возврата в меню", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка возврата в меню", show_alert=True)
         except:
             pass
