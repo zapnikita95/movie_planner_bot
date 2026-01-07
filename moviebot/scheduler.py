@@ -324,25 +324,43 @@ def check_and_send_plan_notifications():
 
         
 
+        # КРИТИЧЕСКИЙ ФИКС: Добавляем rollback при ошибках транзакции
+        try:
+            # Сначала делаем rollback на случай если предыдущая транзакция упала
+            from moviebot.database.db_connection import conn
+            try:
+                conn.rollback()
+            except:
+                pass
+        except:
+            pass
+        
         with db_lock:
+            try:
+                cursor.execute('''
 
-            cursor.execute('''
+                    SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
 
-                SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
+                           m.title, m.link, p.notification_sent, p.ticket_notification_sent
 
-                       m.title, m.link, p.notification_sent, p.ticket_notification_sent
+                    FROM plans p
 
-                FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
 
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.plan_datetime >= %s 
 
-                WHERE p.plan_datetime >= %s 
+                      AND p.plan_datetime <= %s
 
-                  AND p.plan_datetime <= %s
+                ''', (check_start, check_end))
 
-            ''', (check_start, check_end))
-
-            plans = cursor.fetchall()
+                plans = cursor.fetchall()
+            except Exception as db_e:
+                logger.error(f"[PLAN CHECK] Ошибка при запросе планов: {db_e}", exc_info=True)
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                plans = []
 
         
 
@@ -1529,31 +1547,50 @@ def process_recurring_payments():
         
         now = datetime.now(pytz.UTC)
         
+        # КРИТИЧЕСКИЙ ФИКС: Добавляем rollback при ошибках транзакции
+        try:
+            # Сначала делаем rollback на случай если предыдущая транзакция упала
+            try:
+                conn.rollback()
+            except:
+                pass
+        except:
+            pass
+        
         # Находим подписки, у которых next_payment_date наступил и есть payment_method_id
         # Для тестовых подписок проверяем по времени (если прошло 10 минут)
         # Для остальных - только в дневное время (9:00 МСК)
+        subscriptions = []
         with db_lock:
-            # Для тестовых подписок проверяем, если next_payment_date <= now
-            # Для остальных - только если сегодня и в дневное время (9:00-18:00 МСК)
-            cursor.execute("""
-                SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
-                       next_payment_date, payment_method_id, telegram_username, group_username, group_size
-                FROM subscriptions
-                WHERE is_active = TRUE
-                AND next_payment_date IS NOT NULL
-                AND payment_method_id IS NOT NULL
-                AND (
-                    -- Тестовые подписки: проверяем по времени (если прошло 10 минут)
-                    (period_type = 'test' AND next_payment_date <= %s)
-                    OR
-                    -- Остальные подписки: только в дневное время (9:00-18:00 МСК) и сегодня
-                    (period_type != 'test' 
-                     AND DATE(next_payment_date AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
-                     AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) >= 9
-                     AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) < 18)
-                )
-            """, (now, now))
-            subscriptions = cursor.fetchall()
+            try:
+                # Для тестовых подписок проверяем, если next_payment_date <= now
+                # Для остальных - только если сегодня и в дневное время (9:00-18:00 МСК)
+                cursor.execute("""
+                    SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
+                           next_payment_date, payment_method_id, telegram_username, group_username, group_size
+                    FROM subscriptions
+                    WHERE is_active = TRUE
+                    AND next_payment_date IS NOT NULL
+                    AND payment_method_id IS NOT NULL
+                    AND (
+                        -- Тестовые подписки: проверяем по времени (если прошло 10 минут)
+                        (period_type = 'test' AND next_payment_date <= %s)
+                        OR
+                        -- Остальные подписки: только в дневное время (9:00-18:00 МСК) и сегодня
+                        (period_type != 'test' 
+                         AND DATE(next_payment_date AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
+                         AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) >= 9
+                         AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) < 18)
+                    )
+                """, (now, now))
+                subscriptions = cursor.fetchall()
+            except Exception as db_e:
+                logger.error(f"[RECURRING PAYMENT] Ошибка при запросе подписок: {db_e}", exc_info=True)
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                subscriptions = []
         
         for sub in subscriptions:
             try:

@@ -30,14 +30,24 @@ def add_to_database_callback(call):
         logger.info(f"[ADD TO DATABASE] Пользователь {user_id} хочет добавить фильм kp_id={kp_id} в базу, chat_id={chat_id}")
         
         # Проверяем, есть ли фильм уже в базе
+        # КРИТИЧЕСКИЙ ФИКС: Добавляем rollback при ошибках транзакции
         try:
+            # Сначала делаем rollback на случай если предыдущая транзакция упала
+            try:
+                conn.rollback()
+            except:
+                pass
+            
             with db_semaphore:
                 with db_lock:
                     cursor.execute('SELECT id, title, link, watched, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                     row = cursor.fetchone()
         except Exception as e:
             logger.error(f"[ADD TO DATABASE] Ошибка при проверке фильма в базе: {e}", exc_info=True)
-            conn.rollback()
+            try:
+                conn.rollback()
+            except:
+                pass
             bot_instance.answer_callback_query(call.id, "❌ Ошибка проверки базы", show_alert=True)
             return
         

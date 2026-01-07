@@ -100,11 +100,27 @@ class BotWatchdog:
                 }
                 return False
                 
+            # КРИТИЧЕСКИЙ ФИКС: Добавляем rollback при ошибках транзакции
+            try:
+                # Сначала делаем rollback на случай если предыдущая транзакция упала
+                self.db_connection.rollback()
+            except:
+                pass
+            
             # Пытаемся выполнить простой запрос
             cursor = self.db_connection.cursor()
-            cursor.execute("SELECT 1")
-            cursor.fetchone()
-            cursor.close()
+            try:
+                cursor.execute("SELECT 1")
+                cursor.fetchone()
+            except Exception as db_e:
+                # Если ошибка транзакции - делаем rollback
+                try:
+                    self.db_connection.rollback()
+                except:
+                    pass
+                raise
+            finally:
+                cursor.close()
             
             self.health_status['database'] = {
                 'status': 'connected',

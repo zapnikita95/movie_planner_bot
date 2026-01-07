@@ -3916,19 +3916,14 @@ def handle_kinopoisk_link(message):
             try:
                 sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[SEARCH REPLY] ✅ Ответ отправлен пользователю {user_id}, найдено {len(films)} результатов, message_id={sent_message.message_id if sent_message else 'None'}")
-                # Удаляем состояние ТОЛЬКО после успешной отправки
-                if user_id in user_search_state:
-                    del user_search_state[user_id]
-                    logger.info(f"[SEARCH REPLY] Состояние user_search_state удалено для user_id={user_id}")
+                # Состояние уже удалено выше, не нужно удалять снова
             except Exception as e:
                 logger.error(f"[SEARCH REPLY] ❌ Ошибка отправки результатов поиска: {e}", exc_info=True)
                 try:
                     bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
                 except Exception:
                     pass
-                # Удаляем состояние даже при ошибке
-                if user_id in user_search_state:
-                    del user_search_state[user_id]
+                # Состояние уже удалено выше, не нужно удалять снова
         except Exception as e:
             logger.error(f"[SEARCH REPLY] ❌ Критическая ошибка: {e}", exc_info=True)
             try:
