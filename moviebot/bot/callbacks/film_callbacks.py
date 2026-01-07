@@ -20,8 +20,11 @@ def add_to_database_callback(call):
     logger.info("=" * 80)
     logger.info(f"[ADD TO DATABASE] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
-        bot_instance.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
-        logger.info(f"[ADD TO DATABASE] answer_callback_query вызван, callback_id={call.id}")
+        try:
+            bot_instance.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
+            logger.info(f"[ADD TO DATABASE] answer_callback_query вызван, callback_id={call.id}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         
         kp_id = call.data.split(":")[1]
         user_id = call.from_user.id
@@ -49,7 +52,13 @@ def add_to_database_callback(call):
                 conn.rollback()
             except:
                 pass
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка проверки базы", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка проверки базы", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             return
         
         if row:
@@ -60,7 +69,13 @@ def add_to_database_callback(call):
             watched = row.get('watched') if isinstance(row, dict) else row[3]
             
             logger.info(f"[ADD TO DATABASE] Фильм уже в базе: film_id={film_id}, title={title_db}")
-            bot_instance.answer_callback_query(call.id, f"ℹ️ {title_db} уже в базе", show_alert=False)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, f"ℹ️ {title_db} уже в базе", show_alert=False)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             
             # Обновляем сообщение, показывая что фильм в базе
             from moviebot.bot.handlers.series import show_film_info_with_buttons
@@ -159,11 +174,23 @@ def add_to_database_callback(call):
         except Exception as e:
             conn.rollback()
             logger.error(f"[ADD TO DATABASE] Ошибка при добавлении фильма в базу: {e}", exc_info=True)
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка добавления в базу", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка добавления в базу", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             return
         
         logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title_db}")
-        bot_instance.answer_callback_query(call.id, f"✅ {title_db} добавлен в базу!", show_alert=False)
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, f"✅ {title_db} добавлен в базу!", show_alert=False)
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         
         # Обновляем сообщение, показывая что фильм теперь в базе с полной информацией
         from moviebot.bot.handlers.series import show_film_info_with_buttons
@@ -185,7 +212,13 @@ def add_to_database_callback(call):
         except:
             pass
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as answer_e:
             logger.error(f"[ADD TO DATABASE] Не удалось вызвать answer_callback_query: {answer_e}")
     finally:
@@ -294,7 +327,13 @@ def plan_from_added_callback(call):
         
     except Exception as e:
         logger.error(f"[PLAN FROM ADDED] Критическая ошибка: {e}", exc_info=True)
-        bot_instance.answer_callback_query(call.id, "❌ Ошибка планирования", show_alert=True)
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, "❌ Ошибка планирования", show_alert=True)
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
     finally:
         logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
         
@@ -312,15 +351,33 @@ def show_facts_callback(call):
         facts = get_facts(kp_id)
         if facts:
             bot_instance.send_message(chat_id, facts, parse_mode='HTML')
-            bot_instance.answer_callback_query(call.id, "Факты отправлены")
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "Факты отправлены")
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         else:
-            bot_instance.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
     except Exception as e:
         logger.error(f"[SHOW FACTS] Ошибка: {e}", exc_info=True)
     finally:
         # ВСЕГДА отвечаем на callback!
         try:
-            bot_instance.answer_callback_query(call.id)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as answer_e:
             logger.error(f"[SHOW FACTS] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
@@ -331,7 +388,13 @@ def plan_type_callback_fallback(call):
     logger.info("=" * 80)
     logger.info(f"[PLAN TYPE FALLBACK] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id)
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         plan_type = call.data.split(":")[1]  # 'home' или 'cinema'
@@ -368,7 +431,13 @@ def plan_type_callback_fallback(call):
     except Exception as e:
         logger.error(f"[PLAN TYPE FALLBACK] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except:
             pass
     finally:
@@ -377,7 +446,13 @@ def plan_type_callback_fallback(call):
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith('plan_type:'))
 def handle_plan_type(call):
     try:
-        bot_instance.answer_callback_query(call.id, "Выбрано!")
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, "Выбрано!")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         parts = call.data.split(':')
         plan_type = parts[1]  # 'home' или 'cinema'
         kp_id = int(parts[2])
@@ -417,7 +492,13 @@ def handle_plan_type(call):
         
     except Exception as e:
         logger.error(f"[PLAN TYPE] Ошибка: {e}", exc_info=True)
-        bot_instance.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
 def show_film_description_callback(call):
@@ -425,7 +506,13 @@ def show_film_description_callback(call):
     logger.info("=" * 80)
     logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
-        bot_instance.answer_callback_query(call.id, text="⏳ Загружаю описание...")
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, text="⏳ Загружаю описание...")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] answer_callback_query вызван, callback_id={call.id}")
         
         kp_id = call.data.split(":")[1]
@@ -447,7 +534,13 @@ def show_film_description_callback(call):
         
         if not row:
             logger.error(f"[SHOW FILM DESCRIPTION FROM RATE] Фильм не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
-            bot_instance.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             return
         
         # Извлекаем данные
@@ -520,7 +613,13 @@ def show_film_description_callback(call):
     except Exception as e:
         logger.error(f"[SHOW FILM DESCRIPTION FROM RATE] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except:
             pass
     finally:
@@ -534,7 +633,13 @@ def mark_watched_from_description_callback(call):
     logger.info(f"[MARK WATCHED] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
         # Отвечаем на callback сразу
-        bot_instance.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         logger.info(f"[MARK WATCHED] answer_callback_query вызван, callback_id={call.id}")
         
         film_id = int(call.data.split(":")[1])
@@ -557,7 +662,13 @@ def mark_watched_from_description_callback(call):
             
             if not row:
                 logger.error(f"[MARK WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                try:
+                    try:
+                        bot_instance.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                    except Exception as e:
+                        logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
                 return
             
             # Извлекаем данные
@@ -611,12 +722,24 @@ def mark_watched_from_description_callback(call):
         )
         
         logger.info(f"[MARK WATCHED] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
-        bot_instance.answer_callback_query(call.id, text="✅ Фильм отмечен как просмотренный", show_alert=False)
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, text="✅ Фильм отмечен как просмотренный", show_alert=False)
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         
     except Exception as e:
         logger.error(f"[MARK WATCHED] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except:
             pass
     finally:
@@ -630,7 +753,13 @@ def mark_watched_from_description_kp_callback(call):
     logger.info(f"[MARK WATCHED KP] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
         # Отвечаем на callback сразу
-        bot_instance.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         
         kp_id = call.data.split(":")[1]
         user_id = call.from_user.id
@@ -648,7 +777,13 @@ def mark_watched_from_description_kp_callback(call):
         info = extract_movie_info(link)
         
         if not info:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             return
         
         # Добавляем фильм в базу как просмотренный
@@ -677,12 +812,24 @@ def mark_watched_from_description_kp_callback(call):
         )
         
         logger.info(f"[MARK WATCHED KP] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
-        bot_instance.answer_callback_query(call.id, text="✅ Фильм добавлен в базу и отмечен как просмотренный", show_alert=False)
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, text="✅ Фильм добавлен в базу и отмечен как просмотренный", show_alert=False)
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         
     except Exception as e:
         logger.error(f"[MARK WATCHED KP] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except:
             pass
     finally:
@@ -696,7 +843,13 @@ def toggle_watched_from_description_callback(call):
     logger.info(f"[TOGGLE WATCHED] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
         # Отвечаем на callback сразу
-        bot_instance.answer_callback_query(call.id, text="⏳ Снимаю отметку просмотра...")
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, text="⏳ Снимаю отметку просмотра...")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         
         film_id = int(call.data.split(":")[1])
         user_id = call.from_user.id
@@ -718,7 +871,13 @@ def toggle_watched_from_description_callback(call):
             
             if not row:
                 logger.error(f"[TOGGLE WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                try:
+                    try:
+                        bot_instance.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                    except Exception as e:
+                        logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
                 return
             
             # Извлекаем данные
@@ -772,12 +931,24 @@ def toggle_watched_from_description_callback(call):
         )
         
         logger.info(f"[TOGGLE WATCHED] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
-        bot_instance.answer_callback_query(call.id, text="✅ Отметка просмотра снята", show_alert=False)
+        try:
+            try:
+                bot_instance.answer_callback_query(call.id, text="✅ Отметка просмотра снята", show_alert=False)
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        except Exception as e:
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         
     except Exception as e:
         logger.error(f"[TOGGLE WATCHED] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            try:
+                try:
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                except Exception as e:
+                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            except Exception as e:
+                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except:
             pass
     finally:
@@ -789,4 +960,3 @@ def register_film_callbacks(bot_instance):
     # Handlers уже зарегистрированы через декораторы @bot_instance.callback_query_handler
     # при импорте модуля, поэтому эта функция просто для совместимости
     pass
-
