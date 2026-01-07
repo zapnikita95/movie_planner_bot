@@ -1609,8 +1609,8 @@ def main_text_handler(message):
         reply_text = message.reply_to_message.text or ""
         
         if "Список просмотренных фильмов для оценки" in reply_text:
-            from moviebot.bot.handlers.rate import handle_rate_list_reply_internal
-            handle_rate_list_reply_internal(message)
+#             from ...
+#             handle_rate_list_reply_internal(message)
             return
         
         reply_msg_id = message.reply_to_message.message_id
