@@ -970,25 +970,46 @@ def get_active_group_users(chat_id, bot_id=None):
                 chat_id = row[0] if len(row) > 0 else None
                 username = row[1] if len(row) > 1 else None
             
+def get_user_groups(user_id, bot=None):
+    """Получает список групп, где есть и пользователь, и бот (если bot передан)"""
+    groups = []
+    with db_lock:
+        # Получаем группы из stats, где пользователь был активен
+        cursor.execute("""
+            SELECT DISTINCT chat_id, username
+            FROM stats 
+            WHERE user_id = %s AND chat_id < 0
+            ORDER BY chat_id
+        """, (user_id,))
+        
+        for row in cursor.fetchall():
+            if isinstance(row, dict):
+                chat_id = row.get('chat_id')
+                username = row.get('username')
+            else:
+                chat_id = row[0] if len(row) > 0 else None
+                username = row[1] if len(row) > 1 else None
+            
             if chat_id and chat_id < 0:  # Только группы (отрицательные ID)
-                # Проверяем, что бот состоит в группе
+                if bot:
+                    # Проверяем, что бот состоит в группе
                     try:
                         chat = bot.get_chat(chat_id)
                         if chat.type in ['group', 'supergroup']:
                             groups.append({
                                 'chat_id': chat_id,
-                                'username': chat.username or username,
-                                'title': chat.title
+                                'title': chat.title,
+                                'username': chat.username or username
                             })
                     except Exception as e:
                         logger.warning(f"Не удалось получить информацию о группе {chat_id}: {e}")
                         continue
                 else:
-                    # Если бот не передан, возвращаем без проверки
+                    # Если бот не передан — возвращаем без проверки (для совместимости)
                     groups.append({
                         'chat_id': chat_id,
-                        'username': username,
-                        'title': None
+                        'title': None,
+                        'username': username
                     })
     
     return groups
