@@ -429,9 +429,9 @@ def handle_seasons_kp(call):
         except:
             pass
         
-def register_seasons_handlers():
+def register_seasons_handlers(bot):  # ← добавь параметр bot
     """Регистрируем обработчики в основной init"""
-    @bot_instance.message_handler(commands=['seasons'])
+    @bot.message_handler(commands=['seasons'])
     def handle_seasons_command(message):
         log_request(message)
         chat_id = message.chat.id
