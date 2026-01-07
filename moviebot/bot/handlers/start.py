@@ -2,14 +2,18 @@
 Обработчики команды /start и главного меню
 """
 import logging
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import (
     get_active_subscription,
     get_active_group_subscription_by_chat_id,
     log_request
 )
+from moviebot.bot.bot_init import bot
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access
+from moviebot.bot.bot_init import bot
 from moviebot.bot.bot_init import safe_answer_callback_query
 
 logger = logging.getLogger(__name__)

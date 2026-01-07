@@ -4,19 +4,29 @@ Callback handlers для работы с сериалами
 import logging
 import json
 import re
+from moviebot.bot.bot_init import bot
 from datetime import datetime as dt, timedelta
 import pytz
 import telebot
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 from moviebot.bot.bot_init import bot
+from moviebot.bot.bot_init import bot
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import get_watched_emojis, get_watched_custom_emoji_ids
+from moviebot.bot.bot_init import bot
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
+from moviebot.bot.bot_init import bot
 from moviebot.utils.helpers import has_notifications_access
+from moviebot.bot.bot_init import bot
 from moviebot.scheduler import send_series_notification, check_series_for_new_episodes
+from moviebot.bot.bot_init import bot
 from moviebot.states import user_episodes_state, rating_messages, user_plan_state
+from moviebot.bot.bot_init import bot
 from moviebot.api.kinopoisk_api import get_facts
 # show_film_info_with_buttons больше не используется - обновляем только кнопку подписки без API запросов
 

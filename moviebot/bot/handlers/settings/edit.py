@@ -2,12 +2,18 @@
 Обработчики команды /edit - редактирование расписания и оценок
 """
 import logging
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import log_request, get_user_timezone_or_default
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import bot
 from moviebot.states import user_edit_state
+from moviebot.bot.bot_init import bot
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
+from moviebot.bot.bot_init import bot
 from datetime import datetime
 import pytz
 

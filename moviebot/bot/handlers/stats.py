@@ -2,10 +2,14 @@
 Обработчики команд /stats, /total, /admin_stats
 """
 import logging
+from moviebot.bot.bot_init import bot
 from datetime import datetime
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import log_request, get_admin_statistics
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
 logger = logging.getLogger(__name__)

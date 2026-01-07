@@ -4,17 +4,25 @@
 import logging
 import re
 import pytz
+from moviebot.bot.bot_init import bot
 from datetime import datetime, timedelta
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import log_request, get_user_timezone_or_default
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import bot
 from moviebot.api.kinopoisk_api import extract_movie_info, get_seasons_data
+from moviebot.bot.bot_init import bot
 from moviebot.utils.parsing import parse_session_time, check_timezone_change, extract_kp_id_from_text, show_timezone_selection
+from moviebot.bot.bot_init import bot
 from moviebot.states import (
     user_plan_state, plan_notification_messages, plan_error_messages,
     bot_messages
 )
+from moviebot.bot.bot_init import bot
 from moviebot.config import MONTHS_MAP, DAYS_FULL
 
 logger = logging.getLogger(__name__)

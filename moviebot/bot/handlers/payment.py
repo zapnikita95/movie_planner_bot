@@ -2,10 +2,13 @@
 Обработчики команды /payment
 """
 import logging
+from moviebot.bot.bot_init import bot
 from datetime import datetime
 import pytz
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import log_request, get_active_subscription
 
 logger = logging.getLogger(__name__)

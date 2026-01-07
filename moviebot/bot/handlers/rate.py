@@ -3,10 +3,14 @@
 """
 import logging
 import re
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import log_request
+from moviebot.bot.bot_init import bot
 from moviebot.utils.parsing import extract_kp_id_from_text
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
 logger = logging.getLogger(__name__)

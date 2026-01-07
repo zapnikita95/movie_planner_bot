@@ -4,15 +4,23 @@ Callback handlers для работы с премьерами
 import logging
 import re
 import requests
+from moviebot.bot.bot_init import bot
 from datetime import datetime, date, time, timedelta
 import pytz
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import get_notification_settings, log_request
+from moviebot.bot.bot_init import bot
 from moviebot.api.kinopoisk_api import get_premieres_for_period, extract_movie_info
+from moviebot.bot.bot_init import bot
 from moviebot.bot.handlers.series import ensure_movie_in_database
+from moviebot.bot.bot_init import bot
 from moviebot.config import KP_TOKEN
+from moviebot.bot.bot_init import bot
 from moviebot.bot.bot_init import bot
 
 logger = logging.getLogger(__name__)

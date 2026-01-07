@@ -4,17 +4,24 @@
 import logging
 import os
 import tempfile
+from moviebot.bot.bot_init import bot
 from threading import Thread
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.services.shazam_service import (
     search_movies,
     transcribe_voice,
     convert_ogg_to_wav
 )
+from moviebot.bot.bot_init import bot
 from moviebot.api.kinopoisk_api import get_film_by_imdb_id
+from moviebot.bot.bot_init import bot
 from moviebot.utils.helpers import has_recommendations_access
+from moviebot.bot.bot_init import bot
 from moviebot.states import shazam_state
+from moviebot.bot.bot_init import bot
 from moviebot.bot.handlers.text_messages import expect_text_from_user
 
 logger = logging.getLogger(__name__)

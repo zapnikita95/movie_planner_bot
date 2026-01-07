@@ -2,11 +2,16 @@
 Обработчики команды /list
 """
 import logging
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import log_request
+from moviebot.bot.bot_init import bot
 from moviebot.states import user_list_state, list_messages, user_view_film_state, user_plan_state
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import bot
 from moviebot.api.kinopoisk_api import extract_movie_info
 
 logger = logging.getLogger(__name__)

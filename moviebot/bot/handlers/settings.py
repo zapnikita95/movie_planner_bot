@@ -3,20 +3,27 @@
 """
 import logging
 import random
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import (
     log_request, set_user_timezone,
     get_watched_emojis, get_user_timezone, get_notification_settings, set_notification_setting
 )
 import re
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import bot
 from moviebot.utils.helpers import has_recommendations_access, has_notifications_access
+from moviebot.bot.bot_init import bot
 from moviebot.config import PLANS_TZ
+from moviebot.bot.bot_init import bot
 from moviebot.states import (
     user_settings_state, settings_messages,
     dice_game_state, user_import_state
 )
+from moviebot.bot.bot_init import bot
 from datetime import datetime
 import pytz
 

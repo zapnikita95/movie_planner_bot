@@ -3,25 +3,38 @@
 """
 import logging
 import re
+from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+from moviebot.bot.bot_init import bot
+from moviebot.bot.bot_init import bot
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import (
     log_request, get_user_timezone_or_default, set_user_timezone,
     get_watched_emojis, get_user_timezone, get_notification_settings, set_notification_setting
 )
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+from moviebot.bot.bot_init import bot
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data
+from moviebot.bot.bot_init import bot
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
+from moviebot.bot.bot_init import bot
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
+from moviebot.bot.bot_init import bot
 from moviebot.config import KP_TOKEN, PLANS_TZ
 import requests
+from moviebot.bot.bot_init import bot
 from moviebot.states import (
     user_search_state, user_random_state, user_ticket_state,
     user_settings_state, settings_messages, bot_messages, added_movie_messages,
     dice_game_state, user_import_state
 )
+from moviebot.bot.bot_init import bot
 from moviebot.bot.handlers.text_messages import expect_text_from_user
+from moviebot.bot.bot_init import bot
 from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection, extract_kp_user_id
+from moviebot.bot.bot_init import bot
 from datetime import datetime
 import pytz
 import telebot.types
@@ -649,23 +662,8 @@ def register_series_handlers(bot_param):
     logger.info(f"[REGISTER SERIES HANDLERS] ===== START: регистрация обработчиков сериалов =====")
     logger.info(f"[REGISTER SERIES HANDLERS] bot_param: {bot_param}")
     logger.info(f"[REGISTER SERIES HANDLERS] id(bot_param): {id(bot_param)}, id(bot): {id(bot)}")
-    
-    # КРИТИЧЕСКИ ВАЖНО: Используем bot_param (переданный параметр) для регистрации handlers внутри функции
-    # Проверяем, что это один и тот же объект
-        logger.error(f"[REGISTER SERIES HANDLERS] Это означает, что search_type_callback зарегистрирован на другом экземпляре бота!")
-        logger.error(f"[REGISTER SERIES HANDLERS] Перерегистрируем search_type_callback на правильном экземпляре...")
-        
-        # Перерегистрируем обработчик на правильном экземпляре бота
-        @bot_param.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
-        def search_type_callback_fixed(call):
-            """Перерегистрированный обработчик выбора типа поиска"""
-            # Вызываем оригинальный обработчик
-            search_type_callback(call)
-        
-        logger.info(f"[REGISTER SERIES HANDLERS] ✅ search_type_callback перерегистрирован на bot_param")
-    else:
-        logger.info(f"[REGISTER SERIES HANDLERS] ✅ bot_param == bot, обработчик search_type_callback зарегистрирован правильно")
-    
+    logger.info(f"[REGISTER SERIES HANDLERS] ✅ Используем переданный bot_param для всех хэндлеров")
+
     @bot_param.message_handler(commands=['search'])
     def _handle_search_handler(message):
         """Обертка для регистрации команды /search"""
