@@ -192,7 +192,7 @@ def add_to_database_callback(call):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
 def plan_from_added_callback(call):
-    """Обработчик планирования из добавленного фильма"""
+    """Обработчик планирования из добавленного фильма — с автоматическим добавлением в базу, если нужно"""
     logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
     logger.info(f"[PLAN FROM ADDED] Получен callback: call.data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
     try:
@@ -200,98 +200,82 @@ def plan_from_added_callback(call):
         
         user_id = call.from_user.id
         chat_id = call.message.chat.id
-        kp_id = call.data.split(":")[1]
+        kp_id = int(call.data.split(":")[1])
         
         logger.info(f"[PLAN FROM ADDED] Пользователь {user_id} хочет запланировать фильм kp_id={kp_id}")
         
-        # Проверяем, есть ли фильм в базе, если нет - добавляем с минимальной информацией
+        # 1. Получаем информацию о фильме из сообщения (текст карточки)
+        message_text = call.message.text or call.message.caption or ""
+        if not message_text:
+            bot_instance.send_message(chat_id, "❌ Не удалось получить информацию о фильме.")
+            return
         
-        link = None
+        # Извлекаем title и определяем is_series
+        import re
+        title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
+        title = title_match.group(1) if title_match else f"Фильм {kp_id}"
+        
+        is_series = '📺' in message_text
+        link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # 2. Убеждаемся, что фильм в базе (добавляем, если нет)
         film_id = None
-        with db_lock:
-            cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-            row = cursor.fetchone()
-            if row:
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                link = row.get('link') if isinstance(row, dict) else row[1]
-                logger.info(f"[PLAN FROM ADDED] Фильм найден в базе: film_id={film_id}, link={link}")
+        try:
+            with db_semaphore:
+                with db_lock:
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor.fetchone()
+                    if row:
+                        film_id = row[0] if not isinstance(row, dict) else row.get('id')
+                    
+                    if not film_id:
+                        # Добавляем с минимальной информацией
+                        cursor.execute('''
+                            INSERT INTO movies (chat_id, kp_id, title, link, is_series, added_by, added_at, source)
+                            VALUES (%s, %s, %s, %s, %s, %s, NOW(), 'plan_button')
+                            ON CONFLICT (chat_id, kp_id) DO NOTHING
+                            RETURNING id
+                        ''', (chat_id, kp_id, title, link, is_series, user_id))
+                        result = cursor.fetchone()
+                        if result:
+                            film_id = result[0] if not isinstance(result, dict) else result.get('id')
+                        conn.commit()
+                    
+                    logger.info(f"[PLAN FROM ADDED] film_id после проверки/добавления: {film_id}")
+        except Exception as db_e:
+            conn.rollback()
+            logger.error(f"[PLAN FROM ADDED] Ошибка БД при добавлении фильма: {db_e}", exc_info=True)
+            bot_instance.send_message(chat_id, "❌ Ошибка при добавлении фильма в базу.")
+            return
         
         if not film_id:
-            # Фильм не в базе - добавляем с минимальной информацией из сообщения
-            # НЕ ДЕЛАЕМ ЗАПРОС К API - используем информацию из сообщения
-            message_text = call.message.text or ""
-            import re
-            title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
-            if title_match:
-                title = title_match.group(1)
-            else:
-                title_match = re.search(r'[📺🎬]\s*(.+?)\s*\(', message_text)
-                if title_match:
-                    title = title_match.group(1).strip()
-                else:
-                    title = f"Фильм {kp_id}"
-            
-            is_series = '📺' in message_text
-            if not link:
-                link = f"https://kinopoisk.ru/series/{kp_id}/" if is_series else f"https://kinopoisk.ru/film/{kp_id}/"
-            
-            logger.info(f"[PLAN FROM ADDED] Добавляю фильм в базу при планировании: title={title}, kp_id={kp_id}")
-            
-            # Добавляем фильм в базу с минимальной информацией
-            with db_lock:
-                cursor.execute('''
-                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
-                    VALUES (%s, %s, %s, %s, NULL, NULL, NULL, NULL, NULL, %s, %s, NOW(), 'plan_button')
-                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link
-                    RETURNING id
-                ''', (chat_id, link, kp_id, title, 1 if is_series else 0, user_id))
-                
-                result = cursor.fetchone()
-                film_id = result.get('id') if isinstance(result, dict) else result[0]
-                conn.commit()
-            
-            if not film_id:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
-                return
-            
-            logger.info(f"[PLAN FROM ADDED] Фильм добавлен в базу при планировании: kp_id={kp_id}, film_id={film_id}")
+            bot_instance.send_message(chat_id, "❌ Не удалось добавить фильм в базу.")
+            return
         
-        if not link:
-            link = f"https://kinopoisk.ru/film/{kp_id}/"
-            logger.info(f"[PLAN FROM ADDED] Ссылка не найдена в базе, используем стандартную: {link}")
+        # 3. Переходим к планированию
+        from moviebot.bot.handlers.plan import start_plan_home_or_cinema
         
-        # Убеждаемся, что link установлен
-        if not link:
-            link = f"https://kinopoisk.ru/film/{kp_id}/"
-            logger.info(f"[PLAN FROM ADDED] Ссылка не найдена в базе, используем стандартную: {link}")
+        # Имитируем сообщение с /plan и передаём film_id
+        fake_message = type('obj', (object,), {
+            'chat': type('obj', (object,), {'id': chat_id}),
+            'from_user': type('obj', (object,), {'id': user_id}),
+            'text': '/plan',
+            'message_id': call.message.message_id
+        })()
         
-        user_plan_state[user_id] = {
-            'step': 2,
-            'link': link,
-            'chat_id': chat_id,
-            'kp_id': kp_id  # Сохраняем kp_id для отладки
-        }
+        start_plan_home_or_cinema(fake_message, pre_selected_film_id=film_id)
         
-        logger.info(f"[PLAN FROM ADDED] Состояние установлено: user_id={user_id}, state={user_plan_state[user_id]}")
-        logger.info(f"[PLAN FROM ADDED] Проверка состояния после установки: user_id in user_plan_state = {user_id in user_plan_state}")
+        logger.info(f"[PLAN FROM ADDED] Переход к планированию для film_id={film_id}, kp_id={kp_id}")
         
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
-        markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
-        
-        logger.info(f"[PLAN FROM ADDED] Отправка сообщения с выбором типа просмотра...")
-        bot_instance.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
-        logger.info(f"[PLAN FROM ADDED] Сообщение отправлено успешно")
     except Exception as e:
-        logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
+        logger.error(f"[PLAN FROM ADDED] Критическая ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка планирования", show_alert=True)
         except:
             pass
     finally:
         logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
-
-
+        
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
 def show_facts_callback(call):
     """Обработчик кнопки 'Интересные факты'"""
