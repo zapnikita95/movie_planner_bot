@@ -223,7 +223,7 @@ def plan_from_added_callback(call):
         try:
             with db_semaphore:
                 with db_lock:
-                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                     row = cursor.fetchone()
                     if row:
                         film_id = row[0] if not isinstance(row, dict) else row.get('id')
@@ -234,7 +234,7 @@ def plan_from_added_callback(call):
                             VALUES (%s, %s, %s, %s, %s, %s, NOW(), 'plan_button')
                             ON CONFLICT (chat_id, kp_id) DO NOTHING
                             RETURNING id
-                        ''', (chat_id, kp_id, title, link, is_series, user_id))
+                        ''', (chat_id, str(kp_id), title, link, is_series, user_id))
                         result = cursor.fetchone()
                         if result:
                             film_id = result[0] if not isinstance(result, dict) else result.get('id')
@@ -369,7 +369,7 @@ def show_film_description_callback(call):
             cursor.execute('''
                 SELECT id, title, watched, link, year, genres, description, director, actors, is_series
                 FROM movies WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, kp_id))
+            ''', (chat_id, str(kp_id)))
             row = cursor.fetchone()
         
         if not row:
