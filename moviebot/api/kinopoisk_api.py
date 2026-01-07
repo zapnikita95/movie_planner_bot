@@ -30,16 +30,52 @@ def log_kinopoisk_api_request(endpoint, method='GET', status_code=None, user_id=
         except:
             pass
 
-def extract_movie_info(link):
-    logger.info(f"[EXTRACT MOVIE] ===== START: link={link}")
+import re
+import requests
+
+def extract_movie_info(link_or_id):
+    """
+    Извлекает информацию о фильме/сериале по ссылке или kp_id.
     
+    Поддерживает:
+    - Полную ссылку: https://www.kinopoisk.ru/film/123456/ или /series/
+    - Просто kp_id как строку: "123456"
+    - kp_id как int: 123456
+    
+    Возвращает dict с данными или None при ошибке.
+    """
+    logger.info(f"[EXTRACT MOVIE] ===== START: link_or_id={link_or_id}")
+
     try:
-        match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
-        if not match:
-            logger.warning(f"[EXTRACT MOVIE] Не распознана ссылка: {link}")
+        kp_id = None
+        is_series = False
+
+        # Обработка входных данных
+        if isinstance(link_or_id, int):
+            kp_id = str(link_or_id)
+        elif isinstance(link_or_id, str):
+            link = link_or_id.strip()
+            
+            # Пытаемся найти kp_id в ссылке
+            match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
+            if match:
+                kp_id = match.group(2)
+                is_series = match.group(1) == 'series'
+            else:
+                # Если это просто число — считаем kp_id
+                if link.isdigit():
+                    kp_id = link
+                else:
+                    logger.warning(f"[EXTRACT MOVIE] Не распознана ссылка или ID: {link}")
+                    return None
+        else:
+            logger.warning(f"[EXTRACT MOVIE] Неподдерживаемый тип данных: {type(link_or_id)}")
             return None
-        kp_id = match.group(2)
-        is_series = match.group(1) == 'series'  # Определяем, сериал это или фильм
+
+        if not kp_id:
+            logger.warning("[EXTRACT MOVIE] Не удалось определить kp_id")
+            return None
+
         logger.info(f"[EXTRACT MOVIE] kp_id={kp_id}, is_series={is_series}")
 
         headers = {
@@ -52,10 +88,11 @@ def extract_movie_info(link):
         logger.info(f"[EXTRACT MOVIE] Запрос к {url_main}")
         response_main = requests.get(url_main, headers=headers, timeout=15)
         log_kinopoisk_api_request(f"/api/v2.2/films/{kp_id}", 'GET', response_main.status_code, None, None, kp_id)
-        logger.info(f"[EXTRACT MOVIE] Статус ответа: {response_main.status_code}")
+        
         if response_main.status_code != 200:
-            logger.error(f"[EXTRACT MOVIE] Ошибка: {response_main.status_code}, текст: {response_main.text[:200]}")
+            logger.error(f"[EXTRACT MOVIE] Ошибка API: {response_main.status_code}, текст: {response_main.text[:200]}")
             return None
+        
         data_main = response_main.json()
 
         title = data_main.get('nameRu') or data_main.get('nameOriginal') or "Unknown"
@@ -63,33 +100,26 @@ def extract_movie_info(link):
         genres = ', '.join([g['genre'] for g in data_main.get('genres', [])]) or "—"
         description = data_main.get('description') or data_main.get('shortDescription') or "Нет описания"
 
-        # Отдельный запрос на staff (режиссёр и актёры)
-        # Используем v1 endpoint как основной, так как v2.2 не работает
+        # Запрос на staff (режиссёр и актёры)
         url_staff = f"https://kinopoiskapiunofficial.tech/api/v1/staff?filmId={kp_id}"
         logger.debug(f"Staff запрос URL: {url_staff}")
         response_staff = requests.get(url_staff, headers=headers, timeout=15)
         log_kinopoisk_api_request(f"/api/v1/staff?filmId={kp_id}", 'GET', response_staff.status_code, None, None, kp_id)
+        
         staff = []
         if response_staff.status_code == 200:
             staff = response_staff.json()
-            logger.debug(f"Staff ответ получен, количество записей: {len(staff) if isinstance(staff, list) else 'не список'}")
+            logger.debug(f"Staff получено записей: {len(staff)}")
         else:
-            logger.warning(f"Staff запрос ошибка {response_staff.status_code} — режиссёр/актёры не загружены")
-            logger.warning(f"Staff ответ: {response_staff.text[:200] if response_staff.text else 'нет текста'}")
+            logger.warning(f"Staff запрос ошибка {response_staff.status_code}")
 
         # Режиссёр
         director = "Не указан"
-        if staff and len(staff) > 0:
-            # Логируем структуру первого элемента для отладки
-            logger.debug(f"Пример структуры staff элемента: {list(staff[0].keys()) if isinstance(staff[0], dict) else 'не словарь'}")
-        
         for person in staff:
             if not isinstance(person, dict):
                 continue
-            # Проверяем разные варианты полей для профессии
             profession = person.get('professionKey') or person.get('professionText') or person.get('profession')
-            if profession and ('DIRECTOR' in str(profession).upper() or 'РЕЖИССЕР' in str(profession).upper() or profession == 'DIRECTOR'):
-                # Проверяем разные варианты полей для имени
+            if profession and ('DIRECTOR' in str(profession).upper() or 'РЕЖИССЕР' in str(profession).upper()):
                 name = person.get('nameRu') or person.get('nameEn') or person.get('name') or person.get('staffName')
                 if name:
                     director = name
@@ -100,16 +130,14 @@ def extract_movie_info(link):
         for person in staff:
             if not isinstance(person, dict):
                 continue
-            # Проверяем разные варианты полей для профессии
             profession = person.get('professionKey') or person.get('professionText') or person.get('profession')
-            if profession and ('ACTOR' in str(profession).upper() or 'АКТЕР' in str(profession).upper() or profession == 'ACTOR') and len(actors_list) < 6:
-                # Проверяем разные варианты полей для имени
+            if profession and ('ACTOR' in str(profession).upper() or 'АКТЕР' in str(profession).upper()) and len(actors_list) < 6:
                 name = person.get('nameRu') or person.get('nameEn') or person.get('name') or person.get('staffName')
                 if name:
                     actors_list.append(name)
         actors = ', '.join(actors_list) if actors_list else "—"
 
-        logger.info(f"[EXTRACT MOVIE] Успешно: {title} ({year}), режиссёр: {director}, актёры: {actors}")
+        logger.info(f"[EXTRACT MOVIE] Успешно: {title} ({year}), режиссёр: {director}")
 
         result = {
             'kp_id': kp_id,
@@ -121,12 +149,13 @@ def extract_movie_info(link):
             'description': description,
             'is_series': is_series
         }
+        
         logger.info(f"[EXTRACT MOVIE] ===== END: успешно, kp_id={kp_id}, title={title}")
         return result
-    except Exception as e:
-        logger.error(f"[EXTRACT MOVIE] ===== END: КРИТИЧЕСКАЯ ОШИБКА для link={link}: {e}", exc_info=True)
-        return None
 
+    except Exception as e:
+        logger.error(f"[EXTRACT MOVIE] ===== END: КРИТИЧЕСКАЯ ОШИБКА для link_or_id={link_or_id}: {e}", exc_info=True)
+        return None
 
 def get_facts(kp_id):
     """Получает интересные факты о фильме"""
