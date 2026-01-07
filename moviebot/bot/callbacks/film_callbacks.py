@@ -255,7 +255,11 @@ def plan_from_added_callback(call):
         logger.info(f"[PLAN FROM ADDED] Фильм готов к планированию: film_id={film_id}, kp_id={kp_id}")
         
         # Запускаем планирование
-        from moviebot.bot.handlers.plan import start_plan_home_or_cinema
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(InlineKeyboardButton("Дома", callback_data=f"plan_type:home:{kp_id}"))
+        markup.add(InlineKeyboardButton("В кино", callback_data=f"plan_type:cinema:{kp_id}"))
+        bot_instance.edit_message_reply_markup(chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)  # Убрать старые кнопки, если нужно
+        bot_instance.send_message(chat_id, f"Фильм '{title}' добавлен в базу. Где планируете смотреть?", reply_markup=markup)
         
         fake_message = type('obj', (object,), {
             'chat': type('obj', (object,), {'id': chat_id}),
@@ -349,7 +353,51 @@ def plan_type_callback_fallback(call):
     finally:
         logger.info(f"[PLAN TYPE FALLBACK] ===== END: callback_id={call.id}")
 
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith('plan_type:'))
+def handle_plan_type(call):
+    try:
+        bot_instance.answer_callback_query(call.id, "Выбрано!")
+        parts = call.data.split(':')
+        plan_type = parts[1]  # 'home' или 'cinema'
+        kp_id = int(parts[2])
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
 
+        # Ищем в БД link и film_id
+        with db_semaphore:
+            with db_lock:
+                cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                row = cursor.fetchone()
+                if not row:
+                    bot_instance.send_message(chat_id, "❌ Фильм не найден в базе. Попробуйте заново.")
+                    return
+                film_id = row[0] if not isinstance(row, dict) else row['id']
+                link = row[1] if not isinstance(row, dict) else row['link']
+
+        # Сохраняем состояние
+        user_plan_state[user_id] = {
+            'step': 'date',
+            'plan_type': plan_type,
+            'link': link,
+            'kp_id': kp_id,
+            'film_id': film_id
+        }
+
+        # Можно delete_message предыдущее (с кнопками Дома/Кино), чтобы чат не засорять
+        try:
+            bot_instance.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
+
+        bot_instance.send_message(
+            chat_id,
+            "📅 Когда планируете смотреть?\n\nПримеры:\n• сегодня\n• завтра 20:00\n• 15.01\n• понедельник вечером"
+        )
+        
+    except Exception as e:
+        logger.error(f"[PLAN TYPE] Ошибка: {e}", exc_info=True)
+        bot_instance.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
+        
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
 def show_film_description_callback(call):
     """Обработчик кнопки '◀️ Вернуться к описанию' - показывает описание фильма из БД без API запроса"""

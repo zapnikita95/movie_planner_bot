@@ -5537,7 +5537,6 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
                 logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
         
         # Проверяем, есть ли фильм в базе и запланирован ли он
-        # (для show_film_info_without_adding фильм обычно не в базе, но проверим на всякий случай)
         film_id = None
         has_plan = False
         with db_lock:
@@ -5558,15 +5557,15 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
                 markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
         
-        # НЕ показываем кнопку "➕ Добавить в базу" для фильмов, уже добавленных в базу
+        # Кнопка "Добавить в базу" — только если фильма нет в базе
         if not film_id:
             markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
         
-        # Добавляем кнопку "Запланировать просмотр" только если фильм не запланирован
-        if not has_plan:
+        # Кнопка "Запланировать просмотр" — только если фильм УЖЕ в базе и ещё не запланирован
+        if film_id and not has_plan:
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
         
-        # Добавляем кнопки для всех действий (фильм/сериал будет добавлен в базу при нажатии только при определенных действиях)
+        # Общие кнопки
         markup.row(
             InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
             InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
@@ -5589,13 +5588,13 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
             return msg
         except Exception as send_e:
             logger.error(f"[SHOW FILM INFO WITHOUT ADDING] Ошибка отправки сообщения: {send_e}", exc_info=True)
-            raise  # Пробрасываем ошибку дальше
+            raise
         
     except Exception as e:
         logger.error(f"[SHOW FILM INFO WITHOUT ADDING] Ошибка: {e}", exc_info=True)
         try:
             bot_instance.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
-        except Exception:  # Добавь тип исключения
+        except:
             pass
         logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== КОНЕЦ =====")
         return None
