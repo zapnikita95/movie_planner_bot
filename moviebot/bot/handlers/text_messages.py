@@ -344,7 +344,13 @@ def handle_plan_datetime_reply(message):
         
         state = user_plan_state[user_id]
         logger.info(f"[PLAN DATETIME REPLY] Текст ответного сообщения: '{text}'")
-        get_plan_day_or_date_internal(message, state)
+        result = get_plan_day_or_date_internal(message, state)
+        
+        # ФИКС: Очищаем состояние после обработки
+        if user_id in user_plan_state:
+            del user_plan_state[user_id]
+            logger.info(f"[PLAN DATETIME REPLY] Состояние планирования очищено для user_id={user_id}")
+        
         logger.info(f"[PLAN DATETIME REPLY] ✅ Завершено")
     except Exception as e:
         logger.error(f"[PLAN DATETIME REPLY] ❌ Ошибка: {e}", exc_info=True)
@@ -352,7 +358,9 @@ def handle_plan_datetime_reply(message):
             bot_instance.reply_to(message, "❌ Произошла ошибка при обработке даты/времени")
         except:
             pass
-
+        # Очищаем даже при ошибке
+        if user_id in user_plan_state:
+            del user_plan_state[user_id]
 
 def check_plan_link_reply(message):
     """Проверка для handler ответа на промпт ссылки/ID планирования (step=1)"""
@@ -1240,34 +1248,33 @@ def handle_rate_list_reply(message):
     
     logger.info(f"[HANDLE RATE LIST REPLY] Проверка состояний: user_search_state={user_id in user_search_state}, user_plan_state={user_id in user_plan_state}, user_ticket_state={user_id in user_ticket_state}")
     
-    # КРИТИЧЕСКИ ВАЖНО: Пропускаем user_promo_state и user_promo_admin_state
     if user_id in user_promo_state or user_id in user_promo_admin_state:
-        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии промокода")
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — промокод")
         return
     
-    # Проверяем user_search_state первым
     if user_id in user_search_state:
-        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии поиска")
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — поиск")
         return
     
-    # === ФИКС: Если пользователь в планировании и на шаге 3 (ввод даты) — НЕ перехватываем сообщение ===
+    # ФИКС: Если пользователь в планировании и на step=3 (ввод даты) — НЕ пропускаем
     if user_id in user_plan_state:
         state = user_plan_state[user_id]
         if state.get('step') == 3:
-            logger.info(f"[HANDLE RATE LIST REPLY] НЕ пропускаем — пользователь на шаге 3 планирования (ввод даты)")
-            # НИЧЕГО НЕ ДЕЛАЕМ — сообщение уйдёт в handle_plan_datetime_reply
+            logger.info(f"[HANDLE RATE LIST REPLY] НЕ пропускаем — пользователь на step=3 (ввод даты)")
+            # Сообщение идёт дальше в handle_plan_datetime_reply
         else:
             logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — пользователь в планировании, но не на step=3")
             return
+    
     # Остальные состояния — пропускаем
-    elif (user_id in user_ticket_state or
-          user_id in user_settings_state or
-          user_id in user_edit_state or
-          user_id in user_view_film_state or
-          user_id in user_import_state or
-          user_id in user_clean_state or
-          user_id in user_cancel_subscription_state):
-        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в другом состоянии")
+    if (user_id in user_ticket_state or
+        user_id in user_settings_state or
+        user_id in user_edit_state or
+        user_id in user_view_film_state or
+        user_id in user_import_state or
+        user_id in user_clean_state or
+        user_id in user_cancel_subscription_state):
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — другое состояние")
         return
     
     # Обрабатываем сообщения с оценками (числа от 1 до 10)
