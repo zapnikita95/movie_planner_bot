@@ -874,8 +874,12 @@ def plan_type_callback(call):
             
             link = None
             film_id = None
+            
+            # Приводим kp_id к строке для корректного поиска в БД
+            kp_id_str = str(kp_id)
+            
             with db_lock:
-                cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
                 row = cursor.fetchone()
                 if row:
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -885,12 +889,20 @@ def plan_type_callback(call):
             if not film_id:
                 # Фильм не в базе - добавляем
                 if not link:
-                    link = f"https://kinopoisk.ru/film/{kp_id}/"
+                    # Определяем, фильм это или сериал, чтобы использовать правильную ссылку
+                    # Пока используем стандартную ссылку на фильм, API сам определит тип
+                    link = f"https://www.kinopoisk.ru/film/{kp_id_str}/"
+                
+                logger.info(f"[PLAN FROM ADDED] Фильм не в базе, получаю информацию через API: link={link}")
                 info = extract_movie_info(link)
                 if info:
-                    film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                    # Если это сериал, обновляем ссылку
+                    if info.get('is_series') or info.get('type') == 'TV_SERIES':
+                        link = f"https://www.kinopoisk.ru/series/{kp_id_str}/"
+                    
+                    film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id_str, link, info, user_id)
                     if was_inserted:
-                        logger.info(f"[PLAN FROM ADDED] Фильм добавлен в базу при планировании: kp_id={kp_id}, film_id={film_id}")
+                        logger.info(f"[PLAN FROM ADDED] Фильм добавлен в базу при планировании: kp_id={kp_id_str}, film_id={film_id}")
                     if not film_id:
                         bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
                         return
@@ -899,7 +911,7 @@ def plan_type_callback(call):
                     return
             
             if not link:
-                link = f"https://kinopoisk.ru/film/{kp_id}/"
+                link = f"https://www.kinopoisk.ru/film/{kp_id_str}/"
                 logger.info(f"[PLAN FROM ADDED] Ссылка не найдена в базе, используем стандартную: {link}")
             
             user_plan_state[user_id] = {

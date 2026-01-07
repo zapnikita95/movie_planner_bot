@@ -229,12 +229,14 @@ def plan_from_added_callback(call):
                         film_id = row[0] if not isinstance(row, dict) else row.get('id')
                     
                     if not film_id:
+                        # Преобразуем is_series из boolean в integer (0 или 1)
+                        is_series_int = 1 if is_series else 0
                         cursor.execute('''
                             INSERT INTO movies (chat_id, kp_id, title, link, is_series, added_by, added_at, source)
                             VALUES (%s, %s, %s, %s, %s, %s, NOW(), 'plan_button')
                             ON CONFLICT (chat_id, kp_id) DO NOTHING
                             RETURNING id
-                        ''', (chat_id, str(kp_id), title, link, is_series, user_id))
+                        ''', (chat_id, str(kp_id), title, link, is_series_int, user_id))
                         result = cursor.fetchone()
                         if result:
                             film_id = result[0] if not isinstance(result, dict) else result.get('id')

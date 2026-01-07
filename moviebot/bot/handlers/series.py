@@ -4156,64 +4156,7 @@ def handle_kinopoisk_link(message):
             except Exception as send_e:
                 logger.error(f"[KINOPOISK LINK] ❌ Критическая ошибка отправки сообщения: {send_e}", exc_info=True)
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
-def add_film_from_search_callback(call):
-    """Обработчик добавления фильма из результатов поиска"""
-    try:
-        data = call.data
-        logger.info(f"[ADD FILM FROM SEARCH] Получен callback: {data}")
-        
-        # Извлекаем kp_id и тип из callback_data
-        # Формат: add_film_{kp_id}:{film_type}
-        parts = data.replace("add_film_", "").split(":")
-        kp_id = int(parts[0])
-        film_type = parts[1] if len(parts) > 1 else 'FILM'
-        
-        logger.info(f"[ADD FILM FROM SEARCH] kp_id={kp_id}, film_type={film_type}")
-        
-        chat_id = call.message.chat.id
-        user_id = call.from_user.id
-        
-        # Определяем тип фильма и формируем правильную ссылку
-        is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
-        
-        if is_series:
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-        else:
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        
-        # Получаем информацию о фильме
-            from moviebot.api.kinopoisk_api import extract_movie_info
-            info = extract_movie_info(link)
-            
-            if not info:
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-                return
-            
-            # Убеждаемся, что is_series правильно установлен в info
-            if is_series:
-                info['is_series'] = True
-            
-            # Показываем карточку фильма БЕЗ автоматического добавления в базу
-            from moviebot.bot.handlers.series import show_film_info_with_buttons
-            show_film_info_with_buttons(
-                chat_id=chat_id,
-                user_id=user_id,
-                info=info,
-                link=link,
-                kp_id=kp_id,
-                existing=None,
-                message_id=None
-            )
-            
-            bot_instance.answer_callback_query(call.id, "✅ Информация о фильме")
-        
-    except Exception as e:
-        logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
-        try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма", show_alert=True)
-        except:
-            pass
+# Старый обработчик удален - используется более полный обработчик ниже (строка 4401)
 
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
 def view_film_description_callback(call):
@@ -4443,8 +4386,10 @@ def add_film_from_search_callback(call):
             cursor = get_db_cursor()
             
             existing = None
+            # Приводим kp_id к строке для корректного поиска в БД
+            kp_id_str = str(kp_id)
             with db_lock:
-                cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id_str))
                 row = cursor.fetchone()
                 if row:
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -4452,8 +4397,8 @@ def add_film_from_search_callback(call):
                     watched = row.get('watched') if isinstance(row, dict) else row[2]
                     existing = (film_id, title, watched)
             
-            # Показываем карточку фильма с кнопками
-            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+            # Показываем карточку фильма с кнопками (всегда, даже если просмотрен)
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_str, existing)
             
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: успешно показана информация о фильме {kp_id}")
         except Exception as e:
@@ -4496,8 +4441,10 @@ def view_film_description_callback(call):
         
         # Получаем информацию из базы (если фильм там есть)
         existing = None
+        # Приводим kp_id к строке для корректного поиска в БД
+        kp_id_str = str(kp_id)
         with db_lock:
-            cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id_str))
             row = cursor.fetchone()
             if row:
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -4505,8 +4452,8 @@ def view_film_description_callback(call):
                 watched = row.get('watched') if isinstance(row, dict) else row[2]
                 existing = (film_id, title, watched)
         
-        # Показываем описание фильма
-        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing)
+        # Показываем описание фильма (всегда, даже если просмотрен)
+        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_str, existing)
         logger.info(f"[VIEW FILM DESCRIPTION] ✅ Описание фильма показано: kp_id={kp_id}")
     except Exception as e:
         logger.error(f"[VIEW FILM DESCRIPTION] ❌ Ошибка: {e}", exc_info=True)
