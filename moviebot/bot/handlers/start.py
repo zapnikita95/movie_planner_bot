@@ -5,9 +5,7 @@ from moviebot.bot.bot_init import bot
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-
 from moviebot.database.db_operations import (
-
     get_active_subscription,
     get_active_group_subscription_by_chat_id,
     log_request
@@ -15,7 +13,6 @@ from moviebot.database.db_operations import (
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access
 
 from moviebot.bot.bot_init import safe_answer_callback_query
-
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +140,7 @@ def register_start_handlers(bot):
             from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
             from moviebot.bot.handlers.seasons import show_seasons_list
 
-            # Динамический импорт settings (как было в проекте)
+            # Динамический импорт settings
             import importlib.util
             settings_path = "moviebot/bot/handlers/settings.py"
             spec = importlib.util.spec_from_file_location("settings_module", settings_path)
@@ -158,10 +155,22 @@ def register_start_handlers(bot):
                 markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                 try:
-                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                    bot.edit_message_text(
+                        text=text,
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     logger.warning(f"[START MENU] Не удалось отредактировать: {e}")
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                    bot.send_message(
+                        chat_id=chat_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML',
+                        message_thread_id=message_thread_id
+                    )
                 return
 
             if action == 'seasons':
@@ -171,7 +180,7 @@ def register_start_handlers(bot):
                     user_id=user_id,
                     message_id=message_id,
                     message_thread_id=message_thread_id,
-                    bot=bot  # ← вот так передаём экземпляр бота
+                    bot=bot
                 )
             elif action == 'premieres':
                 msg = call.message
@@ -195,15 +204,26 @@ def register_start_handlers(bot):
 
             elif action == 'tickets':
                 if not has_tickets_access(chat_id, user_id):
-                    # Повторяем блок locked
                     text = "🎫 <b>Билеты в кино</b>\n\nВы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\nИспользуйте /payment для оформления подписки."
                     markup = InlineKeyboardMarkup()
                     markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
                     markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                     try:
-                        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                        bot.edit_message_text(
+                            text=text,
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except:
-                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                        bot.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML',
+                            message_thread_id=message_thread_id
+                        )
                     return
                 else:
                     msg = call.message
@@ -225,7 +245,7 @@ def register_start_handlers(bot):
                 msg.text = '/help'
                 help_command(msg)
 
-            # Удаляем старое меню, если не перешли в seasons (там уже отредактировано)
+            # Удаляем старое меню, если не перешли в seasons
             if action != 'seasons':
                 try:
                     bot.delete_message(chat_id, message_id)
@@ -247,7 +267,6 @@ def register_start_handlers(bot):
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             message_id = call.message.message_id
-            message_thread_id = getattr(call.message, 'message_thread_id', None)
 
             # Та же логика подписки, что и в /start
             subscription_info = ""
@@ -299,12 +318,11 @@ def register_start_handlers(bot):
             markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
 
             bot.edit_message_text(
-                welcome_text,
-                chat_id,
-                message_id,
+                text=welcome_text,
+                chat_id=chat_id,
+                message_id=message_id,
                 reply_markup=markup,
-                parse_mode='HTML',
-                message_thread_id=message_thread_id
+                parse_mode='HTML'
             )
 
         except Exception as e:
