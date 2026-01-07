@@ -345,11 +345,15 @@ def show_seasons_list(chat_id: int, user_id: int, message_id: int = None):
     if has_completed:
         markup.add(InlineKeyboardButton("✅ Просмотренные", callback_data="show_completed_series"))
 
-    # markup.add(InlineKeyboardButton("🔄 Обновить", callback_data="refresh_seasons_list"))
-
     markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
 
-    text = f"📺 Сериалы в базе ({len(markup.inline_keyboard) - (1 if has_completed else 0) - 1})"  # Считаем только кнопки с сериалами
+    # Правильный подсчёт количества сериалов (telebot-style)
+    lower_buttons = 1  # всегда "Назад"
+    if has_completed:
+        lower_buttons += 1
+
+    num_series = len(markup.keyboard) - lower_buttons
+    text = f"📺 Сериалы в базе ({num_series})"
 
     if message_id:
         bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
