@@ -280,14 +280,6 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         return False
 
 def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None, bot=None):
-    """
-    Основная функция показа списка сериалов.
-    Если message_id передан — редактирует существующее сообщение, иначе отправляет новое.
-    bot — обязательный параметр для единообразия (передаётся из хэндлера)
-    """
-    if bot is None:
-        bot = global_bot
-
     logger.info(f"[SHOW_SEASONS_LIST] chat_id={chat_id}, user_id={user_id}, message_id={message_id}, thread_id={message_thread_id}")
 
     has_access = has_notifications_access(chat_id, user_id)
