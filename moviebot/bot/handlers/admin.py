@@ -1,19 +1,20 @@
+from moviebot.bot.bot_init import bot
 """
 Админские команды: /unsubscribe, /add_admin
 """
 import logging
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from moviebot.bot.bot_init import bot
+
 from datetime import datetime
+
 import pytz
 
-from moviebot.bot.bot_init import bot
 from moviebot.states import user_unsubscribe_state, user_add_admin_state
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.admin import is_owner, is_admin, add_admin, remove_admin, get_all_admins
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()

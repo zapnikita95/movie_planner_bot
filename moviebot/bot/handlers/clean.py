@@ -1,18 +1,19 @@
+from moviebot.bot.bot_init import bot
 """
 Обработчики команды /clean - очистка базы данных
 """
 import logging
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_operations import log_request
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot
+
 from moviebot.states import user_clean_state, clean_votes, clean_unwatched_votes
-from moviebot.bot.bot_init import bot
+
 from datetime import datetime, timedelta
+
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()

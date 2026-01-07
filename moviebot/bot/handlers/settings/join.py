@@ -1,16 +1,17 @@
+from moviebot.bot.bot_init import bot
 """
 Обработчики команды /join - участие в боте
 """
 import logging
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_operations import log_request
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_operations import is_bot_participant
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()

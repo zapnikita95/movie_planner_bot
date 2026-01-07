@@ -1,41 +1,40 @@
+from moviebot.bot.bot_init import bot
 """
 Обработчики команд связанных с сериалами, поиском, рандомом, премьерами, билетами, настройками и помощью
 """
 import logging
 import re
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
-from moviebot.bot.bot_init import bot
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_operations import (
+
     log_request, get_user_timezone_or_default, set_user_timezone,
     get_watched_emojis, get_user_timezone, get_notification_settings, set_notification_setting
 )
-from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot
+
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
-from moviebot.bot.bot_init import bot
+
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
-from moviebot.bot.bot_init import bot
+
 from moviebot.config import KP_TOKEN, PLANS_TZ
+
 import requests
-from moviebot.bot.bot_init import bot
 from moviebot.states import (
+
     user_search_state, user_random_state, user_ticket_state,
     user_settings_state, settings_messages, bot_messages, added_movie_messages,
     dice_game_state, user_import_state
 )
-from moviebot.bot.bot_init import bot
 from moviebot.bot.handlers.text_messages import expect_text_from_user
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection, extract_kp_user_id
-from moviebot.bot.bot_init import bot
+
 from datetime import datetime
+
 import pytz
 import telebot.types
 

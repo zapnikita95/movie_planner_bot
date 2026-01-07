@@ -1,23 +1,24 @@
+from moviebot.bot.bot_init import bot
 """
 Обработчики команды /seasons
 """
 import logging
 import json
-from moviebot.bot.bot_init import bot
 from datetime import datetime as dt
-from moviebot.bot.bot_init import bot
+
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_operations import log_request
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.helpers import has_notifications_access
-from moviebot.bot.bot_init import bot
+
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
-from moviebot.bot.bot_init import bot
+
 from moviebot.states import user_episodes_state
+
 
 
 logger = logging.getLogger(__name__)
@@ -285,7 +286,6 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
     bot — обязательный параметр для единообразия (передаётся из хэндлера)
     """
     if bot is None:
-        from moviebot.bot.bot_init import bot as global_bot
         bot = global_bot
 
     logger.info(f"[SHOW_SEASONS_LIST] chat_id={chat_id}, user_id={user_id}, message_id={message_id}, thread_id={message_thread_id}")

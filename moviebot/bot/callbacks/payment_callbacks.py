@@ -1,18 +1,17 @@
+from moviebot.bot.bot_init import bot
 """
 Callback handlers для работы с платежами
 """
 import logging
 import os
 import uuid
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
-from moviebot.bot.bot_init import bot
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_operations import (
+
     get_active_subscription, save_payment, create_subscription,
     get_user_personal_subscriptions, get_user_group_subscriptions,
     cancel_subscription, get_active_group_users, get_subscription_by_id,
@@ -20,20 +19,20 @@ from moviebot.database.db_operations import (
     get_active_subscription_by_username, get_active_group_subscription,
     has_subscription_feature
 )
-from moviebot.bot.bot_init import bot
 from moviebot.bot.bot_init import BOT_ID
-from moviebot.bot.bot_init import bot
+
 from moviebot.api.yookassa_api import create_subscription_payment, YOOKASSA_AVAILABLE
-from moviebot.bot.bot_init import bot
+
 from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
-from moviebot.bot.bot_init import bot
+
 from moviebot.states import user_payment_state, user_promo_state
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.promo import apply_promocode, get_promocode_info
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.payments import create_stars_invoice
-from moviebot.bot.bot_init import bot
+
 from datetime import datetime, timedelta
+
 import pytz
 
 logger = logging.getLogger(__name__)

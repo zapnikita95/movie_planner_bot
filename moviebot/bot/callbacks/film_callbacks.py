@@ -1,18 +1,17 @@
+from moviebot.bot.bot_init import bot
 """
 Callback handlers для карточки фильма (add_to_database, plan_from_added, show_facts и т.д.)
 """
 import logging
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
-from moviebot.bot.bot_init import bot
+
 from moviebot.api.kinopoisk_api import get_facts
-from moviebot.bot.bot_init import bot
+
 from moviebot.states import user_plan_state
-from moviebot.bot.bot_init import bot
-from moviebot.bot.bot_init import bot
+
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()

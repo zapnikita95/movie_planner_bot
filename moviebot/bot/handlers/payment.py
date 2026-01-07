@@ -1,15 +1,16 @@
+from moviebot.bot.bot_init import bot
 """
 Обработчики команды /payment
 """
 import logging
-from moviebot.bot.bot_init import bot
 from datetime import datetime
+
 import pytz
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_operations import log_request, get_active_subscription
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ def payment_command(message):
             pass
 
 
-def register_\0(bot):
+def register_payment_handlers(bot):
     """Регистрирует обработчики команды /payment"""
     
     @bot.message_handler(commands=['payment'])

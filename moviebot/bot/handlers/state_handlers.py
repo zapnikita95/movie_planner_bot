@@ -1,3 +1,4 @@
+from moviebot.bot.bot_init import bot
 """
 Отдельные handlers для каждого состояния пользователя
 Каждый handler обрабатывает конкретный тип состояния с поддержкой:
@@ -7,10 +8,10 @@
 """
 import logging
 import sys
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from moviebot.bot.bot_init import bot
+
 from moviebot.bot.bot_init import BOT_ID
+
 
 logger = logging.getLogger(__name__)
 

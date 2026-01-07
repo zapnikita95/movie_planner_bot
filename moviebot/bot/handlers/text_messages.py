@@ -1,11 +1,12 @@
+from moviebot.bot.bot_init import bot
 """
 Единый главный обработчик для всех текстовых сообщений
 Обрабатывает состояния, реплаи, ссылки на Кинопоиск и т.д.
 """
 import logging
 import re
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
 
 
 # Логируем, что модуль импортирован (декораторы выполнятся при импорте)
@@ -14,14 +15,14 @@ logger.info("=" * 80)
 logger.info("[TEXT MESSAGES] Модуль text_messages.py импортирован - декораторы будут зарегистрированы")
 logger.info("=" * 80)
 
-from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import log_request, get_user_timezone_or_default, set_notification_setting
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot
+
 from moviebot.api.kinopoisk_api import extract_movie_info, search_films
-from moviebot.bot.bot_init import bot
+
 from moviebot.states import (
+
     user_search_state, user_plan_state, user_ticket_state,
     user_settings_state, user_edit_state, user_view_film_state,
     user_import_state, user_clean_state, user_cancel_subscription_state,
@@ -30,20 +31,20 @@ from moviebot.states import (
     bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages,
     plan_notification_messages, settings_messages, user_expected_text
 )
-from moviebot.bot.bot_init import bot
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
+
 # Не импортируем search_films_with_type здесь, чтобы избежать циклического импорта
 # Импортируем внутри функции process_search_query
-from moviebot.bot.bot_init import bot
 from moviebot.bot.handlers.list import handle_view_film_reply_internal
-from moviebot.bot.bot_init import bot
+
 from moviebot.bot.bot_init import BOT_ID
+
 # Импортируем обработчики промокодов для автоматической регистрации
 import moviebot.bot.handlers.promo  # noqa: F401
 # Импортируем обработчики админских команд для автоматической регистрации
 import moviebot.bot.handlers.admin  # noqa: F401
-from moviebot.bot.bot_init import bot
 from moviebot.database.db_operations import add_and_announce, is_bot_participant, get_watched_emojis, get_watched_custom_emoji_ids
+
 
 # logger уже создан выше
 conn = get_db_connection()

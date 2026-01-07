@@ -1,18 +1,17 @@
+from moviebot.bot.bot_init import bot
 """
 Обработчики callback для рандома
 """
 import logging
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot
+
 from moviebot.states import user_random_state
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.helpers import has_recommendations_access
-from moviebot.bot.bot_init import bot
-from moviebot.bot.bot_init import bot
+
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()

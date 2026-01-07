@@ -1,35 +1,35 @@
+from moviebot.bot.bot_init import bot
 """
 Обработчики для функции КиноШазам (поиск фильмов по описанию)
 """
 import logging
 import os
 import tempfile
-from moviebot.bot.bot_init import bot
 from threading import Thread
-from moviebot.bot.bot_init import bot
+
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot
+
 from moviebot.services.shazam_service import (
+
     search_movies,
     transcribe_voice,
     convert_ogg_to_wav
 )
-from moviebot.bot.bot_init import bot
 from moviebot.api.kinopoisk_api import get_film_by_imdb_id
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.helpers import has_recommendations_access
-from moviebot.bot.bot_init import bot
+
 from moviebot.states import shazam_state
-from moviebot.bot.bot_init import bot
+
 from moviebot.bot.handlers.text_messages import expect_text_from_user
+
 
 logger = logging.getLogger(__name__)
 
 
 def process_shazam_text_query(message, query, reply_to_message=None):
     """Единая логика обработки текстового запроса Shazam. Используется обоими обработчиками."""
-    from moviebot.bot.bot_init import bot
     
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -143,7 +143,6 @@ def process_shazam_voice_async(message, loading_msg):
     try:
         # Скачиваем голосовое сообщение
         logger.info(f"[SHAZAM VOICE ASYNC] Скачиваем голосовое сообщение...")
-        from moviebot.bot.bot_init import bot
         file_info = bot.get_file(message.voice.file_id)
         logger.info(f"[SHAZAM VOICE ASYNC] file_info получен: file_path={file_info.file_path}, file_size={file_info.file_size}")
         
@@ -299,7 +298,6 @@ def process_shazam_voice_async(message, loading_msg):
     except Exception as e:
         logger.error(f"[SHAZAM VOICE ASYNC] ===== ERROR: {e}", exc_info=True)
         try:
-            from moviebot.bot.bot_init import bot
             bot.edit_message_text(
                 f"❌ Произошла ошибка при обработке голосового сообщения: {str(e)[:100]}\n\nПопробуйте еще раз или опишите фильм текстом.",
                 loading_msg.chat.id,
@@ -308,7 +306,6 @@ def process_shazam_voice_async(message, loading_msg):
         except Exception as edit_e:
             logger.error(f"[SHAZAM VOICE ASYNC] Не удалось обновить сообщение об ошибке: {edit_e}")
             try:
-                from moviebot.bot.bot_init import bot
                 bot.reply_to(message, f"❌ Произошла ошибка: {str(e)[:100]}")
             except:
                 pass

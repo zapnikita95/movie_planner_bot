@@ -1,15 +1,16 @@
+from moviebot.bot.bot_init import bot
 """
 Обработчики команды /promo для управления промокодами
 """
 import logging
-from moviebot.bot.bot_init import bot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from moviebot.bot.bot_init import bot
+
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot
+
 from moviebot.states import user_promo_admin_state
-from moviebot.bot.bot_init import bot
+
 from moviebot.utils.promo import get_active_promocodes, get_all_promocodes, deactivate_promocode, get_promocode_info
+
 
 logger = logging.getLogger(__name__)
 

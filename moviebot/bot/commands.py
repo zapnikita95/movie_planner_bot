@@ -1,3 +1,4 @@
+from moviebot.bot.bot_init import bot
 """
 Регистрация всех command handlers
 """
