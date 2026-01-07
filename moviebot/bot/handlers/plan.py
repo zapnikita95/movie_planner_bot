@@ -154,7 +154,7 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
     if kp_id:
         if not markup.keyboard:
             markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
+        markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
     
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
     if plan_type == 'home' and markup.keyboard and any(btn.callback_data.startswith("streaming_select:") for row in markup.keyboard for btn in row):
@@ -1737,7 +1737,7 @@ def streaming_done_callback(call):
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup()
         if kp_id:
-            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
         
         # Обновляем сообщение вместо удаления
         try:
