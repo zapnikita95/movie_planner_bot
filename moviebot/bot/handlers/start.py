@@ -133,11 +133,13 @@ def start_menu_callback(call):
         safe_answer_callback_query(bot, call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
         action = call.data.split(":")[1]
 
         logger.info(f"[START MENU] Обработка действия: {action}, user_id={user_id}, chat_id={chat_id}")
 
-        from moviebot.bot.handlers.seasons import seasons_command
+        # Убрали импорт seasons_command (его нет)
         from moviebot.bot.handlers.plan import show_schedule
         from moviebot.bot.handlers.payment import payment_command
         from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
@@ -148,9 +150,6 @@ def start_menu_callback(call):
         settings_spec.loader.exec_module(settings_module)
         settings_command = settings_module.settings_command
 
-        message = call.message
-        message.text = None
-
         if action == 'tickets_locked':
             logger.info(f"[START MENU] Обработка tickets_locked для user_id={user_id}")
             text = "🎫 <b>Билеты в кино</b>\n\nВы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\nИспользуйте /payment для оформления подписки."
@@ -158,27 +157,33 @@ def start_menu_callback(call):
             markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             try:
-                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
             except Exception as e:
                 logger.warning(f"[START MENU] Не удалось отредактировать сообщение: {e}")
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
             return
 
         if action == 'seasons':
-            message.text = '/seasons'
-            seasons_command(message)
+            # ← ФИКС ЗДЕСЬ: прямой вызов списка сериалов
+            from moviebot.bot.handlers.seasons import show_seasons_list
+            show_seasons_list(chat_id, user_id, message_id=message_id, message_thread_id=message_thread_id)
+
         elif action == 'premieres':
+            message = call.message
             message.text = '/premieres'
             premieres_command(message)
         elif action == 'random':
+            message = call.message
             message.text = '/random'
             message.from_user.id = user_id
             random_start(message)
         elif action == 'search':
+            message = call.message
             message.text = '/search'
             message.from_user.id = user_id
             handle_search(message)
         elif action == 'schedule':
+            message = call.message
             message.text = '/schedule'
             show_schedule(message)
         elif action == 'tickets':
@@ -188,28 +193,34 @@ def start_menu_callback(call):
                 markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                 try:
-                    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
                 except Exception as e:
                     logger.warning(f"[START MENU] Не удалось отредактировать сообщение: {e}")
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
                 return
             else:
+                message = call.message
                 message.text = '/ticket'
                 ticket_command(message)
         elif action == 'payment':
+            message = call.message
             message.text = '/payment'
             payment_command(message)
         elif action == 'settings':
+            message = call.message
             message.text = '/settings'
             settings_command(message)
         elif action == 'help':
+            message = call.message
             message.text = '/help'
             help_command(message)
 
-        try:
-            bot.delete_message(chat_id, call.message.message_id)
-        except:
-            pass
+        # Удаляем старое меню только если не seasons (там мы уже отредактировали)
+        if action != 'seasons':
+            try:
+                bot.delete_message(chat_id, message_id)
+            except:
+                pass
 
         logger.info(f"[START MENU] Выбран раздел: {action} для пользователя {user_id}")
     except Exception as e:
@@ -218,8 +229,7 @@ def start_menu_callback(call):
             bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
         except:
             pass
-
-
+        
 @bot.callback_query_handler(func=lambda call: call.data == "back_to_start_menu")
 def back_to_start_menu_callback(call):
     try:
