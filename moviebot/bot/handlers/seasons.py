@@ -14,7 +14,7 @@ from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.states import user_episodes_state
 
 # Новый импорт для перенаправления в стандартный обработчик описания
-from moviebot.bot.callbacks.film_callbacks import handle_film_callback
+from moviebot.bot.handlers.series import show_film_info_with_buttons
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -350,24 +350,85 @@ def show_seasons_list(chat_id: int, user_id: int, message_id: int = None):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
 def handle_seasons_kp(call):
-    """Клик по сериалу в /seasons → показываем стандартное описание (как для сериала в базе)"""
+    """Клик по сериалу в /seasons → показываем стандартное описание с постером и кнопками"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot_instance.answer_callback_query(call.id, text="⏳ Загружаю описание...")
 
         kp_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
 
-        logger.info(f"[SEASONS_KP → СТАНДАРТНОЕ ОПИСАНИЕ] kp_id={kp_id}")
+        logger.info(f"[SEASONS_KP → ОПИСАНИЕ] kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
 
-        # Имитируем стандартный callback для показа сериала
-        call.data = f"film:{kp_id}"  # Если префикс series:{kp_id} — поменяй здесь
+        # Получаем данные о фильме из БД (как в других местах)
+        with db_lock:
+            cursor.execute('''
+                SELECT id, title, watched, link, year, genres, description, director, actors, is_series
+                FROM movies WHERE chat_id = %s AND kp_id = %s
+            ''', (chat_id, str(kp_id)))
+            row = cursor.fetchone()
 
-        # Вызываем существующий обработчик карточки фильма/сериала
-        handle_film_callback(call)
+        if not row:
+            bot_instance.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
+            return
+
+        # Преобразуем row в удобный вид
+        if isinstance(row, dict):
+            film_id = row['id']
+            title = row['title']
+            watched = row['watched']
+            link = row['link'] or f"https://www.kinopoisk.ru/film/{kp_id}/"
+            year = row['year']
+            genres = row['genres']
+            description = row['description']
+            director = row['director']
+            actors = row['actors']
+            is_series = bool(row.get('is_series', 0))
+        else:
+            film_id = row[0]
+            title = row[1]
+            watched = row[2]
+            link = row[3] or f"https://www.kinopoisk.ru/film/{kp_id}/"
+            year = row[4] if len(row) > 4 else None
+            genres = row[5] if len(row) > 5 else None
+            description = row[6] if len(row) > 6 else None
+            director = row[7] if len(row) > 7 else None
+            actors = row[8] if len(row) > 8 else None
+            is_series = bool(row[9] if len(row) > 9 else 0)
+
+        info = {
+            'title': title,
+            'year': year,
+            'genres': genres,
+            'description': description,
+            'director': director,
+            'actors': actors,
+            'is_series': is_series
+        }
+
+        existing = (film_id, title, watched)
+
+        # Прямо вызываем функцию, которая показывает полную карточку
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=existing,
+            message_id=call.message.message_id,  # редактируем текущее сообщение (список сезонов → карточка)
+            message_thread_id=message_thread_id,
+            edit=True  # если в функции есть параметр edit, иначе просто будет отправлено новое
+        )
 
     except Exception as e:
         logger.error(f"[SEASONS_KP → ОПИСАНИЕ] Ошибка: {e}", exc_info=True)
-
-
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка загрузки", show_alert=True)
+        except:
+            pass
+        
 def register_seasons_handlers():
     """Регистрируем обработчики в основной init"""
     @bot_instance.message_handler(commands=['seasons'])
