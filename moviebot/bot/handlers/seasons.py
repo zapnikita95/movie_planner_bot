@@ -546,3 +546,8 @@ def handle_seasons_command(message):
         message_thread_id=message_thread_id,
         bot=bot
     )
+
+def register_seasons_handlers(bot):
+    """Регистрирует все обработчики из модуля seasons"""
+    # Здесь ничего не нужно делать — все обработчики уже зарегистрированы через декораторы @bot.message_handler и @bot.callback_query_handler
+    logger.info("✅ seasons handlers зарегистрированы")
