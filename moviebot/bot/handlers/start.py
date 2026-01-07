@@ -164,9 +164,9 @@ def start_menu_callback(call):
             return
 
         if action == 'seasons':
-            # ← ФИКС ЗДЕСЬ: прямой вызов списка сериалов
+            # ← ФИКС: убрали message_thread_id (его нет в show_seasons_list)
             from moviebot.bot.handlers.seasons import show_seasons_list
-            show_seasons_list(chat_id, user_id, message_id=message_id, message_thread_id=message_thread_id)
+            show_seasons_list(chat_id, user_id, message_id=message_id)  # ← только message_id для редактирования
 
         elif action == 'premieres':
             message = call.message
