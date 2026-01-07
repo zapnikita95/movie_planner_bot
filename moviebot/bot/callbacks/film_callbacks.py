@@ -766,6 +766,88 @@ def mark_watched_from_description_callback(call):
     finally:
         logger.info(f"[MARK WATCHED] ===== END: callback_id={call.id}")
 
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("streaming_select:"))
+def streaming_select_callback(call):
+    """Выбор онлайн-кинотеатра для плана 'дома'"""
+    try:
+        bot_instance.answer_callback_query(call.id, "Выбран онлайн-кинотеатр!")
+    except:
+        pass
+    
+    parts = call.data.split(":", 2)  # plan_id:platform (url в JSON)
+    plan_id = int(parts[1])
+    platform = parts[2] if len(parts) > 2 else ""
+    chat_id = call.message.chat.id
+    
+    # Получаем url из сохранённого JSON
+    selected_url = ""
+    with db_lock:
+        cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+        row = cursor.fetchone()
+        if row:
+            sources_json = row[0] if not isinstance(row, dict) else row.get('ticket_file_id')
+            if sources_json:
+                try:
+                    sources = json.loads(sources_json)
+                    selected_url = sources.get(platform, "")
+                except:
+                    pass
+    
+    # Сохраняем выбранный сервис и url
+    with db_lock:
+        cursor.execute('''
+            UPDATE plans 
+            SET streaming_service = %s, streaming_url = %s, streaming_done = FALSE
+            WHERE id = %s AND chat_id = %s
+        ''', (platform, selected_url, plan_id, chat_id))
+        conn.commit()
+    
+    logger.info(f"[STREAMING SELECT] Для плана {plan_id} выбран {platform} ({selected_url})")
+    
+    # Обновляем сообщение
+    new_text = call.message.text.split("\n\n📺")[0] + f"\n\n✅ Выбран: <b>{platform}</b>"
+    bot_instance.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=new_text,
+        parse_mode='HTML',
+        reply_markup=call.message.reply_markup  # Оставляем кнопки, включая "Завершить"
+    )
+
+@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("streaming_done:"))
+def streaming_done_callback(call):
+    """Завершение выбора онлайн-кинотеатров"""
+    try:
+        bot_instance.answer_callback_query(call.id, "Готово!")
+    except:
+        pass
+    
+    plan_id = int(call.data.split(":")[1])
+    chat_id = call.message.chat.id
+    
+    # Ставим streaming_done = True и убираем приписку + кнопки
+    with db_lock:
+        cursor.execute('''
+            UPDATE plans 
+            SET streaming_done = TRUE
+            WHERE id = %s AND chat_id = %s
+        ''', (plan_id, chat_id))
+        conn.commit()
+    
+    # Убираем текст "Выберите..." и кнопки
+    original_text = call.message.text.split("\n\n📺")[0].strip()
+    if "✅ Выбран:" in original_text:
+        original_text = original_text.split("\n\n✅ Выбран:")[0].strip()
+    
+    bot_instance.edit_message_text(
+        chat_id=chat_id,
+        message_id=call.message.message_id,
+        text=original_text,
+        parse_mode='HTML',
+        reply_markup=None
+    )
+    
+    logger.info(f"[STREAMING DONE] План {plan_id} завершён — кнопки убраны")
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description_kp:"))
 def mark_watched_from_description_kp_callback(call):
