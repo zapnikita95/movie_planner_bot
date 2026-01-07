@@ -8,18 +8,11 @@ from datetime import datetime as dt
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-
 from moviebot.database.db_operations import log_request
-
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
 from moviebot.utils.helpers import has_notifications_access
-
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
-
 from moviebot.states import user_episodes_state
-
-
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -113,8 +106,12 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
     return total_episodes, watched_episodes
 
 
-def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=None, message_thread_id=None):
+def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=None, message_thread_id=None, bot=None):
     """Показывает страницу эпизодов сезона с пагинацией"""
+    if bot is None:
+        logger.error("[SHOW_EPISODES_PAGE] bot is None! Cannot proceed.")
+        return False
+
     try:
         logger.info(f"[SHOW EPISODES PAGE] Начало: kp_id={kp_id}, season={season_num}, chat_id={chat_id}, user_id={user_id}, page={page}, message_id={message_id}, message_thread_id={message_thread_id}")
         EPISODES_PER_PAGE = 20
@@ -245,41 +242,27 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         if message_id:
             try:
                 logger.info(f"[SHOW EPISODES PAGE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
-                if message_thread_id:
-                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
-                    params = {
-                        'chat_id': chat_id,
-                        'message_id': message_id,
-                        'text': text,
-                        'parse_mode': 'HTML',
-                        'message_thread_id': message_thread_id
-                    }
-                    if reply_markup_json:
-                        params['reply_markup'] = reply_markup_json
-                    bot.api_call('editMessageText', params)
-                else:
-                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[SHOW EPISODES PAGE] Сообщение обновлено успешно")
             except Exception as e:
                 logger.error(f"[SHOW EPISODES PAGE] Ошибка редактирования сообщения: {e}", exc_info=True)
-                if message_thread_id:
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
-                else:
-                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
         else:
             logger.info(f"[SHOW EPISODES PAGE] Отправка нового сообщения")
-            if message_thread_id:
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
-            else:
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
         
         logger.info(f"[SHOW EPISODES PAGE] Завершено успешно")
         return True
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
         return False
-    
+
+
 def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None, bot=None):
+    if bot is None:
+        logger.error("[SHOW_SEASONS_LIST] bot is None! Cannot proceed.")
+        return
+
     logger.info(f"[SHOW_SEASONS_LIST] chat_id={chat_id}, user_id={user_id}, message_id={message_id}, thread_id={message_thread_id}")
 
     has_access = has_notifications_access(chat_id, user_id)
@@ -295,22 +278,9 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         text = "Нет сериалов в базе. Используйте /search, чтобы найти и добавить сериалы, или просто пришлите ссылку на Кинопоиск на сериал"
         
         if message_id:
-            # Убрали message_thread_id — причина ошибки в старой версии библиотеки
-            bot.edit_message_text(
-                text=text,
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
+            bot.edit_message_text(text=text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
         else:
-            bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=markup,
-                parse_mode='HTML',
-                message_thread_id=message_thread_id
-            )
+            bot.send_message(chat_id=chat_id, text=text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
         return
 
     markup = InlineKeyboardMarkup(row_width=1)
@@ -364,27 +334,16 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
     text = f"📺 Активные сериалы в базе ({num_series})"
 
     if message_id:
-        # Здесь тоже убрали message_thread_id
-        bot.edit_message_text(
-            text=text,
-            chat_id=chat_id,
-            message_id=message_id,
-            reply_markup=markup,
-            parse_mode='HTML'
-        )
+        bot.edit_message_text(text=text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode='HTML')
     else:
-        bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            reply_markup=markup,
-            parse_mode='HTML',
-            message_thread_id=message_thread_id
-        )
+        bot.send_message(chat_id=chat_id, text=text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
 
-def show_completed_series_list(chat_id: int, user_id: int, message_id: int = None):
-    """
-    Показывает список полностью просмотренных сериалов (аналогично show_seasons_list, но только completed).
-    """
+
+def show_completed_series_list(chat_id: int, user_id: int, message_id: int = None, message_thread_id: int = None, bot=None):
+    if bot is None:
+        logger.error("[SHOW_COMPLETED_SERIES_LIST] bot is None!")
+        return
+
     logger.info(f"[SHOW_COMPLETED_SERIES_LIST] chat_id={chat_id}, user_id={user_id}, message_id={message_id}")
 
     has_access = has_notifications_access(chat_id, user_id)
@@ -415,8 +374,8 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
 
         total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
 
-        if total_ep == watched_ep and total_ep > 0 and not is_airing:  # Только полностью просмотренные и не выходящие
-            status = "✅ "  # Эмодзи в начале
+        if total_ep == watched_ep and total_ep > 0 and not is_airing:
+            status = "✅ "
             button_text = f"{status}{title}"
             completed_series.append((kp_id, button_text))
 
@@ -424,10 +383,11 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
         text = "Нет полностью просмотренных сериалов."
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("◀️ К активным сериалам", callback_data="back_to_seasons_list"))
+        
         if message_id:
             bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
         else:
-            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
         return
 
     markup = InlineKeyboardMarkup(row_width=1)
@@ -441,7 +401,8 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
     if message_id:
         bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
     else:
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
 def handle_seasons_kp(call):
@@ -452,11 +413,11 @@ def handle_seasons_kp(call):
         kp_id = int(call.data.split(":")[1])
         chat_id = call.message.chat.id
         user_id = call.from_user.id
+        message_id = call.message.message_id
         message_thread_id = getattr(call.message, 'message_thread_id', None)
 
         logger.info(f"[SEASONS_KP → ОПИСАНИЕ] kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
 
-        # Получаем данные из БД
         with db_lock:
             cursor.execute('''
                 SELECT id, title, watched, link, year, genres, description, director, actors, is_series
@@ -468,7 +429,6 @@ def handle_seasons_kp(call):
             bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
             return
 
-        # Формируем данные (как в других местах бота)
         if isinstance(row, dict):
             film_id = row['id']
             title = row['title']
@@ -504,10 +464,8 @@ def handle_seasons_kp(call):
 
         existing = (film_id, title, watched)
 
-        # ←←← ВОЛШЕБСТВО: локальный импорт здесь, внутри функции
         from moviebot.bot.handlers.series import show_film_info_with_buttons
 
-        # Показываем карточку (редактируем текущее сообщение)
         show_film_info_with_buttons(
             chat_id=chat_id,
             user_id=user_id,
@@ -515,7 +473,7 @@ def handle_seasons_kp(call):
             link=link,
             kp_id=kp_id,
             existing=existing,
-            message_id=call.message.message_id,  # ← заменяем список сериалов на карточку
+            message_id=message_id,
             message_thread_id=message_thread_id
         )
 
@@ -526,43 +484,65 @@ def handle_seasons_kp(call):
         except:
             pass
 
+
 @bot.callback_query_handler(func=lambda call: call.data == "show_completed_series")
 def handle_show_completed_series(call):
-    bot.answer_callback_query(call.id, "⏳ Загружаем просмотренные...")  # ← прелоадер
+    bot.answer_callback_query(call.id, "⏳ Загружаем просмотренные...")  
+    
     chat_id = call.message.chat.id
     user_id = call.from_user.id
     message_id = call.message.message_id
-    show_completed_series_list(chat_id, user_id, message_id=message_id)
+    message_thread_id = getattr(call.message, 'message_thread_id', None)
+    
+    show_completed_series_list(
+        chat_id=chat_id,
+        user_id=user_id,
+        message_id=message_id,
+        message_thread_id=message_thread_id,
+        bot=bot
+    )
+
 
 @bot.callback_query_handler(func=lambda call: call.data == "back_to_seasons_list")
 def handle_back_to_seasons_list(call):
-    bot.answer_callback_query(call.id, "⏳ Возвращаемся...")  # ← прелоадер
+    bot.answer_callback_query(call.id, "⏳ Возвращаемся...")  
+    
     chat_id = call.message.chat.id
     user_id = call.from_user.id
     message_id = call.message.message_id
-    show_seasons_list(chat_id, user_id, message_id=message_id)
+    message_thread_id = getattr(call.message, 'message_thread_id', None)
+    
+    show_seasons_list(
+        chat_id=chat_id,
+        user_id=user_id,
+        message_id=message_id,
+        message_thread_id=message_thread_id,
+        bot=bot
+    )
 
-def register_seasons_handlers(bot):  # параметр bot оставляем
-    """Регистрируем обработчики в основной init"""
-    @bot.message_handler(commands=['seasons'])
-    def handle_seasons_command(message):
-        log_request(message)
-        chat_id = message.chat.id
-        user_id = message.from_user.id
-        message_thread_id = getattr(message, 'message_thread_id', None)
-        
-        # ← Прелоадер: отправляем временное сообщение
+
+@bot.message_handler(commands=['seasons'])
+def handle_seasons_command(message):
+    log_request(message)
+    chat_id = message.chat.id
+    user_id = message.from_user.id
+    message_thread_id = getattr(message, 'message_thread_id', None)
+    
+    try:
         preload_msg = bot.send_message(
-            chat_id, 
-            "⏳ Загружаем сериалы и сезоны...", 
+            chat_id=chat_id,
+            text="⏳ Загружаем сериалы и сезоны...",
             message_thread_id=message_thread_id
         )
-        
-        # Показываем список
-        show_seasons_list(chat_id, user_id, message_thread_id=message_thread_id)
-        
-        # Удаляем прелоадер после загрузки (добавь этот try в конец show_seasons_list, если хочешь универсально, или здесь)
-        try:
-            bot.delete_message(chat_id, preload_msg.message_id, message_thread_id=message_thread_id)
-        except Exception as e:
-            logger.warning(f"[SEASONS COMMAND] Не удалось удалить прелоадер: {e}")
+        preload_message_id = preload_msg.message_id
+    except Exception as e:
+        logger.warning(f"[SEASONS COMMAND] Не удалось отправить прелоадер: {e}")
+        preload_message_id = None
+
+    show_seasons_list(
+        chat_id=chat_id,
+        user_id=user_id,
+        message_id=preload_message_id,
+        message_thread_id=message_thread_id,
+        bot=bot
+    )
