@@ -4175,39 +4175,39 @@ def add_film_from_search_callback(call):
         user_id = call.from_user.id
         
             # Определяем тип фильма и формируем правильную ссылку
-            is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
-            
-            if is_series:
-                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            else:
-                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            
-            # Получаем информацию о фильме
-            from moviebot.api.kinopoisk_api import extract_movie_info
-            info = extract_movie_info(link)
-            
-            if not info:
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-                return
-            
-            # Убеждаемся, что is_series правильно установлен в info
-            if is_series:
-                info['is_series'] = True
-            
-            # Показываем карточку фильма БЕЗ автоматического добавления в базу
-            from moviebot.bot.handlers.series import show_film_info_with_buttons
-            show_film_info_with_buttons(
-                chat_id=chat_id,
-                user_id=user_id,
-                info=info,
-                link=link,
-                kp_id=kp_id,
-                existing=None,
-                message_id=None
-            )
-            
-            bot_instance.answer_callback_query(call.id, "✅ Информация о фильме")
+        is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
         
+        if is_series:
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+        else:
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # Получаем информацию о фильме
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Убеждаемся, что is_series правильно установлен в info
+        if is_series:
+            info['is_series'] = True
+        
+        # Показываем карточку фильма БЕЗ автоматического добавления в базу
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=None,
+            message_id=None
+        )
+        
+        bot_instance.answer_callback_query(call.id, "✅ Информация о фильме")
+    
     except Exception as e:
         logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
         try:
