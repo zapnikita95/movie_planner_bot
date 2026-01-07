@@ -337,23 +337,23 @@ def handle_plan_datetime_reply(message):
     """Обработчик ответа на промпт даты/времени планирования (step=3)"""
     user_id = message.from_user.id
     text = message.text or ""
-    logger.info(f"[PLAN DATETIME REPLY] ===== START: message_id={message.message_id}, user_id={user_id}, text='{text}'")
-    try:
-        from moviebot.bot.handlers.plan import get_plan_day_or_date_internal
-        from moviebot.states import user_plan_state
-        
-        state = user_plan_state[user_id]
-        logger.info(f"[PLAN DATETIME REPLY] Текст ответного сообщения: '{text}'")
-        result = get_plan_day_or_date_internal(message, state)
-        
-        # ФИКС: Очищаем состояние после обработки
-        if user_id in user_plan_state:
-            del user_plan_state[user_id]
-            logger.info(f"[PLAN DATETIME REPLY] Состояние планирования очищено для user_id={user_id}")
-        
-        logger.info(f"[PLAN DATETIME REPLY] ✅ Завершено")
-    except Exception as e:
-        logger.error(f"[PLAN DATETIME REPLY] ❌ Ошибка: {e}", exc_info=True)
+#     logger.info(f"[PLAN DATETIME REPLY] ===== START: message_id={message.message_id}, user_id={user_id}, text='{text}'")
+#     try:
+#         from moviebot.bot.handlers.plan import get_plan_day_or_date_internal
+#         from moviebot.states import user_plan_state
+#         
+#         state = user_plan_state[user_id]
+#         logger.info(f"[PLAN DATETIME REPLY] Текст ответного сообщения: '{text}'")
+#         result = get_plan_day_or_date_internal(message, state)
+#         
+#         # ФИКС: Очищаем состояние после обработки
+#         if user_id in user_plan_state:
+#             del user_plan_state[user_id]
+#             logger.info(f"[PLAN DATETIME REPLY] Состояние планирования очищено для user_id={user_id}")
+#         
+#         logger.info(f"[PLAN DATETIME REPLY] ✅ Завершено")
+#     except Exception as e:
+#         logger.error(f"[PLAN DATETIME REPLY] ❌ Ошибка: {e}", exc_info=True)
         try:
             bot_instance.reply_to(message, "❌ Произошла ошибка при обработке даты/времени")
         except:

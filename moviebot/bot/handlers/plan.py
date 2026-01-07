@@ -322,7 +322,7 @@ def register_plan_handlers(bot_instance):
                         state['pending_plan_dt'] = day_or_date
                         state['pending_message_date_utc'] = message_date_utc
                         state['link'] = link
-                        state['type'] = plan_type
+                        state['plan_type'] = plan_type
                         state['chat_id'] = chat_id
                         user_plan_state[user_id] = state
                         logger.info(f"[PLAN] Сохранен текст для продолжения планирования: '{state['pending_text']}'")
@@ -366,7 +366,7 @@ def register_plan_handlers(bot_instance):
                     'day_or_date': None,
                     'missing': 'day_or_date'
                 }
-                user_plan_state[user_id] = {'step': 3, 'link': link, 'type': plan_type, 'chat_id': chat_id}
+                user_plan_state[user_id] = {'step': 3, 'link': link, 'plan_type': plan_type, 'chat_id': chat_id}
                 return
         except Exception as e:
             logger.error(f"❌ Ошибка в /plan: {e}", exc_info=True)
@@ -789,7 +789,7 @@ def plan_type_callback(call):
             del user_plan_state[user_id]
             return
         
-        state['type'] = plan_type
+        state['plan_type'] = plan_type
         state['step'] = 3
         
         try:
@@ -898,7 +898,7 @@ def plan_type_callback(call):
                 info = extract_movie_info(link)
                 if info:
                     # Если это сериал, обновляем ссылку
-                    if info.get('is_series') or info.get('type') == 'TV_SERIES':
+                    if info.get('is_series') or info.get('plan_type') == 'TV_SERIES':
                         link = f"https://www.kinopoisk.ru/series/{kp_id_str}/"
                     
                     film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id_str, link, info, user_id)
@@ -1091,7 +1091,7 @@ def get_plan_day_or_date_internal(message, state):
     logger.info("=" * 80)
     logger.info(f"[PLAN DAY/DATE INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
     user_id = message.from_user.id
-    plan_type = state.get('type')
+    plan_type = state.get('plan_type')
     link = state.get('link')
     prompt_message_id = state.get('prompt_message_id')
     
