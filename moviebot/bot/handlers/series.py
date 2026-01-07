@@ -4881,54 +4881,45 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 facts_and_rate_added = True
         logger.info(f"[SHOW FILM INFO] Кнопки оценок добавлены, facts_and_rate_added={facts_and_rate_added}")
         
-        # Если это сериал, добавляем кнопки для сериалов (для фильмов в базе и не в базе)
-        logger.info(f"[SHOW FILM INFO] Проверка сериала: is_series={is_series}, user_id={user_id}")
+        # === КНОПКИ ДЛЯ СЕРИАЛОВ (единая логика для всех случаев) ===
+        logger.info(f"[SHOW FILM INFO] Обработка кнопок сериала: is_series={is_series}, user_id={user_id}, film_id={film_id}")
         if is_series and user_id:
-            if film_id:
-                # Фильм в базе - проверяем доступ к функциям уведомлений
-                has_access = has_notifications_access(chat_id, user_id)
-                logger.info(f"[SHOW FILM INFO] Сериал: is_series=True, user_id={user_id}, chat_id={chat_id}, has_notifications_access={has_access}")
-                
-                if has_access:
-                    # КРИТИЧЕСКИЙ ФИКС: НЕ загружаем сезоны при открытии карточки - только по клику на кнопку
-                    # Показываем базовые кнопки без загрузки данных о сезонах
-                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                    
-                    # Проверяем подписку на новые серии (легкий запрос без загрузки сезонов)
-                    is_subscribed = False
+            has_access = has_notifications_access(chat_id, user_id)
+            logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям: has_access={has_access}")
+
+            if has_access:
+                # Кнопка отметки серий (всегда активна при доступе)
+                markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+
+                # Проверяем подписку на новые серии
+                is_subscribed = False
+                if film_id:  # Только если сериал в базе
                     try:
-                        import threading
                         lock_acquired = db_lock.acquire(timeout=3.0)
                         if lock_acquired:
                             try:
-                                cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s LIMIT 1', (chat_id, film_id, user_id))
+                                cursor.execute(
+                                    'SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s LIMIT 1',
+                                    (chat_id, film_id, user_id)
+                                )
                                 sub_row = cursor.fetchone()
                                 if sub_row:
-                                    is_subscribed = sub_row[0] if not isinstance(sub_row, dict) else sub_row.get('subscribed')
-                                    logger.info(f"[SHOW FILM INFO] Подписка проверена: is_subscribed={is_subscribed}")
+                                    is_subscribed = sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0]
                             finally:
                                 db_lock.release()
-                        else:
-                            logger.warning(f"[SHOW FILM INFO] db_lock timeout (3 сек) - пропускаем проверку подписки (не критично)")
-                    except Exception as sub_e:
-                        logger.warning(f"[SHOW FILM INFO] Ошибка при проверке подписки (не критично): {sub_e}")
-                    
-                    if is_subscribed:
-                        markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{kp_id}"))
-                    else:
-                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    except Exception as e:
+                        logger.warning(f"[SHOW FILM INFO] Ошибка проверки подписки: {e}")
+
+                # Кнопка подписки/отписки
+                if is_subscribed:
+                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
                 else:
-                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
-            else:
-                # Фильм не в базе - проверяем доступ к функциям уведомлений
-                has_access = has_notifications_access(chat_id, user_id)
-                if has_access:
-                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-                else:
-                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+            else:
+                # Нет доступа — заблокированные кнопки
+                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
+                markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
         # Проверяем, есть ли план для этого фильма (дома) - чтение безопасно без lock
@@ -5423,15 +5414,6 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
             InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
             InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
         )
-        
-        # Если это сериал, добавляем кнопки для сериалов
-        if is_series:
-            if user_id and has_notifications_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-                markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-                markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
         
         # Отправляем сообщение
         logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Отправка сообщения: chat_id={chat_id}, text_length={len(text)}, has_markup={markup is not None}")
