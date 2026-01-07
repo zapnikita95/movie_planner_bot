@@ -533,10 +533,13 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
         
         with db_lock:
             cursor.execute('''
-                SELECT p.id, m.title, p.plan_datetime, 
-                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as ticket_count
+                SELECT p.id, 
+                       COALESCE(m.title, 'Мероприятие') as title, 
+                       p.plan_datetime, 
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as ticket_count,
+                       p.film_id
                 FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.chat_id = %s AND p.plan_type = 'cinema'
                   AND p.plan_datetime >= %s
                 ORDER BY p.plan_datetime
@@ -2955,12 +2958,14 @@ def register_series_handlers(bot_param):
                 )
                 return
             
-            # Получаем информацию о сеансе
+            # Получаем информацию о сеансе (включая мероприятия без film_id)
             with db_lock:
                 cursor.execute('''
-                    SELECT p.id, p.plan_datetime, p.ticket_file_id, m.title, m.kp_id
+                    SELECT p.id, p.plan_datetime, p.ticket_file_id, p.film_id,
+                           COALESCE(m.title, 'Мероприятие') as title, 
+                           m.kp_id
                     FROM plans p
-                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                     WHERE p.id = %s AND p.chat_id = %s AND p.plan_type = 'cinema'
                 ''', (plan_id, chat_id))
                 plan_row = cursor.fetchone()
@@ -2972,13 +2977,15 @@ def register_series_handlers(bot_param):
             if isinstance(plan_row, dict):
                 plan_dt = plan_row.get('plan_datetime')
                 ticket_file_id = plan_row.get('ticket_file_id')
+                film_id = plan_row.get('film_id')
                 title = plan_row.get('title')
                 kp_id = plan_row.get('kp_id')
             else:
                 plan_dt = plan_row[1]
                 ticket_file_id = plan_row[2]
-                title = plan_row[3]
-                kp_id = plan_row[4]
+                film_id = plan_row[3]
+                title = plan_row[4]
+                kp_id = plan_row[5] if len(plan_row) > 5 else None
             
             # Форматируем дату и время
             user_tz = get_user_timezone_or_default(user_id)
@@ -3013,6 +3020,13 @@ def register_series_handlers(bot_param):
             
             # Добавляем кнопку "✏️ Изменить" для изменения времени сеанса
             markup.add(InlineKeyboardButton("✏️ Изменить", callback_data=f"ticket_edit_time:{plan_id}"))
+            
+            # Если это мероприятие без film_id, добавляем кнопку "🗑️ Удалить"
+            if not film_id:
+                markup.add(InlineKeyboardButton("🗑️ Удалить из расписания", callback_data=f"remove_from_calendar:{plan_id}"))
+            elif kp_id:
+                # Если это фильм, добавляем кнопку "📖 Перейти к описанию"
+                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
             
             if file_id:
                 # Если есть file_id, значит пользователь хочет добавить билеты к этому сеансу
@@ -4139,39 +4153,39 @@ def add_film_from_search_callback(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        # Определяем тип фильма и формируем правильную ссылку
-        is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
-        
-        if is_series:
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-        else:
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        
-        # Получаем информацию о фильме
-        from moviebot.api.kinopoisk_api import extract_movie_info
-        info = extract_movie_info(link)
-        
-        if not info:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-            return
-        
-        # Убеждаемся, что is_series правильно установлен в info
-        if is_series:
-            info['is_series'] = True
-        
-        # Показываем карточку фильма БЕЗ автоматического добавления в базу
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
-        show_film_info_with_buttons(
-            chat_id=chat_id,
-            user_id=user_id,
-            info=info,
-            link=link,
-            kp_id=kp_id,
-            existing=None,
-            message_id=None
-        )
-        
-        bot_instance.answer_callback_query(call.id, "✅ Информация о фильме")
+            # Определяем тип фильма и формируем правильную ссылку
+            is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
+            
+            if is_series:
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            else:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            # Получаем информацию о фильме
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            info = extract_movie_info(link)
+            
+            if not info:
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            # Убеждаемся, что is_series правильно установлен в info
+            if is_series:
+                info['is_series'] = True
+            
+            # Показываем карточку фильма БЕЗ автоматического добавления в базу
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=None,
+                message_id=None
+            )
+            
+            bot_instance.answer_callback_query(call.id, "✅ Информация о фильме")
         
     except Exception as e:
         logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
@@ -4929,46 +4943,37 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 plan_info = None
         logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}")
         
+        # Добавляем кнопку "Просмотрено" для всех фильмов (даже не добавленных в базу)
+        # Кнопка должна работать для всех фильмов, даже если film_id отсутствует
+        if not is_series:
+            if film_id:
+                # Фильм в базе - проверяем статус просмотра
+                if watched:
+                    markup.add(InlineKeyboardButton("✅ Просмотрено", callback_data=f"toggle_watched_from_description:{film_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("👁️ Просмотрено", callback_data=f"mark_watched_from_description:{film_id}"))
+            else:
+                # Фильм не в базе - всегда показываем кнопку "Просмотрено"
+                markup.add(InlineKeyboardButton("👁️ Просмотрено", callback_data=f"mark_watched_from_description_kp:{kp_id}"))
+        
         # Если фильм запланирован, показываем специальную логику кнопок
         if has_plan:
             # Если фильм запланирован, не показываем кнопки "добавить в базу" и "запланировать просмотр"
-            # Добавляем кнопку "Просмотрено" для обычных фильмов (не сериалов), если фильм еще не просмотрен
-            if not is_series and film_id:
-                if not watched:
-                    # Проверяем, просмотрел ли этот конкретный пользователь фильм
-                    user_watched = False
-                    if user_id:
-                        try:
-                            import threading
-                            lock_acquired = db_lock.acquire(timeout=3.0)
-                            if lock_acquired:
-                                try:
-                                    # Проверяем, есть ли у этого пользователя просмотр фильма
-                                    # Для обычных фильмов используем watched статус в movies, но нужно проверить по каждому участнику
-                                    # Для простоты показываем кнопку "Просмотрено" если фильм не просмотрен
-                                    user_watched = False
-                                finally:
-                                    db_lock.release()
-                        except:
-                            pass
-                    
-                    if not user_watched:
-                        markup.add(InlineKeyboardButton("✅ Просмотрено", callback_data=f"mark_watched_from_description:{film_id}"))
             
-            # Добавляем кнопку "Выбрать онлайн-кинотеатр" только для планов типа 'home' (дома)
-            if plan_info and plan_info.get('type') == 'home':
+            # Добавляем кнопку "Выбрать онлайн-кинотеатр" только для планов типа 'home' (дома) и непросмотренных фильмов
+            if plan_info and plan_info.get('type') == 'home' and not watched:
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
         else:
             # Если фильм не запланирован, показываем стандартные кнопки
-            # Если фильм не в базе, добавляем кнопку "➕ Добавить в базу"
-            if not film_id:
-                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
+            # НЕ показываем кнопку "➕ Добавить в базу" для фильмов, уже добавленных в базу
+            # (кнопка показывается только если film_id отсутствует)
             
             # Добавляем кнопку "Запланировать просмотр"
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
             
-            # Добавляем кнопку "Выбрать онлайн-кинотеатр" для всех фильмов (если не запланирован)
-            markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+            # Добавляем кнопку "Выбрать онлайн-кинотеатр" только для непросмотренных фильмов
+            if not watched:
+                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
         
         # Добавляем кнопки "Интересные факты" и "Оценить" всегда (для фильмов в базе и не в базе)
         logger.info(f"[SHOW FILM INFO] Добавление кнопок оценок для film_id={film_id}...")
@@ -5555,17 +5560,6 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
             except Exception as e:
                 logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
         
-        # Если премьера еще не состоялась, добавляем кнопку
-        if premiere_date:
-            from datetime import date as date_class
-            today = date_class.today()
-            if premiere_date > today:
-                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
-        
-        # Добавляем кнопку "➕ Добавить в базу"
-        markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
-        
         # Проверяем, есть ли фильм в базе и запланирован ли он
         # (для show_film_info_without_adding фильм обычно не в базе, но проверим на всякий случай)
         film_id = None
@@ -5579,6 +5573,18 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
                 cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
                 plan_row = cursor.fetchone()
                 has_plan = plan_row is not None
+        
+        # Если премьера еще не состоялась, добавляем кнопку
+        if premiere_date:
+            from datetime import date as date_class
+            today = date_class.today()
+            if premiere_date > today:
+                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+                markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
+        
+        # НЕ показываем кнопку "➕ Добавить в базу" для фильмов, уже добавленных в базу
+        if not film_id:
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
         
         # Добавляем кнопку "Запланировать просмотр" только если фильм не запланирован
         if not has_plan:

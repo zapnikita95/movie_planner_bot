@@ -25,7 +25,8 @@ from moviebot.states import (
     user_import_state, user_clean_state, user_cancel_subscription_state,
     user_refund_state, user_promo_state, user_promo_admin_state,
     user_unsubscribe_state, user_add_admin_state,
-    bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages
+    bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages,
+    plan_notification_messages, settings_messages
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
 from moviebot.bot.handlers.series import search_films_with_type, show_film_info_with_buttons, show_film_info_without_adding
@@ -35,7 +36,7 @@ from moviebot.bot.bot_init import BOT_ID
 import moviebot.bot.handlers.promo  # noqa: F401
 # Импортируем обработчики админских команд для автоматической регистрации
 import moviebot.bot.handlers.admin  # noqa: F401
-from moviebot.database.db_operations import add_and_announce, is_bot_participant, get_watched_emojis
+from moviebot.database.db_operations import add_and_announce, is_bot_participant, get_watched_emojis, get_watched_custom_emoji_ids
 
 # logger уже создан выше
 conn = get_db_connection()
@@ -1661,6 +1662,340 @@ def main_file_handler(message):
     
     # Если не в состоянии - игнорируем
     logger.info(f"[MAIN FILE HANDLER] Фото/документ не обработан (пользователь не в user_ticket_state)")
+
+
+@bot_instance.message_reaction_handler(func=lambda r: True)
+def handle_reaction(reaction):
+    """Обработчик реакций на сообщения - отмечает фильмы как просмотренные через эмодзи"""
+    logger.info(f"[REACTION] Получена реакция в чате {reaction.chat.id} на сообщение {reaction.message_id}")
+    
+    chat_id = reaction.chat.id
+    message_id = reaction.message_id
+    user_id = reaction.user.id if hasattr(reaction, 'user') and reaction.user else None
+    
+    # Проверяем участие в боте (только для реакций на сообщения о фильмах, не для настроек)
+    if user_id and message_id not in settings_messages:
+        if not is_bot_participant(chat_id, user_id):
+            try:
+                bot_instance.send_message(
+                    chat_id,
+                    f"Чтобы взаимодействовать с ботом, начните участие в нём с любой команды, например, /join",
+                    reply_to_message_id=message_id
+                )
+            except:
+                pass
+            return
+    
+    # Проверяем, не это ли реакция на сообщение settings
+    if message_id in settings_messages:
+        # Обработка реакций на настройки уже реализована в settings.py
+        return
+    
+    # Получаем обычные эмодзи (как список символов) для этого чата
+    ordinary_emojis = list(get_watched_emojis(chat_id))
+    
+    # Получаем кастомные эмодзи ID для этого чата
+    custom_emoji_ids = get_watched_custom_emoji_ids(chat_id)
+    
+    logger.info(f"[REACTION] Проверка watched эмодзи для чата {chat_id}")
+    logger.info(f"[REACTION] Доступные watched эмодзи: {ordinary_emojis}")
+    logger.info(f"[REACTION] Доступные кастомные ID: {custom_emoji_ids}")
+    
+    is_watched = False
+    
+    if not reaction.new_reaction:
+        logger.info("[REACTION] Нет новых реакций")
+        return
+    
+    logger.info(f"[REACTION] Количество новых реакций: {len(reaction.new_reaction)}")
+    
+    # Нормализуем эмодзи для сравнения (убираем variation selector)
+    def normalize_emoji(emoji_str):
+        """Убирает variation selector (FE0F) из эмодзи для нормализации"""
+        if not emoji_str:
+            return emoji_str
+        # Убираем variation selector (U+FE0F)
+        return emoji_str.replace('\ufe0f', '')
+    
+    # Нормализуем список watched эмодзи
+    normalized_watched = [normalize_emoji(e) for e in ordinary_emojis]
+    
+    for r in reaction.new_reaction:
+        logger.info(f"[REACTION DEBUG] Реакция: type={getattr(r, 'type', 'unknown')}, emoji={getattr(r, 'emoji', None)}, custom_emoji_id={getattr(r, 'custom_emoji_id', None)}")
+        
+        if hasattr(r, 'type') and r.type == 'emoji' and hasattr(r, 'emoji'):
+            normalized_reaction = normalize_emoji(r.emoji)
+            if normalized_reaction in normalized_watched:
+                logger.info(f"[REACTION DEBUG] ✅ Найден watched эмодзи: {r.emoji} (нормализован: {normalized_reaction})")
+                is_watched = True
+                break
+            else:
+                logger.info(f"[REACTION DEBUG] ❌ Эмодзи {r.emoji} (нормализован: {normalized_reaction}) не в списке watched: {normalized_watched}")
+        elif hasattr(r, 'type') and r.type == 'custom_emoji' and hasattr(r, 'custom_emoji_id'):
+            if str(r.custom_emoji_id) in custom_emoji_ids:
+                logger.info(f"[REACTION DEBUG] ✅ Найден watched кастомный эмодзи ID: {r.custom_emoji_id}")
+                is_watched = True
+                break
+            else:
+                logger.info(f"[REACTION DEBUG] ❌ Кастомный ID {r.custom_emoji_id} не в списке watched: {custom_emoji_ids}")
+        else:
+            # Старый формат реакции (без type)
+            if hasattr(r, 'emoji'):
+                if r.emoji in ordinary_emojis:
+                    logger.info(f"[REACTION DEBUG] ✅ Найден watched эмодзи (старый формат): {r.emoji}")
+                    is_watched = True
+                    break
+                else:
+                    logger.info(f"[REACTION DEBUG] ❌ Эмодзи {r.emoji} не в списке watched (старый формат): {ordinary_emojis}")
+    
+    # Получаем ссылку на фильм (нужно для отметки как просмотренного и предложения добавить эмодзи)
+    link = bot_messages.get(message_id)
+    if not link:
+        plan_data = plan_notification_messages.get(message_id)
+        if plan_data:
+            link = plan_data.get('link')
+    
+    # Если не найдено, пытаемся найти в БД по message_id или другим способом
+    if not link:
+        logger.info(f"[REACTION] Не найдено в bot_messages и plan_notification_messages для message_id={message_id}")
+        # Пробуем найти фильм в БД по последним добавленным фильмам в этом чате
+        try:
+            with db_lock:
+                # Ищем последние фильмы в этом чате (за последний час)
+                cursor.execute("""
+                    SELECT link FROM movies 
+                    WHERE chat_id = %s 
+                    ORDER BY id DESC 
+                    LIMIT 10
+                """, (chat_id,))
+                recent_links = cursor.fetchall()
+                # Если в чате недавно был добавлен только один фильм, используем его
+                if len(recent_links) == 1:
+                    link = recent_links[0].get('link') if isinstance(recent_links[0], dict) else recent_links[0][0]
+                    logger.info(f"[REACTION] Использована последняя ссылка из БД: {link}")
+                    bot_messages[message_id] = link
+        except Exception as e:
+            logger.warning(f"[REACTION] Ошибка при поиске в БД: {e}")
+    
+    # Если эмодзи не в списке watched, предлагаем добавить его, но все равно отмечаем фильм как просмотренный
+    if not is_watched and link:
+        logger.info("[REACTION] Не watched эмодзи — предлагаем добавить и отмечаем фильм как просмотренный")
+        
+        user_id = reaction.user.id if reaction.user else None
+        if user_id:
+            try:
+                # Получаем первое новое эмодзи (обычное или кастомное)
+                new_emoji = None
+                new_custom_emoji_id = None
+                for r in reaction.new_reaction:
+                    if hasattr(r, 'type') and r.type == 'emoji' and hasattr(r, 'emoji'):
+                        new_emoji = r.emoji
+                        break
+                    elif hasattr(r, 'type') and r.type == 'custom_emoji' and hasattr(r, 'custom_emoji_id'):
+                        new_custom_emoji_id = str(r.custom_emoji_id)
+                        break
+                    elif hasattr(r, 'emoji'):
+                        new_emoji = r.emoji
+                        break
+                
+                # Предлагаем добавить эмодзи (только если еще не предлагали)
+                if new_emoji or new_custom_emoji_id:
+                    emoji_for_key = new_emoji if new_emoji else f"custom:{new_custom_emoji_id}"
+                    emoji_suggestion_key = f"{chat_id}:{emoji_for_key}:{message_id}"
+                    if not hasattr(handle_reaction, '_emoji_suggestions'):
+                        handle_reaction._emoji_suggestions = set()
+                    
+                    if emoji_suggestion_key not in handle_reaction._emoji_suggestions:
+                        handle_reaction._emoji_suggestions.add(emoji_suggestion_key)
+                        
+                        # Предлагаем добавить эмодзи
+                        markup = InlineKeyboardMarkup()
+                        if new_emoji:
+                            markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_emoji:{new_emoji}"))
+                            emoji_display = new_emoji
+                        else:
+                            markup.add(InlineKeyboardButton("✅ Добавить", callback_data=f"add_custom_emoji:{new_custom_emoji_id}"))
+                            emoji_display = f"кастомное эмодзи (ID: {new_custom_emoji_id})"
+                        
+                        markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"cancel_add_emoji:{message_id}"))
+                        
+                        bot_instance.send_message(
+                            chat_id,
+                            f"💡 Хотите добавить {emoji_display} в список разрешённых для отметки о просмотре?",
+                            reply_to_message_id=message_id,
+                            reply_markup=markup
+                        )
+                        logger.info(f"[REACTION] Предложено добавить {emoji_display} для чата {chat_id} на сообщение {message_id}")
+            except Exception as e:
+                logger.error(f"[REACTION] Ошибка при предложении добавить эмодзи: {e}", exc_info=True)
+    
+    # Если нет ссылки на фильм, не можем обработать
+    if not link:
+        logger.info(f"[REACTION] Нет link для message_id={message_id}, chat_id={chat_id}. Реакция не обработана.")
+        return
+    
+    # Отмечаем фильм как просмотренный (даже если эмодзи не в списке watched)
+    # Это позволяет пользователю отмечать фильмы любым эмодзи, а не только из списка watched
+    
+    user_id = reaction.user.id if reaction.user else None
+    if not user_id:
+        logger.warning("[REACTION] Не удалось получить user_id")
+        return
+    
+    with db_lock:
+        cursor.execute("SELECT id, title FROM movies WHERE link = %s AND chat_id = %s", (link, chat_id))
+        film = cursor.fetchone()
+        if not film:
+            logger.info("[REACTION] Фильм не найден")
+            return
+        
+        film_id = film.get('id') if isinstance(film, dict) else film[0]
+        film_title = film.get('title') if isinstance(film, dict) else film[1]
+        
+        # Проверяем, не просмотрел ли уже этот пользователь
+        cursor.execute("SELECT id FROM watched_movies WHERE chat_id = %s AND film_id = %s AND user_id = %s", 
+                      (chat_id, film_id, user_id))
+        already_watched = cursor.fetchone()
+        
+        if already_watched:
+            logger.info(f"[REACTION] Пользователь {user_id} уже отметил фильм {film_title} как просмотренный")
+            return
+        
+        # Сохраняем просмотр для конкретного пользователя
+        cursor.execute("""
+            INSERT INTO watched_movies (chat_id, film_id, user_id, watched_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (chat_id, film_id, user_id) DO NOTHING
+        """, (chat_id, film_id, user_id))
+        
+        # Обновляем watched для фильма (если хотя бы один просмотрел)
+        cursor.execute("""
+            UPDATE movies 
+            SET watched = 1 
+            WHERE id = %s AND (
+                SELECT COUNT(*) FROM watched_movies WHERE film_id = %s AND chat_id = %s
+            ) > 0
+        """, (film_id, film_id, chat_id))
+        
+        conn.commit()
+        logger.info(f"[REACTION] Фильм {film_title} отмечен просмотренным пользователем {user_id}")
+        
+        # Получаем kp_id для получения фактов
+        cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+        kp_row = cursor.fetchone()
+        kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
+    
+    # Отправляем персональное сообщение пользователю с упоминанием
+    user_name = reaction.user.first_name if reaction.user else "Вы"
+    user_mention = f"@{reaction.user.username}" if reaction.user and reaction.user.username else user_name
+    msg = bot_instance.send_message(chat_id, 
+        f"🎬 {user_mention}, фильм <b>{film_title}</b> отмечен как просмотренный!\n\n"
+        f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.",
+        parse_mode='HTML')
+    
+    # Сохраняем связь message_id -> film_id для обработки оценки
+    rating_messages[msg.message_id] = film_id
+    logger.info(f"[REACTION] Сообщение об оценке отправлено для {user_name}, message_id={msg.message_id}, film_id={film_id}")
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_emoji:"))
+def add_emoji_callback(call):
+    """Обработчик кнопки 'Добавить' для обычного эмодзи"""
+    try:
+        emoji = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем текущие эмодзи
+        current_emojis = list(get_watched_emojis(chat_id))
+        
+        # Добавляем новое эмодзи, если его еще нет
+        if emoji not in current_emojis:
+            current_emojis.append(emoji)
+            emojis_str = ''.join(current_emojis)
+            
+            # Сохраняем в БД
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, 'watched_emoji', %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (chat_id, emojis_str))
+                conn.commit()
+            
+            bot_instance.answer_callback_query(call.id, f"✅ Эмодзи {emoji} добавлен!")
+            bot_instance.edit_message_text(
+                f"✅ Эмодзи {emoji} добавлен в список разрешённых для отметки о просмотре.",
+                chat_id,
+                call.message.message_id
+            )
+            logger.info(f"[ADD EMOJI] Эмодзи {emoji} добавлен для чата {chat_id}")
+        else:
+            bot_instance.answer_callback_query(call.id, "Эмодзи уже в списке")
+            bot_instance.delete_message(chat_id, call.message.message_id)
+    except Exception as e:
+        logger.error(f"[ADD EMOJI] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_custom_emoji:"))
+def add_custom_emoji_callback(call):
+    """Обработчик кнопки 'Добавить' для кастомного эмодзи"""
+    try:
+        custom_emoji_id = call.data.split(":")[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        # Получаем текущие эмодзи и кастомные ID
+        current_emojis = list(get_watched_emojis(chat_id))
+        current_custom_ids = get_watched_custom_emoji_ids(chat_id)
+        
+        # Добавляем новое кастомное эмодзи, если его еще нет
+        if custom_emoji_id not in current_custom_ids:
+            current_custom_ids.append(custom_emoji_id)
+            emojis_str = ''.join(current_emojis)
+            if current_custom_ids:
+                custom_str = ','.join([f"custom:{cid}" for cid in current_custom_ids])
+                emojis_str = emojis_str + (',' + custom_str if emojis_str else custom_str)
+            
+            # Сохраняем в БД
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, 'watched_emoji', %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (chat_id, emojis_str))
+                conn.commit()
+            
+            bot_instance.answer_callback_query(call.id, f"✅ Кастомное эмодзи добавлено!")
+            bot_instance.edit_message_text(
+                f"✅ Кастомное эмодзи (ID: {custom_emoji_id}) добавлено в список разрешённых для отметки о просмотре.",
+                chat_id,
+                call.message.message_id
+            )
+            logger.info(f"[ADD CUSTOM EMOJI] Кастомное эмодзи {custom_emoji_id} добавлено для чата {chat_id}")
+        else:
+            bot_instance.answer_callback_query(call.id, "Эмодзи уже в списке")
+            bot_instance.delete_message(chat_id, call.message.message_id)
+    except Exception as e:
+        logger.error(f"[ADD CUSTOM EMOJI] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("cancel_add_emoji:"))
+def cancel_add_emoji_callback(call):
+    """Обработчик кнопки 'Отменить' для предложения добавить эмодзи"""
+    try:
+        bot_instance.answer_callback_query(call.id, "Отменено")
+        bot_instance.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        logger.error(f"[CANCEL ADD EMOJI] Ошибка: {e}", exc_info=True)
 
 
 def register_text_message_handlers(bot_instance):

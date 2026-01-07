@@ -456,7 +456,7 @@ def show_film_description_callback(call):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description:"))
 def mark_watched_from_description_callback(call):
-    """Обработчик кнопки '✅ Отметить просмотренным' - отмечает фильм как просмотренный и обновляет сообщение"""
+    """Обработчик кнопки '👁️ Просмотрено' - отмечает фильм как просмотренный и обновляет сообщение"""
     logger.info("=" * 80)
     logger.info(f"[MARK WATCHED] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
@@ -548,6 +548,166 @@ def mark_watched_from_description_callback(call):
             pass
     finally:
         logger.info(f"[MARK WATCHED] ===== END: callback_id={call.id}")
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description_kp:"))
+def mark_watched_from_description_kp_callback(call):
+    """Обработчик кнопки '👁️ Просмотрено' для фильмов, не добавленных в базу - добавляет фильм в базу как просмотренный"""
+    logger.info("=" * 80)
+    logger.info(f"[MARK WATCHED KP] ===== START: callback_id={call.id}, callback_data={call.data}")
+    try:
+        # Отвечаем на callback сразу
+        bot_instance.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
+        
+        kp_id = call.data.split(":")[1]
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id if call.message else None
+        message_thread_id = None
+        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+            message_thread_id = call.message.message_thread_id
+        
+        logger.info(f"[MARK WATCHED KP] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}, message_id={message_id}")
+        
+        # Получаем информацию о фильме через API
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Добавляем фильм в базу как просмотренный
+        from moviebot.bot.handlers.series import ensure_movie_in_database
+        film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+        
+        if not film_id:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+            return
+        
+        # Отмечаем фильм как просмотренный
+        with db_lock:
+            cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            conn.commit()
+            logger.info(f"[MARK WATCHED KP] Фильм {film_id} добавлен в базу и отмечен как просмотренный")
+        
+        # Обновляем existing (теперь watched=1)
+        existing = (film_id, info.get('title'), True)
+        
+        # Обновляем сообщение с описанием фильма
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(
+            chat_id, user_id, info, link, kp_id, existing=existing,
+            message_id=message_id, message_thread_id=message_thread_id
+        )
+        
+        logger.info(f"[MARK WATCHED KP] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
+        bot_instance.answer_callback_query(call.id, text="✅ Фильм добавлен в базу и отмечен как просмотренный", show_alert=False)
+        
+    except Exception as e:
+        logger.error(f"[MARK WATCHED KP] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+    finally:
+        logger.info(f"[MARK WATCHED KP] ===== END: callback_id={call.id}")
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("toggle_watched_from_description:"))
+def toggle_watched_from_description_callback(call):
+    """Обработчик кнопки '✅ Просмотрено' - снимает отметку просмотра"""
+    logger.info("=" * 80)
+    logger.info(f"[TOGGLE WATCHED] ===== START: callback_id={call.id}, callback_data={call.data}")
+    try:
+        # Отвечаем на callback сразу
+        bot_instance.answer_callback_query(call.id, text="⏳ Снимаю отметку просмотра...")
+        
+        film_id = int(call.data.split(":")[1])
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id if call.message else None
+        message_thread_id = None
+        if call.message and hasattr(call.message, 'message_thread_id') and call.message.message_thread_id:
+            message_thread_id = call.message.message_thread_id
+        
+        logger.info(f"[TOGGLE WATCHED] film_id={film_id}, user_id={user_id}, chat_id={chat_id}, message_id={message_id}")
+        
+        # Получаем информацию о фильме из БД
+        with db_lock:
+            cursor.execute('''
+                SELECT id, title, watched, link, kp_id, year, genres, description, director, actors, is_series
+                FROM movies WHERE id = %s AND chat_id = %s
+            ''', (film_id, chat_id))
+            row = cursor.fetchone()
+            
+            if not row:
+                logger.error(f"[TOGGLE WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
+                bot_instance.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                return
+            
+            # Извлекаем данные
+            if isinstance(row, dict):
+                title = row.get('title')
+                watched = row.get('watched')
+                link = row.get('link')
+                kp_id = row.get('kp_id')
+                year = row.get('year')
+                genres = row.get('genres')
+                description = row.get('description')
+                director = row.get('director')
+                actors = row.get('actors')
+                is_series = bool(row.get('is_series', 0))
+            else:
+                title = row[1]
+                watched = row[2]
+                link = row[3]
+                kp_id = row[4]
+                year = row[5]
+                genres = row[6]
+                description = row[7]
+                director = row[8]
+                actors = row[9]
+                is_series = bool(row[10] if len(row) > 10 else 0)
+            
+            # Снимаем отметку просмотра
+            cursor.execute('UPDATE movies SET watched = 0 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            conn.commit()
+            logger.info(f"[TOGGLE WATCHED] Фильм {film_id} - отметка просмотра снята")
+        
+        # Формируем словарь info из данных БД (без API запроса)
+        info = {
+            'title': title,
+            'year': year,
+            'genres': genres,
+            'description': description,
+            'director': director,
+            'actors': actors,
+            'is_series': is_series
+        }
+        
+        # Обновляем existing (теперь watched=0)
+        existing = (film_id, title, False)
+        
+        # Обновляем сообщение с описанием фильма
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(
+            chat_id, user_id, info, link, kp_id, existing=existing,
+            message_id=message_id, message_thread_id=message_thread_id
+        )
+        
+        logger.info(f"[TOGGLE WATCHED] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
+        bot_instance.answer_callback_query(call.id, text="✅ Отметка просмотра снята", show_alert=False)
+        
+    except Exception as e:
+        logger.error(f"[TOGGLE WATCHED] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+    finally:
+        logger.info(f"[TOGGLE WATCHED] ===== END: callback_id={call.id}")
 
 
 def register_film_callbacks(bot_instance):

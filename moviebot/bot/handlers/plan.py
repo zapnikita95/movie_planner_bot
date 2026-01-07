@@ -72,6 +72,7 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
         row = cursor.fetchone()
         if not row:
+            # При планировании фильма дома автоматически добавляем его в базу
             info = extract_movie_info(link)
             if info:
                 is_series_val = 1 if info.get('is_series') else 0
@@ -83,6 +84,7 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
                 if row:
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
                     title = row.get('title') if isinstance(row, dict) else row[1]
+                    logger.info(f"[PROCESS_PLAN] Фильм автоматически добавлен в базу при планировании: kp_id={info['kp_id']}, film_id={film_id}")
                 else:
                     bot_instance.send_message(chat_id, "Не удалось добавить фильм в базу.")
                     return False
@@ -1432,11 +1434,12 @@ def handle_remove_from_calendar_callback(call):
         bot_instance.answer_callback_query(call.id)
         
         with db_lock:
-            # Получаем информацию о плане
+            # Получаем информацию о плане (включая проверку наличия билетов)
             cursor.execute('''
-                SELECT p.id, m.title
+                SELECT p.id, p.ticket_file_id, 
+                       CASE WHEN p.film_id IS NOT NULL THEN m.title ELSE NULL END as title
                 FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.id = %s AND p.chat_id = %s
             ''', (plan_id, chat_id))
             row = cursor.fetchone()
@@ -1446,13 +1449,36 @@ def handle_remove_from_calendar_callback(call):
                 logger.warning(f"[REMOVE FROM CALENDAR] План {plan_id} не найден")
                 return
             
-            title = row.get('title') if isinstance(row, dict) else row[1]
+            ticket_file_id = row.get('ticket_file_id') if isinstance(row, dict) else row[1]
+            title = row.get('title') if isinstance(row, dict) else row[2]
             
-            # Удаляем план
+            # Проверяем наличие билетов
+            has_tickets = ticket_file_id is not None and ticket_file_id.strip() != ''
+            
+            if has_tickets:
+                # Если есть билеты, показываем подтверждение
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("✅ Да, удалить", callback_data=f"confirm_remove_plan:{plan_id}"))
+                markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_remove_plan:{plan_id}"))
+                
+                event_name = title if title else "мероприятие"
+                bot_instance.send_message(
+                    chat_id,
+                    f"⚠️ <b>Подтверждение удаления</b>\n\n"
+                    f"Вы уверены, что хотите удалить <b>{event_name}</b> из расписания?\n\n"
+                    f"⚠️ <b>Внимание:</b> При удалении из расписания будут также удалены все билеты, связанные с этим мероприятием.",
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
+            
+            # Если билетов нет, удаляем сразу
+            title = title if title else "мероприятие"
             cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
             conn.commit()
         
-        bot_instance.answer_callback_query(call.id, f"✅ Фильм '{title}' удалён из календаря")
+        bot_instance.answer_callback_query(call.id, f"✅ '{title}' удалён из календаря")
         logger.info(f"[REMOVE FROM CALENDAR] План {plan_id} удалён пользователем {user_id}")
         
         # Обновляем сообщение, убирая кнопки
@@ -1466,6 +1492,64 @@ def handle_remove_from_calendar_callback(call):
             bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("confirm_remove_plan:"))
+def confirm_remove_plan_callback(call):
+    """Обработчик подтверждения удаления плана с билетами"""
+    try:
+        plan_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        bot_instance.answer_callback_query(call.id)
+        
+        with db_lock:
+            # Получаем информацию о плане
+            cursor.execute('''
+                SELECT p.id, p.ticket_file_id,
+                       CASE WHEN p.film_id IS NOT NULL THEN m.title ELSE NULL END as title
+                FROM plans p
+                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.id = %s AND p.chat_id = %s
+            ''', (plan_id, chat_id))
+            row = cursor.fetchone()
+            
+            if not row:
+                bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                return
+            
+            title = row.get('title') if isinstance(row, dict) else row[2]
+            title = title if title else "мероприятие"
+            
+            # Удаляем план (билеты удалятся автоматически, так как они хранятся в ticket_file_id)
+            cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+            conn.commit()
+        
+        # Удаляем сообщение с подтверждением
+        try:
+            bot_instance.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
+        
+        bot_instance.send_message(chat_id, f"✅ '{title}' удалён из расписания. Билеты также удалены.")
+        logger.info(f"[CONFIRM REMOVE PLAN] План {plan_id} удалён пользователем {user_id} с билетами")
+    except Exception as e:
+        logger.error(f"[CONFIRM REMOVE PLAN] Ошибка: {e}", exc_info=True)
+        try:
+            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("cancel_remove_plan:"))
+def cancel_remove_plan_callback(call):
+    """Обработчик отмены удаления плана"""
+    try:
+        bot_instance.answer_callback_query(call.id, "Отменено")
+        bot_instance.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        logger.error(f"[CANCEL REMOVE PLAN] Ошибка: {e}", exc_info=True)
 
 
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_select:"))
