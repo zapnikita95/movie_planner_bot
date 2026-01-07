@@ -3855,7 +3855,7 @@ def handle_kinopoisk_link(message):
         
         # Проверяем, есть ли уже в базе (для определения статуса просмотра и оценки)
         with db_lock:
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
             row = cursor.fetchone()
             if row:
                 # Уже в базе - ОБНОВЛЯЕМ данные в базе актуальными данными из API
@@ -4175,39 +4175,39 @@ def add_film_from_search_callback(call):
         user_id = call.from_user.id
         
             # Определяем тип фильма и формируем правильную ссылку
-        is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
+            is_series = film_type in ['TV_SERIES', 'MINI_SERIES']
+            
+            if is_series:
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            else:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            # Получаем информацию о фильме
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            info = extract_movie_info(link)
+            
+            if not info:
+                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            # Убеждаемся, что is_series правильно установлен в info
+            if is_series:
+                info['is_series'] = True
+            
+            # Показываем карточку фильма БЕЗ автоматического добавления в базу
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=None,
+                message_id=None
+            )
+            
+            bot_instance.answer_callback_query(call.id, "✅ Информация о фильме")
         
-        if is_series:
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-        else:
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        
-        # Получаем информацию о фильме
-        from moviebot.api.kinopoisk_api import extract_movie_info
-        info = extract_movie_info(link)
-        
-        if not info:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-            return
-        
-        # Убеждаемся, что is_series правильно установлен в info
-        if is_series:
-            info['is_series'] = True
-        
-        # Показываем карточку фильма БЕЗ автоматического добавления в базу
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
-        show_film_info_with_buttons(
-            chat_id=chat_id,
-            user_id=user_id,
-            info=info,
-            link=link,
-            kp_id=kp_id,
-            existing=None,
-            message_id=None
-        )
-        
-        bot_instance.answer_callback_query(call.id, "✅ Информация о фильме")
-    
     except Exception as e:
         logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
         try:
@@ -4871,9 +4871,11 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Получаем film_id для проверки оценок и планов
         logger.info(f"[SHOW FILM INFO] Получение film_id...")
         film_id = None
+        watched = False  # Инициализируем watched по умолчанию
         if existing:
             film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
-            logger.info(f"[SHOW FILM INFO] film_id из existing: {film_id}")
+            watched = existing.get('watched') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
+            logger.info(f"[SHOW FILM INFO] film_id из existing: {film_id}, watched: {watched}")
         else:
             logger.info(f"[SHOW FILM INFO] Запрос film_id из БД...")
             try:
@@ -4881,21 +4883,25 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
                     try:
-                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+                        # Приводим kp_id к строке, так как в БД это text
+                        cursor.execute("SELECT id, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
                         film_row = cursor.fetchone()
                         if film_row:
                             film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                        logger.info(f"[SHOW FILM INFO] Запрос film_id выполнен, film_id={film_id}")
+                            watched = film_row.get('watched') if isinstance(film_row, dict) else (film_row[1] if len(film_row) > 1 else False)
+                        logger.info(f"[SHOW FILM INFO] Запрос film_id выполнен, film_id={film_id}, watched={watched}")
                     finally:
                         db_lock.release()
                         logger.info(f"[SHOW FILM INFO] db_lock освобожден после запроса film_id")
                 else:
                     logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос film_id (не критично)")
                     film_id = None
+                    watched = False
             except Exception as film_id_e:
                 logger.warning(f"[SHOW FILM INFO] Ошибка при запросе film_id (не критично): {film_id_e}")
                 film_id = None
-            logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}")
+                watched = False
+            logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}, watched: {watched}")
         
         # Проверяем, есть ли уже план для этого фильма (чтение безопасно без lock)
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
@@ -5463,7 +5469,7 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
         with db_lock:
             logger.info(f"[ENSURE MOVIE] db_lock получен, проверяю существование фильма")
             # Проверяем, существует ли фильм
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
             row = cursor.fetchone()
             
             if row:
@@ -5480,7 +5486,7 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'link')
                 ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
                 RETURNING id
-            ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], info['description'], 
+            ''', (chat_id, link, str(kp_id), info['title'], info['year'], info['genres'], info['description'], 
                   info['director'], info['actors'], 1 if info.get('is_series') else 0, user_id))
             
             result = cursor.fetchone()
@@ -5586,7 +5592,7 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
         film_id = None
         has_plan = False
         with db_lock:
-            cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
             film_row = cursor.fetchone()
             if film_row:
                 film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
@@ -5697,7 +5703,7 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 try:
                     with db_lock:
                         # Проверяем, есть ли фильм в базе группы (добавлен через бота)
-                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                         film_row = cursor.fetchone()
                         
                         if film_row:
