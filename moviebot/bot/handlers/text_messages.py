@@ -1230,7 +1230,6 @@ def handle_rate_list_reply(message):
     user_id = message.from_user.id
     
     # ВАЖНО: Пропускаем сообщения, если пользователь в любом состоянии
-    # Эти сообщения должны обрабатываться через main_text_handler
     from moviebot.states import (
         user_plan_state, user_promo_state, user_promo_admin_state,
         user_ticket_state, user_search_state, user_settings_state,
@@ -1241,44 +1240,47 @@ def handle_rate_list_reply(message):
     
     logger.info(f"[HANDLE RATE LIST REPLY] Проверка состояний: user_search_state={user_id in user_search_state}, user_plan_state={user_id in user_plan_state}, user_ticket_state={user_id in user_ticket_state}")
     
-    # КРИТИЧЕСКИ ВАЖНО: Пропускаем user_promo_state и user_promo_admin_state - они обрабатываются в main_text_handler
+    # КРИТИЧЕСКИ ВАЖНО: Пропускаем user_promo_state и user_promo_admin_state
     if user_id in user_promo_state or user_id in user_promo_admin_state:
-        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии промокода (promo={user_id in user_promo_state}, promo_admin={user_id in user_promo_admin_state}), передаем в main_text_handler")
+        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск сообщения - пользователь в состоянии промокода")
         return
     
-    # ВАЖНО: Проверяем user_search_state ПЕРВЫМ, так как поиск должен обрабатываться в main_text_handler
+    # Проверяем user_search_state первым
     if user_id in user_search_state:
-        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии поиска, передаем в main_text_handler")
+        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии поиска")
         return
     
-    # Проверяем остальные состояния - ВАЖНО: проверяем ДО обработки, чтобы не перехватывать сообщения из состояний
-    # НЕ проверяем админские состояния (user_refund_state, user_unsubscribe_state, user_add_admin_state) - 
-    # они обрабатываются через отдельный обработчик handle_admin_commands_reply
-    if (user_id in user_plan_state or 
-        user_id in user_ticket_state or
-        user_id in user_settings_state or
-        user_id in user_edit_state or
-        user_id in user_view_film_state or
-        user_id in user_import_state or
-        user_id in user_clean_state or
-        user_id in user_cancel_subscription_state):
-        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в состоянии (plan={user_id in user_plan_state}, ticket={user_id in user_ticket_state}), передаем в main_text_handler")
+    # === ФИКС: Если пользователь в планировании и на шаге 3 (ввод даты) — НЕ перехватываем сообщение ===
+    if user_id in user_plan_state:
+        state = user_plan_state[user_id]
+        if state.get('step') == 3:
+            logger.info(f"[HANDLE RATE LIST REPLY] НЕ пропускаем — пользователь на шаге 3 планирования (ввод даты)")
+            # НИЧЕГО НЕ ДЕЛАЕМ — сообщение уйдёт в handle_plan_datetime_reply
+        else:
+            logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — пользователь в планировании, но не на step=3")
+            return
+    # Остальные состояния — пропускаем
+    elif (user_id in user_ticket_state or
+          user_id in user_settings_state or
+          user_id in user_edit_state or
+          user_id in user_view_film_state or
+          user_id in user_import_state or
+          user_id in user_clean_state or
+          user_id in user_cancel_subscription_state):
+        logger.info(f"[HANDLE RATE LIST REPLY] ✅ Пропуск сообщения - пользователь в другом состоянии")
         return
     
-    # Обрабатываем сообщения с оценками (числа от 1 до 10) - они обрабатываются через rating_messages
+    # Обрабатываем сообщения с оценками (числа от 1 до 10)
     text_stripped = message.text.strip() if message.text else ""
-    if (len(text_stripped) == 1 and text_stripped.isdigit() and 1 <= int(text_stripped) <= 9) or \
-       (len(text_stripped) == 2 and text_stripped == "10"):
-        # Это оценка - обрабатываем через rating_messages
+    
+    # Строгая проверка: только чистые оценки 1–10
+    if text_stripped in {'1', '2', '3', '4', '5', '6', '7', '8', '9', '10'}:
         rating = int(text_stripped)
-        logger.info(f"[HANDLE RATE LIST REPLY] Обнаружена оценка: {rating}, обрабатываем")
+        logger.info(f"[HANDLE RATE LIST REPLY] Обнаружена чистая оценка: {rating}, обрабатываем")
         
-        # === ФИКС: Определяем reply_msg_id ДО очистки ===
         reply_msg_id = message.reply_to_message.message_id if message.reply_to_message else None
-        
         from moviebot.states import rating_messages
         
-        # Очищаем rating_messages ДО и ПОСЛЕ обработки
         cleaned = False
         if reply_msg_id and reply_msg_id in rating_messages:
             del rating_messages[reply_msg_id]
@@ -1291,10 +1293,8 @@ def handle_rate_list_reply(message):
             logger.info(f"[HANDLE RATE LIST REPLY] handle_rating_internal завершен")
         except Exception as rating_e:
             logger.error(f"[HANDLE RATE LIST REPLY] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
-            # Очищаем даже при ошибке
             if not cleaned and reply_msg_id and reply_msg_id in rating_messages:
                 del rating_messages[reply_msg_id]
-                logger.info(f"[HANDLE RATE LIST REPLY] Принудительно очищено rating_messages после ошибки")
         
         return
     
@@ -1309,7 +1309,7 @@ def handle_rate_list_reply(message):
     if not text:
         return
     
-    # Парсим оценки: kp_id оценка (разделители: пробел, запятая, точка с запятой, таб)
+    # Парсим оценки: kp_id оценка
     ratings_pattern = r'(\d+)\s*[,;:\t]?\s*(\d+)'
     matches = re.findall(ratings_pattern, text)
     
@@ -1330,7 +1330,6 @@ def handle_rate_list_reply(message):
                     errors.append(f"{kp_id}: оценка должна быть от 1 до 10")
                     continue
                 
-                # Находим фильм по kp_id
                 cursor.execute('''
                     SELECT id, title FROM movies
                     WHERE chat_id = %s AND kp_id = %s AND watched = 1
@@ -1344,7 +1343,6 @@ def handle_rate_list_reply(message):
                 film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
                 title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
                 
-                # Проверяем, не оценил ли уже пользователь этот фильм
                 cursor.execute('''
                     SELECT rating FROM ratings
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s
@@ -1355,7 +1353,6 @@ def handle_rate_list_reply(message):
                     errors.append(f"{kp_id}: вы уже оценили этот фильм")
                     continue
                 
-                # Сохраняем оценку
                 cursor.execute('''
                     INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
                     VALUES (%s, %s, %s, %s, FALSE)
@@ -1364,22 +1361,18 @@ def handle_rate_list_reply(message):
                 
                 results.append((kp_id, title, rating))
                 
-                # Проверяем, все ли активные пользователи оценили фильм
+                # Проверка, все ли оценили
                 cursor.execute('''
-                    SELECT DISTINCT user_id
-                    FROM stats
-                    WHERE chat_id = %s AND user_id IS NOT NULL
+                    SELECT DISTINCT user_id FROM stats WHERE chat_id = %s AND user_id IS NOT NULL
                 ''', (chat_id,))
                 active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
                 
-                # Получаем всех, кто оценил этот фильм (только неимпортированные оценки)
                 cursor.execute('''
                     SELECT DISTINCT user_id FROM ratings
                     WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
                 ''', (chat_id, film_id))
                 rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
                 
-                # Если все активные пользователи оценили, отмечаем фильм как просмотренный
                 if active_users and active_users.issubset(rated_users):
                     cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                     logger.info(f"[RATE] Все активные пользователи оценили фильм {film_id}, отмечен как просмотренный")
