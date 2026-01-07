@@ -2,7 +2,7 @@
 Обработчики команды /start и главного меню
 """
 import logging
-from telebot_instance.types import InlineKeyboardMarkup, InlineKeyboardButton
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.bot.bot_init import bot_instance  # ТОЛЬКО bot_instance
 from moviebot_instance.database.db_operations import (
