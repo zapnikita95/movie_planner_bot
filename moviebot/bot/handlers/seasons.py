@@ -449,7 +449,10 @@ def handle_seasons_kp(call):
                         WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
                     ''', (chat_id, film_id, user_id))
                     for w_row in cursor.fetchall():
-                        watched_set.add((str(w_row[0]), str(w_row[1])))
+                        # Универсально: работает и с dict, и с tuple
+                        season_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
+                        ep_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
+                        watched_set.add((season_num, ep_num))
 
             _, watched_in_season = count_episodes_for_watch_check([season], is_airing, watched_set, chat_id, film_id, user_id)
             total_in_season, _ = count_episodes_for_watch_check([season], is_airing, set(), chat_id, film_id, user_id)
