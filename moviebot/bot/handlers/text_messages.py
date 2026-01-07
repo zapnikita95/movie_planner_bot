@@ -355,11 +355,12 @@ def handle_plan_datetime_reply(message):
     except Exception as e:
         logger.error(f"[PLAN DATETIME REPLY] ❌ Ошибка: {e}", exc_info=True)
 
-    # ← Универсальная обработка ошибки + очистка состояния (работает всегда)
-    try:
-        bot_instance.reply_to(message, "❌ Произошла ошибка при обработке даты/времени")
-    except:
-        pass
+    # Убрали универсальную ошибку — она больше не нужна, обработка в try-except полная
+    # Если краш — логи покажут, а пользователю ничего не отправляем лишнего
+    #try:
+    #    bot_instance.reply_to(message, "❌ Произошла ошибка при обработке даты/времени")
+    #except:
+    #    pass
 
     # Очищаем состояние на всякий случай (если оно зависло)
     from moviebot.states import user_plan_state
