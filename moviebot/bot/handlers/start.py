@@ -4,7 +4,7 @@
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot  # Глобальный экземпляр бота
+from moviebot.bot.bot_init import bot, bot_instance
 from moviebot.database.db_operations import (
     get_active_subscription,
     get_active_group_subscription_by_chat_id,
