@@ -860,7 +860,8 @@ def plan_type_callback(call):
         logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
         logger.info(f"[PLAN FROM ADDED] Получен callback: call.data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
         try:
-            bot_instance.answer_callback_query(call.id)  # Отвечаем сразу, чтобы убрать "крутилку"
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot_instance, call.id)  # Отвечаем сразу, чтобы убрать "крутилку"
             
             user_id = call.from_user.id
             chat_id = call.message.chat.id

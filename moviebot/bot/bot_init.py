@@ -100,3 +100,31 @@ def sync_commands_periodically(bot_instance):
     """
     logger.info("Периодическая синхронизация команд...")
     setup_bot_commands(bot_instance)
+
+def safe_answer_callback_query(bot_instance, callback_query_id, text=None, show_alert=False, url=None, cache_time=None):
+    """
+    Безопасный вызов answer_callback_query с обработкой ошибок.
+    Не падает на устаревших callback'ах (query is too old).
+    
+    Args:
+        bot_instance: Экземпляр бота
+        callback_query_id: ID callback query
+        text: Текст ответа (опционально)
+        show_alert: Показывать ли alert (опционально)
+        url: URL для перенаправления (опционально)
+        cache_time: Время кэширования (опционально)
+    
+    Returns:
+        bool: True если успешно, False если ошибка
+    """
+    try:
+        bot_instance.answer_callback_query(callback_query_id, text=text, show_alert=show_alert, url=url, cache_time=cache_time)
+        return True
+    except Exception as e:
+        error_msg = str(e).lower()
+        # Игнорируем ошибки устаревших callback'ов
+        if 'too old' in error_msg or 'timeout expired' in error_msg or 'invalid' in error_msg:
+            logger.debug(f"[SAFE CALLBACK] Callback query {callback_query_id} устарел или невалиден, игнорируем: {e}")
+        else:
+            logger.warning(f"[SAFE CALLBACK] Ошибка при ответе на callback query {callback_query_id}: {e}")
+        return False

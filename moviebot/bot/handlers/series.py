@@ -4347,7 +4347,8 @@ def add_film_from_search_callback(call):
         logger.info("=" * 80)
         logger.info(f"[ADD FILM FROM SEARCH] ===== START: callback_id={call.id}, callback_data={call.data}")
         try:
-            bot_instance.answer_callback_query(call.id, text="⏳ Загружаю информацию...")
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot_instance, call.id, text="⏳ Загружаю информацию...")
             logger.info(f"[ADD FILM FROM SEARCH] answer_callback_query вызван, callback_id={call.id}")
             
             # Парсим callback_data: add_film_{kp_id}:{film_type}
@@ -4377,7 +4378,8 @@ def add_film_from_search_callback(call):
             
             if not info:
                 logger.error(f"[ADD FILM FROM SEARCH] Не удалось получить информацию о фильме: kp_id={kp_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                from moviebot.bot.bot_init import safe_answer_callback_query
+                safe_answer_callback_query(bot_instance, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
                 return
             
             # Проверяем, есть ли фильм уже в базе
@@ -4403,10 +4405,8 @@ def add_film_from_search_callback(call):
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: успешно показана информация о фильме {kp_id}")
         except Exception as e:
             logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
-            try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка обработки", show_alert=True)
         finally:
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
 
@@ -4416,7 +4416,8 @@ def view_film_description_callback(call):
     """Обработчик кнопки 'Перейти к описанию' из сообщения об отметке как просмотренные"""
     logger.info(f"[VIEW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
-        bot_instance.answer_callback_query(call.id, text="⏳ Загружаю описание...")
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot_instance, call.id, text="⏳ Загружаю описание...")
         
         kp_id = call.data.split(":")[1]
         user_id = call.from_user.id
@@ -4431,7 +4432,8 @@ def view_film_description_callback(call):
         
         if not info:
             logger.error(f"[VIEW FILM DESCRIPTION] Не удалось получить информацию о фильме для kp_id={kp_id}")
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot_instance, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
         
         # Если это сериал, используем правильную ссылку
@@ -4457,10 +4459,8 @@ def view_film_description_callback(call):
         logger.info(f"[VIEW FILM DESCRIPTION] ✅ Описание фильма показано: kp_id={kp_id}")
     except Exception as e:
         logger.error(f"[VIEW FILM DESCRIPTION] ❌ Ошибка: {e}", exc_info=True)
-        try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except:
-            pass
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка обработки", show_alert=True)
 
 
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
@@ -4469,7 +4469,8 @@ def add_to_database_callback(call):
     logger.info("=" * 80)
     logger.info(f"[ADD TO DATABASE] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
-        bot_instance.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot_instance, call.id, text="⏳ Добавляю в базу...")
         logger.info(f"[ADD TO DATABASE] answer_callback_query вызван, callback_id={call.id}")
         
         kp_id = call.data.split(":")[1]
@@ -4492,7 +4493,8 @@ def add_to_database_callback(call):
         
         if not info:
             logger.error(f"[ADD TO DATABASE] Не удалось получить информацию о фильме для kp_id={kp_id}")
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot_instance, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
         
         logger.info(f"[ADD TO DATABASE] Информация получена, title={info.get('title', 'N/A')}, is_series={info.get('is_series', False)}")
@@ -4519,7 +4521,8 @@ def add_to_database_callback(call):
         title = info.get('title', 'Фильм')
         
         if was_inserted:
-            bot_instance.answer_callback_query(call.id, f"✅ {title} добавлен в базу!", show_alert=False)
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot_instance, call.id, f"✅ {title} добавлен в базу!", show_alert=False)
             logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title}")
             
             # Обновляем сообщение, показывая что фильм теперь в базе
@@ -4533,14 +4536,13 @@ def add_to_database_callback(call):
             # Показываем описание с кнопками (теперь фильм в базе)
             show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title_db, watched), message_id=call.message.message_id)
         else:
-            bot_instance.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot_instance, call.id, f"ℹ️ {title} уже в базе", show_alert=False)
             logger.info(f"[ADD TO DATABASE] Фильм уже был в базе: film_id={film_id}, title={title}")
     except Exception as e:
         logger.error(f"[ADD TO DATABASE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
-        try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except Exception as answer_e:
-            logger.error(f"[ADD TO DATABASE] Не удалось вызвать answer_callback_query: {answer_e}")
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка обработки", show_alert=True)
     finally:
         logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 

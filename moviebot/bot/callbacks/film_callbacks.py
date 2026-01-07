@@ -197,7 +197,8 @@ def plan_from_added_callback(call):
     logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
     logger.info(f"[PLAN FROM ADDED] Получен callback: call.data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot_instance, call.id)
         
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -267,7 +268,8 @@ def plan_from_added_callback(call):
         
     except Exception as e:
         logger.error(f"[PLAN FROM ADDED] Критическая ошибка: {e}", exc_info=True)
-        bot_instance.answer_callback_query(call.id, "❌ Ошибка планирования", show_alert=True)
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка планирования", show_alert=True)
     finally:
         logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
 
@@ -584,9 +586,10 @@ def mark_watched_from_description_kp_callback(call):
         from moviebot.bot.handlers.series import ensure_movie_in_database
         film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
         
-        if not film_id:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
-            return
+                    if not film_id:
+                        from moviebot.bot.bot_init import safe_answer_callback_query
+                        safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+                        return
         
         # Отмечаем фильм как просмотренный
         with db_lock:

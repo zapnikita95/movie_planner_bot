@@ -129,7 +129,8 @@ def send_welcome(message):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("start_menu:"))
 def start_menu_callback(call):
     try:
-        bot.answer_callback_query(call.id)
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot, call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         action = call.data.split(":")[1]
