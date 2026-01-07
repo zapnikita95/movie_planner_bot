@@ -82,7 +82,8 @@ from moviebot.bot.bot_init import set_scheduler
 set_scheduler(scheduler)
 
 # Устанавливаем экземпляр бота и scheduler в модуле scheduler
-from moviebot.scheduler import set_bot, set_scheduler_instance
+from moviebot.scheduler import set_bot_instance, set_scheduler_instance
+set_bot_instance(bot)          # ← передаём сам bot
 set_scheduler_instance(scheduler)
 
 # Настраиваем задачи планировщика
