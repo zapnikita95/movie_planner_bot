@@ -431,7 +431,7 @@ def handle_seasons_kp(call):
         with db_lock:
             cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
             row = cursor.fetchone()
-            film_id = row[0] if row else None
+            film_id = row.get('id') if row else None
 
         for season in seasons_data:
             season_num = season.get('number')
