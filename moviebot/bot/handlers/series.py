@@ -3763,149 +3763,6 @@ def register_series_handlers(bot_param):
     # Обработчик ссылок на Кинопоиск вынесен на уровень модуля для правильной регистрации
     pass
 
-# Обработчик ссылок на Кинопоиск - вынесен на уровень модуля для правильной регистрации
-@bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower()))
-def handle_kinopoisk_link(message):
-    """Обработчик текстовых сообщений со ссылками на Кинопоиск"""
-    logger.info(f"[KINOPOISK LINK] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}")
-    try:
-        from moviebot.bot.bot_init import BOT_ID
-        
-        user_id = message.from_user.id
-        chat_id = message.chat.id
-        text = message.text.strip()
-        
-        logger.info(f"[KINOPOISK LINK] Текст сообщения: '{text[:100]}'")
-        
-        # Пропускаем обработку, если это реплай на сообщение бота (для таких случаев есть отдельные handlers)
-        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
-            reply_text = message.reply_to_message.text or ""
-            # Проверяем, не является ли это реплаем на конкретные промпты бота
-            if any(prompt in reply_text for prompt in [
-                "Пришлите ссылку или ID фильма в ответном сообщении",
-                "Пришлите в ответном сообщении ссылку или ID фильма",
-                "В ответном сообщении пришлите ID фильмов"
-            ]):
-                logger.info(f"[KINOPOISK LINK] Сообщение является реплаем на промпт бота, пропускаем обработку (будет обработано отдельным handler)")
-                return
-        
-        # Проверяем, не находится ли пользователь в состоянии планирования или просмотра фильма
-        from moviebot.states import user_plan_state, user_view_film_state
-        if user_id in user_plan_state:
-            # Если пользователь в состоянии планирования и пришла ссылка - прерываем планирование
-            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии планирования, прерываем планирование и обрабатываем ссылку")
-            bot_instance.reply_to(message, "⚠️ Планирование прервано. Обрабатываю ссылку...")
-            del user_plan_state[user_id]
-        elif user_id in user_view_film_state:
-            # Если пользователь в состоянии просмотра фильма - пропускаем обработку ссылки
-            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии просмотра фильма, пропускаем обработку ссылки")
-            return
-        
-        logger.info(f"[KINOPOISK LINK] Получена ссылка от {user_id}: {text[:100]}")
-        
-        # Используем extract_kp_id_from_text для извлечения ID (он уже правильно обрабатывает все форматы)
-        kp_id = extract_kp_id_from_text(text)
-        if not kp_id:
-            logger.warning(f"[KINOPOISK LINK] Не удалось извлечь kp_id из текста: {text[:200]}")
-            bot_instance.reply_to(message, f"❌ Не удалось извлечь ID из ссылки: {text}")
-            return
-        
-        # Нормализуем ссылку - используем единый формат без www
-        if text.strip().startswith('http'):
-            # Если это ссылка, нормализуем её
-            link = text.strip()
-            # Убираем www для единообразия
-            link = re.sub(r'https?://www\.', 'https://', link)
-            # Убираем trailing slash если есть
-            link = link.rstrip('/')
-        else:
-            # Если это просто ID, создаем ссылку
-            link = f"https://kinopoisk.ru/film/{kp_id}"
-        
-        logger.info(f"[KINOPOISK LINK] Обработка ссылки: {link}, kp_id={kp_id}")
-        
-        # ВСЕГДА получаем информацию о фильме/сериале из API (даже если фильм уже в базе)
-        # Это нужно для получения актуальных данных (описание, актеры, режиссер и т.д.)
-        logger.info(f"[KINOPOISK LINK] ⚠️ ВАЖНО: Отправка запроса к API Кинопоиска для получения актуальной информации (даже если фильм уже в базе)")
-        logger.info(f"[KINOPOISK LINK] Вызов extract_movie_info для link={link}")
-        try:
-            info = extract_movie_info(link)
-            if not info:
-                logger.warning(f"[KINOPOISK LINK] extract_movie_info вернул None для link={link}")
-                bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме/сериале.")
-                return
-            logger.info(f"[KINOPOISK LINK] ✅ extract_movie_info успешно, получены актуальные данные: title={info.get('title')}, is_series={info.get('is_series')}")
-        except Exception as api_e:
-            logger.error(f"[KINOPOISK LINK] ❌ Ошибка extract_movie_info: {api_e}", exc_info=True)
-            try:
-                logger.info(f"[KINOPOISK LINK] Отправка сообщения об ошибке API пользователю...")
-                error_msg = f"❌ Ошибка при получении информации о фильме/сериале: {str(api_e)[:200]}"
-                bot_instance.reply_to(message, error_msg)
-                logger.info(f"[KINOPOISK LINK] ✅ Сообщение об ошибке API отправлено")
-            except Exception as reply_e:
-                logger.error(f"[KINOPOISK LINK] ❌ Ошибка при отправке сообщения об ошибке API: {reply_e}", exc_info=True)
-                try:
-                    bot_instance.send_message(chat_id, "❌ Ошибка при получении информации о фильме/сериале.")
-                    logger.info(f"[KINOPOISK LINK] ✅ Сообщение об ошибке API отправлено через send_message")
-                except Exception as send_e:
-                    logger.error(f"[KINOPOISK LINK] ❌ КРИТИЧЕСКАЯ ОШИБКА: не удалось отправить сообщение об ошибке API: {send_e}", exc_info=True)
-            return
-        
-        is_series = info.get('is_series', False)
-        
-        # Проверяем, есть ли уже в базе (для определения статуса просмотра и оценки)
-        with db_lock:
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
-            row = cursor.fetchone()
-            if row:
-                # Уже в базе - ОБНОВЛЯЕМ данные в базе актуальными данными из API
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                logger.info(f"[KINOPOISK LINK] Фильм уже в базе (film_id={film_id}), ОБНОВЛЯЮ данные актуальными данными из API")
-                
-                # Обновляем данные в базе актуальными данными из API
-                cursor.execute('''
-                    UPDATE movies 
-                    SET title = %s, year = %s, genres = %s, description = %s, 
-                        director = %s, actors = %s, is_series = %s, link = %s
-                    WHERE id = %s
-                ''', (
-                    info['title'],
-                    info['year'],
-                    info.get('genres', '—'),
-                    info.get('description', 'Нет описания'),
-                    info.get('director', 'Не указан'),
-                    info.get('actors', '—'),
-                    1 if is_series else 0,
-                    link,
-                    film_id
-                ))
-                conn.commit()
-                logger.info(f"[KINOPOISK LINK] ✅ Данные в базе обновлены актуальными данными из API")
-                
-                # Получаем обновленные данные из базы
-                cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
-                movie_row = cursor.fetchone()
-                title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
-                watched = movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[1]
-                
-                logger.info(f"[KINOPOISK LINK] Вызываю show_film_info_with_buttons с актуальными данными из API (обновленными в базе)")
-                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title, watched), message_id=None)
-                logger.info(f"[KINOPOISK LINK] show_film_info_with_buttons завершена для kp_id={kp_id}")
-                return
-        
-        # НЕ в базе - показываем описание с ВСЕМИ кнопками БЕЗ добавления в базу
-        logger.info(f"[KINOPOISK LINK] Фильм НЕ в базе, вызываю show_film_info_without_adding: kp_id={kp_id}, chat_id={chat_id}")
-        show_film_info_without_adding(chat_id, user_id, info, link, kp_id)
-        logger.info(f"[KINOPOISK LINK] show_film_info_without_adding завершена для kp_id={kp_id}")
-        
-    except Exception as e:
-        logger.error(f"[KINOPOISK LINK] ===== END: КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
-        try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке ссылки.")
-        except:
-            pass
-    finally:
-        logger.info(f"[KINOPOISK LINK] ===== END: message_id={getattr(message, 'message_id', 'N/A')}")
 
     # Обработчик settings: перенесен в handlers/settings.py
 
@@ -4029,7 +3886,10 @@ def handle_kinopoisk_link(message):
                 pass
 
 # Обработчик ссылок на Кинопоиск - вынесен на уровень модуля для правильной регистрации
-@bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower()))
+@bot_instance.message_handler(
+    content_types=['text'],
+    func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower())
+)
 def handle_kinopoisk_link(message):
     """Обработчик текстовых сообщений со ссылками на Кинопоиск"""
     logger.info(f"[KINOPOISK LINK] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, chat_id={message.chat.id}")
@@ -4042,122 +3902,115 @@ def handle_kinopoisk_link(message):
         
         logger.info(f"[KINOPOISK LINK] Текст сообщения: '{text[:100]}'")
         
-        # КРИТИЧЕСКИЙ ФИКС: Проверяем, не находится ли пользователь в состоянии планирования
-        from moviebot.states import user_plan_state, user_view_film_state
-        if user_id in user_plan_state:
-            state = user_plan_state[user_id]
-            # Если пользователь в процессе планирования (step=1), пропускаем обработку ссылки
-            # Ссылка будет обработана в get_plan_link_internal
-            if state.get('step') == 1:
-                logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в процессе планирования (step=1), пропускаем обработку ссылки")
-                return
-        
-        # Проверяем, не является ли это ответом на промпт планирования
-        if message.reply_to_message:
+        # Пропускаем, если это ответ на промпт бота (обрабатывается отдельно)
+        if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
             reply_text = message.reply_to_message.text or ""
             if any(prompt in reply_text for prompt in [
                 "Пришлите ссылку или ID фильма в ответном сообщении",
                 "Пришлите в ответном сообщении ссылку или ID фильма",
                 "В ответном сообщении пришлите ID фильмов"
             ]):
-                logger.info(f"[KINOPOISK LINK] Сообщение является реплаем на промпт бота, пропускаем обработку (будет обработано отдельным handler)")
+                logger.info(f"[KINOPOISK LINK] Реплай на промпт бота — пропускаем")
                 return
         
-        # Извлекаем kp_id из текста
-        kp_id = extract_kp_id_from_text(text)
-        
-        if not kp_id:
-            logger.warning(f"[KINOPOISK LINK] Не удалось извлечь kp_id из текста: '{text[:100]}'")
-            return
-        
-        logger.info(f"[KINOPOISK LINK] Получена ссылка от {user_id}: {text}")
-        
+        # Проверяем состояние планирования/просмотра
+        from moviebot.states import user_plan_state, user_view_film_state
         if user_id in user_plan_state:
-            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии планирования, прерываем планирование и обрабатываем ссылку")
-            # Обрабатываем ссылку, планирование будет прервано
-        
-        if user_id in user_view_film_state:
-            logger.info(f"[KINOPOISK LINK] Пользователь {user_id} в состоянии просмотра фильма, пропускаем обработку ссылки")
+            logger.info(f"[KINOPOISK LINK] Пользователь в планировании — прерываем и обрабатываем ссылку")
+            bot_instance.reply_to(message, "⚠️ Планирование прервано. Обрабатываю ссылку...")
+            del user_plan_state[user_id]
+        elif user_id in user_view_film_state:
+            logger.info(f"[KINOPOISK LINK] Пользователь в состоянии просмотра — пропускаем ссылку")
             return
         
-        # Обрабатываем ссылку
-        link = f"https://kinopoisk.ru/film/{kp_id}"
-        logger.info(f"[KINOPOISK LINK] Обработка ссылки: {link}, kp_id={kp_id}")
-        
-        # Получаем информацию о фильме
-        logger.info(f"[KINOPOISK LINK] ⚠️ ВАЖНО: Отправка запроса к API Кинопоиска для получения актуальной информации (даже если фильм уже в базе)")
-        logger.info(f"[KINOPOISK LINK] Вызов extract_movie_info для link={link}")
-        info = extract_movie_info(link)
-        
-        if not info:
-            logger.warning(f"[KINOPOISK LINK] extract_movie_info вернул None для link={link}")
-            try:
-                bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме/сериале. Проверьте ссылку и попробуйте еще раз.")
-            except Exception as reply_e:
-                logger.error(f"[KINOPOISK LINK] ❌ Ошибка при отправке сообщения об ошибке: {reply_e}", exc_info=True)
+        # Извлекаем kp_id
+        kp_id = extract_kp_id_from_text(text)
+        if not kp_id:
+            logger.warning(f"[KINOPOISK LINK] Не удалось извлечь kp_id из: {text[:200]}")
+            bot_instance.reply_to(message, f"❌ Не удалось извлечь ID из ссылки.")
             return
         
-        logger.info(f"[KINOPOISK LINK] ✅ extract_movie_info успешно, получены актуальные данные: title={info.get('title')}, is_series={info.get('is_series')}")
+        # Нормализуем ссылку
+        if text.strip().startswith('http'):
+            link = text.strip()
+            link = re.sub(r'https?://www\.', 'https://', link)
+            link = link.rstrip('/')
+        else:
+            link = f"https://kinopoisk.ru/film/{kp_id}"
         
-        # Проверяем, есть ли фильм в базе
+        logger.info(f"[KINOPOISK LINK] Обрабатываем kp_id={kp_id}, link={link}")
+        
+        # Получаем свежие данные из API
+        try:
+            info = extract_movie_info(link)
+            if not info:
+                bot_instance.reply_to(message, "❌ Не удалось получить данные о фильме/сериале.")
+                return
+        except Exception as api_e:
+            logger.error(f"[KINOPOISK LINK] Ошибка API: {api_e}", exc_info=True)
+            bot_instance.reply_to(message, "❌ Ошибка при загрузке данных с Кинопоиска.")
+            return
+        
+        logger.info(f"[KINOPOISK LINK] Данные получены: {info.get('title')} (сериал: {info.get('is_series')})")
+        
+        # Проверяем наличие в базе (таблица movies — как у тебя везде)
         with db_lock:
-            cursor.execute("SELECT id, title, watched FROM films WHERE kp_id = %s", (kp_id,))
-            existing = cursor.fetchone()
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+            row = cursor.fetchone()
         
-        if existing:
-            film_id, title, watched = existing[0], existing[1], existing[2]
-            logger.info(f"[KINOPOISK LINK] Фильм уже в базе (film_id={film_id}), ОБНОВЛЯЮ данные актуальными данными из API")
+        if row:
+            # Уже в базе — обновляем актуальными данными
+            film_id = row[0] if not isinstance(row, dict) else row.get('id')
+            logger.info(f"[KINOPOISK LINK] Фильм в базе (id={film_id}) — обновляем данные")
             
-            # Обновляем данные фильма актуальными данными из API
             with db_lock:
-                cursor.execute("""
-                    UPDATE films 
-                    SET title = %s, year = %s, genres = %s, director = %s, actors = %s, 
-                        description = %s, is_series = %s
-                    WHERE kp_id = %s
-                """, (
+                cursor.execute('''
+                    UPDATE movies 
+                    SET title = %s, year = %s, genres = %s, description = %s, 
+                        director = %s, actors = %s, is_series = %s, link = %s
+                    WHERE id = %s
+                ''', (
                     info.get('title'),
                     info.get('year'),
-                    info.get('genres'),
-                    info.get('director'),
-                    info.get('actors'),
-                    info.get('description'),
-                    info.get('is_series', False),
-                    kp_id
+                    info.get('genres', '—'),
+                    info.get('description', 'Нет описания'),
+                    info.get('director', 'Не указан'),
+                    info.get('actors', '—'),
+                    1 if info.get('is_series') else 0,
+                    link,
+                    film_id
                 ))
                 conn.commit()
             
-            logger.info(f"[KINOPOISK LINK] ✅ Данные в базе обновлены актуальными данными из API")
+            # Получаем watched для existing
+            cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
+            movie_row = cursor.fetchone()
+            title_db = movie_row[0] if not isinstance(movie_row, dict) else movie_row.get('title')
+            watched = movie_row[1] if not isinstance(movie_row, dict) else movie_row.get('watched')
+            
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=(film_id, title_db, watched),
+                message_id=None
+            )
+        else:
+            # НЕ в базе — показываем без добавления
+            logger.info(f"[KINOPOISK LINK] Фильм НЕ в базе — показываем without_adding")
+            show_film_info_without_adding(chat_id, user_id, info, link, kp_id)
         
-        logger.info(f"[KINOPOISK LINK] Вызываю show_film_info_with_buttons с актуальными данными из API (обновленными в базе)")
-        show_film_info_with_buttons(
-            chat_id=chat_id,
-            user_id=user_id,
-            info=info,
-            link=link,
-            kp_id=kp_id,
-            existing=existing,
-            message_id=None,
-            message_thread_id=message.message_thread_id if hasattr(message, 'message_thread_id') else None
-        )
-        
-        logger.info(f"[KINOPOISK LINK] ===== END: message_id={message.message_id}")
-        
-    except Exception as api_e:
-        logger.error(f"[KINOPOISK LINK] ❌ Ошибка при обработке ссылки на Кинопоиск: {api_e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[KINOPOISK LINK] Критическая ошибка: {e}", exc_info=True)
         try:
-            logger.info(f"[KINOPOISK LINK] Отправка сообщения об ошибке API пользователю...")
-            error_msg = f"❌ Ошибка при получении информации о фильме/сериале: {str(api_e)[:200]}"
-            bot_instance.reply_to(message, error_msg)
-        except Exception as reply_e:
-            logger.error(f"[KINOPOISK LINK] ❌ Ошибка при отправке сообщения об ошибке API: {reply_e}", exc_info=True)
-            try:
-                bot_instance.send_message(message.chat.id, error_msg)
-            except Exception as send_e:
-                logger.error(f"[KINOPOISK LINK] ❌ Критическая ошибка отправки сообщения: {send_e}", exc_info=True)
-
-# Старый обработчик удален - используется более полный обработчик ниже (строка 4401)
-
+            bot_instance.reply_to(message, "❌ Ошибка при обработке ссылки.")
+        except:
+            pass
+    finally:
+        logger.info(f"[KINOPOISK LINK] ===== END =====")
+        
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
 def view_film_description_callback(call):
     """Обработчик кнопки 'Перейти к описанию'"""
