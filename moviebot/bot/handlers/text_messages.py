@@ -2211,7 +2211,7 @@ def cancel_add_emoji_callback(call):
         logger.error(f"[CANCEL ADD EMOJI] Ошибка: {e}", exc_info=True)
 
 
-def register_\0(bot):
+def register_text_message_handlers(bot):
     """Регистрирует обработчики текстовых сообщений"""
     # Обработчики уже зарегистрированы через декораторы при импорте модуля
     # Эта функция нужна только для явного вызова в commands.py

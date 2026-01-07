@@ -177,7 +177,7 @@ def _process_refund(message, charge_id):
         bot.reply_to(message, f"❌ Ошибка при обработке возврата: {e}")
 
 
-def register_\0(bot):
+def register_stats_handlers(bot):
     """Регистрирует обработчики команд статистики"""
     
     @bot.message_handler(commands=['stats'])
