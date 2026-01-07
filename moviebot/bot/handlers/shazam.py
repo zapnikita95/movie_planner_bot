@@ -15,8 +15,115 @@ from moviebot.services.shazam_service import (
 from moviebot.api.kinopoisk_api import get_film_by_imdb_id
 from moviebot.utils.helpers import has_recommendations_access
 from moviebot.states import shazam_state
+from moviebot.bot.handlers.text_messages import expect_text_from_user
 
 logger = logging.getLogger(__name__)
+
+
+def process_shazam_text_query(message, query, reply_to_message=None):
+    """Единая логика обработки текстового запроса Shazam. Используется обоими обработчиками."""
+    from moviebot.bot.bot_init import bot
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    # Проверяем доступ
+    if not has_recommendations_access(chat_id, user_id):
+        if reply_to_message:
+            bot.reply_to(message, "❌ Нет доступа к этой функции")
+        else:
+            bot.send_message(chat_id, "❌ Нет доступа к этой функции")
+        shazam_state.pop(user_id, None)
+        return
+    
+    # Показываем анимацию загрузки
+    if reply_to_message:
+        loading_msg = bot.reply_to(message, "🔍 Мы уже ищем что-то похожее...")
+    else:
+        loading_msg = bot.send_message(chat_id, "🔍 Мы уже ищем что-то похожее...")
+    
+    try:
+        # Ищем фильмы
+        results = search_movies(query, top_k=5)
+        
+        if not results:
+            bot.edit_message_text(
+                "❌ Не удалось найти подходящие фильмы. Попробуйте описать по-другому.",
+                loading_msg.chat.id,
+                loading_msg.message_id
+            )
+            shazam_state.pop(user_id, None)
+            return
+        
+        # Получаем информацию о фильмах из Kinopoisk
+        films_info = []
+        for result in results:
+            imdb_id = result['imdb_id']
+            try:
+                film_info = get_film_by_imdb_id(imdb_id)
+                if film_info:
+                    films_info.append({
+                        'kp_id': film_info.get('kp_id'),
+                        'title': film_info.get('title', result['title']),
+                        'year': film_info.get('year', result.get('year')),
+                        'imdb_id': imdb_id
+                    })
+            except Exception as e:
+                logger.warning(f"Не удалось получить информацию о фильме {imdb_id}: {e}")
+                # Используем данные из IMDB
+                films_info.append({
+                    'kp_id': None,
+                    'title': result['title'],
+                    'year': result.get('year'),
+                    'imdb_id': imdb_id
+                })
+        
+        if not films_info:
+            bot.edit_message_text(
+                "❌ Не удалось получить информацию о найденных фильмах.",
+                loading_msg.chat.id,
+                loading_msg.message_id
+            )
+            shazam_state.pop(user_id, None)
+            return
+        
+        # Формируем ответ
+        text = "🎬 <b>Вот наиболее подходящие фильмы по вашему описанию:</b>\n\n"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        for i, film in enumerate(films_info[:5], 1):
+            title = film['title']
+            year = f" ({film['year']})" if film.get('year') else ""
+            text += f"{i}. {title}{year}\n"
+            
+            # Кнопка для просмотра информации о фильме
+            if film.get('kp_id'):
+                markup.add(InlineKeyboardButton(
+                    f"{i}. {title}{year}",
+                    callback_data=f"shazam:film:{film['kp_id']}"
+                ))
+        
+        markup.add(InlineKeyboardButton("⬅️ Вернуться к Шазаму", callback_data="shazam:start"))
+        
+        bot.edit_message_text(
+            text,
+            loading_msg.chat.id,
+            loading_msg.message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+        
+        # Очищаем состояние
+        shazam_state.pop(user_id, None)
+        
+    except Exception as e:
+        logger.error(f"Ошибка в process_shazam_text_query: {e}", exc_info=True)
+        bot.edit_message_text(
+            "❌ Произошла ошибка при поиске. Попробуйте еще раз.",
+            loading_msg.chat.id,
+            loading_msg.message_id
+        )
+        shazam_state.pop(user_id, None)
 
 
 def process_shazam_voice_async(message, loading_msg):
@@ -275,7 +382,7 @@ def register_shazam_handlers(bot):
             text += "📝 <b>Важно:</b> В группах отправьте описание в ответ на это сообщение. В личке можно отправить в ответ или следующим сообщением.\n"
             text += "Максимальная длина: 300 символов."
             
-            bot.edit_message_text(
+            sent_msg = bot.edit_message_text(
                 text,
                 chat_id,
                 call.message.message_id,
@@ -284,6 +391,11 @@ def register_shazam_handlers(bot):
             
             # Устанавливаем состояние ожидания текста
             shazam_state[user_id] = {'mode': 'text', 'chat_id': chat_id}
+            
+            # Для лички устанавливаем ожидание текста через user_expected_text
+            is_private = call.message.chat.type == 'private'
+            if is_private and sent_msg:
+                expect_text_from_user(user_id, chat_id, expected_for='shazam_text', message_id=sent_msg.message_id)
             
         except Exception as e:
             logger.error(f"Ошибка в shazam_text_callback: {e}", exc_info=True)
@@ -304,7 +416,7 @@ def register_shazam_handlers(bot):
             text = "Запишите голосовое сообщение, расскажите, что за фильм вы ищете\n\n"
             text += "📝 <b>Важно:</b> В группах отправьте голосовое в ответ на это сообщение. В личке можно отправить в ответ или следующим сообщением."
             
-            bot.edit_message_text(
+            sent_msg = bot.edit_message_text(
                 text,
                 chat_id,
                 call.message.message_id,
@@ -312,191 +424,117 @@ def register_shazam_handlers(bot):
             )
             
             # Устанавливаем состояние ожидания голосового
-            shazam_state[user_id] = {'mode': 'voice', 'chat_id': chat_id}
+            shazam_state[user_id] = {'mode': 'voice', 'chat_id': chat_id, 'message_id': sent_msg.message_id if sent_msg else None}
             
         except Exception as e:
             logger.error(f"Ошибка в shazam_voice_callback: {e}", exc_info=True)
     
-    @bot.message_handler(func=lambda message: message.from_user.id in shazam_state and shazam_state[message.from_user.id].get('mode') == 'text')
-    def shazam_text_handler(message):
-        """Обработчик текстового запроса"""
-        try:
-            user_id = message.from_user.id
-            chat_id = message.chat.id
-            
-            # Проверяем доступ
-            if not has_recommendations_access(chat_id, user_id):
-                bot.reply_to(message, "❌ Нет доступа к этой функции")
-                shazam_state.pop(user_id, None)
-                return
-            
-            # КРИТИЧЕСКИЙ ФИКС: Проверяем, что это реплай в группах или реплай/следующее сообщение в личке
-            is_private = message.chat.type == 'private'
-            is_reply = message.reply_to_message is not None
-            
-            # В группах принимаем только реплаи
-            if not is_private and not is_reply:
-                bot.reply_to(message, "❌ В группах отправьте описание в ответ на сообщение бота")
-                return
-            
-            # В личке принимаем реплай или следующее сообщение (проверяем, что состояние еще активно)
-            if is_private:
-                state = shazam_state.get(user_id)
-                if state:
-                    state_message_id = state.get('message_id')
-                    # Если это не реплай, проверяем, что это следующее сообщение после установки состояния
-                    if not is_reply:
-                        # Проверяем, что состояние было установлено недавно (в пределах последних 10 сообщений)
-                        # Для простоты принимаем любое сообщение в личке, если состояние активно
-                        pass  # В личке принимаем любое сообщение, если состояние активно
-            
-            query = message.text.strip()
-            if not query:
-                bot.reply_to(message, "Пожалуйста, опишите фильм")
-                return
-            
-            # Проверяем длину (до 300 символов)
-            if len(query) > 300:
-                bot.reply_to(message, f"❌ Описание слишком длинное ({len(query)} символов). Максимум: 300 символов.")
-                return
-            
-            # Показываем анимацию загрузки
-            loading_msg = bot.reply_to(message, "🔍 Мы уже ищем что-то похожее...")
-            
-            try:
-                # Ищем фильмы
-                results = search_movies(query, top_k=5)
-                
-                if not results:
-                    bot.edit_message_text(
-                        "❌ Не удалось найти подходящие фильмы. Попробуйте описать по-другому.",
-                        loading_msg.chat.id,
-                        loading_msg.message_id
-                    )
-                    shazam_state.pop(user_id, None)
-                    return
-                
-                # Получаем информацию о фильмах из Kinopoisk
-                films_info = []
-                for result in results:
-                    imdb_id = result['imdb_id']
-                    try:
-                        film_info = get_film_by_imdb_id(imdb_id)
-                        if film_info:
-                            films_info.append({
-                                'kp_id': film_info.get('kp_id'),
-                                'title': film_info.get('title', result['title']),
-                                'year': film_info.get('year', result.get('year')),
-                                'imdb_id': imdb_id
-                            })
-                    except Exception as e:
-                        logger.warning(f"Не удалось получить информацию о фильме {imdb_id}: {e}")
-                        # Используем данные из IMDB
-                        films_info.append({
-                            'kp_id': None,
-                            'title': result['title'],
-                            'year': result.get('year'),
-                            'imdb_id': imdb_id
-                        })
-                
-                if not films_info:
-                    bot.edit_message_text(
-                        "❌ Не удалось получить информацию о найденных фильмах.",
-                        loading_msg.chat.id,
-                        loading_msg.message_id
-                    )
-                    shazam_state.pop(user_id, None)
-                    return
-                
-                # Формируем ответ
-                text = "🎬 <b>Вот наиболее подходящие фильмы по вашему описанию:</b>\n\n"
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                for i, film in enumerate(films_info[:5], 1):
-                    title = film['title']
-                    year = f" ({film['year']})" if film.get('year') else ""
-                    text += f"{i}. {title}{year}\n"
-                    
-                    # Кнопка для просмотра информации о фильме
-                    if film.get('kp_id'):
-                        markup.add(InlineKeyboardButton(
-                            f"{i}. {title}{year}",
-                            callback_data=f"shazam:film:{film['kp_id']}"
-                        ))
-                
-                markup.add(InlineKeyboardButton("⬅️ Вернуться к Шазаму", callback_data="shazam:start"))
-                
-                bot.edit_message_text(
-                    text,
-                    loading_msg.chat.id,
-                    loading_msg.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                
-                # Очищаем состояние
-                shazam_state.pop(user_id, None)
-                
-            except Exception as e:
-                logger.error(f"Ошибка в shazam_text_handler: {e}", exc_info=True)
-                bot.edit_message_text(
-                    "❌ Произошла ошибка при поиске. Попробуйте еще раз.",
-                    loading_msg.chat.id,
-                    loading_msg.message_id
-                )
-                shazam_state.pop(user_id, None)
-        
-        except Exception as e:
-            logger.error(f"Ошибка в shazam_text_handler: {e}", exc_info=True)
-            shazam_state.pop(user_id, None)
+    # Обработчики текста теперь в text_messages.py (handle_expected_text_in_private и handle_group_shazam_text_reply)
     
-    @bot.message_handler(content_types=['voice'], func=lambda message: message.from_user.id in shazam_state and shazam_state[message.from_user.id].get('mode') == 'voice')
-    def shazam_voice_handler(message):
-        """Обработчик голосового запроса (асинхронная обработка)"""
+    # ==================== ОБРАБОТЧИКИ ГОЛОСОВЫХ СООБЩЕНИЙ ====================
+    
+    def is_shazam_voice_in_private(message):
+        """Проверка для обработчика голосового сообщения Shazam в ЛС"""
+        if message.chat.type != 'private':
+            return False
+        user_id = message.from_user.id
+        if user_id not in shazam_state:
+            return False
+        if shazam_state[user_id].get('mode') != 'voice':
+            return False
+        if not message.voice:
+            return False
+        return True
+    
+    @bot.message_handler(content_types=['voice'], func=is_shazam_voice_in_private)
+    def handle_shazam_voice_in_private(message):
+        """Обработчик голосового запроса Shazam в ЛС - принимает первое голосовое сообщение"""
         user_id = message.from_user.id
         chat_id = message.chat.id
         
-        # КРИТИЧЕСКИЙ ФИКС: Проверяем, что это реплай в группах или реплай/следующее сообщение в личке
-        is_private = message.chat.type == 'private'
-        is_reply = message.reply_to_message is not None
-        
-        # В группах принимаем только реплаи
-        if not is_private and not is_reply:
-            bot.reply_to(message, "❌ В группах отправьте голосовое в ответ на сообщение бота")
-            if user_id in shazam_state:
-                shazam_state.pop(user_id, None)
-            return
-        
-        logger.info(f"[SHAZAM VOICE] ===== START: user_id={user_id}, chat_id={chat_id}, duration={message.voice.duration if message.voice else 'N/A'}")
+        logger.info(f"[SHAZAM VOICE PRIVATE] ===== START: user_id={user_id}, chat_id={chat_id}, duration={message.voice.duration if message.voice else 'N/A'}")
         
         try:
             # Проверяем доступ
             if not has_recommendations_access(chat_id, user_id):
-                logger.warning(f"[SHAZAM VOICE] Нет доступа для user_id={user_id}")
+                logger.warning(f"[SHAZAM VOICE PRIVATE] Нет доступа для user_id={user_id}")
+                bot.send_message(chat_id, "❌ Нет доступа к этой функции")
+                shazam_state.pop(user_id, None)
+                return
+            
+            # Проверяем длину голосового (Telegram max 1 мин = 60 сек)
+            if message.voice.duration > 60:
+                logger.warning(f"[SHAZAM VOICE PRIVATE] Голосовое слишком длинное: {message.voice.duration} сек")
+                bot.send_message(chat_id, "❌ Голосовое сообщение слишком длинное (максимум 1 минута)")
+                shazam_state.pop(user_id, None)
+                return
+            
+            # Показываем анимацию загрузки и запускаем асинхронную обработку
+            logger.info(f"[SHAZAM VOICE PRIVATE] Отправляем сообщение о распознавании и запускаем асинхронную обработку...")
+            loading_msg = bot.send_message(chat_id, "⏳ Минуту, идёт поиск")
+            logger.info(f"[SHAZAM VOICE PRIVATE] Сообщение отправлено, message_id={loading_msg.message_id}, запускаем поток")
+            
+            # Очищаем состояние сразу, чтобы следующее голосовое не обрабатывалось
+            shazam_state.pop(user_id, None)
+            
+            # Запускаем обработку в отдельном потоке
+            thread = Thread(target=process_shazam_voice_async, args=(message, loading_msg))
+            thread.daemon = True
+            thread.start()
+            logger.info(f"[SHAZAM VOICE PRIVATE] Асинхронная обработка запущена в потоке, основной handler завершен")
+            
+        except Exception as e:
+            logger.error(f"[SHAZAM VOICE PRIVATE] ===== CRITICAL ERROR: {e}", exc_info=True)
+            try:
+                bot.send_message(chat_id, f"❌ Критическая ошибка: {str(e)[:100]}")
+            except:
+                pass
+            shazam_state.pop(user_id, None)
+    
+    @bot.message_handler(content_types=['voice'], func=lambda m: m.chat.type in ['group', 'supergroup'] and
+                                                                    m.reply_to_message and
+                                                                    m.reply_to_message.from_user.id == BOT_ID and
+                                                                    m.from_user.id in shazam_state and
+                                                                    shazam_state[m.from_user.id].get('mode') == 'voice' and
+                                                                    "Запишите голосовое сообщение" in (m.reply_to_message.text or ""))
+    def handle_shazam_voice_in_group(message):
+        """Обработчик голосового запроса Shazam в группах - только reply на сообщение бота"""
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        
+        logger.info(f"[SHAZAM VOICE GROUP] ===== START: user_id={user_id}, chat_id={chat_id}, duration={message.voice.duration if message.voice else 'N/A'}")
+        
+        try:
+            # Проверяем доступ
+            if not has_recommendations_access(chat_id, user_id):
+                logger.warning(f"[SHAZAM VOICE GROUP] Нет доступа для user_id={user_id}")
                 bot.reply_to(message, "❌ Нет доступа к этой функции")
                 shazam_state.pop(user_id, None)
                 return
             
             # Проверяем длину голосового (Telegram max 1 мин = 60 сек)
             if message.voice.duration > 60:
-                logger.warning(f"[SHAZAM VOICE] Голосовое слишком длинное: {message.voice.duration} сек")
+                logger.warning(f"[SHAZAM VOICE GROUP] Голосовое слишком длинное: {message.voice.duration} сек")
                 bot.reply_to(message, "❌ Голосовое сообщение слишком длинное (максимум 1 минута)")
                 shazam_state.pop(user_id, None)
                 return
             
             # Показываем анимацию загрузки и запускаем асинхронную обработку
-            logger.info(f"[SHAZAM VOICE] Отправляем сообщение о распознавании и запускаем асинхронную обработку...")
-            loading_msg = bot.reply_to(message, "🔮 Распознаю трек... Подожди секунду :)")
-            logger.info(f"[SHAZAM VOICE] Сообщение отправлено, message_id={loading_msg.message_id}, запускаем поток")
+            logger.info(f"[SHAZAM VOICE GROUP] Отправляем сообщение о распознавании и запускаем асинхронную обработку...")
+            loading_msg = bot.reply_to(message, "⏳ Минуту, идёт поиск")
+            logger.info(f"[SHAZAM VOICE GROUP] Сообщение отправлено, message_id={loading_msg.message_id}, запускаем поток")
+            
+            # Очищаем состояние сразу, чтобы следующее голосовое не обрабатывалось
+            shazam_state.pop(user_id, None)
             
             # Запускаем обработку в отдельном потоке
             thread = Thread(target=process_shazam_voice_async, args=(message, loading_msg))
             thread.daemon = True
             thread.start()
-            logger.info(f"[SHAZAM VOICE] Асинхронная обработка запущена в потоке, основной handler завершен")
+            logger.info(f"[SHAZAM VOICE GROUP] Асинхронная обработка запущена в потоке, основной handler завершен")
             
         except Exception as e:
-            logger.error(f"[SHAZAM VOICE] ===== CRITICAL ERROR: {e}", exc_info=True)
+            logger.error(f"[SHAZAM VOICE GROUP] ===== CRITICAL ERROR: {e}", exc_info=True)
             try:
                 bot.reply_to(message, f"❌ Критическая ошибка: {str(e)[:100]}")
             except:

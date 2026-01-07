@@ -1020,6 +1020,10 @@ def handle_expected_text_in_private(message):
     
     if expected_for == 'search':
         process_search_query(message, query, reply_to_message=None)
+    elif expected_for == 'shazam_text':
+        # Обработка текстового запроса Shazam в личке
+        from moviebot.bot.handlers.shazam import process_shazam_text_query
+        process_shazam_text_query(message, query, reply_to_message=None)
     # Здесь можно добавить elif для других сценариев: 'plan_comment', 'review' и т.д.
     else:
         # fallback или ошибка
@@ -1040,6 +1044,29 @@ def handle_group_search_reply(message):
         return
     logger.info(f"[GROUP SEARCH REPLY] Получен запрос от {message.from_user.id}: '{query[:50]}'")
     process_search_query(message, query, reply_to_message=message.reply_to_message)
+
+
+# ==================== ОБРАБОТЧИК ДЛЯ ГРУПП: SHAZAM ТЕКСТ (REPLY) ====================
+@bot_instance.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'] and
+                                      m.reply_to_message and
+                                      m.reply_to_message.from_user.id == BOT_ID and
+                                      m.text and
+                                      "Опишите, что есть в фильме?" in (m.reply_to_message.text or ""))
+def handle_group_shazam_text_reply(message):
+    """Обработчик текстового запроса Shazam в группах - только reply на сообщение бота"""
+    query = message.text.strip()
+    if not query:
+        bot_instance.reply_to(message, "❌ Пустое описание.")
+        return
+    
+    # Проверяем длину (до 300 символов)
+    if len(query) > 300:
+        bot_instance.reply_to(message, f"❌ Описание слишком длинное ({len(query)} символов). Максимум: 300 символов.")
+        return
+    
+    logger.info(f"[GROUP SHAZAM TEXT REPLY] Получен запрос от {message.from_user.id}: '{query[:50]}'")
+    from moviebot.bot.handlers.shazam import process_shazam_text_query
+    process_shazam_text_query(message, query, reply_to_message=message.reply_to_message)
 
 
 # ==================== СТАРЫЙ ОБРАБОТЧИК (ОСТАВЛЯЕМ ДЛЯ СОВМЕСТИМОСТИ) ====================

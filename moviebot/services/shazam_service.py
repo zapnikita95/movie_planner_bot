@@ -464,15 +464,15 @@ def build_imdb_index():
     else:
         logger.warning(f"Файл {RATINGS_PATH} не найден, фильтрация по рейтингу недоступна")
     
-    # Загружаем plot
-    if not PLOT_PATH.exists():
-        logger.error(f"Файл {PLOT_PATH} не найден")
-        return None, None
+    # Загружаем plot (опционально)
+    plots = None
+    if PLOT_PATH.exists():
+        plots = pd.read_csv(PLOT_PATH, sep='\t', low_memory=False)
+        logger.info(f"Загружено {len(plots)} записей из plots")
+    else:
+        logger.warning(f"Файл {PLOT_PATH} не найден, работаем без описаний сюжета")
     
-    plots = pd.read_csv(PLOT_PATH, sep='\t', low_memory=False)
-    logger.info(f"Загружено {len(plots)} записей из plots")
-    
-    # Загружаем keywords
+    # Загружаем keywords (опционально)
     keywords_dict = {}
     if KEYWORDS_TSV_PATH.exists():
         logger.info("Парсим keywords из TSV...")
@@ -482,6 +482,8 @@ def build_imdb_index():
         logger.info("Парсим keywords из list...")
         keywords_dict = parse_keywords_list(KEYWORDS_PATH)
         logger.info(f"Загружено ключевых слов для {len(keywords_dict)} фильмов")
+    else:
+        logger.warning("Файлы keywords не найдены, работаем без ключевых слов")
     
     # Фильтруем только фильмы
     movies = basics[basics['titleType'] == 'movie'].copy()
@@ -496,12 +498,17 @@ def build_imdb_index():
         movies = movies.sort_values('numVotes', ascending=False)
         logger.info(f"После фильтрации по рейтингу: {len(movies)} фильмов")
     
-    # Объединяем с описаниями
-    movies = movies.merge(plots[['tconst', 'plot']], on='tconst', how='left')
-    movies = movies.dropna(subset=['plot'])
-    logger.info(f"После объединения с описаниями: {len(movies)} фильмов")
+    # Объединяем с описаниями (если есть)
+    if plots is not None:
+        movies = movies.merge(plots[['tconst', 'plot']], on='tconst', how='left')
+        movies = movies.dropna(subset=['plot'])
+        logger.info(f"После объединения с описаниями: {len(movies)} фильмов")
+    else:
+        # Если нет описаний, используем только название и год
+        movies['plot'] = movies['primaryTitle'] + ' (' + movies['startYear'].astype(str) + ')'
+        logger.info(f"Работаем без описаний сюжета, используем только названия: {len(movies)} фильмов")
     
-    # Добавляем ключевые слова к описаниям
+    # Добавляем ключевые слова к описаниям (если есть)
     def enrich_description(row):
         plot = str(row.get('plot', ''))
         tconst = row.get('tconst', '')
