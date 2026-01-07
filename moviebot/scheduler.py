@@ -16,24 +16,22 @@ conn = get_db_connection()
 cursor = get_db_cursor()
 plans_tz = PLANS_TZ  # Для обратной совместимости
 
-# bot и scheduler будут импортированы из moviebot.py при использовании
+# bot и scheduler будут установлены из main.py
 bot = None
 scheduler = None
 
-def set_bot_instance(bot_instance):
+def set_bot_instance(new_bot):
     """Устанавливает экземпляр бота для использования в задачах"""
     global bot
-    bot = bot_instance
+    bot = new_bot  # ← Исправлено: было bot_instance — теперь правильно присваиваем переданный bot
 
-def set_scheduler_instance(scheduler_instance):
+def set_scheduler_instance(new_scheduler):
     """Устанавливает экземпляр scheduler для использования в задачах"""
     global scheduler
-    scheduler = scheduler_instance
+    scheduler = new_scheduler
 
 def hourly_stats():
-
     """Вызывается каждый час для вывода статистики"""
-
     print_daily_stats()
 
 

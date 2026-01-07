@@ -82,8 +82,7 @@ from moviebot.bot.bot_init import set_scheduler
 set_scheduler(scheduler)
 
 # Устанавливаем экземпляр бота и scheduler в модуле scheduler
-from moviebot.scheduler import set_bot_instance, set_scheduler_instance
-set_bot_instance(bot)
+from moviebot.scheduler import set_bot, set_scheduler_instance
 set_scheduler_instance(scheduler)
 
 # Настраиваем задачи планировщика
@@ -130,11 +129,12 @@ scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minut
 logger.info("=" * 80)
 logger.info("[MAIN] ===== РЕГИСТРАЦИЯ ВСЕХ HANDLERS =====")
 
-# Импортируем модули с callback handlers для автоматической регистрации декораторов
+# Импортируем модули с callback handlers для автоматической регистрации декораторов (если они используют глобальный bot)
 import moviebot.bot.callbacks.film_callbacks  # noqa: F401
 import moviebot.bot.callbacks.series_callbacks  # noqa: F401
 import moviebot.bot.callbacks.payment_callbacks  # noqa: F401
 import moviebot.bot.callbacks.premieres_callbacks  # noqa: F401
+import moviebot.bot.callbacks.random_callbacks  # noqa: F401  # если есть
 import moviebot.bot.handlers.admin  # noqa: F401
 
 try:
@@ -147,9 +147,9 @@ except Exception as e:
 import moviebot.bot.handlers.state_handlers  # noqa: F401
 import moviebot.bot.handlers.text_messages  # noqa: F401
 
-
+# Обычные handlers
 from moviebot.bot.handlers.start import register_start_handlers
-register_start_handlers(bot)  # Здесь передаём именно bot (не bot_instance!)
+register_start_handlers(bot)
 logger.info("✅ start handlers зарегистрированы")
 
 from moviebot.bot.handlers.list import register_list_handlers
@@ -211,7 +211,7 @@ from moviebot.bot.handlers.shazam import register_shazam_handlers
 register_shazam_handlers(bot)
 logger.info("✅ shazam handlers зарегистрированы")
 
-# Callbacks
+# === РЕГИСТРАЦИЯ CALLBACKS (после рефакторинга) ===
 from moviebot.bot.callbacks.film_callbacks import register_film_callbacks
 register_film_callbacks(bot)
 logger.info("✅ film_callbacks зарегистрированы")
@@ -228,9 +228,12 @@ from moviebot.bot.callbacks.premieres_callbacks import register_premieres_callba
 register_premieres_callbacks(bot)
 logger.info("✅ premieres_callbacks зарегистрированы")
 
-from moviebot.bot.callbacks.random_callbacks import register_random_callbacks
-register_random_callbacks(bot)
-logger.info("✅ random_callbacks зарегистрированы")
+try:
+    from moviebot.bot.callbacks.random_callbacks import register_random_callbacks
+    register_random_callbacks(bot)
+    logger.info("✅ random_callbacks зарегистрированы")
+except ImportError:
+    logger.info("⚠️ random_callbacks не найден — пропускаем")
 
 from moviebot.bot.handlers.text_messages import register_text_message_handlers
 register_text_message_handlers(bot)
@@ -348,6 +351,3 @@ elif USE_WEBHOOK and WEBHOOK_URL:
 else:
     logger.warning("⚠️ Polling режим отключен в production. Для локальной разработки установите USE_WEBHOOK=true или IS_PRODUCTION=false")
     sys.exit(1)
-
-# Полling закомментирован полностью (не нужен в production)
-# Если понадобится локально — раскомментируй и запусти с IS_PRODUCTION=false

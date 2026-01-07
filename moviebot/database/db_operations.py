@@ -951,7 +951,6 @@ def get_active_group_users(chat_id, bot_id=None):
         return users
 
 
-def get_user_groups(user_id, bot_instance=None):
     """Получает список групп, где есть и пользователь, и бот"""
     groups = []
     with db_lock:
@@ -973,9 +972,8 @@ def get_user_groups(user_id, bot_instance=None):
             
             if chat_id and chat_id < 0:  # Только группы (отрицательные ID)
                 # Проверяем, что бот состоит в группе
-                if bot_instance:
                     try:
-                        chat = bot_instance.get_chat(chat_id)
+                        chat = bot.get_chat(chat_id)
                         if chat.type in ['group', 'supergroup']:
                             groups.append({
                                 'chat_id': chat_id,

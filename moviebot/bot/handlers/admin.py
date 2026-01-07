@@ -6,7 +6,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 import pytz
 
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.states import user_unsubscribe_state, user_add_admin_state
 from moviebot.utils.admin import is_owner, is_admin, add_admin, remove_admin, get_all_admins
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
@@ -60,7 +59,7 @@ def cancel_subscription_by_id(target_id, is_group=False):
         return False, f"Ошибка при отмене подписки: {e}", 0
 
 
-@bot_instance.message_handler(commands=['unsubscribe'])
+@bot.message_handler(commands=['unsubscribe'])
 def unsubscribe_command(message):
     """Команда /unsubscribe - отмена подписки пользователя или группы (только для владельца)"""
     try:
@@ -69,12 +68,12 @@ def unsubscribe_command(message):
         
         # Проверяем, что команда отправлена в личке
         if message.chat.type != 'private':
-            bot_instance.reply_to(message, "❌ Команда /unsubscribe доступна только в личных сообщениях боту.")
+            bot.reply_to(message, "❌ Команда /unsubscribe доступна только в личных сообщениях боту.")
             return
         
         # Проверяем права доступа (только владелец)
         if not is_owner(user_id):
-            bot_instance.reply_to(message, "❌ У вас нет доступа к этой команде.")
+            bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
         
         logger.info(f"[UNSUBSCRIBE] Команда /unsubscribe вызвана от {user_id}")
@@ -88,7 +87,7 @@ def unsubscribe_command(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
         
-        msg = bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
         user_unsubscribe_state[user_id] = {
             'chat_id': message.chat.id,
             'message_id': msg.message_id if msg else None,
@@ -99,12 +98,12 @@ def unsubscribe_command(message):
     except Exception as e:
         logger.error(f"[UNSUBSCRIBE] Ошибка в unsubscribe_command: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке команды /unsubscribe")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке команды /unsubscribe")
         except:
             pass
 
 
-@bot_instance.message_handler(commands=['add_admin'])
+@bot.message_handler(commands=['add_admin'])
 def add_admin_command(message):
     """Команда /add_admin - управление администраторами (только для владельца)"""
     try:
@@ -113,12 +112,12 @@ def add_admin_command(message):
         
         # Проверяем, что команда отправлена в личке
         if message.chat.type != 'private':
-            bot_instance.reply_to(message, "❌ Команда /add_admin доступна только в личных сообщениях боту.")
+            bot.reply_to(message, "❌ Команда /add_admin доступна только в личных сообщениях боту.")
             return
         
         # Проверяем права доступа (только владелец)
         if not is_owner(user_id):
-            bot_instance.reply_to(message, "❌ У вас нет доступа к этой команде.")
+            bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
         
         logger.info(f"[ADD_ADMIN] Команда /add_admin вызвана от {user_id}")
@@ -151,7 +150,7 @@ def add_admin_command(message):
         
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
         
-        msg = bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
         user_add_admin_state[user_id] = {
             'message_id': msg.message_id if msg else None,
             'prompt_message_id': msg.message_id if msg else None
@@ -160,22 +159,22 @@ def add_admin_command(message):
     except Exception as e:
         logger.error(f"[ADD_ADMIN] Ошибка в add_admin_command: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке команды /add_admin")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке команды /add_admin")
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("admin:info:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin:info:"))
 def admin_info_callback(call):
     """Обработчик просмотра информации об администраторе"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         admin_user_id = int(call.data.split(":")[2])
         user_id = call.from_user.id
         
         # Проверяем права доступа
         if not is_owner(user_id):
-            bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
             return
         
         text = f"👤 <b>Администратор: {admin_user_id}</b>\n\n"
@@ -186,36 +185,36 @@ def admin_info_callback(call):
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back_to_list"))
         
         try:
-            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         except:
-            bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+            bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
             
     except Exception as e:
         logger.error(f"[ADD_ADMIN] Ошибка в admin_info_callback: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("admin:remove:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("admin:remove:"))
 def admin_remove_callback(call):
     """Обработчик удаления администратора"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         admin_user_id = int(call.data.split(":")[2])
         user_id = call.from_user.id
         
         # Проверяем права доступа
         if not is_owner(user_id):
-            bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
             return
         
         # Удаляем администратора
         success, message = remove_admin(admin_user_id)
         
         if success:
-            bot_instance.answer_callback_query(call.id, "✅ Администратор удален", show_alert=False)
+            bot.answer_callback_query(call.id, "✅ Администратор удален", show_alert=False)
             # Возвращаемся к списку администраторов
             from moviebot.bot.handlers.admin import add_admin_command
             class FakeMessage:
@@ -227,21 +226,21 @@ def admin_remove_callback(call):
             fake_msg = FakeMessage(call.message.chat.id, user_id)
             add_admin_command(fake_msg)
         else:
-            bot_instance.answer_callback_query(call.id, f"❌ {message}", show_alert=True)
+            bot.answer_callback_query(call.id, f"❌ {message}", show_alert=True)
             
     except Exception as e:
         logger.error(f"[ADD_ADMIN] Ошибка в admin_remove_callback: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "admin:back_to_list")
+@bot.callback_query_handler(func=lambda call: call.data == "admin:back_to_list")
 def admin_back_to_list_callback(call):
     """Обработчик возврата к списку администраторов"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         
         # Возвращаемся к списку администраторов
@@ -259,16 +258,16 @@ def admin_back_to_list_callback(call):
         logger.error(f"[ADD_ADMIN] Ошибка в admin_back_to_list_callback: {e}", exc_info=True)
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("unsubscribe:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("unsubscribe:"))
 def handle_unsubscribe_callback(call):
     """Обработчик выбора типа отмены подписки и отмены конкретной подписки"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         
         # Проверяем права доступа
         if not is_owner(user_id):
-            bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
             return
         
         parts = call.data.split(":")
@@ -292,9 +291,9 @@ def handle_unsubscribe_callback(call):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"unsubscribe:back:{target_user_id}"))
                 
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except:
-                    bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                    bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
                 return
             
             text = f"👤 <b>Личные подписки пользователя {target_user_id}</b>\n\n"
@@ -349,9 +348,9 @@ def handle_unsubscribe_callback(call):
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"unsubscribe:back:{target_user_id}"))
             
             try:
-                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except:
-                bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
         
         elif action == "paid":
             # Показываем список всех подписок, оплаченных пользователем
@@ -373,9 +372,9 @@ def handle_unsubscribe_callback(call):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"unsubscribe:back:{target_user_id}"))
                 
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except:
-                    bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                    bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
                 return
             
             text = f"💳 <b>Оплаченные подписки пользователя {target_user_id}</b>\n\n"
@@ -440,23 +439,23 @@ def handle_unsubscribe_callback(call):
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"unsubscribe:back:{target_user_id}"))
             
             try:
-                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except:
-                bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
         
         elif action == "cancel":
             # Отменяем конкретную подписку
             subscription_id = int(parts[2]) if len(parts) > 2 else None
             
             if not subscription_id:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка: неверный ID подписки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка: неверный ID подписки", show_alert=True)
                 return
             
             from moviebot.database.db_operations import cancel_subscription, get_subscription_by_id
             subscription = get_subscription_by_id(subscription_id)
             
             if not subscription:
-                bot_instance.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
                 return
             
             if isinstance(subscription, dict):
@@ -491,18 +490,18 @@ def handle_unsubscribe_callback(call):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"unsubscribe:back:{target_user_id_from_sub}"))
                 
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except:
-                    bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                    bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
                 
-                bot_instance.answer_callback_query(call.id, "✅ Подписка отменена", show_alert=False)
+                bot.answer_callback_query(call.id, "✅ Подписка отменена", show_alert=False)
                 
                 # Очищаем состояние после успешной отмены
                 from moviebot.states import user_unsubscribe_state
                 if user_id in user_unsubscribe_state:
                     del user_unsubscribe_state[user_id]
             else:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка отмены подписки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка отмены подписки", show_alert=True)
         
         elif action == "back":
             # Возврат к меню выбора типа отмены
@@ -522,26 +521,26 @@ def handle_unsubscribe_callback(call):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
                 
                 try:
-                    bot_instance.edit_message_text(text_result, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot.edit_message_text(text_result, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except:
-                    bot_instance.send_message(call.message.chat.id, text_result, reply_markup=markup, parse_mode='HTML')
+                    bot.send_message(call.message.chat.id, text_result, reply_markup=markup, parse_mode='HTML')
         
     except Exception as e:
         logger.error(f"[UNSUBSCRIBE CALLBACK] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "admin:back")
+@bot.callback_query_handler(func=lambda call: call.data == "admin:back")
 def admin_back_callback(call):
     """Обработчик кнопки 'Назад'"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         # Просто закрываем сообщение или возвращаемся в меню
         try:
-            bot_instance.delete_message(call.message.chat.id, call.message.message_id)
+            bot.delete_message(call.message.chat.id, call.message.message_id)
         except:
             pass
     except Exception as e:

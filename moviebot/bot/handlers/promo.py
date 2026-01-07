@@ -4,7 +4,6 @@
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.states import user_promo_admin_state
 from moviebot.utils.promo import get_active_promocodes, get_all_promocodes, deactivate_promocode, get_promocode_info
 
@@ -34,7 +33,7 @@ def get_bot_owner_id():
 
 
 # Обработчики регистрируются автоматически через декораторы
-@bot_instance.message_handler(commands=['promo'])
+@bot.message_handler(commands=['promo'])
 def promo_command(message):
     """Команда /promo - управление промокодами (только для владельца бота)"""
     try:
@@ -43,13 +42,13 @@ def promo_command(message):
         
         # Проверяем, что команда отправлена в личке
         if message.chat.type != 'private':
-            bot_instance.reply_to(message, "❌ Команда /promo доступна только в личных сообщениях боту.")
+            bot.reply_to(message, "❌ Команда /promo доступна только в личных сообщениях боту.")
             return
         
         # Проверяем права доступа (владелец бота)
         owner_id = get_bot_owner_id()
         if owner_id and user_id != owner_id:
-            bot_instance.reply_to(message, "❌ У вас нет доступа к этой команде.")
+            bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
         
         logger.info(f"[PROMO] Команда /promo вызвана от {user_id}")
@@ -90,28 +89,28 @@ def promo_command(message):
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="back_to_start_menu"))
         
         # Устанавливаем состояние для обработки ответа
-        msg = bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
         user_promo_admin_state[user_id] = {'message_id': msg.message_id}
         
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_command: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке команды /promo")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке команды /promo")
         except:
             pass
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("promo:info:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("promo:info:"))
 def promo_info_callback(call):
     """Обработчик просмотра информации о промокоде"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         promocode_id = int(call.data.split(":")[2])
         user_id = call.from_user.id
         
         # Проверяем права доступа
         owner_id = get_bot_owner_id()
         if owner_id and user_id != owner_id:
-            bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
             return
         
         # Получаем свежие данные о промокоде
@@ -128,7 +127,7 @@ def promo_info_callback(call):
             row = cursor.fetchone()
         
         if not row:
-            bot_instance.answer_callback_query(call.id, "❌ Промокод не найден", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Промокод не найден", show_alert=True)
             return
         
         # Парсим строку или dict
@@ -168,7 +167,7 @@ def promo_info_callback(call):
         markup.add(InlineKeyboardButton("◀️ Назад к списку", callback_data="promo:back_to_list"))
         
         # Редактируем текущее сообщение
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             text=text,
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
@@ -179,11 +178,11 @@ def promo_info_callback(call):
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_info_callback: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("promo:deactivate:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("promo:deactivate:"))
 def promo_deactivate_callback(call):
     """Обработчик деактивации промокода"""
     try:
@@ -193,31 +192,31 @@ def promo_deactivate_callback(call):
         # Проверяем права доступа
         owner_id = get_bot_owner_id()
         if owner_id and user_id != owner_id:
-            bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ У вас нет доступа", show_alert=True)
             return
         
         # Деактивируем промокод
         success, message = deactivate_promocode(promocode_id)
         
         if success:
-            bot_instance.answer_callback_query(call.id, "✅ Промокод деактивирован", show_alert=False)
+            bot.answer_callback_query(call.id, "✅ Промокод деактивирован", show_alert=False)
             # Обновляем текущее сообщение с новой информацией
             promo_info_callback(call)
         else:
-            bot_instance.answer_callback_query(call.id, f"❌ {message}", show_alert=True)
+            bot.answer_callback_query(call.id, f"❌ {message}", show_alert=True)
             
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_deactivate_callback: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "promo:back")
+@bot.callback_query_handler(func=lambda call: call.data == "promo:back")
 def promo_back_callback(call):
     """Обработчик возврата к списку промокодов"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         
@@ -252,7 +251,7 @@ def promo_back_callback(call):
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="back_to_start_menu"))
         
         # Редактируем текущее сообщение
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             text=text,
             chat_id=chat_id,
             message_id=call.message.message_id,
@@ -263,14 +262,14 @@ def promo_back_callback(call):
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_back_callback: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
         
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("promo:activate:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("promo:activate:"))
 def promo_activate_callback(call):
     try:
-        bot_instance.answer_callback_query(call.id, "✅ Промокод активирован")
+        bot.answer_callback_query(call.id, "✅ Промокод активирован")
         promocode_id = int(call.data.split(":")[2])
         
         from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
@@ -284,13 +283,13 @@ def promo_activate_callback(call):
         promo_info_callback(call)  # Обновляем карточку
     except Exception as e:
         logger.error(f"[PROMO] Ошибка активации: {e}", exc_info=True)
-        bot_instance.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "promo:back_to_list")
+@bot.callback_query_handler(func=lambda call: call.data == "promo:back_to_list")
 def promo_back_to_list_callback(call):
     """Возврат к списку всех промокодов из карточки промокода"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         
         # Используем ту же логику, что и в promo_command
         promocodes = get_all_promocodes()
@@ -323,7 +322,7 @@ def promo_back_to_list_callback(call):
         
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="back_to_start_menu"))
         
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             text=text,
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
@@ -333,4 +332,4 @@ def promo_back_to_list_callback(call):
         
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_back_to_list_callback: {e}", exc_info=True)
-        bot_instance.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)

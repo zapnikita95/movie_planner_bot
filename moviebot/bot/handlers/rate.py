@@ -8,7 +8,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_operations import log_request
 from moviebot.utils.parsing import extract_kp_id_from_text
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot as bot_instance
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -39,17 +38,17 @@ def register_rate_handlers(bot):
             # Извлекаем kp_id
             kp_id = extract_kp_id_from_text(kp_id_or_url)
             if not kp_id:
-                bot_instance.reply_to(message, "❌ Не удалось распознать kp_id. Используйте формат:\n<code>/rate 81682 10</code>\nили\n<code>/rate https://www.kinopoisk.ru/film/81682/ 10</code>", parse_mode='HTML')
+                bot.reply_to(message, "❌ Не удалось распознать kp_id. Используйте формат:\n<code>/rate 81682 10</code>\nили\n<code>/rate https://www.kinopoisk.ru/film/81682/ 10</code>", parse_mode='HTML')
                 return
             
             # Парсим оценку
             try:
                 rating = int(rating_str.strip())
                 if not (1 <= rating <= 10):
-                    bot_instance.reply_to(message, "❌ Оценка должна быть от 1 до 10")
+                    bot.reply_to(message, "❌ Оценка должна быть от 1 до 10")
                     return
             except ValueError:
-                bot_instance.reply_to(message, "❌ Неверный формат оценки. Используйте число от 1 до 10")
+                bot.reply_to(message, "❌ Неверный формат оценки. Используйте число от 1 до 10")
                 return
             
             # Ищем фильм в базе
@@ -61,7 +60,7 @@ def register_rate_handlers(bot):
                 film_row = cursor.fetchone()
                 
                 if not film_row:
-                    bot_instance.reply_to(message, f"❌ Фильм с kp_id={kp_id} не найден в базе или не помечен как просмотренный")
+                    bot.reply_to(message, f"❌ Фильм с kp_id={kp_id} не найден в базе или не помечен как просмотренный")
                     return
                 
                 film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
@@ -82,7 +81,7 @@ def register_rate_handlers(bot):
                         WHERE chat_id = %s AND film_id = %s AND user_id = %s
                     ''', (rating, chat_id, film_id, user_id))
                     conn.commit()
-                    bot_instance.reply_to(message, f"✅ Оценка обновлена!\n\n<b>{title}</b>\nСтарая оценка: {old_rating}/10\nНовая оценка: {rating}/10", parse_mode='HTML')
+                    bot.reply_to(message, f"✅ Оценка обновлена!\n\n<b>{title}</b>\nСтарая оценка: {old_rating}/10\nНовая оценка: {rating}/10", parse_mode='HTML')
                     logger.info(f"[RATE] Пользователь {user_id} обновил оценку для фильма {kp_id} с {old_rating} на {rating}")
                 else:
                     # Сохраняем новую оценку
@@ -91,7 +90,7 @@ def register_rate_handlers(bot):
                         VALUES (%s, %s, %s, %s)
                     ''', (chat_id, film_id, user_id, rating))
                     conn.commit()
-                    bot_instance.reply_to(message, f"✅ Оценка сохранена!\n\n<b>{title}</b>\nОценка: {rating}/10", parse_mode='HTML')
+                    bot.reply_to(message, f"✅ Оценка сохранена!\n\n<b>{title}</b>\nОценка: {rating}/10", parse_mode='HTML')
                     logger.info(f"[RATE] Пользователь {user_id} поставил оценку {rating} для фильма {kp_id}")
             
             return
@@ -131,7 +130,7 @@ def register_rate_handlers(bot):
             unwatched_films = cursor.fetchall()
         
         if not unwatched_films:
-            bot_instance.reply_to(message, "✅ Все просмотренные фильмы уже оценены!")
+            bot.reply_to(message, "✅ Все просмотренные фильмы уже оценены!")
             return
         
         # Формируем список фильмов для оценки
@@ -160,14 +159,14 @@ def register_rate_handlers(bot):
         text += "\n<i>Нажмите на фильм, чтобы открыть его описание и оценить</i>"
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
-        bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_rating:"))
     def handle_confirm_rating(call):
         """Обработчик подтверждения оценки"""
         # TODO: Извлечь из moviebot.py строки 7696-7749
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             # TODO: Реализовать логику подтверждения оценки
         except Exception as e:
             logger.error(f"[RATE] Ошибка в handle_confirm_rating: {e}", exc_info=True)
@@ -177,7 +176,7 @@ def register_rate_handlers(bot):
         """Обработчик отмены оценки"""
         # TODO: Извлечь из moviebot.py строки 7750-7776
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             # TODO: Реализовать логику отмены оценки
         except Exception as e:
             logger.error(f"[RATE] Ошибка в handle_cancel_rating: {e}", exc_info=True)
@@ -186,7 +185,7 @@ def register_rate_handlers(bot):
     def rate_from_list_callback(call):
         """Обработчик выбора фильма из списка /rate - открывает описание фильма"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             kp_id = call.data.split(":")[1]
             user_id = call.from_user.id
             chat_id = call.message.chat.id
@@ -199,7 +198,7 @@ def register_rate_handlers(bot):
                 row = cursor.fetchone()
             
             if not row:
-                bot_instance.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
                 return
             
             film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -212,7 +211,7 @@ def register_rate_handlers(bot):
             info = extract_movie_info(link)
             
             if not info:
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
                 return
             
             # Формируем existing для передачи в show_film_info_with_buttons
@@ -225,7 +224,7 @@ def register_rate_handlers(bot):
         except Exception as e:
             logger.error(f"[RATE FROM LIST] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
@@ -307,7 +306,7 @@ def handle_rating_internal(message, rating):
                 logger.info(f"[RATE INTERNAL] Фильм добавлен в базу при оценке: kp_id={kp_id}, film_id={film_id}")
         else:
             logger.warning(f"[RATE INTERNAL] Не удалось получить информацию о фильме для kp_id={kp_id}")
-            bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
+            bot.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
             return
     
     # Если film_id все еще не найден и нет реплая, пытаемся найти последнее сообщение бота с запросом на оценку
@@ -375,7 +374,7 @@ def handle_rating_internal(message, rating):
                     logger.info(f"[RATE INTERNAL] Фильм добавлен в базу при оценке: kp_id={kp_id}, film_id={film_id}")
             else:
                 logger.warning(f"[RATE INTERNAL] Не удалось получить информацию о фильме для kp_id={kp_id}")
-                bot_instance.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
+                bot.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
                 return
     
     if film_id:
@@ -416,13 +415,13 @@ def handle_rating_internal(message, rating):
                     if kp_id:
                         markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"show_film_description:{kp_id}"))
                     
-                    reply_msg = bot_instance.reply_to(message, f"Спасибо! Фильм отмечен как просмотренный, ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", reply_markup=markup if markup.keyboard else None)
+                    reply_msg = bot.reply_to(message, f"Спасибо! Фильм отмечен как просмотренный, ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", reply_markup=markup if markup.keyboard else None)
                     
                     # Сохраняем message_id для удаления при возврате к описанию
                     if kp_id and reply_msg:
                         rating_messages[reply_msg.message_id] = film_id
                 else:
-                    bot_instance.reply_to(message, f"✅ Оценка {rating}/10 сохранена!\nСредняя: {avg_str}/10")
+                    bot.reply_to(message, f"✅ Оценка {rating}/10 сохранена!\nСредняя: {avg_str}/10")
                 
                 # Обновляем кнопку "Оценить" в сообщении с описанием фильма, если оно есть
                 if kp_id:
@@ -526,10 +525,10 @@ def handle_rating_internal(message, rating):
                     
         except Exception as e:
             logger.error(f"[RATE INTERNAL] Ошибка при сохранении оценки: {e}", exc_info=True)
-            bot_instance.reply_to(message, "❌ Произошла ошибка при сохранении оценки.")
+            bot.reply_to(message, "❌ Произошла ошибка при сохранении оценки.")
     else:
         logger.warning(f"[RATE INTERNAL] Не удалось найти film_id для сохранения оценки")
-        bot_instance.reply_to(message, "❌ Не удалось найти фильм для оценки. Убедитесь, что вы отвечаете на сообщение с фильмом.")
+        bot.reply_to(message, "❌ Не удалось найти фильм для оценки. Убедитесь, что вы отвечаете на сообщение с фильмом.")
 
 
 def handle_edit_rating_internal(message, state):
@@ -544,7 +543,7 @@ def handle_edit_rating_internal(message, state):
         logger.info(f"[EDIT RATING INTERNAL] Обработка: text='{text}', film_id={film_id}")
         
         if not film_id:
-            bot_instance.reply_to(message, "❌ Ошибка: фильм не найден.")
+            bot.reply_to(message, "❌ Ошибка: фильм не найден.")
             from moviebot.states import user_edit_state
             if user_id in user_edit_state:
                 del user_edit_state[user_id]
@@ -554,10 +553,10 @@ def handle_edit_rating_internal(message, state):
         try:
             rating = int(text)
             if not (1 <= rating <= 10):
-                bot_instance.reply_to(message, "❌ Оценка должна быть от 1 до 10")
+                bot.reply_to(message, "❌ Оценка должна быть от 1 до 10")
                 return
         except ValueError:
-            bot_instance.reply_to(message, "❌ Неверный формат оценки. Используйте число от 1 до 10")
+            bot.reply_to(message, "❌ Неверный формат оценки. Используйте число от 1 до 10")
             return
         
         # Обновляем оценку
@@ -573,7 +572,7 @@ def handle_edit_rating_internal(message, state):
             film_row = cursor.fetchone()
             title = film_row.get('title') if isinstance(film_row, dict) else (film_row[0] if film_row else "Фильм")
         
-        bot_instance.reply_to(message, f"✅ Оценка обновлена!\n\n<b>{title}</b>\nНовая оценка: {rating}/10", parse_mode='HTML')
+        bot.reply_to(message, f"✅ Оценка обновлена!\n\n<b>{title}</b>\nНовая оценка: {rating}/10", parse_mode='HTML')
         logger.info(f"[EDIT RATING INTERNAL] Оценка обновлена для фильма {film_id}: {rating}/10")
         
         from moviebot.states import user_edit_state
@@ -582,6 +581,6 @@ def handle_edit_rating_internal(message, state):
     except Exception as e:
         logger.error(f"[EDIT RATING INTERNAL] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке.")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке.")
         except:
             pass

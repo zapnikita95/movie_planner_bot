@@ -13,7 +13,6 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.config import KP_TOKEN, PLANS_TZ
 import requests
 from moviebot.states import (
@@ -34,23 +33,20 @@ cursor = get_db_cursor()
 
 # Обработчик выбора типа поиска (фильм/сериал) - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
 # КРИТИЧЕСКИ ВАЖНО: Этот обработчик регистрируется при импорте модуля
-# ВАЖНО: Используем bot_instance из импорта, который должен быть тем же объектом, что и bot в register_series_handlers
 logger.info("=" * 80)
 logger.info(f"[SEARCH TYPE HANDLER] Регистрация обработчика search_type_callback")
-logger.info(f"[SEARCH TYPE HANDLER] bot_instance={bot_instance}, type={type(bot_instance)}")
-logger.info(f"[SEARCH TYPE HANDLER] id(bot_instance)={id(bot_instance)}")
+logger.info(f"[SEARCH TYPE HANDLER] id(bot)={id(bot)}")
 logger.info("=" * 80)
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
 def search_type_callback(call):
     """Обработчик выбора типа поиска (фильм или сериал)"""
     logger.info("=" * 80)
     logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     logger.info(f"[SEARCH TYPE] call.data={call.data}, call.message.message_id={call.message.message_id if call.message else 'N/A'}")
-    logger.info(f"[SEARCH TYPE] bot_instance={bot_instance}, type={type(bot_instance)}")
     try:
         # Отвечаем на callback сразу, чтобы убрать "крутилку"
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         search_type = call.data.split(":")[1]  # 'film' или 'series'
@@ -93,7 +89,7 @@ def search_type_callback(call):
         prompt_text = f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик"
         
         try:
-            sent_msg = bot_instance.edit_message_text(
+            sent_msg = bot.edit_message_text(
                 prompt_text,
                 chat_id,
                 call.message.message_id,
@@ -105,7 +101,7 @@ def search_type_callback(call):
             logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
             # Пробуем отправить новое сообщение
             try:
-                sent_msg = bot_instance.send_message(
+                sent_msg = bot.send_message(
                     chat_id,
                     prompt_text,
                     reply_markup=markup
@@ -114,7 +110,7 @@ def search_type_callback(call):
                 logger.info(f"[SEARCH TYPE] ✅ Новое сообщение отправлено")
             except Exception as send_e:
                 logger.error(f"[SEARCH TYPE] ❌ Ошибка отправки нового сообщения: {send_e}", exc_info=True)
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
                 return
         
         # Для ЛС устанавливаем ожидание текста
@@ -123,18 +119,18 @@ def search_type_callback(call):
     except Exception as e:
         logger.error(f"[SEARCH TYPE] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except Exception as answer_e:
             logger.error(f"[SEARCH TYPE] Не удалось вызвать answer_callback_query: {answer_e}")
     finally:
         logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "search:retry")
+@bot.callback_query_handler(func=lambda call: call.data == "search:retry")
 def search_retry_callback(call):
     """Обработчик кнопки 'Повторить запрос' - возвращает промпт поиска"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         is_private = call.message.chat.type == 'private'
@@ -169,7 +165,7 @@ def search_retry_callback(call):
         else:
             prompt_text += "\n\n📝 В группе отправьте запрос в ответ на это сообщение."
         
-        prompt_msg = bot_instance.send_message(chat_id, prompt_text, reply_markup=markup)
+        prompt_msg = bot.send_message(chat_id, prompt_text, reply_markup=markup)
         
         # Устанавливаем состояние для ожидания запроса
         user_search_state[user_id] = {
@@ -185,7 +181,7 @@ def search_retry_callback(call):
     except Exception as e:
         logger.error(f"[SEARCH RETRY] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
@@ -225,7 +221,7 @@ def handle_search(message):
                 InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
             )
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            reply_msg = bot_instance.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
+            reply_msg = bot.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
             # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
             user_id = message.from_user.id
             chat_id = message.chat.id
@@ -251,7 +247,7 @@ def handle_search(message):
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🔄 Повторить запрос", callback_data="search:retry"))
             markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
-            bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
+            bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
             return
         
         # Формируем сообщение с результатами
@@ -303,7 +299,7 @@ def handle_search(message):
         # Добавляем пояснение про эмодзи
         results_text += "\n\n🎬 - фильм\n📺 - сериал"
         
-        results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+        results_msg = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
         # Сохраняем message_id результатов поиска для кнопки "Назад"
         if results_msg:
             user_search_state[message.from_user.id] = {
@@ -319,7 +315,7 @@ def handle_search(message):
     except Exception as e:
         logger.error(f"❌ Ошибка в /search: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /search")
+            bot.reply_to(message, "Произошла ошибка при обработке команды /search")
         except:
             pass
 
@@ -367,12 +363,12 @@ def random_start(message):
                 markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
             
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            bot_instance.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
+            bot.reply_to(message, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
             logger.info(f"✅ Ответ на /random отправлен пользователю {user_id}")
         except Exception as e:
             logger.error(f"❌ Ошибка в /random: {e}", exc_info=True)
             try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /random")
+                bot.reply_to(message, "Произошла ошибка при обработке команды /random")
             except:
                 pass
 
@@ -393,7 +389,7 @@ def premieres_command(message):
         markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
-        bot_instance.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
 
 
 def ticket_command(message):
@@ -422,7 +418,7 @@ def ticket_command(message):
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             logger.info(f"[TICKET COMMAND] Вызов reply_to для сообщения о подписке")
-            bot_instance.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+            bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
             logger.info(f"[TICKET COMMAND] Сообщение о подписке отправлено")
             return
         
@@ -462,7 +458,7 @@ def ticket_command(message):
         logger.error(f"[TICKET COMMAND] Тип ошибки: {type(e).__name__}, args: {e.args}")
         try:
             logger.info(f"[TICKET COMMAND] Попытка отправить сообщение об ошибке")
-            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /ticket")
+            bot.reply_to(message, "Произошла ошибка при обработке команды /ticket")
             logger.info(f"[TICKET COMMAND] Сообщение об ошибке отправлено")
         except Exception as send_error:
             logger.error(f"[TICKET COMMAND] ❌ Не удалось отправить сообщение об ошибке: {send_error}", exc_info=True)
@@ -536,7 +532,7 @@ movie-planner-bot@yandex.com"""
     text_html = text_html.replace('5) Планирование походов в кино', '<b>5) Планирование походов в кино</b>')
     text_html = text_html.replace('Приятного просмотра!', '<b>Приятного просмотра!</b>')
     text_html = text_html.replace('Если у вас возникли сложности с ботом или оплатой, напишите нам:', '<b>Если у вас возникли сложности с ботом или оплатой, напишите нам:</b>')
-    bot_instance.reply_to(message, text_html, reply_markup=markup, parse_mode='HTML')
+    bot.reply_to(message, text_html, reply_markup=markup, parse_mode='HTML')
 
 
 def show_cinema_sessions(chat_id, user_id, file_id=None):
@@ -577,13 +573,13 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data=f"ticket_new:{file_id}"))
                 markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
-                bot_instance.send_message(chat_id, "❌ Нет запланированных сеансов в кино.\n\n📎 Файл готов к добавлению. Создайте новый сеанс.", reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, "❌ Нет запланированных сеансов в кино.\n\n📎 Файл готов к добавлению. Создайте новый сеанс.", reply_markup=markup, parse_mode='HTML')
             else:
                 # Нет файла и нет сеансов
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data="ticket_new"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                bot_instance.send_message(chat_id, "❌ Нет запланированных сеансов в кино.", reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, "❌ Нет запланированных сеансов в кино.", reply_markup=markup, parse_mode='HTML')
             return
         
         user_tz = get_user_timezone_or_default(user_id)
@@ -637,12 +633,12 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
         else:
             text += "Выберите сеанс для просмотра билетов или добавления новых."
         
-        bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         logger.info(f"[SHOW SESSIONS] Сообщение с сеансами отправлено пользователю {user_id}")
     except Exception as e:
         logger.error(f"[SHOW SESSIONS] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.send_message(chat_id, "❌ Произошла ошибка при загрузке сеансов.")
+            bot.send_message(chat_id, "❌ Произошла ошибка при загрузке сеансов.")
         except:
             pass
 
@@ -652,16 +648,10 @@ def register_series_handlers(bot_param):
     logger.info("=" * 80)
     logger.info(f"[REGISTER SERIES HANDLERS] ===== START: регистрация обработчиков сериалов =====")
     logger.info(f"[REGISTER SERIES HANDLERS] bot_param: {bot_param}")
-    logger.info(f"[REGISTER SERIES HANDLERS] bot_instance (из импорта): {bot_instance}")
-    logger.info(f"[REGISTER SERIES HANDLERS] bot_param == bot_instance: {bot_param == bot_instance}")
-    logger.info(f"[REGISTER SERIES HANDLERS] id(bot_param): {id(bot_param)}, id(bot_instance): {id(bot_instance)}")
+    logger.info(f"[REGISTER SERIES HANDLERS] id(bot_param): {id(bot_param)}, id(bot): {id(bot)}")
     
     # КРИТИЧЕСКИ ВАЖНО: Используем bot_param (переданный параметр) для регистрации handlers внутри функции
-    # Но обработчик search_type_callback уже зарегистрирован на верхнем уровне модуля с bot_instance
     # Проверяем, что это один и тот же объект
-    if bot_param != bot_instance:
-        logger.error(f"[REGISTER SERIES HANDLERS] ❌ КРИТИЧЕСКАЯ ОШИБКА: bot_param != bot_instance!")
-        logger.error(f"[REGISTER SERIES HANDLERS] bot_param id: {id(bot_param)}, bot_instance id: {id(bot_instance)}")
         logger.error(f"[REGISTER SERIES HANDLERS] Это означает, что search_type_callback зарегистрирован на другом экземпляре бота!")
         logger.error(f"[REGISTER SERIES HANDLERS] Перерегистрируем search_type_callback на правильном экземпляре...")
         
@@ -674,7 +664,7 @@ def register_series_handlers(bot_param):
         
         logger.info(f"[REGISTER SERIES HANDLERS] ✅ search_type_callback перерегистрирован на bot_param")
     else:
-        logger.info(f"[REGISTER SERIES HANDLERS] ✅ bot_param == bot_instance, обработчик search_type_callback зарегистрирован правильно")
+        logger.info(f"[REGISTER SERIES HANDLERS] ✅ bot_param == bot, обработчик search_type_callback зарегистрирован правильно")
     
     @bot_param.message_handler(commands=['search'])
     def _handle_search_handler(message):
@@ -717,7 +707,7 @@ def register_series_handlers(bot_param):
                 has_rec_access = has_recommendations_access(chat_id, user_id)
                 logger.info(f"[RANDOM CALLBACK] Mode {mode} requires recommendations access: {has_rec_access}")
                 if not has_rec_access:
-                    bot_instance.answer_callback_query(
+                    bot.answer_callback_query(
                         call.id, 
                         "❌ Этот режим доступен только с подпиской на рекомендации. Используйте /payment для оформления подписки.", 
                         show_alert=True
@@ -756,7 +746,7 @@ def register_series_handlers(bot_param):
             # Для режима kinopoisk пропускаем периоды и сразу переходим к выбору года и жанра
             if mode == 'kinopoisk':
                 user_random_state[user_id]['step'] = 'year'
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 logger.info(f"[RANDOM CALLBACK] Mode kinopoisk selected, moving to year selection")
                 _show_year_step(call, chat_id, user_id)
                 return
@@ -884,14 +874,14 @@ def register_series_handlers(bot_param):
                     markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             text = f"{mode_description}\n\n🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)"
-            bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             logger.info(f"[RANDOM CALLBACK] ✅ Mode selected: {mode}, moving to period selection, user_id={user_id}")
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_mode: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
     
@@ -922,7 +912,7 @@ def register_series_handlers(bot_param):
             else:
                 message_text = "🔒 Этот режим недоступен. Подключите подписку через /payment"
             
-            bot_instance.answer_callback_query(
+            bot.answer_callback_query(
                 call.id,
                 message_text,
                 show_alert=True
@@ -930,7 +920,7 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[RAND MODE LOCKED] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id,
                     "🔒 Функционал можно подключить через /payment",
                     show_alert=True
@@ -949,19 +939,19 @@ def register_series_handlers(bot_param):
             
             if user_id not in user_random_state:
                 logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
                 return
             
             mode = user_random_state[user_id].get('mode')
             if mode != 'kinopoisk':
                 logger.warning(f"[RANDOM CALLBACK] Content type handler called for non-kinopoisk mode: {mode}")
-                bot_instance.answer_callback_query(call.id, "❌ Неверный режим", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Неверный режим", show_alert=True)
                 return
             
             if data == "back":
                 # Возврат к выбору режима
                 logger.info(f"[RANDOM CALLBACK] Content type back, returning to mode selection")
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 # Вызываем random_start для возврата к выбору режима
                 from moviebot.bot.handlers.series import random_start
                 class FakeMessage:
@@ -970,7 +960,7 @@ def register_series_handlers(bot_param):
                         self.chat = call.message.chat
                         self.text = '/random'
                     def reply_to(self, text, **kwargs):
-                        return bot_instance.send_message(self.chat.id, text, **kwargs)
+                        return bot.send_message(self.chat.id, text, **kwargs)
                 fake_message = FakeMessage(call)
                 random_start(fake_message)
                 return
@@ -1000,13 +990,13 @@ def register_series_handlers(bot_param):
                 'ALL': '🎬 Фильм и Сериал'
             }.get(data, '')
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             text = f"{mode_description}\n\nВыбрано: {content_type_text}\n\n🎲 <b>Шаг 2/3: Выберите период</b>\n\n(можно выбрать несколько или пропустить)"
-            bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_content_type: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
     
@@ -1092,16 +1082,16 @@ def register_series_handlers(bot_param):
                     text = f"{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько)"
                 
                 try:
-                    bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot.answer_callback_query(call.id)
                     logger.info(f"[RANDOM CALLBACK] Period keyboard updated, selected={selected}")
                 except Exception as e:
                     logger.error(f"[RANDOM CALLBACK] Error updating period keyboard: {e}", exc_info=True)
-                    bot_instance.answer_callback_query(call.id, "Ошибка обновления")
+                    bot.answer_callback_query(call.id, "Ошибка обновления")
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_period: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка обработки")
+                bot.answer_callback_query(call.id, "Ошибка обработки")
             except:
                 pass
     
@@ -1135,9 +1125,9 @@ def register_series_handlers(bot_param):
             text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
             
             try:
-                bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except:
-                bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
             
             logger.info(f"[RANDOM] Year step shown for user {user_id}")
         except Exception as e:
@@ -1279,20 +1269,20 @@ def register_series_handlers(bot_param):
             
             selected_text = f"\n\nВыбрано: {', '.join(selected_genres)}" if selected_genres else ""
             try:
-                bot_instance.edit_message_text(f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}", 
+                bot.edit_message_text(f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}", 
                                     chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 logger.info(f"[RANDOM] Genre step shown, user_id={user_id}, selected={len(selected_genres)}")
             except Exception as e:
                 logger.error(f"[RANDOM] Error showing genre step: {e}", exc_info=True)
                 # Пробуем отправить новое сообщение
-                bot_instance.send_message(chat_id, f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}", 
+                bot.send_message(chat_id, f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}", 
                                 reply_markup=markup, parse_mode='HTML')
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
         except Exception as e:
             logger.error(f"[RANDOM] ERROR in _show_genre_step: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка загрузки жанров")
+                bot.answer_callback_query(call.id, "Ошибка загрузки жанров")
             except:
                 pass
     
@@ -1386,16 +1376,16 @@ def register_series_handlers(bot_param):
             text = f"{mode_description}\n\n🎬 <b>Шаг 3/3: Выберите жанр</b>{genre_limit_text}{selected_text}"
             
             try:
-                bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except:
-                bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             logger.info(f"[RANDOM] Genre step shown for kinopoisk, user_id={user_id}")
         except Exception as e:
             logger.error(f"[RANDOM] ERROR in _show_genre_step_kinopoisk: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка загрузки жанров")
+                bot.answer_callback_query(call.id, "Ошибка загрузки жанров")
             except:
                 pass
     
@@ -1484,19 +1474,19 @@ def register_series_handlers(bot_param):
             
             selected_text = f"\n\nВыбрано: {', '.join(selected_directors)}" if selected_directors else ""
             try:
-                bot_instance.edit_message_text(f"🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(можно выбрать несколько){selected_text}", 
+                bot.edit_message_text(f"🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(можно выбрать несколько){selected_text}", 
                                     chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 logger.info(f"[RANDOM] Director step shown, user_id={user_id}, selected={len(selected_directors)}")
             except Exception as e:
                 logger.error(f"[RANDOM] Error showing director step: {e}", exc_info=True)
-                bot_instance.send_message(chat_id, f"🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(можно выбрать несколько){selected_text}", 
+                bot.send_message(chat_id, f"🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(можно выбрать несколько){selected_text}", 
                                 reply_markup=markup, parse_mode='HTML')
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
         except Exception as e:
             logger.error(f"[RANDOM] ERROR in _show_director_step: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка загрузки режиссёров")
+                bot.answer_callback_query(call.id, "Ошибка загрузки режиссёров")
             except:
                 pass
     
@@ -1599,19 +1589,19 @@ def register_series_handlers(bot_param):
             
             selected_text = f"\n\nВыбрано: {', '.join(selected_actors)}" if selected_actors else ""
             try:
-                bot_instance.edit_message_text(f"🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(можно выбрать несколько){selected_text}", 
+                bot.edit_message_text(f"🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(можно выбрать несколько){selected_text}", 
                                     chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 logger.info(f"[RANDOM] Actor step shown, user_id={user_id}, selected={len(selected_actors)}")
             except Exception as e:
                 logger.error(f"[RANDOM] Error showing actor step: {e}", exc_info=True)
-                bot_instance.send_message(chat_id, f"🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(можно выбрать несколько){selected_text}", 
+                bot.send_message(chat_id, f"🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(можно выбрать несколько){selected_text}", 
                                 reply_markup=markup, parse_mode='HTML')
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
         except Exception as e:
             logger.error(f"[RANDOM] ERROR in _show_actor_step: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка загрузки актёров")
+                bot.answer_callback_query(call.id, "Ошибка загрузки актёров")
             except:
                 pass
     
@@ -1628,7 +1618,7 @@ def register_series_handlers(bot_param):
             
             if user_id not in user_random_state:
                 logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
                 return
             
             mode = user_random_state[user_id].get('mode')
@@ -1680,15 +1670,15 @@ def register_series_handlers(bot_param):
                     text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                     
                     try:
-                        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                        bot_instance.answer_callback_query(call.id)
+                        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot.answer_callback_query(call.id)
                     except Exception as e:
                         logger.error(f"[RANDOM CALLBACK] Error updating period keyboard: {e}", exc_info=True)
-                        bot_instance.answer_callback_query(call.id, "Ошибка обновления")
+                        bot.answer_callback_query(call.id, "Ошибка обновления")
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_year: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
     
@@ -1717,7 +1707,7 @@ def register_series_handlers(bot_param):
                 else:
                     # Для kinopoisk ограничиваем до 3 жанров
                     if mode == 'kinopoisk' and len(genres) >= 3:
-                        bot_instance.answer_callback_query(call.id, "Можно выбрать максимум 3 жанра", show_alert=True)
+                        bot.answer_callback_query(call.id, "Можно выбрать максимум 3 жанра", show_alert=True)
                         return
                     genres.append(data)
                     logger.info(f"[RANDOM CALLBACK] Genre added: {data}")
@@ -1782,11 +1772,11 @@ def register_series_handlers(bot_param):
                     text = f"{mode_description}\n\nВыбрано: {content_type_text}\n\n🎲 <b>Шаг 2/3: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                     
                     try:
-                        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                        bot_instance.answer_callback_query(call.id)
+                        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot.answer_callback_query(call.id)
                     except Exception as e:
                         logger.error(f"[RANDOM CALLBACK] Error updating period keyboard: {e}", exc_info=True)
-                        bot_instance.answer_callback_query(call.id, "Ошибка обновления")
+                        bot.answer_callback_query(call.id, "Ошибка обновления")
                     return
                 
                 # Переходим к финалу
@@ -1827,11 +1817,11 @@ def register_series_handlers(bot_param):
                     text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                     
                     try:
-                        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                        bot_instance.answer_callback_query(call.id)
+                        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot.answer_callback_query(call.id)
                     except Exception as e:
                         logger.error(f"[RANDOM CALLBACK] Error updating period keyboard: {e}", exc_info=True)
-                        bot_instance.answer_callback_query(call.id, "Ошибка обновления")
+                        bot.answer_callback_query(call.id, "Ошибка обновления")
                     return
                 
                 # Переходим к финалу
@@ -1884,16 +1874,16 @@ def register_series_handlers(bot_param):
                 
                 selected = ', '.join(periods) if periods else 'ничего'
                 try:
-                    bot_instance.edit_message_text(f"🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько)", 
+                    bot.edit_message_text(f"🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько)", 
                                         chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                    bot_instance.answer_callback_query(call.id)
+                    bot.answer_callback_query(call.id)
                 except Exception as e:
                     logger.error(f"[RANDOM CALLBACK] Error going back to period: {e}", exc_info=True)
-                    bot_instance.answer_callback_query(call.id, "Ошибка")
+                    bot.answer_callback_query(call.id, "Ошибка")
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_genre: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка обработки")
+                bot.answer_callback_query(call.id, "Ошибка обработки")
             except:
                 pass
     
@@ -1945,7 +1935,7 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_dir: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка обработки")
+                bot.answer_callback_query(call.id, "Ошибка обработки")
             except:
                 pass
     
@@ -1989,7 +1979,7 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_actor: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка обработки")
+                bot.answer_callback_query(call.id, "Ошибка обработки")
             except:
                 pass
     
@@ -2004,7 +1994,7 @@ def register_series_handlers(bot_param):
             # Если это кнопка "Найти фильм" из случайных событий и нет состояния
             if call.data == "rand_final:go" and user_id not in user_random_state:
                 logger.info(f"[RANDOM CALLBACK] Кнопка 'Найти фильм' из случайных событий, запускаем рандом по своей базе")
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 
                 # Создаем фиктивное сообщение для вызова random_start
                 class FakeMessage:
@@ -2014,7 +2004,7 @@ def register_series_handlers(bot_param):
                         self.text = '/random'
                 
                     def reply_to(self, text, **kwargs):
-                        return bot_instance.send_message(self.chat.id, text, **kwargs)
+                        return bot.send_message(self.chat.id, text, **kwargs)
                 
                 fake_message = FakeMessage(call)
                 random_start(fake_message)
@@ -2050,7 +2040,7 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_final: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка обработки")
+                bot.answer_callback_query(call.id, "Ошибка обработки")
             except:
                 pass
     
@@ -2185,8 +2175,8 @@ def register_series_handlers(bot_param):
                         continue
                 
                 if not all_films:
-                    bot_instance.edit_message_text("😔 Не удалось найти фильм по заданным критериям на Кинопоиске.", chat_id, call.message.message_id)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text("😔 Не удалось найти фильм по заданным критериям на Кинопоиске.", chat_id, call.message.message_id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
                 
@@ -2198,8 +2188,8 @@ def register_series_handlers(bot_param):
                         filtered_films.append(film)
                 
                 if not filtered_films:
-                    bot_instance.edit_message_text("😔 Все найденные фильмы уже есть в вашей базе.", chat_id, call.message.message_id)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text("😔 Все найденные фильмы уже есть в вашей базе.", chat_id, call.message.message_id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
                 
@@ -2238,7 +2228,7 @@ def register_series_handlers(bot_param):
                             chat_id, user_id, movie_info, link, kp_id_result,
                             existing=None, message_id=call.message.message_id
                         )
-                        bot_instance.answer_callback_query(call.id)
+                        bot.answer_callback_query(call.id)
                         del user_random_state[user_id]
                         return
                     else:
@@ -2259,15 +2249,15 @@ def register_series_handlers(bot_param):
                         markup.add(InlineKeyboardButton("🔗 Перейти к карточке", callback_data=f"add_to_database:{kp_id_result}"))
                         
                         try:
-                            bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
                         except:
-                            bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                        bot_instance.answer_callback_query(call.id)
+                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                        bot.answer_callback_query(call.id)
                         del user_random_state[user_id]
                         return
                 else:
-                    bot_instance.edit_message_text("😔 Не удалось найти фильм по заданным критериям на Кинопоиске.", chat_id, call.message.message_id)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text("😔 Не удалось найти фильм по заданным критериям на Кинопоиске.", chat_id, call.message.message_id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
             
@@ -2299,8 +2289,8 @@ def register_series_handlers(bot_param):
                     favorite_films = cursor.fetchall()
                 
                 if not favorite_films:
-                    bot_instance.edit_message_text("😔 Не найдено фильмов с оценкой 9-10, импортированных с Кинопоиска.", chat_id, call.message.message_id)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text("😔 Не найдено фильмов с оценкой 9-10, импортированных с Кинопоиска.", chat_id, call.message.message_id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
                 
@@ -2328,8 +2318,8 @@ def register_series_handlers(bot_param):
                             unique_similars.append((similar_kp_id, similar_title))
                 
                 if not unique_similars:
-                    bot_instance.edit_message_text("😔 Не найдено похожих фильмов к вашим любимым.", chat_id, call.message.message_id)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text("😔 Не найдено похожих фильмов к вашим любимым.", chat_id, call.message.message_id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
                 
@@ -2441,10 +2431,10 @@ def register_series_handlers(bot_param):
                         markup.add(InlineKeyboardButton("🔗 Перейти к карточке", callback_data=f"add_to_database:{kp_id_result}"))
                         
                         try:
-                            bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
                         except:
-                            bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                        bot_instance.answer_callback_query(call.id)
+                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                        bot.answer_callback_query(call.id)
                         del user_random_state[user_id]
                         return
                     else:
@@ -2456,15 +2446,15 @@ def register_series_handlers(bot_param):
                         markup.add(InlineKeyboardButton("🔗 Перейти к карточке", callback_data=f"add_to_database:{kp_id_result}"))
                         
                         try:
-                            bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
                         except:
-                            bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                        bot_instance.answer_callback_query(call.id)
+                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                        bot.answer_callback_query(call.id)
                         del user_random_state[user_id]
                         return
                 else:
-                    bot_instance.edit_message_text("😔 Не найдено похожих фильмов по заданным фильтрам.", chat_id, call.message.message_id)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text("😔 Не найдено похожих фильмов по заданным фильтрам.", chat_id, call.message.message_id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
             elif mode == 'group_votes':
@@ -2532,8 +2522,8 @@ def register_series_handlers(bot_param):
                     base_films = cursor.fetchall()
                 
                 if not base_films:
-                    bot_instance.edit_message_text("😔 Не удалось найти фильм по заданным критериям в вашей базе.", chat_id, call.message.message_id)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text("😔 Не удалось найти фильм по заданным критериям в вашей базе.", chat_id, call.message.message_id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
                 
@@ -2643,13 +2633,13 @@ def register_series_handlers(bot_param):
                         chat_id, user_id, found_film, link, kp_id_result,
                         existing=None, message_id=call.message.message_id
                     )
-                    bot_instance.answer_callback_query(call.id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
                 else:
                     # Если не удалось найти фильм
-                    bot_instance.edit_message_text("😔 Не удалось найти фильм по заданным критериям на Кинопоиске.", chat_id, call.message.message_id)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.edit_message_text("😔 Не удалось найти фильм по заданным критериям на Кинопоиске.", chat_id, call.message.message_id)
+                    bot.answer_callback_query(call.id)
                     del user_random_state[user_id]
                     return
             elif mode == 'database':
@@ -2816,11 +2806,11 @@ def register_series_handlers(bot_param):
                     markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
                 
                 try:
-                    bot_instance.edit_message_text(message_text, 
+                    bot.edit_message_text(message_text, 
                                         chat_id, call.message.message_id, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-                    bot_instance.answer_callback_query(call.id)
+                    bot.answer_callback_query(call.id)
                 except:
-                    bot_instance.send_message(chat_id, message_text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                    bot.send_message(chat_id, message_text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                 del user_random_state[user_id]
                 return
             
@@ -2849,14 +2839,14 @@ def register_series_handlers(bot_param):
             
             film_message_id = None
             try:
-                bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
                 film_message_id = call.message.message_id
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
             except Exception as e:
                 logger.error(f"[RANDOM] Error editing message: {e}", exc_info=True)
-                sent_msg = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
                 film_message_id = sent_msg.message_id
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
             
             # Сохраняем message_id фильма для обработки реакций и реплаев
             if film_message_id:
@@ -2872,7 +2862,7 @@ def register_series_handlers(bot_param):
                     "• Поставьте реакцию просмотра на это сообщение или сообщение фильма, "
                     "чтобы отметить фильм как просмотренный"
                 )
-                sent = bot_instance.send_message(chat_id, instruction_text, parse_mode='HTML')
+                sent = bot.send_message(chat_id, instruction_text, parse_mode='HTML')
                 # Также сохраняем для обработки реплаев
                 bot_messages[sent.message_id] = link
             except Exception as e:
@@ -2883,17 +2873,17 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[RANDOM] ERROR in _random_final: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Ошибка поиска фильма")
+                bot.answer_callback_query(call.id, "Ошибка поиска фильма")
                 if user_id in user_random_state:
                     del user_random_state[user_id]
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "random_back_to_menu")
+    @bot.callback_query_handler(func=lambda call: call.data == "random_back_to_menu")
     def handle_random_back_to_menu(call):
         """Обработчик кнопки 'Вернуться к меню' в рандоме - возвращает к выбору режима"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
@@ -2914,7 +2904,7 @@ def register_series_handlers(bot_param):
                     reply_markup = kwargs.get('reply_markup')
                     parse_mode = kwargs.get('parse_mode', 'HTML')
                     try:
-                        return bot_instance.edit_message_text(
+                        return bot.edit_message_text(
                             text,
                             self.chat.id,
                             self.message_id,
@@ -2923,7 +2913,7 @@ def register_series_handlers(bot_param):
                         )
                     except:
                         # Если не удалось отредактировать, отправляем новое
-                        return bot_instance.send_message(
+                        return bot.send_message(
                             self.chat.id,
                             text,
                             reply_markup=reply_markup,
@@ -2936,15 +2926,15 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[RANDOM BACK TO MENU] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_locked:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_locked:"))
     def handle_ticket_locked(call):
         """Обработчик заблокированных кнопок билетов"""
         try:
-            bot_instance.answer_callback_query(
+            bot.answer_callback_query(
                 call.id,
                 "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
                 show_alert=True
@@ -2952,13 +2942,13 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[TICKET LOCKED] Ошибка: {e}", exc_info=True)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_session:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_session:"))
     def ticket_session_callback(call):
         """Обработчик выбора сеанса - показывает информацию о сеансе и билеты"""
         try:
             from moviebot.utils.helpers import has_tickets_access
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
@@ -2969,7 +2959,7 @@ def register_series_handlers(bot_param):
             
             # Проверяем доступ к функциям билетов
             if not has_tickets_access(chat_id, user_id):
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     "🎫 <b>Билеты в кино</b>\n\n"
                     "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
                     "Используйте /payment для оформления подписки.",
@@ -2992,7 +2982,7 @@ def register_series_handlers(bot_param):
                 plan_row = cursor.fetchone()
             
             if not plan_row:
-                bot_instance.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
                 return
             
             if isinstance(plan_row, dict):
@@ -3064,7 +3054,7 @@ def register_series_handlers(bot_param):
             
             # Показываем информацию о сеансе
             try:
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     text,
                     chat_id,
                     call.message.message_id,
@@ -3076,7 +3066,7 @@ def register_series_handlers(bot_param):
                 if "message is not modified" in error_str:
                     # Если сообщение не изменилось, просто обновляем клавиатуру
                     try:
-                        bot_instance.edit_message_reply_markup(
+                        bot.edit_message_reply_markup(
                             chat_id=chat_id,
                             message_id=call.message.message_id,
                             reply_markup=markup
@@ -3088,24 +3078,24 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[TICKET SESSION] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
     def ticket_new_callback(call):
         """Обработчик кнопки 'Добавить новый сеанс' - показывает выбор типа билета"""
         try:
             from moviebot.states import user_ticket_state
             from moviebot.utils.helpers import has_tickets_access
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
             # Проверяем доступ к функциям билетов
             if not has_tickets_access(chat_id, user_id):
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     "🎫 <b>Билеты в кино</b>\n\n"
                     "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
                     "Используйте /payment для оформления подписки.",
@@ -3125,7 +3115,7 @@ def register_series_handlers(bot_param):
             markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 "🎫 <b>Добавление билета</b>\n\n"
                 "Выберите тип билета:",
                 chat_id,
@@ -3136,17 +3126,17 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[TICKET NEW] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "ticket:add_event")
+    @bot.callback_query_handler(func=lambda call: call.data == "ticket:add_event")
     def ticket_add_event_callback(call):
         """Обработчик кнопки 'Добавить билет' - начинает флоу добавления билета на мероприятие"""
         try:
             from moviebot.states import user_ticket_state
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
@@ -3157,7 +3147,7 @@ def register_series_handlers(bot_param):
                 'type': 'event'
             }
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 "🎤 <b>Добавление билета на мероприятие</b>\n\n"
                 "Напишите название мероприятия в ответ на это сообщение:",
                 chat_id,
@@ -3167,17 +3157,17 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[TICKET ADD EVENT] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_new_film"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_new_film"))
     def ticket_new_film_callback(call):
         """Обработчик кнопки 'Добавить фильм' - начинает флоу добавления билета на фильм"""
         try:
             from moviebot.states import user_ticket_state
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
@@ -3205,7 +3195,7 @@ def register_series_handlers(bot_param):
             # Если текст совпадает, просто обновляем клавиатуру или отправляем новое сообщение
             if current_text.strip() == new_text.strip():
                 # Текст не изменился, отправляем новое сообщение
-                bot_instance.send_message(
+                bot.send_message(
                     chat_id,
                     new_text,
                     parse_mode='HTML'
@@ -3213,7 +3203,7 @@ def register_series_handlers(bot_param):
             else:
                 # Текст изменился, обновляем сообщение
                 try:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         new_text,
                         chat_id,
                         call.message.message_id,
@@ -3223,7 +3213,7 @@ def register_series_handlers(bot_param):
                     error_str = str(e).lower()
                     if "message is not modified" in error_str:
                         # Если сообщение не изменилось, отправляем новое
-                        bot_instance.send_message(
+                        bot.send_message(
                             chat_id,
                             new_text,
                             parse_mode='HTML'
@@ -3233,24 +3223,24 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[TICKET NEW FILM] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("show_ticket:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("show_ticket:"))
     def show_ticket_callback(call):
         """Обработчик кнопки 'Показать билеты' - отправляет билеты пользователю"""
         try:
             from moviebot.utils.helpers import has_tickets_access
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             plan_id = int(call.data.split(":")[1])
             
             # Проверяем доступ к функциям билетов
             if not has_tickets_access(chat_id, user_id):
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id,
                     "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
                     show_alert=True
@@ -3264,7 +3254,7 @@ def register_series_handlers(bot_param):
                 ticket_row = cursor.fetchone()
             
             if not ticket_row:
-                bot_instance.answer_callback_query(call.id, "❌ Билеты не найдены", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Билеты не найдены", show_alert=True)
                 return
             
             if isinstance(ticket_row, dict):
@@ -3273,7 +3263,7 @@ def register_series_handlers(bot_param):
                 ticket_data = ticket_row[0]
             
             if not ticket_data:
-                bot_instance.answer_callback_query(call.id, "❌ Билеты не загружены", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Билеты не загружены", show_alert=True)
                 return
             
             # Парсим билеты (может быть JSON массив или один file_id)
@@ -3295,33 +3285,33 @@ def register_series_handlers(bot_param):
                     else:
                         caption = f"🎟️ Билет {i+1}/{len(ticket_files)}"
                     
-                    bot_instance.send_photo(chat_id, ticket_file_id, caption=caption)
+                    bot.send_photo(chat_id, ticket_file_id, caption=caption)
                     sent_count += 1
                 except:
                     try:
-                        bot_instance.send_document(chat_id, ticket_file_id, caption=caption)
+                        bot.send_document(chat_id, ticket_file_id, caption=caption)
                         sent_count += 1
                     except Exception as e:
                         logger.error(f"[SHOW TICKET] Ошибка отправки билета {i+1}: {e}", exc_info=True)
             
             if sent_count > 0:
-                bot_instance.answer_callback_query(call.id, f"✅ Отправлено билетов: {sent_count}/{len(ticket_files)}")
+                bot.answer_callback_query(call.id, f"✅ Отправлено билетов: {sent_count}/{len(ticket_files)}")
             else:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка отправки билетов", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка отправки билетов", show_alert=True)
         except Exception as e:
             logger.error(f"[SHOW TICKET] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_more_tickets:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("add_more_tickets:"))
     def add_more_tickets_callback(call):
         """Обработчик кнопки 'Добавить ещё билеты' - начинает загрузку дополнительных билетов"""
         try:
             from moviebot.states import user_ticket_state
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             plan_id = int(call.data.split(":")[1])
@@ -3333,7 +3323,7 @@ def register_series_handlers(bot_param):
                 'chat_id': chat_id
             }
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 "📎 <b>Загрузка дополнительных билетов</b>\n\n"
                 "Отправьте файлы билетов. После загрузки всех билетов напишите 'готово'.",
                 chat_id,
@@ -3343,18 +3333,18 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[ADD MORE TICKETS] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("ticket_edit_time:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_edit_time:"))
     def ticket_edit_time_callback(call):
         """Обработчик кнопки 'Изменить время' - позволяет изменить время сеанса"""
         try:
             from moviebot.states import user_ticket_state
             from moviebot.utils.parsing import parse_session_time
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             plan_id = int(call.data.split(":")[1])
@@ -3365,7 +3355,7 @@ def register_series_handlers(bot_param):
                 plan_row = cursor.fetchone()
             
             if not plan_row:
-                bot_instance.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
                 return
             
             plan_dt = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[0]
@@ -3397,7 +3387,7 @@ def register_series_handlers(bot_param):
                 "Например: 18 января 19:30 или 18.01 19:30" + current_time_str
             )
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 text,
                 chat_id,
                 call.message.message_id,
@@ -3406,36 +3396,36 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[TICKET EDIT TIME] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "ticket:cancel")
+    @bot.callback_query_handler(func=lambda call: call.data == "ticket:cancel")
     def ticket_cancel_callback(call):
         """Обработчик кнопки 'Отмена' для билетов"""
         try:
             from moviebot.states import user_ticket_state
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
             if user_id in user_ticket_state:
                 del user_ticket_state[user_id]
             
-            bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+            bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
         except Exception as e:
             logger.error(f"[TICKET CANCEL] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "random_event:close")
+    @bot.callback_query_handler(func=lambda call: call.data == "random_event:close")
     def handle_random_event_close(call):
         """Обработчик кнопки 'Закрыть' для случайных уведомлений"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             chat_id = call.message.chat.id
             message_id = call.message.message_id
             
@@ -3446,7 +3436,7 @@ def register_series_handlers(bot_param):
                 dice_messages = game_state.get('dice_messages', {})
                 for dice_msg_id in dice_messages.keys():
                     try:
-                        bot_instance.delete_message(chat_id, dice_msg_id)
+                        bot.delete_message(chat_id, dice_msg_id)
                         logger.info(f"[RANDOM EVENTS] Удалено сообщение с кубиком {dice_msg_id}")
                     except Exception as e:
                         logger.warning(f"[RANDOM EVENTS] Не удалось удалить сообщение с кубиком {dice_msg_id}: {e}")
@@ -3457,20 +3447,20 @@ def register_series_handlers(bot_param):
             
             # Удаляем сообщение
             try:
-                bot_instance.delete_message(chat_id, message_id)
+                bot.delete_message(chat_id, message_id)
                 logger.info(f"[RANDOM EVENTS] Сообщение {message_id} закрыто пользователем {call.from_user.id}")
             except Exception as e:
                 logger.warning(f"[RANDOM EVENTS] Не удалось удалить сообщение {message_id}: {e}")
                 # Если не удалось удалить, просто отвечаем на callback
-                bot_instance.answer_callback_query(call.id, "Сообщение закрыто")
+                bot.answer_callback_query(call.id, "Сообщение закрыто")
         except Exception as e:
             logger.error(f"[RANDOM EVENTS] Ошибка при закрытии случайного события: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+                bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "dice_game:start")
+    @bot.callback_query_handler(func=lambda call: call.data == "dice_game:start")
     def handle_dice_game_start(call):
         """Обработчик кнопки 'Бросить кубик' для игры в кубик"""
         try:
@@ -3478,16 +3468,16 @@ def register_series_handlers(bot_param):
             from moviebot.utils.random_events import update_dice_game_message
             from datetime import datetime, timedelta
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             chat_id = call.message.chat.id
             user_id = call.from_user.id
             message_id = call.message.message_id
             
             # Проверяем, что это групповой чат
             try:
-                chat_info = bot_instance.get_chat(chat_id)
+                chat_info = bot.get_chat(chat_id)
                 if chat_info.type == 'private':
-                    bot_instance.answer_callback_query(call.id, "Игра в кубик работает только в групповых чатах", show_alert=True)
+                    bot.answer_callback_query(call.id, "Игра в кубик работает только в групповых чатах", show_alert=True)
                     return
             except Exception as e:
                 logger.warning(f"[DICE GAME] Не удалось получить информацию о чате {chat_id}: {e}")
@@ -3507,7 +3497,7 @@ def register_series_handlers(bot_param):
             # Проверяем, не истекло ли время игры (24 часа)
             if (datetime.now(PLANS_TZ) - game_state['start_time']).total_seconds() > 86400:
                 del dice_game_state[chat_id]
-                bot_instance.answer_callback_query(call.id, "Время игры истекло", show_alert=True)
+                bot.answer_callback_query(call.id, "Время игры истекло", show_alert=True)
                 return
             
             # Проверяем, не бросил ли уже пользователь кубик
@@ -3518,21 +3508,21 @@ def register_series_handlers(bot_param):
                 all_have_results = len(participants_with_results) == all_participants and all_participants >= 2
                 
                 if all_have_results:
-                    bot_instance.answer_callback_query(call.id, "🎲 Кости уже брошены", show_alert=True)
+                    bot.answer_callback_query(call.id, "🎲 Кости уже брошены", show_alert=True)
                 else:
-                    bot_instance.answer_callback_query(call.id, "Вы уже бросили кубик!", show_alert=True)
+                    bot.answer_callback_query(call.id, "Вы уже бросили кубик!", show_alert=True)
                 return
             
             # Отправляем стикер игральной кости
             try:
                 logger.info(f"[DICE GAME] Попытка отправить кубик для chat_id={chat_id}, user_id={user_id}")
                 try:
-                    dice_msg = bot_instance.send_dice(chat_id, emoji='🎲')
+                    dice_msg = bot.send_dice(chat_id, emoji='🎲')
                     logger.info(f"[DICE GAME] Кубик отправлен с emoji, message_id={dice_msg.message_id if dice_msg else None}")
                 except TypeError as e:
                     # Если emoji не поддерживается, используем стандартный кубик
                     logger.warning(f"[DICE GAME] emoji не поддерживается, используем стандартный кубик: {e}")
-                    dice_msg = bot_instance.send_dice(chat_id)
+                    dice_msg = bot.send_dice(chat_id)
                     logger.info(f"[DICE GAME] Стандартный кубик отправлен, message_id={dice_msg.message_id if dice_msg else None}")
                 except Exception as e:
                     logger.error(f"[DICE GAME] Ошибка при отправке кубика: {e}", exc_info=True)
@@ -3574,15 +3564,15 @@ def register_series_handlers(bot_param):
                     raise Exception("Не удалось отправить кубик")
             except Exception as e:
                 logger.error(f"[DICE GAME] Ошибка при отправке кубика: {e}", exc_info=True)
-                bot_instance.answer_callback_query(call.id, "Ошибка при отправке кубика", show_alert=True)
+                bot.answer_callback_query(call.id, "Ошибка при отправке кубика", show_alert=True)
         except Exception as e:
             logger.error(f"[DICE GAME] Ошибка в handle_dice_game_start: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+                bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
             except:
                 pass
 
-    @bot_instance.message_handler(content_types=['dice'])
+    @bot.message_handler(content_types=['dice'])
     def handle_dice_result(message):
         """Обработчик получения значения кубика"""
         try:
@@ -3673,7 +3663,7 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[DICE GAME RESULT] ❌ Ошибка в handle_dice_result: {e}", exc_info=True)
 
-    @bot_instance.edited_message_handler(content_types=['dice'])
+    @bot.edited_message_handler(content_types=['dice'])
     def handle_dice_result_edited(message):
         """Обработчик обновления сообщения с кубиком (когда кубик останавливается)"""
         try:
@@ -3767,7 +3757,7 @@ def register_series_handlers(bot_param):
     # Обработчик settings: перенесен в handlers/settings.py
 
     # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-    @bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
+    @bot.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
     def handle_search_reply(message):
         """Обработчик ответных сообщений для поиска"""
         logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
@@ -3807,7 +3797,7 @@ def register_series_handlers(bot_param):
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🔄 Повторить запрос", callback_data="search:retry"))
                 markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
-                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
+                bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
                 # Очищаем состояние
                 del user_search_state[user_id]
                 return
@@ -3868,25 +3858,25 @@ def register_series_handlers(bot_param):
             
             # Отправляем результаты
             try:
-                sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                sent_message = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[SEARCH REPLY] ✅ Ответ отправлен пользователю {user_id}, найдено {len(films)} результатов, message_id={sent_message.message_id if sent_message else 'None'}")
                 # Состояние уже удалено выше, не нужно удалять снова
             except Exception as e:
                 logger.error(f"[SEARCH REPLY] ❌ Ошибка отправки результатов поиска: {e}", exc_info=True)
                 try:
-                    bot_instance.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
+                    bot.reply_to(message, f"❌ Ошибка при отправке результатов поиска. Попробуйте еще раз.")
                 except Exception:
                     pass
                 # Состояние уже удалено выше, не нужно удалять снова
         except Exception as e:
             logger.error(f"[SEARCH REPLY] ❌ Критическая ошибка: {e}", exc_info=True)
             try:
-                bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
+                bot.reply_to(message, "❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
             except:
                 pass
 
 # Обработчик ссылок на Кинопоиск - вынесен на уровень модуля для правильной регистрации
-@bot_instance.message_handler(
+@bot.message_handler(
     content_types=['text'],
     func=lambda m: m.text and not m.text.strip().startswith('/') and ('kinopoisk.ru' in m.text.lower() or 'kinopoisk.com' in m.text.lower())
 )
@@ -3917,7 +3907,7 @@ def handle_kinopoisk_link(message):
         from moviebot.states import user_plan_state, user_view_film_state
         if user_id in user_plan_state:
             logger.info(f"[KINOPOISK LINK] Пользователь в планировании — прерываем и обрабатываем ссылку")
-            bot_instance.reply_to(message, "⚠️ Планирование прервано. Обрабатываю ссылку...")
+            bot.reply_to(message, "⚠️ Планирование прервано. Обрабатываю ссылку...")
             del user_plan_state[user_id]
         elif user_id in user_view_film_state:
             logger.info(f"[KINOPOISK LINK] Пользователь в состоянии просмотра — пропускаем ссылку")
@@ -3927,7 +3917,7 @@ def handle_kinopoisk_link(message):
         kp_id = extract_kp_id_from_text(text)
         if not kp_id:
             logger.warning(f"[KINOPOISK LINK] Не удалось извлечь kp_id из: {text[:200]}")
-            bot_instance.reply_to(message, f"❌ Не удалось извлечь ID из ссылки.")
+            bot.reply_to(message, f"❌ Не удалось извлечь ID из ссылки.")
             return
         
         # Нормализуем ссылку
@@ -3944,11 +3934,11 @@ def handle_kinopoisk_link(message):
         try:
             info = extract_movie_info(link)
             if not info:
-                bot_instance.reply_to(message, "❌ Не удалось получить данные о фильме/сериале.")
+                bot.reply_to(message, "❌ Не удалось получить данные о фильме/сериале.")
                 return
         except Exception as api_e:
             logger.error(f"[KINOPOISK LINK] Ошибка API: {api_e}", exc_info=True)
-            bot_instance.reply_to(message, "❌ Ошибка при загрузке данных с Кинопоиска.")
+            bot.reply_to(message, "❌ Ошибка при загрузке данных с Кинопоиска.")
             return
         
         logger.info(f"[KINOPOISK LINK] Данные получены: {info.get('title')} (сериал: {info.get('is_series')})")
@@ -4005,13 +3995,13 @@ def handle_kinopoisk_link(message):
     except Exception as e:
         logger.error(f"[KINOPOISK LINK] Критическая ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Ошибка при обработке ссылки.")
+            bot.reply_to(message, "❌ Ошибка при обработке ссылки.")
         except:
             pass
     finally:
         logger.info(f"[KINOPOISK LINK] ===== END =====")
         
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
 def view_film_description_callback(call):
     """Обработчик кнопки 'Перейти к описанию'"""
     try:
@@ -4027,7 +4017,7 @@ def view_film_description_callback(call):
         info = extract_movie_info(link)
         
         if not info:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
         
         # Показываем описание фильма
@@ -4042,12 +4032,12 @@ def view_film_description_callback(call):
             message_id=None
         )
         
-        bot_instance.answer_callback_query(call.id, "✅ Описание фильма")
+        bot.answer_callback_query(call.id, "✅ Описание фильма")
         
     except Exception as e:
         logger.error(f"[VIEW FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении описания", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка при получении описания", show_alert=True)
         except:
             pass
 
@@ -4085,7 +4075,7 @@ def ensure_movie_in_database(kp_id, title=None):
         return existing or cursor.lastrowid
 
 # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-@bot_instance.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
+@bot.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
 def handle_search_reply(message):
         """Обработчик ответных сообщений для поиска"""
         logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
@@ -4125,7 +4115,7 @@ def handle_search_reply(message):
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🔄 Повторить запрос", callback_data="search:retry"))
                 markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
-                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
+                bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
                 # Очищаем состояние
                 del user_search_state[user_id]
                 return
@@ -4171,7 +4161,7 @@ def handle_search_reply(message):
             results_text += "\n\n🎬 - фильм\n📺 - сериал"
             
             logger.info(f"[SEARCH REPLY] Отправка результатов поиска пользователю {user_id}")
-            results_msg = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+            results_msg = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
             
             # Обновляем состояние
             if results_msg:
@@ -4189,26 +4179,26 @@ def handle_search_reply(message):
         except Exception as e:
             logger.error(f"[SEARCH REPLY] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса поиска")
+                bot.reply_to(message, "❌ Произошла ошибка при обработке запроса поиска")
             except:
                 pass
 
 # Обработчик кнопки результата поиска "add_film_{kp_id}:{film_type}" - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
 def add_film_from_search_callback(call):
         """Обработчик кнопки результата поиска - показывает информацию о фильме"""
         logger.info("=" * 80)
         logger.info(f"[ADD FILM FROM SEARCH] ===== START: callback_id={call.id}, callback_data={call.data}")
         try:
             from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot_instance, call.id, text="⏳ Загружаю информацию...")
+            safe_answer_callback_query(bot, call.id, text="⏳ Загружаю информацию...")
             logger.info(f"[ADD FILM FROM SEARCH] answer_callback_query вызван, callback_id={call.id}")
             
             # Парсим callback_data: add_film_{kp_id}:{film_type}
             parts = call.data.split(":")
             if len(parts) < 2:
                 logger.error(f"[ADD FILM FROM SEARCH] Неверный формат callback_data: {call.data}")
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
                 return
             
             kp_id = parts[0].replace("add_film_", "")
@@ -4232,7 +4222,7 @@ def add_film_from_search_callback(call):
             if not info:
                 logger.error(f"[ADD FILM FROM SEARCH] Не удалось получить информацию о фильме: kp_id={kp_id}")
                 from moviebot.bot.bot_init import safe_answer_callback_query
-                safe_answer_callback_query(bot_instance, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                safe_answer_callback_query(bot, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
                 return
             
             # Проверяем, есть ли фильм уже в базе
@@ -4259,18 +4249,18 @@ def add_film_from_search_callback(call):
         except Exception as e:
             logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
             from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка обработки", show_alert=True)
+            safe_answer_callback_query(bot, call.id, "❌ Ошибка обработки", show_alert=True)
         finally:
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
 
 # Обработчик кнопки "➕ Добавить в базу" - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
 def view_film_description_callback(call):
     """Обработчик кнопки 'Перейти к описанию' из сообщения об отметке как просмотренные"""
     logger.info(f"[VIEW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
         from moviebot.bot.bot_init import safe_answer_callback_query
-        safe_answer_callback_query(bot_instance, call.id, text="⏳ Загружаю описание...")
+        safe_answer_callback_query(bot, call.id, text="⏳ Загружаю описание...")
         
         kp_id = call.data.split(":")[1]
         user_id = call.from_user.id
@@ -4286,7 +4276,7 @@ def view_film_description_callback(call):
         if not info:
             logger.error(f"[VIEW FILM DESCRIPTION] Не удалось получить информацию о фильме для kp_id={kp_id}")
             from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot_instance, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            safe_answer_callback_query(bot, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
         
         # Если это сериал, используем правильную ссылку
@@ -4313,17 +4303,17 @@ def view_film_description_callback(call):
     except Exception as e:
         logger.error(f"[VIEW FILM DESCRIPTION] ❌ Ошибка: {e}", exc_info=True)
         from moviebot.bot.bot_init import safe_answer_callback_query
-        safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка обработки", show_alert=True)
+        safe_answer_callback_query(bot, call.id, "❌ Ошибка обработки", show_alert=True)
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
 def add_to_database_callback(call):
     """Обработчик кнопки '➕ Добавить в базу'"""
     logger.info("=" * 80)
     logger.info(f"[ADD TO DATABASE] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
         from moviebot.bot.bot_init import safe_answer_callback_query
-        safe_answer_callback_query(bot_instance, call.id, text="⏳ Добавляю в базу...")
+        safe_answer_callback_query(bot, call.id, text="⏳ Добавляю в базу...")
         logger.info(f"[ADD TO DATABASE] answer_callback_query вызван, callback_id={call.id}")
         
         kp_id = call.data.split(":")[1]
@@ -4341,13 +4331,13 @@ def add_to_database_callback(call):
             logger.info(f"[ADD TO DATABASE] extract_movie_info завершен, info={'получен' if info else 'None'}")
         except Exception as api_e:
             logger.error(f"[ADD TO DATABASE] Ошибка в extract_movie_info: {api_e}", exc_info=True)
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении информации о фильме", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка при получении информации о фильме", show_alert=True)
             return
         
         if not info:
             logger.error(f"[ADD TO DATABASE] Не удалось получить информацию о фильме для kp_id={kp_id}")
             from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot_instance, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            safe_answer_callback_query(bot, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
         
         logger.info(f"[ADD TO DATABASE] Информация получена, title={info.get('title', 'N/A')}, is_series={info.get('is_series', False)}")
@@ -4364,18 +4354,18 @@ def add_to_database_callback(call):
             logger.info(f"[ADD TO DATABASE] ensure_movie_in_database завершен: film_id={film_id}, was_inserted={was_inserted}")
         except Exception as db_e:
             logger.error(f"[ADD TO DATABASE] Ошибка в ensure_movie_in_database: {db_e}", exc_info=True)
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
             return
         if not film_id:
             logger.error(f"[ADD TO DATABASE] Не удалось добавить фильм в базу для kp_id={kp_id}")
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
             return
         
         title = info.get('title', 'Фильм')
         
         if was_inserted:
             from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot_instance, call.id, f"✅ {title} добавлен в базу!", show_alert=False)
+            safe_answer_callback_query(bot, call.id, f"✅ {title} добавлен в базу!", show_alert=False)
             logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title}")
             
             # Обновляем сообщение, показывая что фильм теперь в базе
@@ -4390,12 +4380,12 @@ def add_to_database_callback(call):
             show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=(film_id, title_db, watched), message_id=call.message.message_id)
         else:
             from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot_instance, call.id, f"ℹ️ {title} уже в базе", show_alert=False)
+            safe_answer_callback_query(bot, call.id, f"ℹ️ {title} уже в базе", show_alert=False)
             logger.info(f"[ADD TO DATABASE] Фильм уже был в базе: film_id={film_id}, title={title}")
     except Exception as e:
         logger.error(f"[ADD TO DATABASE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         from moviebot.bot.bot_init import safe_answer_callback_query
-        safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка обработки", show_alert=True)
+        safe_answer_callback_query(bot, call.id, "❌ Ошибка обработки", show_alert=True)
     finally:
         logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 
@@ -4418,7 +4408,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         logger.info(f"[SHOW FILM INFO] info keys: {list(info.keys()) if info else 'None'}")
         if not info:
             logger.error(f"[SHOW FILM INFO] info is None или пустой!")
-            bot_instance.send_message(chat_id, "❌ Произошла ошибка: информация о фильме не получена.")
+            bot.send_message(chat_id, "❌ Произошла ошибка: информация о фильме не получена.")
             return
         
         # Инициализируем plan_info как None, чтобы она была доступна во всех путях выполнения
@@ -5078,11 +5068,11 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     if reply_markup_json:
                         params['reply_markup'] = reply_markup_json
                     logger.info(f"[SHOW FILM INFO] Вызов api_call editMessageText для треда")
-                    bot_instance.api_call('editMessageText', params)
+                    bot.api_call('editMessageText', params)
                 else:
                     logger.info(f"[SHOW FILM INFO] Вызов edit_message_text")
                     logger.info(f"[SHOW FILM INFO] Параметры edit: chat_id={chat_id}, message_id={message_id}, text_length={len(text)}, has_markup={markup is not None}")
-                    bot_instance.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
                 logger.info(f"[SHOW FILM INFO] Сообщение обновлено успешно: {info.get('title')}, kp_id={kp_id}, message_id={message_id}")
             except telebot.apihelper.ApiTelegramException as e:
                 error_str = str(e).lower()
@@ -5104,18 +5094,18 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                             }
                             if reply_markup_json:
                                 params['reply_markup'] = reply_markup_json
-                            bot_instance.api_call('editMessageReplyMarkup', params)
+                            bot.api_call('editMessageReplyMarkup', params)
                         else:
-                            bot_instance.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
+                            bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
                         logger.info(f"[SHOW FILM INFO] Клавиатура обновлена успешно")
                     except Exception as e2:
                         logger.error(f"[SHOW FILM INFO] Не удалось обновить markup: {e2}", exc_info=True)
                         # При ошибке отправляем новое сообщение
                         try:
                             if message_thread_id:
-                                bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
                             else:
-                                bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                             logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
                         except Exception as send_e:
                             logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
@@ -5124,9 +5114,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     logger.warning(f"[SHOW FILM INFO] Другая ошибка Telegram API, отправляю новое сообщение")
                     try:
                         if message_thread_id:
-                            bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
                         else:
-                            bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                         logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
                     except Exception as send_e:
                         logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
@@ -5135,9 +5125,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 # При ошибке отправляем новое сообщение
                 try:
                     if message_thread_id:
-                        bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
                     else:
-                        bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                     logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
                 except Exception as send_e:
                     logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
@@ -5170,7 +5160,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 
                 logger.info(f"[SHOW FILM INFO] Параметры подготовлены, вызываю send_message...")
                 logger.info(f"[SHOW FILM INFO] send_params keys: {list(send_params.keys())}, text_length: {len(send_params.get('text', ''))}")
-                msg = bot_instance.send_message(**send_params)
+                msg = bot.send_message(**send_params)
                 logger.info(f"[SHOW FILM INFO] ✅ Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
                 logger.info(f"[SHOW FILM INFO] ✅ Сообщение отправлено успешно")
                 return  # Успешно отправлено, выходим
@@ -5193,14 +5183,14 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     if len(fallback_text) > 4096:
                         fallback_text = fallback_text[:4093] + "..."
                     
-                    bot_instance.send_message(chat_id, fallback_text, parse_mode='HTML', disable_web_page_preview=False)
+                    bot.send_message(chat_id, fallback_text, parse_mode='HTML', disable_web_page_preview=False)
                     logger.info(f"[SHOW FILM INFO] ✅ Упрощенное сообщение отправлено")
                 except Exception as fallback_e:
                     logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить даже упрощенное сообщение: {fallback_e}", exc_info=True)
                     # Последняя попытка - самое простое сообщение
                     try:
                         simple_text = f"🎬 {info.get('title', 'Фильм')}\n\n<a href='{link}'>Кинопоиск</a>"
-                        bot_instance.send_message(chat_id, simple_text, parse_mode='HTML', disable_web_page_preview=False)
+                        bot.send_message(chat_id, simple_text, parse_mode='HTML', disable_web_page_preview=False)
                         logger.info(f"[SHOW FILM INFO] ✅ Простейшее сообщение отправлено")
                     except Exception as simple_e:
                         logger.error(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА: не удалось отправить даже простое сообщение: {simple_e}", exc_info=True)
@@ -5218,7 +5208,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     fallback_text = f"🎬 <b>{info.get('title', 'Фильм')}</b>\n\n<a href='{link}'>Кинопоиск</a>"
                     if len(fallback_text) > 4096:
                         fallback_text = fallback_text[:4093] + "..."
-                    bot_instance.send_message(chat_id, fallback_text, parse_mode='HTML', disable_web_page_preview=False)
+                    bot.send_message(chat_id, fallback_text, parse_mode='HTML', disable_web_page_preview=False)
                     logger.info(f"[SHOW FILM INFO] ✅ Упрощенное сообщение отправлено после ошибки")
                 except Exception as fallback_e:
                     logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить упрощенное сообщение: {fallback_e}", exc_info=True)
@@ -5241,7 +5231,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             if link:
                 error_text += f"<a href='{link}'>Кинопоиск</a>\n\n"
             error_text += "❌ Произошла ошибка при формировании описания."
-            bot_instance.send_message(chat_id, error_text, parse_mode='HTML', disable_web_page_preview=False)
+            bot.send_message(chat_id, error_text, parse_mode='HTML', disable_web_page_preview=False)
             logger.info(f"[SHOW FILM INFO] ✅ Сообщение об ошибке отправлено")
         except Exception as send_error_e:
             logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить даже сообщение об ошибке: {send_error_e}", exc_info=True)
@@ -5316,7 +5306,7 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
     try:
         if not info:
             logger.error(f"[SHOW FILM INFO WITHOUT ADDING] info is None или пустой!")
-            bot_instance.send_message(chat_id, "❌ Произошла ошибка: информация о фильме не получена.")
+            bot.send_message(chat_id, "❌ Произошла ошибка: информация о фильме не получена.")
             return
         
         is_series = info.get('is_series', False)
@@ -5425,7 +5415,7 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
         # Отправляем сообщение
         logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Отправка сообщения: chat_id={chat_id}, text_length={len(text)}, has_markup={markup is not None}")
         try:
-            msg = bot_instance.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
             logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Описание фильма отправлено БЕЗ добавления в базу: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
             return msg
         except Exception as send_e:
@@ -5435,7 +5425,7 @@ def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
     except Exception as e:
         logger.error(f"[SHOW FILM INFO WITHOUT ADDING] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
+            bot.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
         except:
             pass
         logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== КОНЕЦ =====")
@@ -5580,7 +5570,7 @@ def handle_import_user_id_internal(message, state):
     kp_user_id = extract_kp_user_id(text)
     
     if not kp_user_id:
-        bot_instance.reply_to(message, "❌ Не удалось извлечь ID пользователя. Отправьте ID или ссылку на профиль Кинопоиска.")
+        bot.reply_to(message, "❌ Не удалось извлечь ID пользователя. Отправьте ID или ссылку на профиль Кинопоиска.")
         return
     
     state['kp_user_id'] = kp_user_id
@@ -5594,14 +5584,14 @@ def handle_import_user_id_internal(message, state):
     markup.add(InlineKeyboardButton("1000", callback_data=f"import_count:1000"))
     markup.add(InlineKeyboardButton("1500", callback_data=f"import_count:1500"))
     
-    bot_instance.reply_to(message, 
+    bot.reply_to(message, 
         f"✅ ID пользователя: <code>{kp_user_id}</code>\n\n"
         f"Сколько фильмов загрузить?",
         reply_markup=markup, parse_mode='HTML')
 
 
 # Обработчик выбора количества фильмов для импорта - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("import_count:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("import_count:"))
 def handle_import_count_callback(call):
     """Обработчик выбора количества фильмов для импорта"""
     try:
@@ -5610,18 +5600,18 @@ def handle_import_count_callback(call):
         count = int(call.data.split(":")[1])
         
         if user_id not in user_import_state:
-            bot_instance.answer_callback_query(call.id, "❌ Состояние импорта потеряно", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Состояние импорта потеряно", show_alert=True)
             return
         
         state = user_import_state[user_id]
         kp_user_id = state.get('kp_user_id')
         
         if not kp_user_id:
-            bot_instance.answer_callback_query(call.id, "❌ ID пользователя не найден", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ ID пользователя не найден", show_alert=True)
             return
         
-        bot_instance.answer_callback_query(call.id, f"⏳ Начинаю импорт {count} фильмов...")
-        status_msg = bot_instance.edit_message_text(
+        bot.answer_callback_query(call.id, f"⏳ Начинаю импорт {count} фильмов...")
+        status_msg = bot.edit_message_text(
             f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
             f"ID пользователя: <code>{kp_user_id}</code>\n"
             f"Количество: {count}\n\n"
@@ -5641,7 +5631,7 @@ def handle_import_count_callback(call):
                 imported = import_kp_ratings(kp_user_id, chat_id, user_id, count)
                 
                 # Отправляем результат
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     f"✅ <b>Импорт завершён!</b>\n\n"
                     f"ID пользователя: <code>{kp_user_id}</code>\n"
                     f"Загружено новых оценок: <b>{imported}</b>\n\n"
@@ -5653,7 +5643,7 @@ def handle_import_count_callback(call):
             except Exception as e:
                 logger.error(f"[IMPORT] Ошибка в фоновом импорте: {e}", exc_info=True)
                 try:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         f"❌ <b>Ошибка при импорте</b>\n\n"
                         f"Произошла ошибка: {str(e)[:200]}",
                         chat_id, status_msg.message_id, parse_mode='HTML'
@@ -5667,7 +5657,7 @@ def handle_import_count_callback(call):
     except Exception as e:
         logger.error(f"[IMPORT] Ошибка в handle_import_count_callback: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при импорте", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка при импорте", show_alert=True)
         except:
             pass
 
@@ -5713,7 +5703,7 @@ def handle_clean_confirm_internal(message):
             
             conn.commit()
         
-        bot_instance.reply_to(message, 
+        bot.reply_to(message, 
             f"✅ Ваши данные удалены:\n"
             f"• Оценок: {ratings_deleted}\n"
             f"• Планов: {plans_deleted}\n"
@@ -5729,7 +5719,7 @@ def handle_clean_confirm_internal(message):
             imported_deleted = cursor.rowcount
             conn.commit()
         
-        bot_instance.reply_to(message, f"✅ Удалено импортированных оценок: {imported_deleted}")
+        bot.reply_to(message, f"✅ Удалено импортированных оценок: {imported_deleted}")
         del user_clean_state[user_id]
     
     elif target == 'clean_imported_movies':
@@ -5765,7 +5755,7 @@ def handle_clean_confirm_internal(message):
             movies_to_delete = cursor.fetchall()
             
             if not movies_to_delete:
-                bot_instance.reply_to(message, "✅ Нет фильмов для удаления. Все фильмы либо имеют обычные оценки, либо находятся в планах.")
+                bot.reply_to(message, "✅ Нет фильмов для удаления. Все фильмы либо имеют обычные оценки, либо находятся в планах.")
                 del user_clean_state[user_id]
                 return
             
@@ -5785,7 +5775,7 @@ def handle_clean_confirm_internal(message):
             
             conn.commit()
         
-        bot_instance.reply_to(message, 
+        bot.reply_to(message, 
             f"✅ Удалено фильмов, добавленных при импорте: {movies_deleted}\n"
             f"• Удалено оценок: {ratings_deleted}\n"
             f"• Удалено отметок просмотра: {watched_deleted}")
@@ -5808,7 +5798,7 @@ def handle_clean_confirm_internal(message):
             settings_deleted = cursor.rowcount
             conn.commit()
         
-        bot_instance.reply_to(message, 
+        bot.reply_to(message, 
             f"✅ База данных чата обнулена:\n"
             f"• Фильмов: {movies_deleted}\n"
             f"• Оценок: {ratings_deleted}\n"
@@ -5831,11 +5821,11 @@ def handle_clean_confirm_internal(message):
             movies_deleted = cursor.rowcount
             conn.commit()
         
-        bot_instance.reply_to(message, f"✅ Удалено непросмотренных фильмов: {movies_deleted}")
+        bot.reply_to(message, f"✅ Удалено непросмотренных фильмов: {movies_deleted}")
         del user_clean_state[user_id]
     
     else:
         logger.warning(f"[CLEAN CONFIRM] Неизвестный target: {target}")
-        bot_instance.reply_to(message, "❌ Неизвестный тип удаления")
+        bot.reply_to(message, "❌ Неизвестный тип удаления")
         if user_id in user_clean_state:
             del user_clean_state[user_id]

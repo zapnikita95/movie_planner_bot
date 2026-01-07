@@ -12,7 +12,7 @@ def register_all_handlers(bot):
     logger.info("[REGISTER ALL HANDLERS] ===== НАЧАЛО РЕГИСТРАЦИИ ВСЕХ HANDLERS =====")
     
     # КРИТИЧЕСКИ ВАЖНО: Импортируем модули с декораторами ДО вызова функций регистрации
-    # Это необходимо для того, чтобы декораторы @bot_instance.callback_query_handler сработали
+    # Это необходимо для того, чтобы декораторы @bot.callback_query_handler сработали
     import moviebot.bot.handlers.series  # noqa: F401 - импорт для регистрации декораторов (search_type_callback)
     
     # Импортируем и регистрируем handlers
@@ -103,11 +103,11 @@ def register_all_handlers(bot):
     # поэтому они регистрируются автоматически при импорте модулей выше
     
     # КРИТИЧЕСКИ ВАЖНО: Импортируем модуль text_messages ДО вызова register_text_message_handlers
-    # чтобы декораторы @bot_instance.message_handler выполнились при импорте
+    # чтобы декораторы @bot.message_handler выполнились при импорте
     import moviebot.bot.handlers.text_messages  # noqa: F401 - импорт для регистрации декораторов
     
     # КРИТИЧЕСКИ ВАЖНО: Импортируем модуль text_messages ДО вызова register_text_message_handlers
-    # чтобы декораторы @bot_instance.message_handler выполнились при импорте
+    # чтобы декораторы @bot.message_handler выполнились при импорте
     logger.info("Импортирую модуль text_messages для регистрации декораторов...")
     import moviebot.bot.handlers.text_messages  # noqa: F401 - импорт для регистрации декораторов
     logger.info("✅ Модуль text_messages импортирован, декораторы зарегистрированы")

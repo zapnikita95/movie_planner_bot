@@ -4,7 +4,6 @@ Callback handlers для карточки фильма (add_to_database, plan_fr
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 from moviebot.api.kinopoisk_api import get_facts
 from moviebot.states import user_plan_state
@@ -14,14 +13,14 @@ conn = get_db_connection()
 cursor = get_db_cursor()
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
 def add_to_database_callback(call):
     """Обработчик кнопки '➕ Добавить в базу'"""
     logger.info("=" * 80)
     logger.info(f"[ADD TO DATABASE] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
         try:
-            bot_instance.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
+            bot.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
             logger.info(f"[ADD TO DATABASE] answer_callback_query вызван, callback_id={call.id}")
         except Exception as e:
             logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
@@ -54,7 +53,7 @@ def add_to_database_callback(call):
                 pass
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка проверки базы", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка проверки базы", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -71,7 +70,7 @@ def add_to_database_callback(call):
             logger.info(f"[ADD TO DATABASE] Фильм уже в базе: film_id={film_id}, title={title_db}")
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, f"ℹ️ {title_db} уже в базе", show_alert=False)
+                    bot.answer_callback_query(call.id, f"ℹ️ {title_db} уже в базе", show_alert=False)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -176,7 +175,7 @@ def add_to_database_callback(call):
             logger.error(f"[ADD TO DATABASE] Ошибка при добавлении фильма в базу: {e}", exc_info=True)
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка добавления в базу", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка добавления в базу", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -186,7 +185,7 @@ def add_to_database_callback(call):
         logger.info(f"[ADD TO DATABASE] Фильм добавлен в базу: film_id={film_id}, title={title_db}")
         try:
             try:
-                bot_instance.answer_callback_query(call.id, f"✅ {title_db} добавлен в базу!", show_alert=False)
+                bot.answer_callback_query(call.id, f"✅ {title_db} добавлен в базу!", show_alert=False)
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -214,7 +213,7 @@ def add_to_database_callback(call):
         try:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -224,13 +223,13 @@ def add_to_database_callback(call):
     finally:
         logger.info(f"[ADD TO DATABASE] ===== END: callback_id={call.id}")
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
 def plan_from_added_callback(call):
     """Обработчик 'Запланировать просмотр' — добавляет фильм в базу, если его нет, и запускает планирование"""
     logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
     try:
         from moviebot.bot.bot_init import safe_answer_callback_query
-        safe_answer_callback_query(bot_instance, call.id)
+        safe_answer_callback_query(bot, call.id)
         
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -293,11 +292,11 @@ def plan_from_added_callback(call):
         except Exception as db_e:
             conn.rollback()
             logger.error(f"[PLAN FROM ADDED] Ошибка БД при добавлении фильма: {db_e}", exc_info=True)
-            bot_instance.send_message(chat_id, "❌ Ошибка при добавлении фильма в базу.")
+            bot.send_message(chat_id, "❌ Ошибка при добавлении фильма в базу.")
             return
         
         if not film_id:
-            bot_instance.send_message(chat_id, "❌ Не удалось добавить фильм в базу.")
+            bot.send_message(chat_id, "❌ Не удалось добавить фильм в базу.")
             return
         
         logger.info(f"[PLAN FROM ADDED] Фильм готов к планированию: film_id={film_id}, kp_id={kp_id}, title={title}")
@@ -311,11 +310,11 @@ def plan_from_added_callback(call):
         
         # Убираем старые кнопки (опционально, если хочешь)
         try:
-            bot_instance.edit_message_reply_markup(chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
+            bot.edit_message_reply_markup(chat_id=chat_id, message_id=call.message.message_id, reply_markup=None)
         except:
             pass
         
-        bot_instance.send_message(
+        bot.send_message(
             chat_id,
             f"✅ Фильм '<b>{title}</b>' добавлен в базу!\n\nГде планируете смотреть?",
             reply_markup=markup,
@@ -329,7 +328,7 @@ def plan_from_added_callback(call):
         logger.error(f"[PLAN FROM ADDED] Критическая ошибка: {e}", exc_info=True)
         try:
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка планирования", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка планирования", show_alert=True)
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -337,7 +336,7 @@ def plan_from_added_callback(call):
     finally:
         logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
         
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
 def show_facts_callback(call):
     """Обработчик кнопки 'Интересные факты'"""
     try:
@@ -350,10 +349,10 @@ def show_facts_callback(call):
         # Получаем факты
         facts = get_facts(kp_id)
         if facts:
-            bot_instance.send_message(chat_id, facts, parse_mode='HTML')
+            bot.send_message(chat_id, facts, parse_mode='HTML')
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "Факты отправлены")
+                    bot.answer_callback_query(call.id, "Факты отправлены")
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -361,7 +360,7 @@ def show_facts_callback(call):
         else:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
+                    bot.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -373,7 +372,7 @@ def show_facts_callback(call):
         try:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id)
+                    bot.answer_callback_query(call.id)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -382,7 +381,7 @@ def show_facts_callback(call):
             logger.error(f"[SHOW FACTS] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"), priority=1)
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"), priority=1)
 def plan_type_callback_fallback(call):
     """Запасной обработчик выбора типа плана (на случай, если основной не срабатывает)"""
     logger.info("=" * 80)
@@ -390,7 +389,7 @@ def plan_type_callback_fallback(call):
     try:
         try:
             try:
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -405,7 +404,7 @@ def plan_type_callback_fallback(call):
         
         if user_id not in user_plan_state:
             logger.warning(f"[PLAN TYPE FALLBACK] Состояние не найдено для user_id={user_id}")
-            bot_instance.edit_message_text("❌ Ошибка: сессия истекла. Начните заново с /plan", chat_id, call.message.message_id)
+            bot.edit_message_text("❌ Ошибка: сессия истекла. Начните заново с /plan", chat_id, call.message.message_id)
             return
         
         state = user_plan_state[user_id]
@@ -413,7 +412,7 @@ def plan_type_callback_fallback(call):
         
         if not link:
             logger.warning(f"[PLAN TYPE FALLBACK] Ссылка не найдена в состоянии: {state}")
-            bot_instance.edit_message_text("❌ Ошибка: не найдена ссылка на фильм. Начните заново с /plan", chat_id, call.message.message_id)
+            bot.edit_message_text("❌ Ошибка: не найдена ссылка на фильм. Начните заново с /plan", chat_id, call.message.message_id)
             del user_plan_state[user_id]
             return
         
@@ -421,11 +420,11 @@ def plan_type_callback_fallback(call):
         state['step'] = 3
         
         try:
-            bot_instance.delete_message(chat_id, call.message.message_id)
+            bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
         
-        bot_instance.send_message(chat_id, f"📅 Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\nМожно указать:\n• День недели (сегодня, завтра, понедельник и т.д.)\n• Дату (01.01, 1 января и т.д.)\n• Время (19:00, 20:30)")
+        bot.send_message(chat_id, f"📅 Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\nМожно указать:\n• День недели (сегодня, завтра, понедельник и т.д.)\n• Дату (01.01, 1 января и т.д.)\n• Время (19:00, 20:30)")
         
         logger.info(f"[PLAN TYPE FALLBACK] Пользователь {user_id} выбрал {plan_type}, link={link}")
     except Exception as e:
@@ -433,7 +432,7 @@ def plan_type_callback_fallback(call):
         try:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -443,10 +442,10 @@ def plan_type_callback_fallback(call):
     finally:
         logger.info(f"[PLAN TYPE FALLBACK] ===== END: callback_id={call.id}")
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith('plan_type:'))
+@bot.callback_query_handler(func=lambda call: call.data.startswith('plan_type:'))
 def handle_plan_type(call):
     try:
-        bot_instance.answer_callback_query(call.id, "Выбрано!")
+        bot.answer_callback_query(call.id, "Выбрано!")
     except Exception as e:
         logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
 
@@ -454,7 +453,7 @@ def handle_plan_type(call):
         parts = call.data.split(':')
         if len(parts) < 2:
             logger.warning(f"[PLAN TYPE] Неправильный формат callback_data: {call.data}")
-            bot_instance.send_message(call.message.chat.id, "❌ Ошибка формата. Попробуйте заново.")
+            bot.send_message(call.message.chat.id, "❌ Ошибка формата. Попробуйте заново.")
             return
 
         plan_type = parts[1]  # 'home' или 'cinema'
@@ -476,7 +475,7 @@ def handle_plan_type(call):
                 logger.info(f"[PLAN TYPE] kp_id взят из состояния: {kp_id}")
             else:
                 logger.warning(f"[PLAN TYPE] kp_id не найден ни в callback, ни в состоянии: {call.data}")
-                bot_instance.send_message(call.message.chat.id, "❌ Фильм не определён. Начните планирование заново.")
+                bot.send_message(call.message.chat.id, "❌ Фильм не определён. Начните планирование заново.")
                 return
 
         user_id = call.from_user.id
@@ -488,7 +487,7 @@ def handle_plan_type(call):
                 cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                 row = cursor.fetchone()
                 if not row:
-                    bot_instance.send_message(chat_id, "❌ Фильм не найден в базе. Попробуйте заново.")
+                    bot.send_message(chat_id, "❌ Фильм не найден в базе. Попробуйте заново.")
                     return
                 film_id = row[0] if not isinstance(row, dict) else row['id']
                 link = row[1] if not isinstance(row, dict) else row['link']
@@ -505,11 +504,11 @@ def handle_plan_type(call):
 
         # Удаляем сообщение с кнопками
         try:
-            bot_instance.delete_message(chat_id, call.message.message_id)
+            bot.delete_message(chat_id, call.message.message_id)
         except Exception as e:
             logger.debug(f"[PLAN TYPE] Не удалось удалить сообщение: {e}")
 
-        bot_instance.send_message(
+        bot.send_message(
             chat_id,
             "📅 Когда планируете смотреть?\n\nПримеры:\n• сегодня\n• завтра 20:00\n• 15.01\n• понедельник вечером"
         )
@@ -517,11 +516,11 @@ def handle_plan_type(call):
     except Exception as e:
         logger.error(f"[PLAN TYPE] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
+            bot.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
         except Exception as e:
             logger.warning(f"[CALLBACK] Не удалось ответить на callback: {e}")
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
 def show_film_description_callback(call):
     """Обработчик кнопки '◀️ Вернуться к описанию' - показывает описание фильма из БД без API запроса"""
     logger.info("=" * 80)
@@ -529,7 +528,7 @@ def show_film_description_callback(call):
     try:
         try:
             try:
-                bot_instance.answer_callback_query(call.id, text="⏳ Загружаю описание...")
+                bot.answer_callback_query(call.id, text="⏳ Загружаю описание...")
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -557,7 +556,7 @@ def show_film_description_callback(call):
             logger.error(f"[SHOW FILM DESCRIPTION FROM RATE] Фильм не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -624,7 +623,7 @@ def show_film_description_callback(call):
         if call.message:
             try:
                 rating_message_id = call.message.message_id
-                bot_instance.delete_message(chat_id, rating_message_id)
+                bot.delete_message(chat_id, rating_message_id)
                 logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] Сообщение с оценкой удалено: message_id={rating_message_id}")
             except Exception as del_e:
                 logger.warning(f"[SHOW FILM DESCRIPTION FROM RATE] Не удалось удалить сообщение с оценкой: {del_e}")
@@ -636,7 +635,7 @@ def show_film_description_callback(call):
         try:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -647,7 +646,7 @@ def show_film_description_callback(call):
         logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] ===== END: callback_id={call.id}")
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description:"))
 def mark_watched_from_description_callback(call):
     """Обработчик кнопки '👁️ Просмотрено' - отмечает фильм как просмотренный и обновляет сообщение"""
     logger.info("=" * 80)
@@ -656,7 +655,7 @@ def mark_watched_from_description_callback(call):
         # Отвечаем на callback сразу
         try:
             try:
-                bot_instance.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
+                bot.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -685,7 +684,7 @@ def mark_watched_from_description_callback(call):
                 logger.error(f"[MARK WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
                 try:
                     try:
-                        bot_instance.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
                     except Exception as e:
                         logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
                 except Exception as e:
@@ -745,7 +744,7 @@ def mark_watched_from_description_callback(call):
         logger.info(f"[MARK WATCHED] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
         try:
             try:
-                bot_instance.answer_callback_query(call.id, text="✅ Фильм отмечен как просмотренный", show_alert=False)
+                bot.answer_callback_query(call.id, text="✅ Фильм отмечен как просмотренный", show_alert=False)
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -756,7 +755,7 @@ def mark_watched_from_description_callback(call):
         try:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -766,11 +765,11 @@ def mark_watched_from_description_callback(call):
     finally:
         logger.info(f"[MARK WATCHED] ===== END: callback_id={call.id}")
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("streaming_select:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_select:"))
 def streaming_select_callback(call):
     """Выбор онлайн-кинотеатра для плана 'дома'"""
     try:
-        bot_instance.answer_callback_query(call.id, "Выбран онлайн-кинотеатр!")
+        bot.answer_callback_query(call.id, "Выбран онлайн-кинотеатр!")
     except:
         pass
     
@@ -806,7 +805,7 @@ def streaming_select_callback(call):
     
     # Обновляем сообщение
     new_text = call.message.text.split("\n\n📺")[0] + f"\n\n✅ Выбран: <b>{platform}</b>"
-    bot_instance.edit_message_text(
+    bot.edit_message_text(
         chat_id=chat_id,
         message_id=call.message.message_id,
         text=new_text,
@@ -814,11 +813,11 @@ def streaming_select_callback(call):
         reply_markup=call.message.reply_markup  # Оставляем кнопки, включая "Завершить"
     )
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("streaming_done:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_done:"))
 def streaming_done_callback(call):
     """Завершение выбора онлайн-кинотеатров"""
     try:
-        bot_instance.answer_callback_query(call.id, "Готово!")
+        bot.answer_callback_query(call.id, "Готово!")
     except:
         pass
     
@@ -839,7 +838,7 @@ def streaming_done_callback(call):
     if "✅ Выбран:" in original_text:
         original_text = original_text.split("\n\n✅ Выбран:")[0].strip()
     
-    bot_instance.edit_message_text(
+    bot.edit_message_text(
         chat_id=chat_id,
         message_id=call.message.message_id,
         text=original_text,
@@ -849,7 +848,7 @@ def streaming_done_callback(call):
     
     logger.info(f"[STREAMING DONE] План {plan_id} завершён — кнопки убраны")
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description_kp:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description_kp:"))
 def mark_watched_from_description_kp_callback(call):
     """Обработчик кнопки '👁️ Просмотрено' для фильмов, не добавленных в базу - добавляет фильм в базу как просмотренный"""
     logger.info("=" * 80)
@@ -858,7 +857,7 @@ def mark_watched_from_description_kp_callback(call):
         # Отвечаем на callback сразу
         try:
             try:
-                bot_instance.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
+                bot.answer_callback_query(call.id, text="⏳ Отмечаю как просмотренный...")
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -882,7 +881,7 @@ def mark_watched_from_description_kp_callback(call):
         if not info:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -895,7 +894,7 @@ def mark_watched_from_description_kp_callback(call):
         
         if not film_id:
             from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot_instance, call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+            safe_answer_callback_query(bot, call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
             return
 
         # Отмечаем фильм как просмотренный
@@ -917,7 +916,7 @@ def mark_watched_from_description_kp_callback(call):
         logger.info(f"[MARK WATCHED KP] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
         try:
             try:
-                bot_instance.answer_callback_query(call.id, text="✅ Фильм добавлен в базу и отмечен как просмотренный", show_alert=False)
+                bot.answer_callback_query(call.id, text="✅ Фильм добавлен в базу и отмечен как просмотренный", show_alert=False)
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -928,7 +927,7 @@ def mark_watched_from_description_kp_callback(call):
         try:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -939,7 +938,7 @@ def mark_watched_from_description_kp_callback(call):
         logger.info(f"[MARK WATCHED KP] ===== END: callback_id={call.id}")
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("toggle_watched_from_description:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("toggle_watched_from_description:"))
 def toggle_watched_from_description_callback(call):
     """Обработчик кнопки '✅ Просмотрено' - снимает отметку просмотра"""
     logger.info("=" * 80)
@@ -948,7 +947,7 @@ def toggle_watched_from_description_callback(call):
         # Отвечаем на callback сразу
         try:
             try:
-                bot_instance.answer_callback_query(call.id, text="⏳ Снимаю отметку просмотра...")
+                bot.answer_callback_query(call.id, text="⏳ Снимаю отметку просмотра...")
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -976,7 +975,7 @@ def toggle_watched_from_description_callback(call):
                 logger.error(f"[TOGGLE WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
                 try:
                     try:
-                        bot_instance.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
                     except Exception as e:
                         logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
                 except Exception as e:
@@ -1036,7 +1035,7 @@ def toggle_watched_from_description_callback(call):
         logger.info(f"[TOGGLE WATCHED] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
         try:
             try:
-                bot_instance.answer_callback_query(call.id, text="✅ Отметка просмотра снята", show_alert=False)
+                bot.answer_callback_query(call.id, text="✅ Отметка просмотра снята", show_alert=False)
             except Exception as e:
                 logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
         except Exception as e:
@@ -1047,7 +1046,7 @@ def toggle_watched_from_description_callback(call):
         try:
             try:
                 try:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
                 except Exception as e:
                     logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
             except Exception as e:
@@ -1057,10 +1056,10 @@ def toggle_watched_from_description_callback(call):
     finally:
         logger.info(f"[TOGGLE WATCHED] ===== END: callback_id={call.id}")
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("remove_from_database:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("remove_from_database:"))
 def remove_from_database_prompt(call):
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
     except:
         pass
 
@@ -1078,7 +1077,7 @@ def remove_from_database_prompt(call):
         InlineKeyboardButton("✅ Удалить", callback_data=f"confirm_remove:{kp_id}"),
         InlineKeyboardButton("⬅️ Назад", callback_data=f"view_film_description:{kp_id}")
     )
-    bot_instance.edit_message_text(
+    bot.edit_message_text(
         chat_id=chat_id,
         message_id=call.message.message_id,
         text=f"Точно удалить из базы <b>{title}</b>?",
@@ -1086,10 +1085,10 @@ def remove_from_database_prompt(call):
         parse_mode='HTML'
     )
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("confirm_remove:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_remove:"))
 def confirm_remove(call):
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
     except:
         pass
 
@@ -1100,15 +1099,15 @@ def confirm_remove(call):
         cursor.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
         conn.commit()
 
-    bot_instance.edit_message_text(
+    bot.edit_message_text(
         chat_id=chat_id,
         message_id=call.message.message_id,
         text="✅ Фильм удалён из базы.",
         reply_markup=None
     )
 
-def register_film_callbacks(bot_instance):
+def register_film_callbacks(bot):
     """Регистрирует callback handlers для карточки фильма (уже зарегистрированы через декораторы)"""
-    # Handlers уже зарегистрированы через декораторы @bot_instance.callback_query_handler
+    # Handlers уже зарегистрированы через декораторы @bot.callback_query_handler
     # при импорте модуля, поэтому эта функция просто для совместимости
     pass

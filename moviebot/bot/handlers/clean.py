@@ -6,7 +6,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot as bot_instance, BOT_ID
 from moviebot.states import user_clean_state, clean_votes, clean_unwatched_votes
 from datetime import datetime, timedelta
 
@@ -15,7 +14,7 @@ conn = get_db_connection()
 cursor = get_db_cursor()
 
 
-@bot_instance.message_handler(commands=['clean'])
+@bot.message_handler(commands=['clean'])
 def clean_command(message):
     logger.info(f"[HANDLER] /clean вызван от {message.from_user.id}")
     username = message.from_user.username or f"user_{message.from_user.id}"
@@ -59,10 +58,10 @@ def clean_command(message):
         "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
         "Выберите действие:"
     )
-    bot_instance.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+    bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("clean:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("clean:"))
 def clean_action_choice(call):
     """Обработчик выбора действия в /clean"""
     user_id = call.from_user.id
@@ -77,7 +76,7 @@ def clean_action_choice(call):
             try:
                 # Получаем список активных участников
                 try:
-                    chat_member_count = bot_instance.get_chat_member_count(chat_id)
+                    chat_member_count = bot.get_chat_member_count(chat_id)
                     logger.info(f"[CLEAN] Количество участников чата через API: {chat_member_count}")
                 except Exception as api_error:
                     logger.warning(f"[CLEAN] Не удалось получить количество участников через API: {api_error}")
@@ -120,10 +119,10 @@ def clean_action_choice(call):
                         f"⚠️ Не найдено активных участников чата за последние 30 дней.\n\n"
                         f"Используйте /dbcheck для подробной диагностики БД"
                     )
-                    bot_instance.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
+                    bot.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
                     return
                 
-                msg = bot_instance.send_message(chat_id, 
+                msg = bot.send_message(chat_id, 
                     f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено полное обнуление базы данных чата.\n\n"
                     f"Участников в чате: {active_members_count}\n"
                     f"Для подтверждения все участники должны поставить 👍 (лайк) на это сообщение.\n\n"
@@ -138,15 +137,15 @@ def clean_action_choice(call):
                     'active_members': active_members
                 }
                 
-                bot_instance.edit_message_text("✅ Запрос на обнуление базы отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
+                bot.edit_message_text("✅ Запрос на обнуление базы отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
             except Exception as e:
                 logger.error(f"Ошибка при инициировании голосования: {e}", exc_info=True)
-                bot_instance.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
+                bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
         else:
             # В личном чате можно сразу удалить
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 "⚠️ <b>Обнуление базы данных чата</b>\n\n"
                 "Это удалит <b>ВСЕ данные чата</b>:\n"
                 "• Все фильмы\n"
@@ -165,7 +164,7 @@ def clean_action_choice(call):
         # Обнуление базы пользователя - удаляет только данные конкретного пользователя в этом чате
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             "⚠️ <b>Обнуление базы данных пользователя</b>\n\n"
             "Это удалит <b>только ваши данные в этом чате</b>:\n"
             "• Все ваши оценки\n"
@@ -186,7 +185,7 @@ def clean_action_choice(call):
             try:
                 # Получаем количество участников и активных участников (та же логика, что и для chat_db)
                 try:
-                    chat_member_count = bot_instance.get_chat_member_count(chat_id)
+                    chat_member_count = bot.get_chat_member_count(chat_id)
                 except Exception as api_error:
                     chat_member_count = None
                 
@@ -227,10 +226,10 @@ def clean_action_choice(call):
                         f"⚠️ Не найдено активных участников чата за последние 30 дней.\n\n"
                         f"Используйте /dbcheck для подробной диагностики БД"
                     )
-                    bot_instance.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
+                    bot.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
                     return
                 
-                msg = bot_instance.send_message(chat_id, 
+                msg = bot.send_message(chat_id, 
                     f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено удаление всех непросмотренных фильмов.\n\n"
                     f"Участников в чате: {active_members_count}\n"
                     f"Для подтверждения все участники должны поставить 👍 (лайк) на это сообщение.\n\n"
@@ -245,15 +244,15 @@ def clean_action_choice(call):
                     'active_members': active_members
                 }
                 
-                bot_instance.edit_message_text("✅ Запрос на удаление непросмотренных фильмов отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
+                bot.edit_message_text("✅ Запрос на удаление непросмотренных фильмов отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
             except Exception as e:
                 logger.error(f"Ошибка при инициировании голосования: {e}", exc_info=True)
-                bot_instance.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
+                bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
         else:
             # В личном чате можно сразу удалить
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 "⚠️ <b>Удаление непросмотренных фильмов</b>\n\n"
                 "Это удалит все фильмы, которые:\n"
                 "• Не находятся в расписании\n"
@@ -269,7 +268,7 @@ def clean_action_choice(call):
         # Удаление импортированных оценок пользователя
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             "⚠️ <b>Удаление импортированных оценок с Кинопоиска</b>\n\n"
             "Это удалит <b>только ваши импортированные оценки</b>:\n"
             "• Все оценки с пометкой is_imported = TRUE\n"
@@ -285,7 +284,7 @@ def clean_action_choice(call):
         # Удаление фильмов, которые были добавлены только из-за импорта
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="clean:cancel"))
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             "⚠️ <b>Удаление фильмов, добавленных при импорте</b>\n\n"
             "Это удалит фильмы, которые:\n"
             "• Были добавлены в базу только из-за импорта оценок\n"
@@ -300,7 +299,7 @@ def clean_action_choice(call):
         user_clean_state[user_id]['target'] = 'clean_imported_movies'
     
     elif action == 'cancel':
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         if user_id in user_clean_state:
             del user_clean_state[user_id]
         
@@ -339,7 +338,7 @@ def clean_action_choice(call):
             "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
             "Выберите действие:"
         )
-        bot_instance.edit_message_text(help_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        bot.edit_message_text(help_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
 
 
 def register_clean_handlers(bot):

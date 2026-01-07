@@ -8,14 +8,11 @@
 import logging
 import sys
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.bot.bot_init import BOT_ID
 
 logger = logging.getLogger(__name__)
 
 # Логируем при импорте модуля
-print(f"[STATE HANDLERS] Модуль импортирован, bot_instance: {bot_instance}, id: {id(bot_instance)}", file=sys.stdout, flush=True)
-logger.info(f"[STATE HANDLERS] Модуль импортирован, bot_instance: {bot_instance}, id: {id(bot_instance)}")
 
 
 def _process_promo_success(message, state, promo_code, discounted_price, message_text, promocode_id, user_id, chat_id):
@@ -163,10 +160,10 @@ def _process_promo_success(message, state, promo_code, discounted_price, message
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
         
         try:
-            bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+            bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
         except Exception as e:
             logger.error(f"[PROMO HANDLER] Ошибка отправки: {e}", exc_info=True)
-            bot_instance.send_message(chat_id, text_result, reply_markup=markup, parse_mode='HTML')
+            bot.send_message(chat_id, text_result, reply_markup=markup, parse_mode='HTML')
         
         # Удаляем состояние промокода
         from moviebot.states import user_promo_state
@@ -195,7 +192,7 @@ def should_process_message(message, state, prompt_message_id=None, require_reply
     
     # Определяем тип чата
     try:
-        chat_info = bot_instance.get_chat(chat_id)
+        chat_info = bot.get_chat(chat_id)
         is_private = chat_info.type == 'private'
     except:
         is_private = chat_id > 0  # Положительные ID обычно личные чаты
@@ -269,11 +266,11 @@ def send_error_message(message, error_text, prompt_message_id=None, state=None, 
     markup.add(InlineKeyboardButton("❌ Отмена", callback_data="cancel_action"))
     
     try:
-        bot_instance.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
     except Exception as e:
         logger.error(f"[ERROR MESSAGE] Ошибка отправки сообщения об ошибке: {e}", exc_info=True)
         try:
-            bot_instance.send_message(message.chat.id, error_text, reply_markup=markup, parse_mode='HTML')
+            bot.send_message(message.chat.id, error_text, reply_markup=markup, parse_mode='HTML')
         except Exception as e2:
             logger.error(f"[ERROR MESSAGE] Критическая ошибка отправки: {e2}", exc_info=True)
 
@@ -287,17 +284,17 @@ def handle_retry_prompt_callback(call):
         
         # Получаем оригинальное сообщение-промпт
         try:
-            prompt_message = bot_instance.forward_message(chat_id, chat_id, prompt_message_id)
+            prompt_message = bot.forward_message(chat_id, chat_id, prompt_message_id)
             # Или просто отправляем новое сообщение с тем же текстом
             # Для этого нужно сохранять текст промпта в состоянии
-            bot_instance.answer_callback_query(call.id, "Промпт отправлен повторно")
+            bot.answer_callback_query(call.id, "Промпт отправлен повторно")
         except Exception as e:
             logger.error(f"[RETRY PROMPT] Ошибка: {e}", exc_info=True)
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
     except Exception as e:
         logger.error(f"[RETRY PROMPT] Ошибка обработки: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
         except:
             pass
 
@@ -328,8 +325,8 @@ def handle_cancel_action_callback(call):
             if user_id in state_dict:
                 del state_dict[user_id]
         
-        bot_instance.answer_callback_query(call.id, "✅ Действие отменено")
-        bot_instance.edit_message_text(
+        bot.answer_callback_query(call.id, "✅ Действие отменено")
+        bot.edit_message_text(
             "❌ Действие отменено",
             call.message.chat.id,
             call.message.message_id
@@ -337,18 +334,18 @@ def handle_cancel_action_callback(call):
     except Exception as e:
         logger.error(f"[CANCEL ACTION] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
         except:
             pass
 
 
 # Регистрируем обработчики кнопок
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("retry_prompt:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("retry_prompt:"))
 def retry_prompt_callback(call):
     handle_retry_prompt_callback(call)
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "cancel_action")
+@bot.callback_query_handler(func=lambda call: call.data == "cancel_action")
 def cancel_action_callback(call):
     handle_cancel_action_callback(call)
 
@@ -389,7 +386,7 @@ def check_rating_message(message):
     
     # В личных чатах можно отправлять оценку без реплая
     try:
-        chat_info = bot_instance.get_chat(message.chat.id)
+        chat_info = bot.get_chat(message.chat.id)
         if chat_info.type == 'private':
             return True
     except:
@@ -399,7 +396,7 @@ def check_rating_message(message):
     return False
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_rating_message)
+@bot.message_handler(content_types=['text'], func=check_rating_message)
 def handle_rating(message):
     """Обработчик для оценок фильмов"""
     logger.info(f"[RATE HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -499,7 +496,7 @@ def check_promo_message(message):
     return False
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_promo_message)
+@bot.message_handler(content_types=['text'], func=check_promo_message)
 def handle_promo(message):
     """Обработчик для промокодов"""
     logger.info(f"[PROMO HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -554,7 +551,7 @@ def handle_promo(message):
                     error_text = "❌ Промокод уже применен к этому платежу.\n\nВы не можете применить промокод повторно."
                     markup = InlineKeyboardMarkup()
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
-                    bot_instance.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
+                    bot.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
                     return
             
             # Применяем промокод
@@ -576,7 +573,7 @@ def handle_promo(message):
                 error_text = f"❌ {message_text}\n\nВведите другой промокод или оплатите полную стоимость."
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
-                bot_instance.reply_to(message, error_text, reply_markup=markup)
+                bot.reply_to(message, error_text, reply_markup=markup)
                 
         except Exception as e:
             logger.error(f"[PROMO HANDLER] Ошибка обработки промокода: {e}", exc_info=True)
@@ -593,7 +590,7 @@ def handle_promo(message):
         
         # Проверка лички/реплая
         try:
-            chat_info = bot_instance.get_chat(chat_id)
+            chat_info = bot.get_chat(chat_id)
             is_private = chat_info.type == 'private'
         except:
             is_private = chat_id > 0
@@ -620,7 +617,7 @@ def handle_promo(message):
             success, result_message = create_promocode(code, discount_input, total_uses_str)
             
             if success:
-                bot_instance.reply_to(message, f"✅ {result_message}")
+                bot.reply_to(message, f"✅ {result_message}")
                 
                 # Обновление меню /promo
                 class FakeMessage:
@@ -634,7 +631,7 @@ def handle_promo(message):
                 from moviebot.bot.handlers.promo import promo_command
                 promo_command(fake_msg)
             else:
-                bot_instance.reply_to(message, f"❌ {result_message}")
+                bot.reply_to(message, f"❌ {result_message}")
             
             del user_promo_admin_state[user_id]
             
@@ -670,7 +667,7 @@ def check_ticket_message(message):
     
     # В личных чатах можно отвечать без реплая
     try:
-        chat_info = bot_instance.get_chat(message.chat.id)
+        chat_info = bot.get_chat(message.chat.id)
         is_private = chat_info.type == 'private'
     except:
         is_private = message.chat.id > 0
@@ -693,7 +690,7 @@ def check_ticket_message(message):
     return True
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_ticket_message)
+@bot.message_handler(content_types=['text'], func=check_ticket_message)
 def handle_ticket(message):
     """Обработчик для билетов"""
     logger.info(f"[TICKET HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -726,7 +723,7 @@ def handle_ticket(message):
                     state['event_name'] = event_name
                     state['step'] = 'event_datetime'
                     
-                    bot_instance.reply_to(
+                    bot.reply_to(
                         message,
                         f"✅ Название мероприятия: <b>{event_name}</b>\n\n"
                         "Теперь укажите дату и время мероприятия в ответ на это сообщение.\n"
@@ -761,7 +758,7 @@ def handle_ticket(message):
                     tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
                     formatted_time = event_dt.strftime('%d.%m.%Y %H:%M')
                     
-                    bot_instance.reply_to(
+                    bot.reply_to(
                         message,
                         f"✅ Дата и время: <b>{formatted_time} {tz_name}</b>\n\n"
                         "Теперь отправьте файл или картинку с билетом:",
@@ -805,7 +802,7 @@ def handle_ticket(message):
                                     except:
                                         ticket_count = 1
                         
-                        bot_instance.reply_to(message, f"✅ Загрузка билетов завершена! Всего билетов: {ticket_count}")
+                        bot.reply_to(message, f"✅ Загрузка билетов завершена! Всего билетов: {ticket_count}")
                         # Очищаем состояние
                         if user_id in user_ticket_state:
                             del user_ticket_state[user_id]
@@ -862,7 +859,7 @@ def handle_ticket(message):
                 new_dt_local = new_dt_utc.astimezone(user_tz)
                 date_str = new_dt_local.strftime('%d.%m.%Y %H:%M')
                 
-                bot_instance.reply_to(message, f"✅ Время сеанса изменено на {date_str}")
+                bot.reply_to(message, f"✅ Время сеанса изменено на {date_str}")
                 
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
@@ -903,7 +900,7 @@ def check_search_message(message):
     
     # В личных чатах можно отвечать без реплая
     try:
-        chat_info = bot_instance.get_chat(message.chat.id)
+        chat_info = bot.get_chat(message.chat.id)
         is_private = chat_info.type == 'private'
     except:
         is_private = message.chat.id > 0
@@ -927,7 +924,7 @@ def check_search_message(message):
     return False
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_search_message)
+@bot.message_handler(content_types=['text'], func=check_search_message)
 def handle_search(message):
     """Обработчик для поиска"""
     logger.info(f"[SEARCH HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -958,7 +955,7 @@ def handle_search(message):
             logger.info(f"[SEARCH HANDLER] ✅ Поиск завершен: найдено {len(films) if films else 0} результатов, страниц: {total_pages}")
             
             if not films:
-                bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+                bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
                 if user_id in user_search_state:
                     del user_search_state[user_id]
                 return
@@ -1008,7 +1005,7 @@ def handle_search(message):
                 results_text = results_text[:max_length] + "\n\n... (показаны не все результаты)"
             
             try:
-                sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                sent_message = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[SEARCH HANDLER] ✅ Ответ отправлен, message_id={sent_message.message_id if sent_message else 'None'}")
                 if user_id in user_search_state:
                     del user_search_state[user_id]
@@ -1061,7 +1058,7 @@ def check_import_message(message):
     
     # В личных чатах можно отвечать без реплая
     try:
-        chat_info = bot_instance.get_chat(message.chat.id)
+        chat_info = bot.get_chat(message.chat.id)
         is_private = chat_info.type == 'private'
     except:
         is_private = message.chat.id > 0
@@ -1076,7 +1073,7 @@ def check_import_message(message):
         return is_reply
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_import_message)
+@bot.message_handler(content_types=['text'], func=check_import_message)
 def handle_import(message):
     """Обработчик для импорта из Кинопоиска"""
     logger.info(f"[IMPORT HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -1139,7 +1136,7 @@ def check_edit_message(message):
     
     # В личных чатах можно отвечать без реплая
     try:
-        chat_info = bot_instance.get_chat(message.chat.id)
+        chat_info = bot.get_chat(message.chat.id)
         is_private = chat_info.type == 'private'
     except:
         is_private = message.chat.id > 0
@@ -1161,7 +1158,7 @@ def check_edit_message(message):
         return True
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_edit_message)
+@bot.message_handler(content_types=['text'], func=check_edit_message)
 def handle_edit(message):
     """Обработчик для редактирования"""
     logger.info(f"[EDIT HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -1190,7 +1187,7 @@ def handle_edit(message):
                 
                 # Проверяем, что это ответ на правильное сообщение
                 try:
-                    chat_info = bot_instance.get_chat(message.chat.id)
+                    chat_info = bot.get_chat(message.chat.id)
                     is_private = chat_info.type == 'private'
                 except:
                     is_private = message.chat.id > 0
@@ -1257,7 +1254,7 @@ def check_settings_message(message):
     return False
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_settings_message)
+@bot.message_handler(content_types=['text'], func=check_settings_message)
 def handle_settings(message):
     """Обработчик для настроек"""
     logger.info(f"[SETTINGS HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -1289,29 +1286,29 @@ def handle_settings(message):
                                     if notify_type == 'home':
                                         set_notification_setting(chat_id, 'notify_home_weekday_hour', hour)
                                         set_notification_setting(chat_id, 'notify_home_weekday_minute', minute)
-                                        bot_instance.reply_to(message, f"✅ Время напоминаний для домашнего просмотра установлено: {hour:02d}:{minute:02d}")
+                                        bot.reply_to(message, f"✅ Время напоминаний для домашнего просмотра установлено: {hour:02d}:{minute:02d}")
                                     elif notify_type == 'home_weekday':
                                         set_notification_setting(chat_id, 'notify_home_weekday_hour', hour)
                                         set_notification_setting(chat_id, 'notify_home_weekday_minute', minute)
-                                        bot_instance.reply_to(message, f"✅ Время напоминаний для домашнего просмотра (будни) установлено: {hour:02d}:{minute:02d}")
+                                        bot.reply_to(message, f"✅ Время напоминаний для домашнего просмотра (будни) установлено: {hour:02d}:{minute:02d}")
                                     elif notify_type == 'home_weekend':
                                         set_notification_setting(chat_id, 'notify_home_weekend_hour', hour)
                                         set_notification_setting(chat_id, 'notify_home_weekend_minute', minute)
-                                        bot_instance.reply_to(message, f"✅ Время напоминаний для домашнего просмотра (выходные) установлено: {hour:02d}:{minute:02d}")
+                                        bot.reply_to(message, f"✅ Время напоминаний для домашнего просмотра (выходные) установлено: {hour:02d}:{minute:02d}")
                                 
                                 elif notify_type == 'cinema' or notify_type.startswith('cinema_'):
                                     if notify_type == 'cinema':
                                         set_notification_setting(chat_id, 'notify_cinema_weekday_hour', hour)
                                         set_notification_setting(chat_id, 'notify_cinema_weekday_minute', minute)
-                                        bot_instance.reply_to(message, f"✅ Время напоминаний для просмотра в кино установлено: {hour:02d}:{minute:02d}")
+                                        bot.reply_to(message, f"✅ Время напоминаний для просмотра в кино установлено: {hour:02d}:{minute:02d}")
                                     elif notify_type == 'cinema_weekday':
                                         set_notification_setting(chat_id, 'notify_cinema_weekday_hour', hour)
                                         set_notification_setting(chat_id, 'notify_cinema_weekday_minute', minute)
-                                        bot_instance.reply_to(message, f"✅ Время напоминаний для просмотра в кино (будни) установлено: {hour:02d}:{minute:02d}")
+                                        bot.reply_to(message, f"✅ Время напоминаний для просмотра в кино (будни) установлено: {hour:02d}:{minute:02d}")
                                     elif notify_type == 'cinema_weekend':
                                         set_notification_setting(chat_id, 'notify_cinema_weekend_hour', hour)
                                         set_notification_setting(chat_id, 'notify_cinema_weekend_minute', minute)
-                                        bot_instance.reply_to(message, f"✅ Время напоминаний для просмотра в кино (выходные) установлено: {hour:02d}:{minute:02d}")
+                                        bot.reply_to(message, f"✅ Время напоминаний для просмотра в кино (выходные) установлено: {hour:02d}:{minute:02d}")
                                 
                                 if user_id in user_settings_state:
                                     del user_settings_state[user_id]
@@ -1395,7 +1392,7 @@ def check_clean_message(message):
     
     # В личных чатах можно отвечать без реплая
     try:
-        chat_info = bot_instance.get_chat(message.chat.id)
+        chat_info = bot.get_chat(message.chat.id)
         is_private = chat_info.type == 'private'
     except:
         is_private = message.chat.id > 0
@@ -1417,7 +1414,7 @@ def check_clean_message(message):
         return True
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_clean_message)
+@bot.message_handler(content_types=['text'], func=check_clean_message)
 def handle_clean(message):
     """Обработчик для очистки"""
     logger.info(f"[CLEAN HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -1489,7 +1486,7 @@ def check_admin_message(message):
     
     # В личных чатах можно отвечать без реплая (админские команды обычно в личных чатах)
     try:
-        chat_info = bot_instance.get_chat(message.chat.id)
+        chat_info = bot.get_chat(message.chat.id)
         is_private = chat_info.type == 'private'
     except:
         is_private = message.chat.id > 0
@@ -1505,7 +1502,7 @@ def check_admin_message(message):
     return is_reply
 
 
-@bot_instance.message_handler(content_types=['text'], func=check_admin_message)
+@bot.message_handler(content_types=['text'], func=check_admin_message)
 def handle_admin(message):
     """Обработчик для админских функций"""
     logger.info(f"[ADMIN HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -1535,9 +1532,9 @@ def handle_admin(message):
                         if subscription_id:
                             if cancel_subscription(subscription_id, user_id):
                                 if subscription_type == 'group':
-                                    bot_instance.reply_to(message, "✅ <b>Групповая подписка отменена</b>\n\nВаша групповая подписка была успешно отменена.", parse_mode='HTML')
+                                    bot.reply_to(message, "✅ <b>Групповая подписка отменена</b>\n\nВаша групповая подписка была успешно отменена.", parse_mode='HTML')
                                 else:
-                                    bot_instance.reply_to(message, "✅ <b>Личная подписка отменена</b>\n\nВаша личная подписка была успешно отменена.", parse_mode='HTML')
+                                    bot.reply_to(message, "✅ <b>Личная подписка отменена</b>\n\nВаша личная подписка была успешно отменена.", parse_mode='HTML')
                                 del user_cancel_subscription_state[user_id]
                             else:
                                 send_error_message(
@@ -1602,7 +1599,7 @@ def handle_admin(message):
                                 markup = InlineKeyboardMarkup()
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
                                 
-                                bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                                bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
                             else:
                                 send_error_message(
                                     message,
@@ -1630,7 +1627,7 @@ def handle_admin(message):
                             state['target_id'] = target_id
                             state['prompt_message_id'] = None  # Сбрасываем, так как теперь будем работать через callbacks
                             
-                            bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                            bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
                             # НЕ удаляем user_unsubscribe_state, так как будем обрабатывать через callbacks
                     except ValueError:
                         send_error_message(
@@ -1672,7 +1669,7 @@ def handle_admin(message):
                             admin_text += "Все команды доступны только в личных сообщениях боту."
                             
                             try:
-                                bot_instance.send_message(admin_id, admin_text, parse_mode='HTML')
+                                bot.send_message(admin_id, admin_text, parse_mode='HTML')
                                 logger.info(f"[ADMIN HANDLER] Уведомление отправлено новому администратору: {admin_id}")
                             except Exception as e:
                                 logger.warning(f"[ADMIN HANDLER] Не удалось отправить уведомление администратору {admin_id}: {e}")
@@ -1685,7 +1682,7 @@ def handle_admin(message):
                             markup = InlineKeyboardMarkup()
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back_to_list"))
                             
-                            bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                            bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
                         else:
                             send_error_message(
                                 message,

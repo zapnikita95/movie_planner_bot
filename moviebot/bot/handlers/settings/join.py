@@ -7,14 +7,13 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_operations import log_request
 from moviebot.database.db_operations import is_bot_participant
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot as bot_instance, BOT_ID
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
 
 
-@bot_instance.message_handler(commands=['join'])
+@bot.message_handler(commands=['join'])
 def join_command(message):
     logger.info(f"[HANDLER] /join вызван от {message.from_user.id}")
     try:
@@ -60,7 +59,7 @@ def join_command(message):
                 
                 # Получаем администраторов группы (они точно есть)
                 try:
-                    admins = bot_instance.get_chat_administrators(chat_id)
+                    admins = bot.get_chat_administrators(chat_id)
                     all_group_member_ids = set()
                     all_group_members = {}
                     
@@ -165,7 +164,7 @@ def join_command(message):
                                         button_text = button_text[:47] + "..."
                                     markup.add(InlineKeyboardButton(button_text, callback_data=f"join_add:{member['user_id']}"))
                                 
-                                bot_instance.reply_to(message, response_text, parse_mode='HTML', reply_markup=markup)
+                                bot.reply_to(message, response_text, parse_mode='HTML', reply_markup=markup)
                                 return
                 except Exception as e:
                     logger.warning(f"[JOIN] Не удалось получить список администраторов: {e}")
@@ -185,17 +184,17 @@ def join_command(message):
             except Exception as e:
                 logger.warning(f"[JOIN] Ошибка при получении участников: {e}")
         
-        bot_instance.reply_to(message, response_text, parse_mode='HTML')
+        bot.reply_to(message, response_text, parse_mode='HTML')
         logger.info(f"✅ Команда /join обработана для пользователя {user_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /join: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /join")
+            bot.reply_to(message, "Произошла ошибка при обработке команды /join")
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("join_add:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("join_add:"))
 def join_add_callback(call):
     """Обработчик добавления участника через кнопку в /join"""
     try:
@@ -205,19 +204,19 @@ def join_add_callback(call):
         
         # Проверяем, является ли вызывающий участником бота
         if not is_bot_participant(chat_id, user_id):
-            bot_instance.answer_callback_query(call.id, "❌ Вы не участвуете в боте. Используйте /join", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Вы не участвуете в боте. Используйте /join", show_alert=True)
             return
         
         # Проверяем, является ли целевой пользователь уже участником
         if is_bot_participant(chat_id, target_user_id):
-            bot_instance.answer_callback_query(call.id, "✅ Этот пользователь уже участвует в боте")
+            bot.answer_callback_query(call.id, "✅ Этот пользователь уже участвует в боте")
             return
         
         # Регистрируем пользователя
         username = call.from_user.username or f"user_{target_user_id}"
         log_request(target_user_id, username, '/join', chat_id)
         
-        bot_instance.answer_callback_query(call.id, "✅ Пользователь добавлен к участию в боте")
+        bot.answer_callback_query(call.id, "✅ Пользователь добавлен к участию в боте")
         
         # Обновляем сообщение, удаляя кнопку добавленного пользователя
         try:
@@ -241,7 +240,7 @@ def join_add_callback(call):
             
             # Получаем администраторов группы
             try:
-                admins = bot_instance.get_chat_administrators(chat_id)
+                admins = bot.get_chat_administrators(chat_id)
                 all_group_member_ids = set()
                 all_group_members = {}
                 
@@ -346,17 +345,17 @@ def join_add_callback(call):
                                 button_text = button_text[:47] + "..."
                             markup.add(InlineKeyboardButton(button_text, callback_data=f"join_add:{member['user_id']}"))
                         
-                        bot_instance.edit_message_text(response_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot.edit_message_text(response_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     else:
                         # Все участники добавлены, удаляем кнопки
-                        bot_instance.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
+                        bot.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
                 else:
                     # Все участники добавлены
                     # Получаем информацию о групповой подписке
                     paid_participants_count = 0
                     total_participants_count = 0
                     try:
-                        admins = bot_instance.get_chat_administrators(chat_id)
+                        admins = bot.get_chat_administrators(chat_id)
                         all_group_member_ids = set()
                         for admin in admins:
                             admin_user = admin.user
@@ -392,7 +391,7 @@ def join_add_callback(call):
                         
                         display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
                         response_text += f"• {display_name}\n"
-                    bot_instance.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
+                    bot.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
             except Exception as e:
                 logger.warning(f"[JOIN ADD] Не удалось обновить сообщение: {e}")
         except Exception as e:
@@ -400,7 +399,7 @@ def join_add_callback(call):
     except Exception as e:
         logger.error(f"[JOIN ADD] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 

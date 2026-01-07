@@ -6,7 +6,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request, get_user_timezone_or_default
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.states import user_edit_state
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
 from datetime import datetime
@@ -17,7 +16,7 @@ conn = get_db_connection()
 cursor = get_db_cursor()
 
 
-@bot_instance.message_handler(commands=['edit'])
+@bot.message_handler(commands=['edit'])
 def edit_command(message):
     """Команда /edit - редактирование расписания и оценок"""
     logger.info(f"[EDIT COMMAND] ===== ФУНКЦИЯ ВЫЗВАНА =====")
@@ -45,17 +44,17 @@ def edit_command(message):
     )
     
     try:
-        bot_instance.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
     except Exception as e:
         logger.error(f"[EDIT COMMAND] ❌ Ошибка отправки меню: {e}", exc_info=True)
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit:"))
 def edit_action_callback(call):
     """Обработчик выбора действия в /edit"""
     logger.info(f"[EDIT ACTION] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         action = call.data.split(":")[1]
@@ -76,7 +75,7 @@ def edit_action_callback(call):
                 plans = cursor.fetchall()
             
             if not plans:
-                bot_instance.edit_message_text("Нет планов для редактирования.", chat_id, call.message.message_id)
+                bot.edit_message_text("Нет планов для редактирования.", chat_id, call.message.message_id)
                 return
             
             markup = InlineKeyboardMarkup(row_width=1)
@@ -105,7 +104,7 @@ def edit_action_callback(call):
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_plan:{plan_id}"))
             
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
-            bot_instance.edit_message_text("📅 <b>Выберите план для редактирования:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text("📅 <b>Выберите план для редактирования:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         
         elif action == "rating":
             # Показываем список фильмов с оценками для изменения
@@ -121,7 +120,7 @@ def edit_action_callback(call):
                 movies = cursor.fetchall()
             
             if not movies:
-                bot_instance.edit_message_text("Нет фильмов с вашими оценками для изменения.", chat_id, call.message.message_id)
+                bot.edit_message_text("Нет фильмов с вашими оценками для изменения.", chat_id, call.message.message_id)
                 return
             
             markup = InlineKeyboardMarkup(row_width=1)
@@ -142,7 +141,7 @@ def edit_action_callback(call):
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_rating:{film_id}"))
             
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
-            bot_instance.edit_message_text("⭐ <b>Выберите фильм для изменения оценки:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text("⭐ <b>Выберите фильм для изменения оценки:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         
         elif action == "cancel":
             # Проверяем, есть ли kp_id в состоянии для возврата к описанию
@@ -183,30 +182,30 @@ def edit_action_callback(call):
                             return
                     
                     # Если не удалось получить информацию, просто показываем сообщение об отмене
-                    bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+                    bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
                 except Exception as e:
                     logger.error(f"[EDIT CANCEL] Ошибка при возврате к описанию: {e}", exc_info=True)
-                    bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+                    bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
             else:
-                bot_instance.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+                bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
         
         else:
             logger.warning(f"[EDIT ACTION] Неизвестное действие: {action}")
-            bot_instance.answer_callback_query(call.id, "❌ Неизвестное действие", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Неизвестное действие", show_alert=True)
     except Exception as e:
         logger.error(f"[EDIT ACTION] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan_datetime:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan_datetime:"))
 def edit_plan_datetime_callback(call):
     """Обработчик изменения даты/времени плана"""
     logger.info(f"[EDIT PLAN DATETIME] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
@@ -220,7 +219,7 @@ def edit_plan_datetime_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"edit_plan:{plan_id}"))
         
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             "📅 <b>Введите новую дату и время:</b>\n\n"
             "Формат:\n"
             "• 15 января 10:30\n"
@@ -234,17 +233,17 @@ def edit_plan_datetime_callback(call):
     except Exception as e:
         logger.error(f"[EDIT PLAN DATETIME] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan_streaming:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan_streaming:"))
 def edit_plan_streaming_callback(call):
     """Обработчик изменения онлайн-кинотеатра для домашнего плана"""
     logger.info(f"[EDIT PLAN STREAMING] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
@@ -260,7 +259,7 @@ def edit_plan_streaming_callback(call):
             plan_row = cursor.fetchone()
         
         if not plan_row:
-            bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
             return
         
         sources_json = plan_row.get('ticket_file_id') if isinstance(plan_row, dict) else plan_row[0]
@@ -288,7 +287,7 @@ def edit_plan_streaming_callback(call):
                 conn.commit()
         
         if not sources_dict:
-            bot_instance.answer_callback_query(call.id, "❌ Онлайн-кинотеатры не найдены", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Онлайн-кинотеатры не найдены", show_alert=True)
             return
         
         markup = InlineKeyboardMarkup(row_width=2)
@@ -307,22 +306,22 @@ def edit_plan_streaming_callback(call):
         if current_service:
             text += f"\n\n✅ Текущий: <b>{current_service}</b>"
         
-        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         logger.info(f"[EDIT PLAN STREAMING] Меню выбора кинотеатра показано для плана {plan_id}")
     except Exception as e:
         logger.error(f"[EDIT PLAN STREAMING] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan_ticket:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan_ticket:"))
 def edit_plan_ticket_callback(call):
     """Обработчик загрузки билетов через /edit"""
     logger.info(f"[EDIT PLAN TICKET] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
@@ -337,7 +336,7 @@ def edit_plan_ticket_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             "🎟️ <b>Пришлите билеты скриншотом или вложением</b>\n\n"
             "Отправьте фото или файл с билетами в следующем сообщении.",
             chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
@@ -346,17 +345,17 @@ def edit_plan_ticket_callback(call):
     except Exception as e:
         logger.error(f"[EDIT PLAN TICKET] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan_switch:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan_switch:"))
 def edit_plan_switch_callback(call):
     """Обработчик переключения типа плана (дома <-> в кино)"""
     logger.info(f"[EDIT PLAN SWITCH] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
@@ -367,7 +366,7 @@ def edit_plan_switch_callback(call):
             plan_row = cursor.fetchone()
             
             if not plan_row:
-                bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
                 return
             
             current_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[0]
@@ -378,7 +377,7 @@ def edit_plan_switch_callback(call):
             conn.commit()
         
         type_text = "в кино" if new_type == 'cinema' else "дома"
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             f"✅ Тип плана изменен на: <b>{type_text}</b>",
             chat_id, call.message.message_id, parse_mode='HTML'
         )
@@ -386,17 +385,17 @@ def edit_plan_switch_callback(call):
     except Exception as e:
         logger.error(f"[EDIT PLAN SWITCH] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_rating:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_rating:"))
 def edit_rating_callback(call):
     """Обработчик изменения оценки"""
     logger.info(f"[EDIT RATING] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         film_id = int(call.data.split(":")[1])
@@ -406,7 +405,7 @@ def edit_rating_callback(call):
             'film_id': film_id
         }
         
-        bot_instance.edit_message_text(
+        bot.edit_message_text(
             "⭐ <b>Введите новую оценку (1-10):</b>\n\n"
             "Ответьте на это сообщение числом от 1 до 10.",
             chat_id, call.message.message_id, parse_mode='HTML'
@@ -415,7 +414,7 @@ def edit_rating_callback(call):
     except Exception as e:
         logger.error(f"[EDIT RATING] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 

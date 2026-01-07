@@ -7,7 +7,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_operations import log_request
 from moviebot.states import user_list_state, list_messages, user_view_film_state, user_plan_state
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.api.kinopoisk_api import extract_movie_info
 
 logger = logging.getLogger(__name__)
@@ -80,15 +79,15 @@ def register_list_handlers(bot):
                 'chat_id': chat_id
             }
             
-            bot_instance.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
-            prompt_msg = bot_instance.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+            bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+            prompt_msg = bot.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
             # Сохраняем message_id промпта в состояние
             user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
             logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}, prompt_message_id={prompt_msg.message_id}")
         except Exception as e:
             logger.error(f"[PLAN FROM LIST] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
     
@@ -106,15 +105,15 @@ def register_list_handlers(bot):
                 'chat_id': chat_id
             }
             
-            bot_instance.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
-            prompt_msg = bot_instance.send_message(chat_id, "Пришлите в ответном сообщении ссылку или ID фильма, чье описание хотите посмотреть")
+            bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+            prompt_msg = bot.send_message(chat_id, "Пришлите в ответном сообщении ссылку или ID фильма, чье описание хотите посмотреть")
             # Сохраняем message_id промпта в состояние
             user_view_film_state[user_id]['prompt_message_id'] = prompt_msg.message_id
             logger.info(f"[VIEW FILM FROM LIST] Состояние установлено для пользователя {user_id}, prompt_message_id={prompt_msg.message_id}")
         except Exception as e:
             logger.error(f"[VIEW FILM FROM LIST] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
@@ -302,7 +301,7 @@ def handle_view_film_reply_internal(message, state):
         
         kp_id = extract_kp_id_from_text(text)
         if not kp_id:
-            bot_instance.reply_to(message, "❌ Не удалось найти ссылку или ID фильма в сообщении. Попробуйте еще раз.")
+            bot.reply_to(message, "❌ Не удалось найти ссылку или ID фильма в сообщении. Попробуйте еще раз.")
             return
         
         # Формируем ссылку
@@ -314,7 +313,7 @@ def handle_view_film_reply_internal(message, state):
         # Получаем информацию о фильме
         info = extract_movie_info(link)
         if not info:
-            bot_instance.reply_to(message, f"❌ Не удалось получить информацию о фильме. Проверьте ссылку или ID: {kp_id}")
+            bot.reply_to(message, f"❌ Не удалось получить информацию о фильме. Проверьте ссылку или ID: {kp_id}")
             return
         
         # Проверяем, есть ли фильм в базе
@@ -338,7 +337,7 @@ def handle_view_film_reply_internal(message, state):
     except Exception as e:
         logger.error(f"[VIEW FILM REPLY] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке запроса. Попробуйте еще раз.")
         except:
             pass
 

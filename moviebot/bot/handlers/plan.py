@@ -16,7 +16,6 @@ from moviebot.states import (
     bot_messages
 )
 from moviebot.config import MONTHS_MAP, DAYS_FULL
-from moviebot.bot.bot_init import bot as bot_instance
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -27,7 +26,7 @@ days_full = DAYS_FULL
 months_map = MONTHS_MAP
 
 
-def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, message_date_utc=None):
+def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_date_utc=None):
     """
     Планирует просмотр фильма. Возвращает True при успехе, False при ошибке, 
     'NEEDS_TIMEZONE' если нужно уточнить часовой пояс.
@@ -86,10 +85,10 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
                     title = row.get('title') if isinstance(row, dict) else row[1]
                     logger.info(f"[PROCESS_PLAN] Фильм автоматически добавлен в базу при планировании: kp_id={info['kp_id']}, film_id={film_id}")
                 else:
-                    bot_instance.send_message(chat_id, "Не удалось добавить фильм в базу.")
+                    bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
                     return False
             else:
-                bot_instance.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
+                bot.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
                 return False
         else:
             film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -160,7 +159,7 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
     if plan_type == 'home' and markup.keyboard and any(btn.callback_data.startswith("streaming_select:") for row in markup.keyboard for btn in row):
         text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
     
-    bot_instance.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
+    bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
     # Очищаем состояние планирования после успешного завершения
     if user_id in user_plan_state:
@@ -170,13 +169,12 @@ def process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, m
     return True
 
 
-def register_plan_handlers(bot_instance):
+def register_plan_handlers(bot):
     """Регистрирует обработчики команд /plan и /schedule"""
     logger.info("=" * 80)
     logger.info(f"[REGISTER PLAN HANDLERS] ===== START: регистрация обработчиков планирования =====")
-    logger.info(f"[REGISTER PLAN HANDLERS] bot_instance: {bot_instance}")
     
-    @bot_instance.message_handler(commands=['plan'], func=lambda m: not m.reply_to_message)
+    @bot.message_handler(commands=['plan'], func=lambda m: not m.reply_to_message)
     def plan_handler(message):
         """Команда /plan - планирование просмотра (только чистая команда без реплая)"""
         logger.info(f"[HANDLER] /plan вызван от {message.from_user.id}")
@@ -314,7 +312,7 @@ def register_plan_handlers(bot_instance):
                     import pytz
                     message_date_utc = dt.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
                     
-                    result = process_plan(bot_instance, user_id, chat_id, link, plan_type, day_or_date, message_date_utc)
+                    result = process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_date_utc)
                     if result == 'NEEDS_TIMEZONE':
                         # Сохраняем введенный текст в состоянии планирования для продолжения после выбора часового пояса
                         state = user_plan_state.get(user_id, {})
@@ -329,7 +327,7 @@ def register_plan_handlers(bot_instance):
                         show_timezone_selection(chat_id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
                         # НЕ удаляем состояние - оно нужно для продолжения планирования после выбора часового пояса
                 except Exception as e:
-                    bot_instance.reply_to(message, f"Ошибка при планировании: {e}")
+                    bot.reply_to(message, f"Ошибка при планировании: {e}")
                     logger.error(f"Ошибка process_plan: {e}", exc_info=True)
                     return
                 return
@@ -338,13 +336,13 @@ def register_plan_handlers(bot_instance):
             if not link:
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("❌ Выйти", callback_data="plan:cancel"))
-                prompt_msg = bot_instance.reply_to(message, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
+                prompt_msg = bot.reply_to(message, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
                 user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id, 'prompt_message_id': prompt_msg.message_id}
                 logger.info(f"[PLAN] Сохранен prompt_message_id={prompt_msg.message_id} для user_id={user_id}")
                 return
             
             if not plan_type:
-                error_msg = bot_instance.reply_to(message, "Не указан тип просмотра (дома/кино).")
+                error_msg = bot.reply_to(message, "Не указан тип просмотра (дома/кино).")
                 plan_error_messages[error_msg.message_id] = {
                     'user_id': user_id,
                     'chat_id': chat_id,
@@ -357,7 +355,7 @@ def register_plan_handlers(bot_instance):
                 return
             
             if not day_or_date:
-                error_msg = bot_instance.reply_to(message, "Не указан день или дата просмотра.")
+                error_msg = bot.reply_to(message, "Не указан день или дата просмотра.")
                 plan_error_messages[error_msg.message_id] = {
                     'user_id': user_id,
                     'chat_id': chat_id,
@@ -371,7 +369,7 @@ def register_plan_handlers(bot_instance):
         except Exception as e:
             logger.error(f"❌ Ошибка в /plan: {e}", exc_info=True)
             try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /plan")
+                bot.reply_to(message, "Произошла ошибка при обработке команды /plan")
             except:
                 pass
 
@@ -405,7 +403,7 @@ def show_schedule(message):
             empty_markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
             empty_markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
             empty_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            bot_instance.reply_to(
+            bot.reply_to(
                 message,
                 "В расписании нет фильмов, используйте /search, чтобы найти и добавить фильмы или сериалы, посмотрите, какие премьеры сейчас идут в кино, или просто пришлите ссылку на Кинопоиск на фильм или сериал",
                 reply_markup=empty_markup
@@ -496,7 +494,7 @@ def show_schedule(message):
                 ticket_emoji = "🎟️ " if has_ticket else ""
                 cinema_text += f"{ticket_emoji}<b>{title}</b> — {date_str}\n"
             
-            cinema_msg = bot_instance.reply_to(message, cinema_text, reply_markup=cinema_markup, parse_mode='HTML')
+            cinema_msg = bot.reply_to(message, cinema_text, reply_markup=cinema_markup, parse_mode='HTML')
             cinema_message_id = cinema_msg.message_id
         
         # Сообщение 2: Просмотры дома
@@ -515,9 +513,9 @@ def show_schedule(message):
                 home_text += f"<b>{title}</b> — {date_str}\n"
             
             if cinema_plans:
-                home_msg = bot_instance.send_message(chat_id, home_text, reply_markup=home_markup, parse_mode='HTML')
+                home_msg = bot.send_message(chat_id, home_text, reply_markup=home_markup, parse_mode='HTML')
             else:
-                home_msg = bot_instance.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
+                home_msg = bot.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
             home_message_id = home_msg.message_id
         
         # Сохраняем message_id обоих сообщений для удаления при нажатии "Назад"
@@ -547,16 +545,16 @@ def show_schedule(message):
     except Exception as e:
         logger.error(f"❌ Ошибка в /schedule: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /schedule")
+            bot.reply_to(message, "Произошла ошибка при обработке команды /schedule")
         except:
             pass
 
-    @bot_instance.message_handler(commands=['schedule'])
+    @bot.message_handler(commands=['schedule'])
     def _show_schedule_handler(message):
         """Обертка для регистрации команды /schedule"""
         show_schedule(message)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
+    @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
     def show_film_description_callback(call):
         """Обработчик кнопки показа описания фильма из /schedule"""
         logger.info("=" * 80)
@@ -564,7 +562,7 @@ def show_schedule(message):
         logger.info(f"[SHOW FILM DESCRIPTION] ✅ ОБРАБОТЧИК ВЫЗВАН!")
         try:
             logger.info(f"[SHOW FILM DESCRIPTION] Вызов answer_callback_query")
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             logger.info(f"[SHOW FILM DESCRIPTION] answer_callback_query выполнен")
             kp_id = call.data.split(":")[1]
             user_id = call.from_user.id
@@ -659,7 +657,7 @@ def show_schedule(message):
                         from moviebot.bot.handlers.series import show_film_info_with_buttons
                         show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
                     else:
-                        bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             else:
                 # Фильм не в базе - получаем информацию через API
                 logger.info(f"[SHOW FILM DESCRIPTION] Фильм не в базе, получаю информацию через API")
@@ -669,7 +667,7 @@ def show_schedule(message):
                 info = extract_movie_info(link)
                 
                 if not info:
-                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
                     return
                 
                 from moviebot.bot.handlers.series import show_film_info_with_buttons
@@ -681,15 +679,15 @@ def show_schedule(message):
             logger.error(f"[SHOW FILM DESCRIPTION] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
             logger.error(f"[SHOW FILM DESCRIPTION] Тип ошибки: {type(e).__name__}, args: {e.args}")
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
+    @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
     def schedule_back_callback(call):
         """Обработчик кнопки возврата из расписания - удаляет оба сообщения с планами"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             chat_id = call.message.chat.id
             
             # Получаем сохраненные message_id обоих сообщений
@@ -701,13 +699,13 @@ def show_schedule(message):
                 # Удаляем оба сообщения
                 if cinema_message_id:
                     try:
-                        bot_instance.delete_message(chat_id, cinema_message_id)
+                        bot.delete_message(chat_id, cinema_message_id)
                     except Exception as e:
                         logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение с кино: {e}")
                 
                 if home_message_id:
                     try:
-                        bot_instance.delete_message(chat_id, home_message_id)
+                        bot.delete_message(chat_id, home_message_id)
                     except Exception as e:
                         logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение с домом: {e}")
                 
@@ -716,7 +714,7 @@ def show_schedule(message):
             else:
                 # Если не нашли сохраненные сообщения, удаляем текущее
                 try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    bot.delete_message(chat_id, call.message.message_id)
                 except Exception as e:
                     logger.warning(f"[SCHEDULE BACK] Не удалось удалить сообщение: {e}")
             
@@ -740,7 +738,7 @@ def show_schedule(message):
             markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
             
             try:
-                bot_instance.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, welcome_text, reply_markup=markup, parse_mode='HTML')
             except Exception as e:
                 logger.error(f"[SCHEDULE BACK] Ошибка при отправке главного меню: {e}")
             
@@ -748,7 +746,7 @@ def show_schedule(message):
         except Exception as e:
             logger.error(f"[SCHEDULE BACK] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+                bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
             except:
                 pass
 
@@ -757,7 +755,7 @@ def show_schedule(message):
     logger.info("=" * 80)
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
 def plan_type_callback(call):
     """Обработчик выбора типа плана"""
     logger.info("=" * 80)
@@ -766,7 +764,7 @@ def plan_type_callback(call):
     # TODO: Извлечь из moviebot.py строки 10827-10868
     try:
         logger.info(f"[PLAN TYPE] Вызов answer_callback_query")
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         logger.info(f"[PLAN TYPE] answer_callback_query выполнен")
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -778,14 +776,14 @@ def plan_type_callback(call):
         
         if user_id not in user_plan_state:
             logger.warning(f"[PLAN TYPE] Состояние не найдено для user_id={user_id}, текущие состояния: {list(user_plan_state.keys())}")
-            bot_instance.edit_message_text("❌ Ошибка: сессия истекла. Начните заново с /plan", chat_id, call.message.message_id)
+            bot.edit_message_text("❌ Ошибка: сессия истекла. Начните заново с /plan", chat_id, call.message.message_id)
             return
         
         state = user_plan_state[user_id]
         link = state.get('link')
         
         if not link:
-            bot_instance.edit_message_text("❌ Ошибка: не найдена ссылка на фильм. Начните заново с /plan", chat_id, call.message.message_id)
+            bot.edit_message_text("❌ Ошибка: не найдена ссылка на фильм. Начните заново с /plan", chat_id, call.message.message_id)
             del user_plan_state[user_id]
             return
         
@@ -793,12 +791,12 @@ def plan_type_callback(call):
         state['step'] = 3
         
         try:
-            bot_instance.delete_message(chat_id, call.message.message_id)
+            bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
         
         # Отправляем сообщение с запросом даты/времени и сохраняем его message_id
-        prompt_msg = bot_instance.send_message(chat_id, f"📅 Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\nМожно указать:\n• День недели (сегодня, завтра, понедельник и т.д.)\n• Дату (01.01, 1 января и т.д.)\n• Время (19:00, 20:30)")
+        prompt_msg = bot.send_message(chat_id, f"📅 Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\nМожно указать:\n• День недели (сегодня, завтра, понедельник и т.д.)\n• Дату (01.01, 1 января и т.д.)\n• Время (19:00, 20:30)")
         state['prompt_message_id'] = prompt_msg.message_id
         logger.info(f"[PLAN TYPE] Сохранен prompt_message_id={prompt_msg.message_id} для user_id={user_id}")
         
@@ -806,12 +804,12 @@ def plan_type_callback(call):
     except Exception as e:
         logger.error(f"[PLAN TYPE] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "plan:cancel")
+    @bot.callback_query_handler(func=lambda call: call.data == "plan:cancel")
     def plan_cancel_callback(call):
         """Обработчик отмены плана"""
         user_id = call.from_user.id
@@ -821,12 +819,12 @@ def plan_type_callback(call):
             del user_plan_state[user_id]
             logger.info(f"[PLAN] Пользователь {user_id} вышел из режима планирования")
         
-        bot_instance.answer_callback_query(call.id, "Режим планирования отменён")
-        bot_instance.edit_message_text("✅ Режим планирования отменён. Можете использовать другие команды.", 
+        bot.answer_callback_query(call.id, "Режим планирования отменён")
+        bot.edit_message_text("✅ Режим планирования отменён. Можете использовать другие команды.", 
                              chat_id, call.message.message_id)
 
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data == "plan_from_list")
+    @bot.callback_query_handler(func=lambda call: call.data == "plan_from_list")
     def plan_from_list_callback(call):
         """Обработчик планирования из списка"""
         # TODO: Извлечь из moviebot.py строки 10886-10909
@@ -841,27 +839,27 @@ def plan_type_callback(call):
                 'chat_id': chat_id
             }
             
-            bot_instance.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
-            prompt_msg = bot_instance.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+            bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+            prompt_msg = bot.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
             # Сохраняем message_id промпта в состояние
             user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
             logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}, prompt_message_id={prompt_msg.message_id}")
         except Exception as e:
             logger.error(f"[PLAN FROM LIST] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
+    @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
     def plan_from_added_callback(call):
         """Обработчик планирования из добавленного фильма"""
         logger.info(f"[PLAN FROM ADDED] ===== НАЧАЛО ОБРАБОТКИ =====")
         logger.info(f"[PLAN FROM ADDED] Получен callback: call.data={call.data}, user_id={call.from_user.id}, chat_id={call.message.chat.id}")
         try:
             from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot_instance, call.id)  # Отвечаем сразу, чтобы убрать "крутилку"
+            safe_answer_callback_query(bot, call.id)  # Отвечаем сразу, чтобы убрать "крутилку"
             
             user_id = call.from_user.id
             chat_id = call.message.chat.id
@@ -905,10 +903,10 @@ def plan_type_callback(call):
                     if was_inserted:
                         logger.info(f"[PLAN FROM ADDED] Фильм добавлен в базу при планировании: kp_id={kp_id_str}, film_id={film_id}")
                     if not film_id:
-                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
                         return
                 else:
-                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
                     return
             
             if not link:
@@ -931,21 +929,21 @@ def plan_type_callback(call):
             )
             
             logger.info(f"[PLAN FROM ADDED] Отправка сообщения с выбором типа просмотра...")
-            prompt_msg = bot_instance.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
+            prompt_msg = bot.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
             # Если хочешь — сохрани prompt_message_id, но не обязательно
             logger.info(f"[PLAN FROM ADDED] Сообщение отправлено успешно")
             
         except Exception as e:
             logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
         finally:
             logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
 
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
     def add_ticket_from_plan_callback(call):
         """Обработчик кнопки 'Добавить билеты' из подтверждения /plan"""
         try:
@@ -958,7 +956,7 @@ def plan_type_callback(call):
             
             # Проверяем доступ к функциям билетов
             if not has_tickets_access(chat_id, user_id):
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id, 
                     "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment", 
                     show_alert=True
@@ -974,8 +972,8 @@ def plan_type_callback(call):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
             
-            bot_instance.answer_callback_query(call.id, "Загрузите билеты в чат")
-            bot_instance.send_message(
+            bot.answer_callback_query(call.id, "Загрузите билеты в чат")
+            bot.send_message(
                 chat_id,
                 "🎟️ <b>Загрузите билеты в чат</b>\n\n"
                 "Отправьте фото или файл с билетами в следующем сообщении.",
@@ -984,7 +982,7 @@ def plan_type_callback(call):
         except Exception as e:
             logger.error(f"[ADD TICKET] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
@@ -1049,7 +1047,7 @@ def get_plan_link_internal(message, state):
                         logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
     
     if not link:
-        bot_instance.reply_to(message, "❌ Не найдена ссылка на фильм. Пришлите ссылку или ID фильма.")
+        bot.reply_to(message, "❌ Не найдена ссылка на фильм. Пришлите ссылку или ID фильма.")
         if user_id in user_plan_state:
             del user_plan_state[user_id]
         return
@@ -1067,7 +1065,7 @@ def get_plan_link_internal(message, state):
         kp_id = extract_kp_id_from_text(message_text)
     
     if not kp_id:
-        bot_instance.reply_to(message, "❌ Не удалось определить ID фильма. Попробуйте другую ссылку.")
+        bot.reply_to(message, "❌ Не удалось определить ID фильма. Попробуйте другую ссылку.")
         if user_id in user_plan_state:
             del user_plan_state[user_id]
         return
@@ -1082,7 +1080,7 @@ def get_plan_link_internal(message, state):
         InlineKeyboardButton("В кино 🎥", callback_data=f"plan_type:cinema:{kp_id}")
     )
     
-    prompt_msg = bot_instance.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
+    prompt_msg = bot.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
     user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
     logger.info(f"[PLAN] Сохранен prompt_message_id={prompt_msg.message_id} для user_id={user_id} (step=2)")
 
@@ -1130,7 +1128,7 @@ def get_plan_day_or_date_internal(message, state):
     
     if not plan_type or not link:
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Отсутствует plan_type или link: plan_type={plan_type}, link={link}")
-        bot_instance.reply_to(message, "❌ Ошибка: не указан тип просмотра или ссылка. Начните заново.")
+        bot.reply_to(message, "❌ Ошибка: не указан тип просмотра или ссылка. Начните заново.")
         if user_id in user_plan_state:
             del user_plan_state[user_id]
         return
@@ -1346,14 +1344,14 @@ def get_plan_day_or_date_internal(message, state):
     
     if not plan_dt:
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать дату из текста: '{text}'")
-        bot_instance.reply_to(message, "Не удалось распознать день/дату. Попробуйте снова.")
+        bot.reply_to(message, "Не удалось распознать день/дату. Попробуйте снова.")
         return
     
     # Вызываем process_plan
     message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
     # Преобразуем plan_dt обратно в строку для process_plan
     day_or_date_str = plan_dt.strftime('%d.%m.%Y %H:%M') if plan_dt else None
-    result = process_plan(bot_instance, user_id, message.chat.id, link, plan_type, day_or_date_str, message_date_utc)
+    result = process_plan(bot, user_id, message.chat.id, link, plan_type, day_or_date_str, message_date_utc)
     if result == 'NEEDS_TIMEZONE':
         show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
     elif result:
@@ -1365,12 +1363,12 @@ def get_plan_day_or_date_internal(message, state):
             del user_plan_state[user_id]
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan:"))
 def edit_plan_callback(call):
     """Обработчик выбора плана для редактирования"""
     logger.info(f"[EDIT PLAN] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
@@ -1399,7 +1397,7 @@ def edit_plan_callback(call):
             plan_row = cursor.fetchone()
         
         if not plan_row:
-            bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
             logger.warning(f"[EDIT PLAN] План {plan_id} не найден")
             return
         
@@ -1450,17 +1448,17 @@ def edit_plan_callback(call):
         text += f"Дата/время: {date_str}\n\n"
         text += f"Что вы хотите изменить?"
         
-        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         logger.info(f"[EDIT PLAN] Меню редактирования отправлено для плана {plan_id}")
     except Exception as e:
         logger.error(f"[EDIT PLAN] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("remove_from_calendar:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("remove_from_calendar:"))
 def handle_remove_from_calendar_callback(call):
     """Обработчик удаления фильма из календаря"""
     logger.info(f"[REMOVE FROM CALENDAR] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
@@ -1471,7 +1469,7 @@ def handle_remove_from_calendar_callback(call):
         
         logger.info(f"[REMOVE FROM CALENDAR] Удаление плана {plan_id} пользователем {user_id}")
         
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         
         with db_lock:
             # Получаем информацию о плане (включая проверку наличия билетов)
@@ -1485,7 +1483,7 @@ def handle_remove_from_calendar_callback(call):
             row = cursor.fetchone()
             
             if not row:
-                bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
                 logger.warning(f"[REMOVE FROM CALENDAR] План {plan_id} не найден")
                 return
             
@@ -1503,7 +1501,7 @@ def handle_remove_from_calendar_callback(call):
                 markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_remove_plan:{plan_id}"))
                 
                 event_name = title if title else "мероприятие"
-                bot_instance.send_message(
+                bot.send_message(
                     chat_id,
                     f"⚠️ <b>Подтверждение удаления</b>\n\n"
                     f"Вы уверены, что хотите удалить <b>{event_name}</b> из расписания?\n\n"
@@ -1518,23 +1516,23 @@ def handle_remove_from_calendar_callback(call):
             cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
             conn.commit()
         
-        bot_instance.answer_callback_query(call.id, f"✅ '{title}' удалён из календаря")
+        bot.answer_callback_query(call.id, f"✅ '{title}' удалён из календаря")
         logger.info(f"[REMOVE FROM CALENDAR] План {plan_id} удалён пользователем {user_id}")
         
         # Обновляем сообщение, убирая кнопки
         try:
-            bot_instance.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
         except Exception as e:
             logger.warning(f"[REMOVE FROM CALENDAR] Не удалось обновить сообщение: {e}")
     except Exception as e:
         logger.error(f"[REMOVE FROM CALENDAR] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("confirm_remove_plan:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("confirm_remove_plan:"))
 def confirm_remove_plan_callback(call):
     """Обработчик подтверждения удаления плана с билетами"""
     try:
@@ -1542,7 +1540,7 @@ def confirm_remove_plan_callback(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         
         with db_lock:
             # Получаем информацию о плане
@@ -1556,7 +1554,7 @@ def confirm_remove_plan_callback(call):
             row = cursor.fetchone()
             
             if not row:
-                bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
                 return
             
             title = row.get('title') if isinstance(row, dict) else row[2]
@@ -1568,31 +1566,31 @@ def confirm_remove_plan_callback(call):
         
         # Удаляем сообщение с подтверждением
         try:
-            bot_instance.delete_message(chat_id, call.message.message_id)
+            bot.delete_message(chat_id, call.message.message_id)
         except:
             pass
         
-        bot_instance.send_message(chat_id, f"✅ '{title}' удалён из расписания. Билеты также удалены.")
+        bot.send_message(chat_id, f"✅ '{title}' удалён из расписания. Билеты также удалены.")
         logger.info(f"[CONFIRM REMOVE PLAN] План {plan_id} удалён пользователем {user_id} с билетами")
     except Exception as e:
         logger.error(f"[CONFIRM REMOVE PLAN] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("cancel_remove_plan:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("cancel_remove_plan:"))
 def cancel_remove_plan_callback(call):
     """Обработчик отмены удаления плана"""
     try:
-        bot_instance.answer_callback_query(call.id, "Отменено")
-        bot_instance.delete_message(call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id, "Отменено")
+        bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception as e:
         logger.error(f"[CANCEL REMOVE PLAN] Ошибка: {e}", exc_info=True)
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_select:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_select:"))
 def streaming_select_callback(call):
     """Обработчик выбора онлайн-кинотеатра"""
     logger.info(f"[STREAMING SELECT] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
@@ -1627,11 +1625,11 @@ def streaming_select_callback(call):
                         ''', (platform, url, plan_id, chat_id))
                         conn.commit()
                         
-                        bot_instance.answer_callback_query(call.id, f"✅ Выбран {platform}")
+                        bot.answer_callback_query(call.id, f"✅ Выбран {platform}")
                         logger.info(f"[STREAMING SELECT] Кинотеатр {platform} сохранен для плана {plan_id}")
                         
                         # Отправляем сообщение-подтверждение в чат
-                        bot_instance.send_message(
+                        bot.send_message(
                             chat_id,
                             f"✅ Онлайн-кинотеатр выбран: <b>{platform}</b>",
                             parse_mode='HTML'
@@ -1640,24 +1638,24 @@ def streaming_select_callback(call):
                         
                         # Удаляем сообщение с выбором кинотеатра
                         try:
-                            bot_instance.delete_message(chat_id, call.message.message_id)
+                            bot.delete_message(chat_id, call.message.message_id)
                         except Exception as e:
                             logger.warning(f"[STREAMING SELECT] Не удалось удалить сообщение: {e}")
                     else:
-                        bot_instance.answer_callback_query(call.id, "❌ Кинотеатр не найден", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Кинотеатр не найден", show_alert=True)
                 except json.JSONDecodeError:
-                    bot_instance.answer_callback_query(call.id, "❌ Ошибка данных", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка данных", show_alert=True)
             else:
-                bot_instance.answer_callback_query(call.id, "❌ Источники не найдены", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Источники не найдены", show_alert=True)
     except Exception as e:
         logger.error(f"[STREAMING SELECT] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_done:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_done:"))
 def streaming_done_callback(call):
     """Обработчик кнопки 'Завершить' - сохраняет флаг и обновляет сообщение с подтверждением планирования"""
     logger.info(f"[STREAMING DONE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
@@ -1679,7 +1677,7 @@ def streaming_done_callback(call):
             plan_row = cursor.fetchone()
             
             if not plan_row:
-                bot_instance.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
                 return
             
             if isinstance(plan_row, dict):
@@ -1702,7 +1700,7 @@ def streaming_done_callback(call):
             conn.commit()
             logger.info(f"[STREAMING DONE] Флаг streaming_done установлен для плана {plan_id}")
         
-        bot_instance.answer_callback_query(call.id, "✅")
+        bot.answer_callback_query(call.id, "✅")
         
         # Формируем текст подтверждения с названием фильма и датой
         if plan_datetime:
@@ -1741,7 +1739,7 @@ def streaming_done_callback(call):
         
         # Обновляем сообщение вместо удаления
         try:
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 confirmation_text,
                 chat_id,
                 message_id,
@@ -1752,39 +1750,39 @@ def streaming_done_callback(call):
         except Exception as e:
             logger.warning(f"[STREAMING DONE] Не удалось обновить сообщение: {e}, пробуем отправить новое")
             try:
-                bot_instance.send_message(chat_id, confirmation_text, parse_mode='HTML')
-                bot_instance.delete_message(chat_id, message_id)
+                bot.send_message(chat_id, confirmation_text, parse_mode='HTML')
+                bot.delete_message(chat_id, message_id)
             except Exception as e2:
                 logger.error(f"[STREAMING DONE] Не удалось отправить новое сообщение: {e2}")
     except Exception as e:
         logger.error(f"[STREAMING DONE] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
-@bot_instance.message_handler(func=lambda message: message.from_user.id in user_plan_state and user_plan_state[message.from_user.id].get("step") == 3)
+@bot.message_handler(func=lambda message: message.from_user.id in user_plan_state and user_plan_state[message.from_user.id].get("step") == 3)
 def handle_plan_date(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     state = user_plan_state.get(user_id)
     
     if not state:
-        bot_instance.send_message(chat_id, "❌ Состояние потеряно. Начните заново.")
+        bot.send_message(chat_id, "❌ Состояние потеряно. Начните заново.")
         return
     
     day_or_date = message.text.strip()
     
     # Вызываем существующую process_plan (она принимает link, plan_type, day_or_date)
-    result = process_plan(bot_instance, user_id, chat_id, state['link'], state['plan_type'], day_or_date, pre_selected_film_id=state.get('film_id'))
+    result = process_plan(bot, user_id, chat_id, state['link'], state['plan_type'], day_or_date, pre_selected_film_id=state.get('film_id'))
     
     if result == 'NEEDS_TIMEZONE':
-        show_timezone_selection(bot_instance, chat_id, user_id)  # Если есть такая функция
+        show_timezone_selection(bot, chat_id, user_id)  # Если есть такая функция
     elif result:
-        bot_instance.send_message(chat_id, "✅ Просмотр успешно запланирован!")
+        bot.send_message(chat_id, "✅ Просмотр успешно запланирован!")
         del user_plan_state[user_id]  # Очистка состояния
     else:
-        bot_instance.send_message(chat_id, "❌ Не понял дату/время. Попробуйте ещё раз (примеры: завтра, 15 января 19:00).")
+        bot.send_message(chat_id, "❌ Не понял дату/время. Попробуйте ещё раз (примеры: завтра, 15 января 19:00).")
 
 def handle_edit_plan_datetime_internal(message, state):
     """Внутренняя функция для обработки изменения даты/времени плана"""
@@ -1812,7 +1810,7 @@ def handle_edit_plan_datetime_internal(message, state):
             return
         
         if not plan_id:
-            bot_instance.reply_to(message, "❌ Ошибка: план не найден.")
+            bot.reply_to(message, "❌ Ошибка: план не найден.")
             if user_id in user_edit_state:
                 del user_edit_state[user_id]
             return
@@ -1828,7 +1826,7 @@ def handle_edit_plan_datetime_internal(message, state):
             plan_row = cursor.fetchone()
         
         if not plan_row:
-            bot_instance.reply_to(message, "❌ План не найден.")
+            bot.reply_to(message, "❌ План не найден.")
             if user_id in user_edit_state:
                 del user_edit_state[user_id]
             return
@@ -1861,16 +1859,16 @@ def handle_edit_plan_datetime_internal(message, state):
                 date_str = session_dt.strftime('%d.%m.%Y %H:%M')
             else:
                 date_str = str(session_dt)
-            bot_instance.reply_to(message, f"✅ Дата и время плана обновлены: {date_str} {tz_name}")
+            bot.reply_to(message, f"✅ Дата и время плана обновлены: {date_str} {tz_name}")
             logger.info(f"[EDIT PLAN DATETIME INTERNAL] План {plan_id} обновлен: {date_str}")
             if user_id in user_edit_state:
                 del user_edit_state[user_id]
         else:
-            bot_instance.reply_to(message, "❌ Не удалось распознать дату/время. Попробуйте еще раз.")
+            bot.reply_to(message, "❌ Не удалось распознать дату/время. Попробуйте еще раз.")
             logger.warning(f"[EDIT PLAN DATETIME INTERNAL] Не удалось распознать дату/время из текста: '{text}'")
     except Exception as e:
         logger.error(f"[EDIT PLAN DATETIME INTERNAL] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке.")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке.")
         except:
             pass

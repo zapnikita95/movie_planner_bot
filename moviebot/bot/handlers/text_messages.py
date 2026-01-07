@@ -6,14 +6,11 @@ import logging
 import re
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# КРИТИЧЕСКИ ВАЖНО: Импортируем bot_instance ДО всех декораторов
-from moviebot.bot.bot_init import bot as bot_instance
 
 # Логируем, что модуль импортирован (декораторы выполнятся при импорте)
 logger = logging.getLogger(__name__)
 logger.info("=" * 80)
 logger.info("[TEXT MESSAGES] Модуль text_messages.py импортирован - декораторы будут зарегистрированы")
-logger.info(f"[TEXT MESSAGES] bot_instance: {bot_instance} (тип: {type(bot_instance).__name__})")
 logger.info("=" * 80)
 
 from moviebot.database.db_operations import log_request, get_user_timezone_or_default, set_notification_setting
@@ -64,7 +61,7 @@ def add_reactions_check(message):
     return True
 
 
-@bot_instance.message_handler(func=add_reactions_check)
+@bot.message_handler(func=add_reactions_check)
 def add_reactions(message):
     """Обработчик добавления реакций"""
     user_id = message.from_user.id
@@ -105,7 +102,7 @@ def add_reactions(message):
     new_reactions = emojis + [f"custom:{cid}" for cid in custom_ids]
     
     if not new_reactions:
-        bot_instance.reply_to(message, "❌ Не нашёл эмодзи в вашем сообщении. Попробуйте отправить эмодзи снова.")
+        bot.reply_to(message, "❌ Не нашёл эмодзи в вашем сообщении. Попробуйте отправить эмодзи снова.")
         return
     
     # Сохраняем в БД
@@ -128,11 +125,11 @@ def add_reactions(message):
             conn.commit()
         
         action_text = "добавлены к текущим" if action == "add" else "заменены"
-        bot_instance.reply_to(message, f"✅ Реакции {action_text}:\n{unique_emojis}")
+        bot.reply_to(message, f"✅ Реакции {action_text}:\n{unique_emojis}")
         logger.info(f"[SETTINGS] Реакции обновлены для чата {chat_id}, user_id={user_id}: {unique_emojis}")
     except Exception as e:
         logger.error(f"[SETTINGS] Ошибка при сохранении реакций: {e}", exc_info=True)
-        bot_instance.reply_to(message, "❌ Произошла ошибка при сохранении реакций.")
+        bot.reply_to(message, "❌ Произошла ошибка при сохранении реакций.")
     
     # Очищаем состояние
     if user_id in user_settings_state:
@@ -155,7 +152,7 @@ def check_list_mark_watched_reply(message):
     return True
 
 
-@bot_instance.message_handler(func=check_list_mark_watched_reply)
+@bot.message_handler(func=check_list_mark_watched_reply)
 def handle_list_mark_watched_reply(message):
     """Обработчик ответа на сообщение из /list с ID фильмов для отметки как просмотренные"""
     logger.info(f"[LIST MARK WATCHED REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -169,7 +166,7 @@ def handle_list_mark_watched_reply(message):
         kp_ids = re.findall(r'\b(\d{4,})\b', text)
         
         if not kp_ids:
-            bot_instance.reply_to(message, "❌ Не найдено ID фильмов в сообщении. Укажите ID фильмов (например: 1234567 7654321)")
+            bot.reply_to(message, "❌ Не найдено ID фильмов в сообщении. Укажите ID фильмов (например: 1234567 7654321)")
             return
         
         # Отмечаем фильмы как просмотренные
@@ -235,12 +232,12 @@ def handle_list_mark_watched_reply(message):
         if len(marked_films) > 5:
             markup.add(InlineKeyboardButton("📋 Показать все отмеченные фильмы", callback_data="list:watched"))
         
-        bot_instance.reply_to(message, response_text, reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, response_text, reply_markup=markup, parse_mode='HTML')
         logger.info(f"[LIST MARK WATCHED REPLY] ✅ Завершено: отмечено {marked_count} фильмов")
     except Exception as e:
         logger.error(f"[LIST MARK WATCHED REPLY] ❌ Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке")
         except:
             pass
 
@@ -259,7 +256,7 @@ def check_list_plan_reply(message):
     return True
 
 
-@bot_instance.message_handler(func=check_list_plan_reply)
+@bot.message_handler(func=check_list_plan_reply)
 def handle_list_plan_reply(message):
     """Обработчик ответа на промпт планирования из /list (step=1) - ссылка/ID"""
     user_id = message.from_user.id
@@ -281,7 +278,7 @@ def handle_list_plan_reply(message):
     except Exception as e:
         logger.error(f"[LIST PLAN REPLY] ❌ Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке")
         except:
             pass
 
@@ -331,7 +328,7 @@ def check_plan_datetime_reply(message):
     
     return True
 
-@bot_instance.message_handler(func=check_plan_datetime_reply)
+@bot.message_handler(func=check_plan_datetime_reply)
 def handle_plan_datetime_reply(message):
     """Обработчик ответа на промпт даты/времени планирования (step=3)"""
     user_id = message.from_user.id
@@ -358,7 +355,7 @@ def handle_plan_datetime_reply(message):
     # Убрали универсальную ошибку — она больше не нужна, обработка в try-except полная
     # Если краш — логи покажут, а пользователю ничего не отправляем лишнего
     #try:
-    #    bot_instance.reply_to(message, "❌ Произошла ошибка при обработке даты/времени")
+    #    bot.reply_to(message, "❌ Произошла ошибка при обработке даты/времени")
     #except:
     #    pass
 
@@ -414,7 +411,7 @@ def check_plan_link_reply(message):
     return True
 
 
-@bot_instance.message_handler(func=check_plan_link_reply)
+@bot.message_handler(func=check_plan_link_reply)
 def handle_plan_link_reply(message):
     """Обработчик ответа на промпт ссылки/ID планирования (step=1) - только извлекает ID, не показывает описание"""
     user_id = message.from_user.id
@@ -431,7 +428,7 @@ def handle_plan_link_reply(message):
     except Exception as e:
         logger.error(f"[PLAN LINK REPLY] ❌ Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке ссылки/ID")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке ссылки/ID")
         except:
             pass
 
@@ -465,7 +462,7 @@ def check_clean_imported_ratings_reply(message):
     return True
 
 
-@bot_instance.message_handler(func=check_clean_imported_ratings_reply)
+@bot.message_handler(func=check_clean_imported_ratings_reply)
 def handle_clean_imported_ratings_reply(message):
     """Обработчик ответа на сообщение об удалении импортированных оценок - ТОЛЬКО для 'ДА, УДАЛИТЬ'"""
     logger.info(f"[CLEAN IMPORTED RATINGS REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
@@ -509,7 +506,7 @@ def handle_clean_imported_ratings_reply(message):
     except Exception as e:
         logger.error(f"[CLEAN IMPORTED RATINGS REPLY] ❌ Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке")
         except:
             pass
 
@@ -546,7 +543,7 @@ def check_import_user_id_reply(message):
     return True
 
 
-@bot_instance.message_handler(func=check_import_user_id_reply)
+@bot.message_handler(func=check_import_user_id_reply)
 def handle_import_user_id_reply(message):
     """Обработчик ответа на сообщение об импорте базы из Кинопоиска с ID пользователя"""
     logger.info(f"[IMPORT USER ID REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
@@ -579,11 +576,11 @@ def handle_import_user_id_reply(message):
             logger.info(f"[IMPORT USER ID REPLY] ✅ Завершено")
         except Exception as e:
             logger.error(f"[IMPORT USER ID REPLY] Ошибка обработки: {e}", exc_info=True)
-            bot_instance.reply_to(message, "❌ Не получилось обработать ID пользователя. Проверьте правильность ввода.")
+            bot.reply_to(message, "❌ Не получилось обработать ID пользователя. Проверьте правильность ввода.")
     except Exception as e:
         logger.error(f"[IMPORT USER ID REPLY] ❌ Критическая ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке")
         except:
             pass
 
@@ -602,7 +599,7 @@ def check_list_view_film_reply(message):
     return True
 
 
-@bot_instance.message_handler(func=check_list_view_film_reply)
+@bot.message_handler(func=check_list_view_film_reply)
 def handle_list_view_film_reply(message):
     """Обработчик ответа на промпт просмотра описания из /list"""
     logger.info(f"[LIST VIEW FILM REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
@@ -622,12 +619,12 @@ def handle_list_view_film_reply(message):
     except Exception as e:
         logger.error(f"[LIST VIEW FILM REPLY] ❌ Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "❌ Произошла ошибка при обработке")
+            bot.reply_to(message, "❌ Произошла ошибка при обработке")
         except:
             pass
 
 
-@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in added_movie_messages and m.text and m.text.strip().isdigit() and 1 <= int(m.text.strip()) <= 10)
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in added_movie_messages and m.text and m.text.strip().isdigit() and 1 <= int(m.text.strip()) <= 10)
 def handle_added_movie_rating_reply(message):
     """Обрабатывает реплай на сообщение 'Добавлено в базу' с числом от 1 до 10"""
     try:
@@ -648,7 +645,7 @@ def handle_added_movie_rating_reply(message):
         markup.add(InlineKeyboardButton("✅ Да, зачесть", callback_data=f"confirm_rating:{film_id}:{rating}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="cancel_rating"))
         
-        bot_instance.reply_to(
+        bot.reply_to(
             message,
             f"💡 Зачесть оценку <b>{rating}/10</b> и отметить фильм <b>{title}</b> как просмотренный?",
             parse_mode='HTML',
@@ -659,7 +656,7 @@ def handle_added_movie_rating_reply(message):
         logger.error(f"[ADDED MOVIE REPLY] Ошибка: {e}", exc_info=True)
 
 
-@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "Введите промокод в ответном сообщении" in (m.reply_to_message.text or ""))
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "Введите промокод в ответном сообщении" in (m.reply_to_message.text or ""))
 def handle_promo_reply_direct(message):
     """ОТДЕЛЬНЫЙ handler для реплаев на сообщение промокода - ВЫСОКИЙ ПРИОРИТЕТ"""
     logger.info(f"[PROMO REPLY DIRECT] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
@@ -670,7 +667,7 @@ def handle_promo_reply_direct(message):
         
         if not promo_code:
             logger.warning(f"[PROMO REPLY DIRECT] Пустой промокод от пользователя {user_id}")
-            bot_instance.reply_to(message, "❌ Промокод не может быть пустым. Введите промокод.")
+            bot.reply_to(message, "❌ Промокод не может быть пустым. Введите промокод.")
             return
         
         logger.info(f"[PROMO REPLY DIRECT] Обрабатываем промокод: '{promo_code}' от пользователя {user_id}")
@@ -679,7 +676,7 @@ def handle_promo_reply_direct(message):
         from moviebot.states import user_promo_state
         if user_id not in user_promo_state:
             logger.warning(f"[PROMO REPLY DIRECT] Пользователь {user_id} не в состоянии промокода")
-            bot_instance.reply_to(message, "❌ Сессия истекла. Начните заново с /payment")
+            bot.reply_to(message, "❌ Сессия истекла. Начните заново с /payment")
             return
         
         state = user_promo_state[user_id]
@@ -701,7 +698,7 @@ def handle_promo_reply_direct(message):
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
                 
-                bot_instance.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
+                bot.reply_to(message, error_text, reply_markup=markup, parse_mode='HTML')
                 return
         
         # Применяем промокод к оригинальной цене (не к уже дисконтированной)
@@ -882,12 +879,12 @@ def handle_promo_reply_direct(message):
             
             logger.info(f"[PROMO REPLY DIRECT] Отправка сообщения с результатом применения промокода")
             try:
-                sent_msg = bot_instance.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                sent_msg = bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[PROMO REPLY DIRECT] ✅ Сообщение отправлено успешно: message_id={sent_msg.message_id if sent_msg else 'None'}")
             except Exception as send_e:
                 logger.error(f"[PROMO REPLY DIRECT] ❌ Ошибка отправки сообщения: {send_e}", exc_info=True)
                 try:
-                    sent_msg = bot_instance.send_message(chat_id, text_result, reply_markup=markup, parse_mode='HTML')
+                    sent_msg = bot.send_message(chat_id, text_result, reply_markup=markup, parse_mode='HTML')
                     logger.info(f"[PROMO REPLY DIRECT] ✅ Сообщение отправлено через send_message: message_id={sent_msg.message_id if sent_msg else 'None'}")
                 except Exception as send2_e:
                     logger.error(f"[PROMO REPLY DIRECT] ❌ Ошибка отправки через send_message: {send2_e}", exc_info=True)
@@ -904,7 +901,7 @@ def handle_promo_reply_direct(message):
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
             
-            bot_instance.reply_to(message, error_text, reply_markup=markup)
+            bot.reply_to(message, error_text, reply_markup=markup)
             # Не удаляем состояние, чтобы пользователь мог попробовать другой промокод
             return
     except Exception as e:
@@ -943,9 +940,9 @@ def process_search_query(message, query, reply_to_message=None):
         if not films:
             reply_text = f"❌ Ничего не найдено по запросу '{query}'"
             if reply_to_message:
-                bot_instance.reply_to(message, reply_text)
+                bot.reply_to(message, reply_text)
             else:
-                bot_instance.send_message(chat_id, reply_text)
+                bot.send_message(chat_id, reply_text)
             return
         
         # Формируем текст и кнопки
@@ -982,9 +979,9 @@ def process_search_query(message, query, reply_to_message=None):
             results_text = results_text[:4000] + "\n\n... (показаны не все результаты)"
         
         if reply_to_message:
-            sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+            sent_message = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
         else:
-            sent_message = bot_instance.send_message(chat_id, results_text, reply_markup=markup, parse_mode='HTML')
+            sent_message = bot.send_message(chat_id, results_text, reply_markup=markup, parse_mode='HTML')
         
         logger.info(f"[SEARCH] Результаты отправлены: message_id={sent_message.message_id}")
         
@@ -996,9 +993,9 @@ def process_search_query(message, query, reply_to_message=None):
         logger.error(f"[SEARCH] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         error_text = "❌ Ошибка при поиске. Попробуйте позже."
         if reply_to_message:
-            bot_instance.reply_to(message, error_text)
+            bot.reply_to(message, error_text)
         else:
-            bot_instance.send_message(chat_id, error_text)
+            bot.send_message(chat_id, error_text)
 
 
 # ==================== 1. ОБРАБОТЧИК ДЛЯ ЛС: ТОЛЬКО ЕСЛИ БОТ ОЖИДАЕТ ТЕКСТ ====================
@@ -1016,7 +1013,7 @@ def is_expected_text_in_private(message):
     return True
 
 
-@bot_instance.message_handler(content_types=['text'], func=is_expected_text_in_private)
+@bot.message_handler(content_types=['text'], func=is_expected_text_in_private)
 def handle_expected_text_in_private(message):
     """Обрабатывает ОДНО сообщение в ЛС, когда бот его ждёт"""
     user_id = message.from_user.id
@@ -1041,11 +1038,11 @@ def handle_expected_text_in_private(message):
     # Здесь можно добавить elif для других сценариев: 'plan_comment', 'review' и т.д.
     else:
         # fallback или ошибка
-        bot_instance.send_message(message.chat.id, "⚠️ Неизвестный контекст ожидания текста.")
+        bot.send_message(message.chat.id, "⚠️ Неизвестный контекст ожидания текста.")
 
 
 # ==================== 2. ОБРАБОТЧИК ДЛЯ ГРУПП: ТОЛЬКО REPLY НА СООБЩЕНИЕ БОТА ====================
-@bot_instance.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'] and
+@bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'] and
                                       m.reply_to_message and
                                       m.reply_to_message.from_user.id == BOT_ID and
                                       m.text and
@@ -1054,14 +1051,14 @@ def handle_group_search_reply(message):
     """Обработчик поиска в группах - только reply на сообщение бота"""
     query = message.text.strip()
     if not query:
-        bot_instance.reply_to(message, "❌ Пустой запрос.")
+        bot.reply_to(message, "❌ Пустой запрос.")
         return
     logger.info(f"[GROUP SEARCH REPLY] Получен запрос от {message.from_user.id}: '{query[:50]}'")
     process_search_query(message, query, reply_to_message=message.reply_to_message)
 
 
 # ==================== ОБРАБОТЧИК ДЛЯ ГРУПП: SHAZAM ТЕКСТ (REPLY) ====================
-@bot_instance.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'] and
+@bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'] and
                                       m.reply_to_message and
                                       m.reply_to_message.from_user.id == BOT_ID and
                                       m.text and
@@ -1070,12 +1067,12 @@ def handle_group_shazam_text_reply(message):
     """Обработчик текстового запроса Shazam в группах - только reply на сообщение бота"""
     query = message.text.strip()
     if not query:
-        bot_instance.reply_to(message, "❌ Пустое описание.")
+        bot.reply_to(message, "❌ Пустое описание.")
         return
     
     # Проверяем длину (до 300 символов)
     if len(query) > 300:
-        bot_instance.reply_to(message, f"❌ Описание слишком длинное ({len(query)} символов). Максимум: 300 символов.")
+        bot.reply_to(message, f"❌ Описание слишком длинное ({len(query)} символов). Максимум: 300 символов.")
         return
     
     logger.info(f"[GROUP SHAZAM TEXT REPLY] Получен запрос от {message.from_user.id}: '{query[:50]}'")
@@ -1084,7 +1081,7 @@ def handle_group_shazam_text_reply(message):
 
 
 # ==================== СТАРЫЙ ОБРАБОТЧИК (ОСТАВЛЯЕМ ДЛЯ СОВМЕСТИМОСТИ) ====================
-@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "🔍 Укажите запрос для поиска" in (m.reply_to_message.text or ""))
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "🔍 Укажите запрос для поиска" in (m.reply_to_message.text or ""))
 def handle_search_reply_direct(message):
     """ОТДЕЛЬНЫЙ handler для реплаев на сообщение поиска - ВЫСОКИЙ ПРИОРИТЕТ"""
     logger.info(f"[SEARCH REPLY DIRECT] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
@@ -1119,12 +1116,12 @@ def handle_search_reply_direct(message):
             logger.info(f"[SEARCH REPLY DIRECT] ✅ Поиск завершен: найдено {len(films) if films else 0} результатов, страниц: {total_pages}")
         except Exception as search_e:
             logger.error(f"[SEARCH REPLY DIRECT] ❌ Ошибка при выполнении поиска: {search_e}", exc_info=True)
-            bot_instance.reply_to(message, f"❌ Ошибка при выполнении поиска. Попробуйте еще раз.")
+            bot.reply_to(message, f"❌ Ошибка при выполнении поиска. Попробуйте еще раз.")
             return
         
         if not films:
             logger.warning(f"[SEARCH REPLY DIRECT] Ничего не найдено по запросу '{query}'")
-            bot_instance.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+            bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
             return
         
         # Формируем сообщение с результатами
@@ -1163,7 +1160,7 @@ def handle_search_reply_direct(message):
             results_text = results_text[:4000] + "\n\n... (показаны не все результаты)"
         
         try:
-            sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+            sent_message = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
             logger.info(f"[SEARCH REPLY DIRECT] ✅ Результаты поиска отправлены: message_id={sent_message.message_id if sent_message else 'None'}")
             # Удаляем состояние после успешной отправки
             if user_id in user_search_state:
@@ -1212,7 +1209,7 @@ def check_admin_commands_reply(message):
     return False
 
 
-@bot_instance.message_handler(func=check_admin_commands_reply)
+@bot.message_handler(func=check_admin_commands_reply)
 def handle_admin_commands_reply(message):
     """Обработчик реплаев для админских команд (refund_stars, unsubscribe, add_admin)"""
     logger.info(f"[ADMIN COMMANDS REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
@@ -1250,7 +1247,7 @@ def check_rate_reply(message):
     
     return False
 
-@bot_instance.message_handler(func=check_rate_reply)
+@bot.message_handler(func=check_rate_reply)
 def handle_rate_list_reply(message):
     """Обработчик реплаев на сообщения бота с оценками"""
     logger.info(f"[HANDLE RATE LIST REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
@@ -1354,7 +1351,7 @@ def handle_rate_list_reply(message):
     matches = re.findall(ratings_pattern, text)
     
     if not matches:
-        bot_instance.reply_to(message, "❌ Не удалось распознать оценки. Используйте формат: <code>kp_id оценка</code>", parse_mode='HTML')
+        bot.reply_to(message, "❌ Не удалось распознать оценки. Используйте формат: <code>kp_id оценка</code>", parse_mode='HTML')
         return
     
     results = []
@@ -1443,7 +1440,7 @@ def handle_rate_list_reply(message):
     if not results and not errors:
         response_text = "❌ Не удалось обработать оценки. Проверьте формат."
     
-    bot_instance.reply_to(message, response_text, parse_mode='HTML')
+    bot.reply_to(message, response_text, parse_mode='HTML')
 
 
 def is_kinopoisk_link(message):
@@ -1489,7 +1486,7 @@ def is_kinopoisk_link(message):
     return unique_links if unique_links else None
 
 
-@bot_instance.message_handler(func=lambda m: (
+@bot.message_handler(func=lambda m: (
     m.text and 
     not m.text.strip().startswith('/plan') and
     is_kinopoisk_link(m) is not None
@@ -1538,11 +1535,11 @@ def save_movie_message(message):
                     logger.info(f"[SAVE MESSAGE] Фильм обработан: {link}")
             
             if added_count > 1:
-                bot_instance.send_message(chat_id, f"🎉 Добавлено {added_count} новых фильмов в базу!")
+                bot.send_message(chat_id, f"🎉 Добавлено {added_count} новых фильмов в базу!")
     except Exception as e:
         logger.warning(f"[SAVE MESSAGE] Ошибка при обработке сообщения с фильмом: {e}", exc_info=True)
 
-@bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
+@bot.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
     """
     Fallback handler для текстовых сообщений (исключая команды)
@@ -1668,7 +1665,7 @@ def main_text_handler(message):
     # Если сообщение не обработано ни одним handler, просто логируем
     logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано ни одним специализированным handler: text='{text[:100]}', user_id={user_id}, chat_id={chat_id}")
     return
-@bot_instance.message_handler(content_types=['photo', 'document'])
+@bot.message_handler(content_types=['photo', 'document'])
 def main_file_handler(message):
     """Единый хэндлер для всех фото и документов"""
     user_id = message.from_user.id
@@ -1698,7 +1695,7 @@ def main_file_handler(message):
                 event_datetime_utc = state.get('event_datetime_utc')
                 
                 if not event_name or not event_datetime_utc:
-                    bot_instance.reply_to(message, "❌ Ошибка: не найдены данные мероприятия.")
+                    bot.reply_to(message, "❌ Ошибка: не найдены данные мероприятия.")
                     if user_id in user_ticket_state:
                         del user_ticket_state[user_id]
                     return
@@ -1716,7 +1713,7 @@ def main_file_handler(message):
                 
                 logger.info(f"[EVENT TICKET] Билет на мероприятие сохранен: event_name={event_name}, chat_id={chat_id}, user_id={user_id}")
                 
-                bot_instance.reply_to(message, f"✅ Билет на мероприятие <b>{event_name}</b> сохранён! 🎟️", parse_mode='HTML')
+                bot.reply_to(message, f"✅ Билет на мероприятие <b>{event_name}</b> сохранён! 🎟️", parse_mode='HTML')
                 
                 # Очищаем состояние
                 if user_id in user_ticket_state:
@@ -1724,7 +1721,7 @@ def main_file_handler(message):
                 return
             except Exception as e:
                 logger.error(f"[EVENT TICKET] Ошибка при сохранении билета на мероприятие: {e}", exc_info=True)
-                bot_instance.reply_to(message, "❌ Произошла ошибка при сохранении билета.")
+                bot.reply_to(message, "❌ Произошла ошибка при сохранении билета.")
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
                 return
@@ -1733,7 +1730,7 @@ def main_file_handler(message):
             # Обработка загрузки билетов для фильма
             plan_id = state.get('plan_id')
             if not plan_id:
-                bot_instance.reply_to(message, "❌ Ошибка: план не найден.")
+                bot.reply_to(message, "❌ Ошибка: план не найден.")
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
                 return
@@ -1768,7 +1765,7 @@ def main_file_handler(message):
             title = state.get('film_title', 'фильм')
             dt = state.get('plan_dt', '')
             
-            bot_instance.reply_to(message, f"✅ Билет прикреплён! (Всего билетов: {len(existing_tickets)})\n\n<b>{title}</b> — {dt}\n\nМожете отправить ещё билеты или написать 'готово'.", parse_mode='HTML')
+            bot.reply_to(message, f"✅ Билет прикреплён! (Всего билетов: {len(existing_tickets)})\n\n<b>{title}</b> — {dt}\n\nМожете отправить ещё билеты или написать 'готово'.", parse_mode='HTML')
             return
         
         if step == 'waiting_ticket_file':
@@ -1808,7 +1805,7 @@ def main_file_handler(message):
                 markup.add(InlineKeyboardButton("➕ Добавить еще билет к сеансу", callback_data=f"add_ticket:{plan_id}"))
                 markup.add(InlineKeyboardButton("🎟️ Вернуться к билетам", callback_data="ticket_new"))
                 
-                bot_instance.reply_to(message, f"✅ Файл получен. (Всего билетов: {len(existing_tickets)}) Можете отправить ещё билеты или написать 'готово'. 🍿", reply_markup=markup)
+                bot.reply_to(message, f"✅ Файл получен. (Всего билетов: {len(existing_tickets)}) Можете отправить ещё билеты или написать 'готово'. 🍿", reply_markup=markup)
                 # НЕ очищаем состояние - пользователь может добавить ещё билеты
                 logger.info(f"[TICKET FILE] Состояние пользователя {user_id} сохранено для добавления дополнительных билетов")
                 return
@@ -1817,7 +1814,7 @@ def main_file_handler(message):
             # Обработка добавления дополнительных билетов
             plan_id = state.get('plan_id')
             if not plan_id:
-                bot_instance.reply_to(message, "❌ Ошибка: план не найден.")
+                bot.reply_to(message, "❌ Ошибка: план не найден.")
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
                 return
@@ -1847,7 +1844,7 @@ def main_file_handler(message):
                 cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
                 conn.commit()
             
-            bot_instance.reply_to(message, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
+            bot.reply_to(message, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
             return
         
         # Сохраняем file_id для последующей обработки
@@ -1859,7 +1856,7 @@ def main_file_handler(message):
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🎟️ Вернуться к билетам", callback_data="ticket_new"))
         
-        bot_instance.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿", reply_markup=markup)
+        bot.reply_to(message, "✅ Файл получен. Приятного просмотра! 🍿", reply_markup=markup)
         # Очищаем состояние пользователя, завершаем цикл работы с билетами
         if user_id in user_ticket_state:
             del user_ticket_state[user_id]
@@ -1870,7 +1867,7 @@ def main_file_handler(message):
     logger.info(f"[MAIN FILE HANDLER] Фото/документ не обработан (пользователь не в user_ticket_state)")
 
 
-@bot_instance.message_reaction_handler(func=lambda r: True)
+@bot.message_reaction_handler(func=lambda r: True)
 def handle_reaction(reaction):
     """Обработчик реакций на сообщения - отмечает фильмы как просмотренные через эмодзи"""
     logger.info(f"[REACTION] Получена реакция в чате {reaction.chat.id} на сообщение {reaction.message_id}")
@@ -1883,7 +1880,7 @@ def handle_reaction(reaction):
     if user_id and message_id not in settings_messages:
         if not is_bot_participant(chat_id, user_id):
             try:
-                bot_instance.send_message(
+                bot.send_message(
                     chat_id,
                     f"Чтобы взаимодействовать с ботом, начните участие в нём с любой команды, например, /join",
                     reply_to_message_id=message_id
@@ -2025,7 +2022,7 @@ def handle_reaction(reaction):
                         
                         markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"cancel_add_emoji:{message_id}"))
                         
-                        bot_instance.send_message(
+                        bot.send_message(
                             chat_id,
                             f"💡 Хотите добавить {emoji_display} в список разрешённых для отметки о просмотре?",
                             reply_to_message_id=message_id,
@@ -2094,7 +2091,7 @@ def handle_reaction(reaction):
     # Отправляем персональное сообщение пользователю с упоминанием
     user_name = reaction.user.first_name if reaction.user else "Вы"
     user_mention = f"@{reaction.user.username}" if reaction.user and reaction.user.username else user_name
-    msg = bot_instance.send_message(chat_id, 
+    msg = bot.send_message(chat_id, 
         f"🎬 {user_mention}, фильм <b>{film_title}</b> отмечен как просмотренный!\n\n"
         f"💬 Ответьте числом от 1 до 10 на это сообщение или на сообщение с фильмом, чтобы поставить оценку.",
         parse_mode='HTML')
@@ -2104,7 +2101,7 @@ def handle_reaction(reaction):
     logger.info(f"[REACTION] Сообщение об оценке отправлено для {user_name}, message_id={msg.message_id}, film_id={film_id}")
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_emoji:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_emoji:"))
 def add_emoji_callback(call):
     """Обработчик кнопки 'Добавить' для обычного эмодзи"""
     try:
@@ -2129,25 +2126,25 @@ def add_emoji_callback(call):
                 ''', (chat_id, emojis_str))
                 conn.commit()
             
-            bot_instance.answer_callback_query(call.id, f"✅ Эмодзи {emoji} добавлен!")
-            bot_instance.edit_message_text(
+            bot.answer_callback_query(call.id, f"✅ Эмодзи {emoji} добавлен!")
+            bot.edit_message_text(
                 f"✅ Эмодзи {emoji} добавлен в список разрешённых для отметки о просмотре.",
                 chat_id,
                 call.message.message_id
             )
             logger.info(f"[ADD EMOJI] Эмодзи {emoji} добавлен для чата {chat_id}")
         else:
-            bot_instance.answer_callback_query(call.id, "Эмодзи уже в списке")
-            bot_instance.delete_message(chat_id, call.message.message_id)
+            bot.answer_callback_query(call.id, "Эмодзи уже в списке")
+            bot.delete_message(chat_id, call.message.message_id)
     except Exception as e:
         logger.error(f"[ADD EMOJI] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_custom_emoji:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_custom_emoji:"))
 def add_custom_emoji_callback(call):
     """Обработчик кнопки 'Добавить' для кастомного эмодзи"""
     try:
@@ -2176,40 +2173,37 @@ def add_custom_emoji_callback(call):
                 ''', (chat_id, emojis_str))
                 conn.commit()
             
-            bot_instance.answer_callback_query(call.id, f"✅ Кастомное эмодзи добавлено!")
-            bot_instance.edit_message_text(
+            bot.answer_callback_query(call.id, f"✅ Кастомное эмодзи добавлено!")
+            bot.edit_message_text(
                 f"✅ Кастомное эмодзи (ID: {custom_emoji_id}) добавлено в список разрешённых для отметки о просмотре.",
                 chat_id,
                 call.message.message_id
             )
             logger.info(f"[ADD CUSTOM EMOJI] Кастомное эмодзи {custom_emoji_id} добавлено для чата {chat_id}")
         else:
-            bot_instance.answer_callback_query(call.id, "Эмодзи уже в списке")
-            bot_instance.delete_message(chat_id, call.message.message_id)
+            bot.answer_callback_query(call.id, "Эмодзи уже в списке")
+            bot.delete_message(chat_id, call.message.message_id)
     except Exception as e:
         logger.error(f"[ADD CUSTOM EMOJI] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("cancel_add_emoji:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("cancel_add_emoji:"))
 def cancel_add_emoji_callback(call):
     """Обработчик кнопки 'Отменить' для предложения добавить эмодзи"""
     try:
-        bot_instance.answer_callback_query(call.id, "Отменено")
-        bot_instance.delete_message(call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id, "Отменено")
+        bot.delete_message(call.message.chat.id, call.message.message_id)
     except Exception as e:
         logger.error(f"[CANCEL ADD EMOJI] Ошибка: {e}", exc_info=True)
 
 
-def register_text_message_handlers(bot_instance):
+def register_\0(bot):
     """Регистрирует обработчики текстовых сообщений"""
     # Обработчики уже зарегистрированы через декораторы при импорте модуля
     # Эта функция нужна только для явного вызова в commands.py
-    # Проверяем, что bot_instance совпадает с глобальным bot_instance
-    if bot_instance != bot_instance:
-        logger.warning("⚠️ Переданный bot_instance не совпадает с глобальным bot_instance из bot_init!")
     logger.info("✅ Обработчики текстовых сообщений зарегистрированы (декораторы выполнены при импорте)")
 

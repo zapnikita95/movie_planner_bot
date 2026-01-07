@@ -7,7 +7,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request, get_admin_statistics
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.bot.bot_init import BOT_ID, bot as bot_instance
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -88,7 +87,7 @@ def _process_refund(message, charge_id):
                         stored_id = p.get('telegram_payment_charge_id') if isinstance(p, dict) else (p[5] if len(p) > 5 else None)
                         logger.info(f"[REFUND]   {i+1}. payment_id={p.get('payment_id') if isinstance(p, dict) else p[0]}, charge_id={stored_id[:50] if stored_id else 'None'}..., created_at={p.get('created_at') if isinstance(p, dict) else (p[6] if len(p) > 6 else 'N/A')}")
             
-            bot_instance.reply_to(message, f"❌ Платеж с ID операции '{charge_id[:50]}...' не найден в базе данных.\n\n"
+            bot.reply_to(message, f"❌ Платеж с ID операции '{charge_id[:50]}...' не найден в базе данных.\n\n"
                                           f"Проверьте правильность ID операции. Убедитесь, что вы скопировали полный ID из сообщения об успешной оплате.")
             logger.warning(f"[REFUND] Платеж не найден: charge_id={charge_id[:50]}... (полная длина: {len(charge_id)})")
             return
@@ -113,7 +112,7 @@ def _process_refund(message, charge_id):
         
         # Проверяем, что платеж был успешным
         if status != 'succeeded':
-            bot_instance.reply_to(message, f"⚠️ Платеж найден, но его статус: '{status}'. Возврат возможен только для успешных платежей.")
+            bot.reply_to(message, f"⚠️ Платеж найден, но его статус: '{status}'. Возврат возможен только для успешных платежей.")
             return
         
         # Выполняем возврат через Telegram API
@@ -145,7 +144,7 @@ def _process_refund(message, charge_id):
                     """, (charge_id,))
                     conn.commit()
                 
-                bot_instance.reply_to(message, f"✅ Возврат выполнен успешно!\n\n"
+                bot.reply_to(message, f"✅ Возврат выполнен успешно!\n\n"
                                       f"📋 Детали:\n"
                                       f"   • ID операции: {charge_id}\n"
                                       f"   • User ID: {user_id}\n"
@@ -156,7 +155,7 @@ def _process_refund(message, charge_id):
             else:
                 error_description = result_data.get('description', 'Неизвестная ошибка')
                 error_code = result_data.get('error_code', 'N/A')
-                bot_instance.reply_to(message, f"❌ Ошибка возврата: {error_description}\n\n"
+                bot.reply_to(message, f"❌ Ошибка возврата: {error_description}\n\n"
                                       f"Код ошибки: {error_code}\n\n"
                                       f"Возможные причины:\n"
                                       f"• Платеж уже был возвращен\n"
@@ -166,17 +165,17 @@ def _process_refund(message, charge_id):
                 
         except Exception as e:
             logger.error(f"[REFUND] ❌ Ошибка при выполнении возврата: {e}", exc_info=True)
-            bot_instance.reply_to(message, f"❌ Ошибка при выполнении возврата: {e}")
+            bot.reply_to(message, f"❌ Ошибка при выполнении возврата: {e}")
             
     except Exception as e:
         logger.error(f"[REFUND] ❌ Ошибка при обработке возврата: {e}", exc_info=True)
-        bot_instance.reply_to(message, f"❌ Ошибка при обработке возврата: {e}")
+        bot.reply_to(message, f"❌ Ошибка при обработке возврата: {e}")
 
 
-def register_stats_handlers(bot_instance):
+def register_\0(bot):
     """Регистрирует обработчики команд статистики"""
     
-    @bot_instance.message_handler(commands=['stats'])
+    @bot.message_handler(commands=['stats'])
     def stats_command(message):
         """Команда /stats - детальная статистика группы и участников"""
         # TODO: Извлечь из moviebot.py строки 8407-9153
@@ -524,16 +523,16 @@ def register_stats_handlers(bot_instance):
             else:
                 text += "👥 <i>Нет данных об участниках</i>\n"
             
-            bot_instance.reply_to(message, text, parse_mode='HTML')
+            bot.reply_to(message, text, parse_mode='HTML')
             logger.info(f"✅ Ответ на /stats отправлен пользователю {message.from_user.id}")
         except Exception as e:
             logger.error(f"❌ Ошибка в /stats: {e}", exc_info=True)
             try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /stats")
+                bot.reply_to(message, "Произошла ошибка при обработке команды /stats")
             except:
                 pass
 
-    @bot_instance.message_handler(commands=['total'])
+    @bot.message_handler(commands=['total'])
     def total_stats(message):
         """Команда /total - статистика: фильмы, жанры, режиссёры, актёры и оценки"""
         # TODO: Извлечь из moviebot.py строки 9188-9387
@@ -591,7 +590,7 @@ def register_stats_handlers(bot_instance):
                 
                 # Если нет данных, отправляем сообщение
                 if total == 0:
-                    bot_instance.reply_to(message, "📊 Нет данных о вашей статистике.\n\nОцените первый фильм, чтобы статистика начала собираться.")
+                    bot.reply_to(message, "📊 Нет данных о вашей статистике.\n\nОцените первый фильм, чтобы статистика начала собираться.")
                     return
                 
                 # Жанры (исключаем импортированные фильмы)
@@ -738,23 +737,23 @@ def register_stats_handlers(bot_instance):
                 else:
                     text += "<b>Топ актёров:</b> —\n"
                 
-                bot_instance.reply_to(message, text, parse_mode='HTML')
+                bot.reply_to(message, text, parse_mode='HTML')
                 logger.info(f"✅ Ответ на /total отправлен пользователю {message.from_user.id}")
         except Exception as e:
             logger.error(f"❌ Ошибка в /total: {e}", exc_info=True)
             try:
-                bot_instance.reply_to(message, "Произошла ошибка при обработке команды /total")
+                bot.reply_to(message, "Произошла ошибка при обработке команды /total")
             except:
                 pass
 
-    @bot_instance.message_handler(commands=['admin_stats'])
+    @bot.message_handler(commands=['admin_stats'])
     def admin_stats_command(message):
         """Команда /admin_stats - статистика для администратора"""
         from moviebot.utils.admin import is_admin
         
         user_id = message.from_user.id
         if not is_admin(user_id):
-            bot_instance.reply_to(message, "❌ У вас нет доступа к этой команде.")
+            bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
         
         try:
@@ -762,7 +761,7 @@ def register_stats_handlers(bot_instance):
             stats = get_admin_statistics()
             
             if 'error' in stats:
-                bot_instance.reply_to(message, f"❌ Ошибка получения статистики: {stats['error']}")
+                bot.reply_to(message, f"❌ Ошибка получения статистики: {stats['error']}")
                 return
             
             # Формируем сообщение со статистикой
@@ -843,20 +842,20 @@ def register_stats_handlers(bot_instance):
                         count = cmd_row[1] if len(cmd_row) > 1 else 0
                     text += f"   {i}. {cmd}: {count}\n"
             
-            bot_instance.reply_to(message, text, parse_mode='HTML')
+            bot.reply_to(message, text, parse_mode='HTML')
             
         except Exception as e:
             logger.error(f"Ошибка в admin_stats_command: {e}", exc_info=True)
-            bot_instance.reply_to(message, f"❌ Ошибка получения статистики: {e}")
+            bot.reply_to(message, f"❌ Ошибка получения статистики: {e}")
 
-    @bot_instance.message_handler(commands=['refundstars', 'refund_stars'])
+    @bot.message_handler(commands=['refundstars', 'refund_stars'])
     def refundstars_command(message):
         """Команда для возврата звезд по ID операции (только для администраторов)"""
         from moviebot.utils.admin import is_admin
         
         user_id = message.from_user.id
         if not is_admin(user_id):
-            bot_instance.reply_to(message, "❌ У вас нет доступа к этой команде.")
+            bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
         
         try:
@@ -875,7 +874,7 @@ def register_stats_handlers(bot_instance):
             # Если charge_id не указан, запрашиваем его
             from moviebot.states import user_refund_state
             user_id = message.from_user.id
-            prompt_msg = bot_instance.reply_to(message, "📝 Укажите ID операции (charge_id) для возврата.\n\n"
+            prompt_msg = bot.reply_to(message, "📝 Укажите ID операции (charge_id) для возврата.\n\n"
                                   "Отправьте ID операции в ответ на это сообщение.\n\n"
                                   "Пример: stxwe_iXQAPRqkiZSjm9JxEiO0Ke03gNqoupstFOak10sj3ZSSeHbT2_3MukFRW4kGE-YBSssodFt05T9Szh1-N2m_FgDCvAAPloyRiqVDUp3tmzfl2I891zLP4VcZ6ul8I")
             user_refund_state[user_id] = {
@@ -887,6 +886,6 @@ def register_stats_handlers(bot_instance):
         except Exception as e:
             logger.error(f"Ошибка в refundstars_command: {e}", exc_info=True)
             try:
-                bot_instance.reply_to(message, f"❌ Ошибка обработки команды: {e}")
+                bot.reply_to(message, f"❌ Ошибка обработки команды: {e}")
             except:
                 pass

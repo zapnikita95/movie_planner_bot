@@ -8,7 +8,6 @@ from datetime import datetime, date, time, timedelta
 import pytz
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_notification_settings, log_request
 from moviebot.api.kinopoisk_api import get_premieres_for_period, extract_movie_info
@@ -154,7 +153,7 @@ def show_premieres_page(call, premieres, period, page=0):
         # Используем edit_message_text вместо send_message, если это callback
         if call.message.message_id:
             try:
-                bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except Exception as e:
                 error_str = str(e)
                 # Игнорируем ошибку "message is not modified" и "there is no text in the message to edit"
@@ -162,24 +161,24 @@ def show_premieres_page(call, premieres, period, page=0):
                     logger.error(f"[PREMIERES PAGE] Ошибка редактирования сообщения: {e}")
                 # Если не получилось отредактировать, отправляем новое
                 try:
-                    bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 except:
                     pass
         else:
             # Если message_id нет, отправляем новое сообщение
-            bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         
         if call.id:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premieres_period:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_period:"))
 def premieres_period_callback(call):
     """Обработчик выбора периода для премьер"""
     try:
@@ -190,8 +189,8 @@ def premieres_period_callback(call):
         premieres = get_premieres_for_period(period)
         
         if not premieres:
-            bot_instance.edit_message_text("❌ Не удалось получить список премьер для выбранного периода.", chat_id, call.message.message_id)
-            bot_instance.answer_callback_query(call.id)
+            bot.edit_message_text("❌ Не удалось получить список премьер для выбранного периода.", chat_id, call.message.message_id)
+            bot.answer_callback_query(call.id)
             return
     
         # Сохраняем премьеры для пагинации (можно использовать временное хранилище или передавать через callback_data)
@@ -201,12 +200,12 @@ def premieres_period_callback(call):
     except Exception as e:
         logger.error(f"[PREMIERES PERIOD] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premieres_page:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_page:"))
 def premieres_page_callback(call):
     """Обработчик пагинации премьер"""
     try:
@@ -220,12 +219,12 @@ def premieres_page_callback(call):
     except Exception as e:
         logger.error(f"[PREMIERES PAGE] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data == "premieres_back_to_periods")
+@bot.callback_query_handler(func=lambda call: call.data == "premieres_back_to_periods")
 def premieres_back_to_periods_callback(call):
     """Обработчик возврата к выбору периода"""
     try:
@@ -243,25 +242,25 @@ def premieres_back_to_periods_callback(call):
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
         try:
-            bot_instance.edit_message_text("📅 <b>Выберите период для просмотра премьер:</b>", chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text("📅 <b>Выберите период для просмотра премьер:</b>", chat_id, message_id, reply_markup=markup, parse_mode='HTML')
         except Exception as e:
             # Если не удалось отредактировать, отправляем новое сообщение
-            bot_instance.send_message(chat_id, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
+            bot.send_message(chat_id, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
         
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
     except Exception as e:
         logger.error(f"[PREMIERES BACK TO PERIODS] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premiere_detail:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_detail:"))
 def premiere_detail_handler(call):
     """Показывает детали премьеры с постером и трейлером"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         parts = call.data.split(":")
         kp_id = parts[1]
         period = parts[2] if len(parts) > 2 else 'current_month'  # Период для возврата назад
@@ -273,7 +272,7 @@ def premiere_detail_handler(call):
         
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code != 200:
-            bot_instance.answer_callback_query(call.id, "Не удалось загрузить данные фильма", show_alert=True)
+            bot.answer_callback_query(call.id, "Не удалось загрузить данные фильма", show_alert=True)
             return
         
         data = response.json()
@@ -400,17 +399,17 @@ def premiere_detail_handler(call):
         # Отправляем с постером
         if poster_url:
             try:
-                bot_instance.send_photo(
+                bot.send_photo(
                     chat_id,
                     poster_url,
                     caption=text,
                     parse_mode='HTML',
                     reply_markup=markup
                 )
-                bot_instance.delete_message(chat_id, call.message.message_id)
+                bot.delete_message(chat_id, call.message.message_id)
             except Exception as e:
                 logger.error(f"[PREMIERES DETAIL] Ошибка отправки фото: {e}")
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     text,
                     chat_id,
                     call.message.message_id,
@@ -419,7 +418,7 @@ def premiere_detail_handler(call):
                     disable_web_page_preview=False
                 )
         else:
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 text,
                 chat_id,
                 call.message.message_id,
@@ -432,30 +431,30 @@ def premiere_detail_handler(call):
         if trailer_url:
             try:
                 # Пытаемся отправить как видео
-                bot_instance.send_video(chat_id, trailer_url, caption=f"📺 Трейлер: <b>{title}</b>", parse_mode='HTML')
+                bot.send_video(chat_id, trailer_url, caption=f"📺 Трейлер: <b>{title}</b>", parse_mode='HTML')
             except Exception as e:
                 logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как видео: {e}")
                 try:
                     # Если не получилось как видео, отправляем как ссылку
-                    bot_instance.send_message(chat_id, f"📺 <a href='{trailer_url}'>Смотреть трейлер: {title}</a>", parse_mode='HTML')
+                    bot.send_message(chat_id, f"📺 <a href='{trailer_url}'>Смотреть трейлер: {title}</a>", parse_mode='HTML')
                 except Exception as e2:
                     logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как ссылки: {e2}")
         
     except Exception as e:
         logger.error(f"[PREMIERES DETAIL] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "Ошибка загрузки фильма", show_alert=True)
+            bot.answer_callback_query(call.id, "Ошибка загрузки фильма", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premiere_add:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_add:"))
 def premiere_add_to_db(call):
     """Добавляет премьеру в базу и показывает описание фильма с кнопками БЕЗ повторного API запроса"""
     logger.info("=" * 80)
     logger.info(f"[PREMIERE ADD] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
-        bot_instance.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
+        bot.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
         logger.info(f"[PREMIERE ADD] answer_callback_query вызван, callback_id={call.id}")
         
         kp_id = call.data.split(":")[1]
@@ -478,7 +477,7 @@ def premiere_add_to_db(call):
             watched = existing_row.get('watched') if isinstance(existing_row, dict) else existing_row[2]
             
             logger.info(f"[PREMIERE ADD] Фильм уже в базе: film_id={film_id}, title={title}")
-            bot_instance.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
+            bot.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
             
             # Получаем полную информацию из БД (без API запроса)
             with db_lock:
@@ -521,7 +520,7 @@ def premiere_add_to_db(call):
                 
                 # Удаляем сообщение с премьерой
                 try:
-                    bot_instance.delete_message(chat_id, message_id)
+                    bot.delete_message(chat_id, message_id)
                 except Exception as e:
                     logger.warning(f"[PREMIERE ADD] Не удалось удалить сообщение: {e}")
                 
@@ -535,18 +534,18 @@ def premiere_add_to_db(call):
         logger.info(f"[PREMIERE ADD] Фильм не найден в базе, получаю информацию через API")
         info = extract_movie_info(link)
         if not info:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
         
         # Добавляем в базу
         film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
         
         if not film_id:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
             return
         
         logger.info(f"[PREMIERE ADD] Фильм добавлен в базу: film_id={film_id}, was_inserted={was_inserted}")
-        bot_instance.answer_callback_query(call.id, "✅ Фильм добавлен в базу!", show_alert=False)
+        bot.answer_callback_query(call.id, "✅ Фильм добавлен в базу!", show_alert=False)
         
         # Получаем полную информацию из БД (без повторного API запроса)
         with db_lock:
@@ -593,7 +592,7 @@ def premiere_add_to_db(call):
             
             # Удаляем сообщение с премьерой
             try:
-                bot_instance.delete_message(chat_id, message_id)
+                bot.delete_message(chat_id, message_id)
             except Exception as e:
                 logger.warning(f"[PREMIERE ADD] Не удалось удалить сообщение: {e}")
             
@@ -603,23 +602,23 @@ def premiere_add_to_db(call):
             logger.info(f"[PREMIERE ADD] Описание фильма показано из БД: kp_id={kp_id}")
         else:
             logger.error(f"[PREMIERE ADD] Не удалось получить данные из БД после добавления: film_id={film_id}")
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении данных из базы", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка при получении данных из базы", show_alert=True)
             
     except Exception as e:
         logger.error(f"[PREMIERE ADD] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
     finally:
         logger.info(f"[PREMIERE ADD] ===== END: callback_id={call.id}")
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premiere_notify:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_notify:"))
 def premiere_notify_handler(call):
     """Обработчик уведомления о выходе премьеры - добавляет в расписание, затем в базу"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         parts = call.data.split(":")
         kp_id = parts[1]
         date_str = parts[2] if len(parts) > 2 else ''
@@ -631,14 +630,14 @@ def premiere_notify_handler(call):
         try:
             premiere_date = datetime.strptime(date_str.replace('-', '.'), '%d.%m.%Y').date()
         except:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка парсинга даты", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка парсинга даты", show_alert=True)
             return
         
         # Получаем информацию о фильме (но НЕ добавляем в базу пока)
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         info = extract_movie_info(link)
         if not info:
-            bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
             return
         
         title = info.get('title', 'Фильм')
@@ -735,7 +734,7 @@ def premiere_notify_handler(call):
                     else:
                         logger.error(f"[PREMIERE NOTIFY] План не был создан, но ошибки не было")
                         conn.rollback()
-                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
                         return
                 else:
                     plan_id = existing_plan.get('id') if isinstance(existing_plan, dict) else existing_plan[0]
@@ -749,7 +748,7 @@ def premiere_notify_handler(call):
             except Exception as e:
                 conn.rollback()
                 logger.error(f"[PREMIERE NOTIFY] Ошибка в транзакции: {e}", exc_info=True)
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
                 return
         
         # Отправляем сообщение-подтверждение
@@ -764,23 +763,23 @@ def premiere_notify_handler(call):
         markup.add(InlineKeyboardButton("🔗 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
         markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"premiere_cancel:{kp_id}:{plan_id}"))
         
-        bot_instance.send_message(chat_id, confirm_text, parse_mode='HTML', reply_markup=markup)
-        bot_instance.answer_callback_query(call.id, "✅ Уведомление установлено!")
+        bot.send_message(chat_id, confirm_text, parse_mode='HTML', reply_markup=markup)
+        bot.answer_callback_query(call.id, "✅ Уведомление установлено!")
         
         logger.info(f"[PREMIERE NOTIFY] Уведомление установлено для фильма {title} (kp_id={kp_id}) пользователем {user_id}, plan_id={plan_id}")
     except Exception as e:
         logger.error(f"[PREMIERE NOTIFY] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при установке уведомления", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка при установке уведомления", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premiere_cancel:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_cancel:"))
 def premiere_cancel_handler(call):
     """Обработчик отмены уведомления о премьере - удаляет из базы и расписания"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         parts = call.data.split(":")
         kp_id = parts[1]
         plan_id = int(parts[2]) if len(parts) > 2 else None
@@ -820,26 +819,26 @@ def premiere_cancel_handler(call):
                 
                 # Обновляем сообщение
                 try:
-                    bot_instance.edit_message_text(deleted_text, chat_id, call.message.message_id, parse_mode='HTML')
+                    bot.edit_message_text(deleted_text, chat_id, call.message.message_id, parse_mode='HTML')
                 except:
-                    bot_instance.send_message(chat_id, deleted_text, parse_mode='HTML')
+                    bot.send_message(chat_id, deleted_text, parse_mode='HTML')
                 
                 logger.info(f"[PREMIERE CANCEL] Отменено уведомление для фильма {title} (kp_id={kp_id}) пользователем {user_id}")
             else:
-                bot_instance.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
     except Exception as e:
         logger.error(f"[PREMIERE CANCEL] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка при отмене", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка при отмене", show_alert=True)
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("premieres_back:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_back:"))
 def premieres_back_handler(call):
     """Обработчик возврата к списку премьер"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         parts = call.data.split(":")
         period = parts[1] if len(parts) > 1 else 'current_month'
         chat_id = call.message.chat.id
@@ -847,7 +846,7 @@ def premieres_back_handler(call):
         
         # Удаляем сообщение о фильме
         try:
-            bot_instance.delete_message(chat_id, message_id)
+            bot.delete_message(chat_id, message_id)
         except Exception as e:
             logger.warning(f"[PREMIERES BACK] Не удалось удалить сообщение: {e}")
         
@@ -856,7 +855,7 @@ def premieres_back_handler(call):
         
         if not premieres:
             try:
-                bot_instance.send_message(chat_id, "❌ Не удалось получить список премьер.")
+                bot.send_message(chat_id, "❌ Не удалось получить список премьер.")
             except:
                 pass
             return
@@ -874,12 +873,12 @@ def premieres_back_handler(call):
     except Exception as e:
         logger.error(f"[PREMIERES BACK] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
 
-def register_premieres_callbacks(bot_instance):
+def register_premieres_callbacks(bot):
     """Регистрирует обработчики премьер (уже зарегистрированы через декораторы)"""
     pass
 

@@ -12,7 +12,6 @@ from moviebot.database.db_operations import (
 import re
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.utils.helpers import has_recommendations_access, has_notifications_access
-from moviebot.bot.bot_init import bot as bot_instance, BOT_ID
 from moviebot.config import PLANS_TZ
 from moviebot.states import (
     user_settings_state, settings_messages,
@@ -41,7 +40,7 @@ def settings_command(message):
             with db_lock:
                 cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
                 conn.commit()
-            bot_instance.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
+            bot.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
             logger.info(f"Реакции сброшены для чата {chat_id}")
             return
         
@@ -73,7 +72,7 @@ def settings_command(message):
         markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
-        sent = bot_instance.send_message(chat_id,
+        sent = bot.send_message(chat_id,
             f"⚙️ <b>Настройки</b>\n\n"
             f"Выберите, что хотите настроить:",
             reply_markup=markup,
@@ -83,12 +82,12 @@ def settings_command(message):
     except Exception as e:
         logger.error(f"❌ Ошибка в /settings: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /settings")
+            bot.reply_to(message, "Произошла ошибка при обработке команды /settings")
         except:
             pass
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
 def handle_settings_callback(call):
     """Обработчик callback для настроек"""
     logger.info(f"[SETTINGS CALLBACK] ===== НАЧАЛО ОБРАБОТКИ =====")
@@ -100,14 +99,13 @@ def handle_settings_callback(call):
         is_private = call.message.chat.type == 'private'
         
         logger.info(f"[SETTINGS CALLBACK] Получен callback от {user_id}, action={action}, chat_id={chat_id}, is_private={is_private}, callback_data={call.data}")
-        logger.info(f"[SETTINGS CALLBACK] bot_instance: {bot_instance}, type: {type(bot_instance)}")
         
         # Вызываем answer_callback_query в самом начале (как в рабочей версии)
         # Но сначала обрабатываем заблокированные кнопки
         if action == "notifications_locked":
             # Заблокированная кнопка настроек напоминаний
             try:
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id,
                     "⏰ Настройки напоминаний доступны с подпиской 🔔 Уведомления или 📦 Все режимы. Подключите подписку через /payment",
                     show_alert=True
@@ -119,7 +117,7 @@ def handle_settings_callback(call):
         if action == "import_locked":
             # Заблокированная кнопка импорта базы
             try:
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id,
                     "📥 Импорт базы из Кинопоиска доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment",
                     show_alert=True
@@ -131,7 +129,7 @@ def handle_settings_callback(call):
         if action == "random_events_locked":
             # Показываем сообщение о том, что раздел доступен только в групповых чатах
             try:
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id,
                     "🎲 Случайные события доступны только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
                     show_alert=True
@@ -144,7 +142,7 @@ def handle_settings_callback(call):
         if action == "random_events":
             # Проверяем, что это не личный чат
             if is_private:
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id,
                     "Раздел доступен только в групповых чатах. Создайте групповой чат с друзьями, добавьте в него бота и планируйте просмотр кино вместе 👥",
                     show_alert=True
@@ -152,7 +150,7 @@ def handle_settings_callback(call):
                 return
             
             # Для групповых чатов вызываем answer_callback_query
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             
             # Показываем настройку случайных событий
             with db_lock:
@@ -173,7 +171,7 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
             status_text = "включены" if is_enabled else "выключены"
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 f"🎲 <b>Случайные события</b>\n\n"
                 f"Текущий статус: <b>{status_text}</b>\n\n"
                 f"Случайные события включают:\n"
@@ -187,7 +185,7 @@ def handle_settings_callback(call):
             return
         
         # Для остальных действий вызываем обычный answer_callback_query в начале
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         
         if action == "emoji":
             # Показываем настройки эмодзи
@@ -202,7 +200,7 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 f"😀 <b>Настройка эмодзи просмотра</b>\n\n"
                 f"<b>Текущие реакции:</b> {current_emojis_str}\n\n"
                 f"Выберите действие или поставьте реакцию на это сообщение — она автоматически добавится к текущим.",
@@ -229,7 +227,7 @@ def handle_settings_callback(call):
         if action == "notifications":
             # Проверяем доступ к настройкам напоминаний
             if not has_notifications_access(chat_id, user_id):
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id,
                     "🔒 Функционал можно подключить через /payment",
                     show_alert=True
@@ -279,7 +277,7 @@ def handle_settings_callback(call):
                 text += f"   Время: <b>{cinema_weekday}</b>\n"
             text += f"\n🎫 <b>Билеты на сеанс:</b> <b>{ticket_text}</b>"
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 text,
                 call.message.chat.id,
                 call.message.message_id,
@@ -296,7 +294,7 @@ def handle_settings_callback(call):
                 'count': None,
                 'prompt_message_id': call.message.message_id
             }
-            msg = bot_instance.edit_message_text(
+            msg = bot.edit_message_text(
                 f"📥 <b>Импорт базы из Кинопоиска</b>\n\n"
                 f"Отправьте ID пользователя Кинопоиска или ссылку на профиль.\n\n"
                 f"Примеры:\n"
@@ -321,16 +319,16 @@ def handle_settings_callback(call):
             
             # Проверяем, что это групповой чат
             try:
-                chat_info = bot_instance.get_chat(chat_id)
+                chat_info = bot.get_chat(chat_id)
                 if chat_info.type == 'private':
-                    bot_instance.answer_callback_query(call.id, "Примеры событий работают только в групповых чатах", show_alert=True)
+                    bot.answer_callback_query(call.id, "Примеры событий работают только в групповых чатах", show_alert=True)
                     return
             except Exception as e:
                 logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить информацию о чате {chat_id}: {e}")
-                bot_instance.answer_callback_query(call.id, "Ошибка при отправке примера", show_alert=True)
+                bot.answer_callback_query(call.id, "Ошибка при отправке примера", show_alert=True)
                 return
             
-            bot_instance.answer_callback_query(call.id, "Отправляю пример события...")
+            bot.answer_callback_query(call.id, "Отправляю пример события...")
             
             if example_type == "with_user":
                 # Пример события с участником (выбор случайного участника)
@@ -338,7 +336,7 @@ def handle_settings_callback(call):
                 # Получаем BOT_ID, если он не определен
                 if BOT_ID is None:
                     try:
-                        bot_info = bot_instance.get_me()
+                        bot_info = bot.get_me()
                         current_bot_id = bot_info.id
                     except:
                         current_bot_id = None
@@ -382,7 +380,7 @@ def handle_settings_callback(call):
                         user_name = f"@{username}"
                     else:
                         try:
-                            user_info = bot_instance.get_chat_member(chat_id, p_user_id)
+                            user_info = bot.get_chat_member(chat_id, p_user_id)
                             user_name = user_info.user.first_name or "участник"
                         except:
                             user_name = "участник"
@@ -397,7 +395,7 @@ def handle_settings_callback(call):
                 text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
                 text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
                 
-                bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
             else:
                 # Пример события без участника (игра в кубик)
                 # Проверяем количество участников (исключая бота)
@@ -405,12 +403,12 @@ def handle_settings_callback(call):
                 
                 # Получаем общее количество участников группы
                 try:
-                    chat_members_count = bot_instance.get_chat_member_count(chat_id)
+                    chat_members_count = bot.get_chat_member_count(chat_id)
                     # Вычитаем бота из общего количества
                     total_participants = max(1, chat_members_count - 1)  # Минимум 1, чтобы избежать деления на 0
                 except Exception as e:
                     logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить количество участников чата: {e}")
-                    bot_instance.answer_callback_query(call.id, "Ошибка при получении информации о чате", show_alert=True)
+                    bot.answer_callback_query(call.id, "Ошибка при получении информации о чате", show_alert=True)
                     return
                 
                 with db_lock:
@@ -427,7 +425,7 @@ def handle_settings_callback(call):
                 # Проверяем, что не менее 65% участников активны
                 required_participants = int(total_participants * 0.65)
                 if active_participants < required_participants:
-                    bot_instance.answer_callback_query(
+                    bot.answer_callback_query(
                         call.id,
                         f"Для игры в кубик нужно не менее 65% активных участников ({required_participants} из {total_participants}). Сейчас активных: {active_participants}.",
                         show_alert=True
@@ -443,7 +441,7 @@ def handle_settings_callback(call):
                 text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
                 text += f"⏳ Осталось бросить кубик: {active_participants} участник(ов)"
                 
-                sent_msg = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 
                 # Инициализируем состояние игры для примера события
                 if chat_id not in dice_game_state:
@@ -471,7 +469,7 @@ def handle_settings_callback(call):
                 conn.commit()
             
             status_text = "включены" if new_value == 'true' else "выключены"
-            bot_instance.answer_callback_query(call.id, f"Случайные события {status_text}")
+            bot.answer_callback_query(call.id, f"Случайные события {status_text}")
             
             # Обновляем сообщение
             markup = InlineKeyboardMarkup(row_width=1)
@@ -483,7 +481,7 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 f"🎲 <b>Случайные события</b>\n\n"
                 f"Текущий статус: <b>{status_text}</b>\n\n"
                 f"Случайные события включают:\n"
@@ -506,7 +504,7 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("🇷🇸 Сербия (Europe/Belgrade)", callback_data="timezone:Serbia"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 f"🕐 <b>Выбор часового пояса</b>\n\n"
                 f"Текущий: <b>{current_tz_name}</b>\n\n"
                 f"Выберите часовой пояс. Все время будет отображаться и планироваться в выбранном часовом поясе.",
@@ -522,7 +520,7 @@ def handle_settings_callback(call):
             logger.info(f"[SETTINGS CALLBACK] Обработка action=edit для user_id={user_id}, chat_id={chat_id}")
             
             # Отвечаем на callback сразу
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             
             try:
                 from moviebot.bot.handlers.settings.edit import edit_command
@@ -530,14 +528,14 @@ def handle_settings_callback(call):
             except ImportError as e:
                 logger.error(f"[SETTINGS CALLBACK] Ошибка импорта edit_command: {e}", exc_info=True)
                 try:
-                    bot_instance.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /edit. Попробуйте вызвать её напрямую: /edit")
+                    bot.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /edit. Попробуйте вызвать её напрямую: /edit")
                 except:
                     pass
                 return
             except Exception as e:
                 logger.error(f"[SETTINGS CALLBACK] Неожиданная ошибка при импорте edit_command: {e}", exc_info=True)
                 try:
-                    bot_instance.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /edit напрямую")
+                    bot.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /edit напрямую")
                 except:
                     pass
                 return
@@ -562,7 +560,7 @@ def handle_settings_callback(call):
                 
                 # Удаляем сообщение после успешного выполнения команды
                 try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    bot.delete_message(chat_id, call.message.message_id)
                     logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено после выполнения команды")
                 except Exception as e:
                     logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение после выполнения: {e}")
@@ -570,11 +568,11 @@ def handle_settings_callback(call):
                 logger.error(f"[SETTINGS CALLBACK] Ошибка при вызове edit_command: {e}", exc_info=True)
                 # Удаляем сообщение даже при ошибке
                 try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    bot.delete_message(chat_id, call.message.message_id)
                 except:
                     pass
                 try:
-                    bot_instance.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /edit. Попробуйте вызвать её напрямую: /edit")
+                    bot.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /edit. Попробуйте вызвать её напрямую: /edit")
                 except:
                     pass
             return
@@ -584,7 +582,7 @@ def handle_settings_callback(call):
             logger.info(f"[SETTINGS CALLBACK] Обработка action=clean для user_id={user_id}, chat_id={chat_id}")
             
             # Отвечаем на callback сразу
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             
             try:
                 from moviebot.bot.handlers.settings.clean import clean_command
@@ -592,14 +590,14 @@ def handle_settings_callback(call):
             except ImportError as e:
                 logger.error(f"[SETTINGS CALLBACK] Ошибка импорта clean_command: {e}", exc_info=True)
                 try:
-                    bot_instance.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /clean. Попробуйте вызвать её напрямую: /clean")
+                    bot.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /clean. Попробуйте вызвать её напрямую: /clean")
                 except:
                     pass
                 return
             except Exception as e:
                 logger.error(f"[SETTINGS CALLBACK] Неожиданная ошибка при импорте clean_command: {e}", exc_info=True)
                 try:
-                    bot_instance.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /clean напрямую")
+                    bot.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /clean напрямую")
                 except:
                     pass
                 return
@@ -624,7 +622,7 @@ def handle_settings_callback(call):
                 
                 # Удаляем сообщение после успешного выполнения команды
                 try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    bot.delete_message(chat_id, call.message.message_id)
                     logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено после выполнения команды")
                 except Exception as e:
                     logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение после выполнения: {e}")
@@ -632,11 +630,11 @@ def handle_settings_callback(call):
                 logger.error(f"[SETTINGS CALLBACK] Ошибка при вызове clean_command: {e}", exc_info=True)
                 # Удаляем сообщение даже при ошибке
                 try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    bot.delete_message(chat_id, call.message.message_id)
                 except:
                     pass
                 try:
-                    bot_instance.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /clean. Попробуйте вызвать её напрямую: /clean")
+                    bot.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /clean. Попробуйте вызвать её напрямую: /clean")
                 except:
                     pass
             return
@@ -646,7 +644,7 @@ def handle_settings_callback(call):
             logger.info(f"[SETTINGS CALLBACK] Обработка action=join для user_id={user_id}, chat_id={chat_id}")
             
             # Отвечаем на callback сразу
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             
             try:
                 from moviebot.bot.handlers.settings.join import join_command
@@ -654,14 +652,14 @@ def handle_settings_callback(call):
             except ImportError as e:
                 logger.error(f"[SETTINGS CALLBACK] Ошибка импорта join_command: {e}", exc_info=True)
                 try:
-                    bot_instance.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /join. Попробуйте вызвать её напрямую: /join")
+                    bot.send_message(chat_id, "❌ Ошибка: не удалось загрузить команду /join. Попробуйте вызвать её напрямую: /join")
                 except:
                     pass
                 return
             except Exception as e:
                 logger.error(f"[SETTINGS CALLBACK] Неожиданная ошибка при импорте join_command: {e}", exc_info=True)
                 try:
-                    bot_instance.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /join напрямую")
+                    bot.send_message(chat_id, "❌ Ошибка при загрузке команды. Попробуйте вызвать /join напрямую")
                 except:
                     pass
                 return
@@ -686,7 +684,7 @@ def handle_settings_callback(call):
                 
                 # Удаляем сообщение после успешного выполнения команды
                 try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    bot.delete_message(chat_id, call.message.message_id)
                     logger.info(f"[SETTINGS CALLBACK] Сообщение {call.message.message_id} удалено после выполнения команды")
                 except Exception as e:
                     logger.warning(f"[SETTINGS CALLBACK] Не удалось удалить сообщение после выполнения: {e}")
@@ -694,11 +692,11 @@ def handle_settings_callback(call):
                 logger.error(f"[SETTINGS CALLBACK] Ошибка при вызове join_command: {e}", exc_info=True)
                 # Удаляем сообщение даже при ошибке
                 try:
-                    bot_instance.delete_message(chat_id, call.message.message_id)
+                    bot.delete_message(chat_id, call.message.message_id)
                 except:
                     pass
                 try:
-                    bot_instance.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /join. Попробуйте вызвать её напрямую: /join")
+                    bot.send_message(chat_id, "❌ Произошла ошибка при выполнении команды /join. Попробуйте вызвать её напрямую: /join")
                 except:
                     pass
             return
@@ -731,7 +729,7 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("👥 Участие", callback_data="settings:join"))
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 f"⚙️ <b>Настройки</b>\n\n"
                 f"Выберите, что хотите настроить:",
                 call.message.chat.id,
@@ -746,7 +744,7 @@ def handle_settings_callback(call):
             with db_lock:
                 cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
                 conn.commit()
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 "✅ Реакции сброшены к значению по умолчанию (✅)",
                 call.message.chat.id,
                 call.message.message_id,
@@ -767,7 +765,7 @@ def handle_settings_callback(call):
             }
             
             mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 f"⚙️ <b>Настройки реакций</b>\n\n"
                 f"📝 Поставьте выбранный эмодзи в ответ на это сообщение.\n\n"
                 f"Новые реакции будут {mode_text}.",
@@ -797,7 +795,7 @@ def handle_settings_callback(call):
                 current = notify_settings.get('separate_weekdays', 'true')
                 new_value = 'false' if current == 'true' else 'true'
                 set_notification_setting(chat_id, 'notify_separate_weekdays', new_value)
-                bot_instance.answer_callback_query(call.id, f"Разделение будни/выходные {'включено' if new_value == 'true' else 'выключено'}")
+                bot.answer_callback_query(call.id, f"Разделение будни/выходные {'включено' if new_value == 'true' else 'выключено'}")
                 # Возвращаемся к меню настроек напоминаний
                 action = "notifications"
                 # Рекурсивно вызываем обработчик для обновления меню
@@ -827,7 +825,7 @@ def handle_settings_callback(call):
                 text += f"Текущая настройка: <b>{ticket_text}</b>\n\n"
                 text += f"Выберите, когда присылать билеты:"
                 
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     text,
                     call.message.chat.id,
                     call.message.message_id,
@@ -848,7 +846,7 @@ def handle_settings_callback(call):
                 else:
                     ticket_text = f"За {minutes} минут"
                 
-                bot_instance.answer_callback_query(call.id, f"Билеты: {ticket_text}")
+                bot.answer_callback_query(call.id, f"Билеты: {ticket_text}")
                 # Возвращаемся к меню настроек напоминаний
                 call.data = "settings:notifications"
                 handle_settings_callback(call)
@@ -876,7 +874,7 @@ def handle_settings_callback(call):
                     text += f"⏰ Время: <b>{home_weekday}</b>\n"
                 text += f"\nОтправьте время в формате ЧЧ:ММ (например, 19:00 или 09:00)"
                 
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     text,
                     call.message.chat.id,
                     call.message.message_id,
@@ -898,8 +896,8 @@ def handle_settings_callback(call):
                 user_settings_state[user_id]['waiting_notify_time'] = f'home_{time_type}'
                 user_settings_state[user_id]['notify_separate'] = True
                 
-                bot_instance.answer_callback_query(call.id)
-                bot_instance.edit_message_text(
+                bot.answer_callback_query(call.id)
+                bot.edit_message_text(
                     f"🏠 <b>Настройка времени для домашнего просмотра</b>\n\n"
                     f"📅 {'Будни' if time_type == 'weekday' else 'Выходные'}\n\n"
                     f"Отправьте время в формате ЧЧ:ММ (например, 19:00 или 09:00)",
@@ -931,7 +929,7 @@ def handle_settings_callback(call):
                     text += f"⏰ Время: <b>{cinema_weekday}</b>\n"
                 text += f"\nОтправьте время в формате ЧЧ:ММ (например, 09:00)"
                 
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     text,
                     call.message.chat.id,
                     call.message.message_id,
@@ -952,8 +950,8 @@ def handle_settings_callback(call):
                 user_settings_state[user_id]['waiting_notify_time'] = f'cinema_{time_type}'
                 user_settings_state[user_id]['notify_separate'] = True
                 
-                bot_instance.answer_callback_query(call.id)
-                bot_instance.edit_message_text(
+                bot.answer_callback_query(call.id)
+                bot.edit_message_text(
                     f"🎬 <b>Настройка времени для просмотра в кино</b>\n\n"
                     f"📅 {'Будни' if time_type == 'weekday' else 'Выходные'}\n\n"
                     f"Отправьте время в формате ЧЧ:ММ (например, 09:00)",
@@ -1007,7 +1005,7 @@ def handle_settings_callback(call):
                 text += "• <b>Премьеры в кино</b> — напоминание о премьерах, если давно не добавляли фильмы в кино\n"
                 text += "• <b>Случайные события</b> — все случайные события (выбор участника, игра в кубик и т.д.)"
                 
-                bot_instance.edit_message_text(
+                bot.edit_message_text(
                     text,
                     call.message.chat.id,
                     call.message.message_id,
@@ -1018,24 +1016,24 @@ def handle_settings_callback(call):
         
         logger.warning(f"[SETTINGS CALLBACK] Необработанное действие: {action}, callback_data={call.data}")
         try:
-            bot_instance.answer_callback_query(call.id, f"Действие '{action}' будет реализовано позже", show_alert=True)
+            bot.answer_callback_query(call.id, f"Действие '{action}' будет реализовано позже", show_alert=True)
         except:
             pass
     except Exception as e:
         logger.error(f"[SETTINGS CALLBACK] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
     finally:
         logger.info(f"[SETTINGS CALLBACK] ===== КОНЕЦ ОБРАБОТКИ =====")
 
 
-@bot_instance.callback_query_handler(func=lambda call: call.data.startswith("timezone:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("timezone:"))
 def handle_timezone_callback(call):
     """Обработчик выбора часового пояса"""
     try:
-        bot_instance.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         timezone_name = call.data.split(":", 1)[1]  # "Moscow" или "Serbia"
@@ -1045,7 +1043,7 @@ def handle_timezone_callback(call):
             tz_obj = pytz.timezone('Europe/Moscow' if timezone_name == "Moscow" else 'Europe/Belgrade')
             current_time = datetime.now(tz_obj).strftime('%H:%M')
             
-            bot_instance.edit_message_text(
+            bot.edit_message_text(
                 f"✅ Часовой пояс установлен: <b>{tz_display}</b>\n\n"
                 f"Текущее время: <b>{current_time}</b>\n\n"
                 f"Все время будет отображаться и планироваться в часовом поясе {tz_display}.\n"
@@ -1098,7 +1096,7 @@ def handle_timezone_callback(call):
                     # Импортируем process_plan из handlers/plan
                     from moviebot.bot.handlers.plan import process_plan
                     # Вызываем process_plan с сохраненными данными
-                    result = process_plan(bot_instance, user_id, chat_id_from_state, link, plan_type, pending_plan_dt, pending_message_date_utc)
+                    result = process_plan(bot, user_id, chat_id_from_state, link, plan_type, pending_plan_dt, pending_message_date_utc)
                     if result:
                         # Очищаем сохраненные данные
                         if 'pending_text' in state:
@@ -1114,11 +1112,11 @@ def handle_timezone_callback(call):
                 else:
                     logger.warning(f"[TIMEZONE CALLBACK] Недостаточно данных для продолжения планирования: link={link}, plan_type={plan_type}, pending_plan_dt={pending_plan_dt}")
         else:
-            bot_instance.answer_callback_query(call.id, "Ошибка сохранения часового пояса", show_alert=True)
+            bot.answer_callback_query(call.id, "Ошибка сохранения часового пояса", show_alert=True)
     except Exception as e:
         logger.error(f"[TIMEZONE CALLBACK] Ошибка: {e}", exc_info=True)
         try:
-            bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 

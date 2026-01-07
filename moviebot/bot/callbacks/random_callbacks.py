@@ -4,7 +4,6 @@
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot as bot_instance
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.states import user_random_state
 from moviebot.utils.helpers import has_recommendations_access
@@ -33,7 +32,7 @@ def register_random_callbacks(bot):
                 has_rec_access = has_recommendations_access(chat_id, user_id)
                 logger.info(f"[RANDOM CALLBACK] Mode {mode} requires recommendations access: {has_rec_access}")
                 if not has_rec_access:
-                    bot_instance.answer_callback_query(
+                    bot.answer_callback_query(
                         call.id, 
                         "❌ Этот режим доступен только с подпиской на рекомендации. Используйте /payment для оформления подписки.", 
                         show_alert=True
@@ -63,8 +62,8 @@ def register_random_callbacks(bot):
                     markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
                     markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="rand_mode:back"))
                     
-                    bot_instance.answer_callback_query(call.id)
-                    bot_instance.edit_message_text(
+                    bot.answer_callback_query(call.id)
+                    bot.edit_message_text(
                         "📥 <b>Загрузите ваши оценки из базы Кинопоиска</b>\n\n"
                         "Для использования режима \"По моим оценкам\" необходимо импортировать ваши оценки с Кинопоиска.",
                         chat_id,
@@ -76,7 +75,7 @@ def register_random_callbacks(bot):
             
             if user_id not in user_random_state:
                 logger.error(f"[RANDOM CALLBACK] State not found for user_id={user_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
                 return
             
             user_random_state[user_id]['mode'] = mode
@@ -256,9 +255,9 @@ def register_random_callbacks(bot):
                 markup.add(InlineKeyboardButton("🎬 Фильм и Сериал", callback_data="rand_content_type:ALL"))
                 markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="rand_mode:back"))
                 
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 text = f"{mode_description}\n\n🎬 <b>Шаг 1/3: Выберите тип контента</b>"
-                bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[RANDOM CALLBACK] ✅ Mode kinopoisk selected, moving to content type selection, user_id={user_id}")
                 return
             
@@ -269,19 +268,19 @@ def register_random_callbacks(bot):
                     markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
             
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             # Для режимов group_votes показываем Шаг 1/2, для остальных - Шаг 1/4
             if mode == 'group_votes':
                 step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
             else:
                 step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
             text = f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько или пропустить)"
-            bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             logger.info(f"[RANDOM CALLBACK] ✅ Mode selected: {mode}, moving to period selection, user_id={user_id}")
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in random_mode_handler: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
     
@@ -305,10 +304,10 @@ def register_random_callbacks(bot):
                     'group_votes': 'Подключить расширенные рекомендации можно в /payment (💳 Оплата)'
                 }
                 message = mode_messages.get(mode, 'Подключить расширенные рекомендации можно в /payment (💳 Оплата)')
-                bot_instance.answer_callback_query(call.id, message, show_alert=True)
+                bot.answer_callback_query(call.id, message, show_alert=True)
             else:
                 # Режим заблокирован по другим причинам (недостаточно оценок)
-                bot_instance.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
+                bot.answer_callback_query(call.id, "🔒 Этот режим пока недоступен", show_alert=True)
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in random_mode_locked_handler: {e}", exc_info=True)
     

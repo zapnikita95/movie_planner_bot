@@ -9,7 +9,6 @@ import pytz
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-from moviebot.bot.bot_init import bot as bot_instance, scheduler
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_watched_emojis, get_watched_custom_emoji_ids
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
@@ -24,16 +23,16 @@ conn = get_db_connection()
 cursor = get_db_cursor()
 
 
-def register_series_callbacks(bot_instance):
+def register_series_callbacks(bot):
     """Регистрирует callback handlers для сериалов"""
     
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
     def series_track_callback(call):
         """Обработчик для отметки сезонов/серий как просмотренных"""
         try:
             # Пытаемся ответить на callback query, но не падаем, если query истек
             try:
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
             except Exception as e:
                 logger.warning(f"[SERIES TRACK] Не удалось ответить на callback query (возможно, истек): {e}")
             
@@ -47,7 +46,7 @@ def register_series_callbacks(bot_instance):
             # Проверяем доступ к функциям уведомлений
             if not has_notifications_access(chat_id, user_id):
                 logger.warning(f"[SERIES TRACK] Нет доступа: user_id={user_id}, chat_id={chat_id}")
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id, 
                     "🔒 Функционал можно подключить через /payment", 
                     show_alert=True
@@ -60,26 +59,26 @@ def register_series_callbacks(bot_instance):
             info = extract_movie_info(link)
             if not info:
                 logger.error(f"[SERIES TRACK] Не удалось получить информацию о сериале для kp_id={kp_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
                 return
             
             film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
             if not film_id:
                 logger.error(f"[SERIES TRACK] Не удалось добавить сериал в базу для kp_id={kp_id}")
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
                 return
             
             title = info.get('title', 'Сериал')
             
             # Если сериал был добавлен, отправляем уведомление
             if was_inserted:
-                bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                bot.send_message(chat_id, f"✅ Сериал добавлен в базу!")
                 logger.info(f"[SERIES TRACK] Сериал добавлен в базу: film_id={film_id}, title={title}")
             
             # Получаем сезоны из API
             seasons_data = get_seasons_data(kp_id)
             if not seasons_data:
-                bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сезонах", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сезонах", show_alert=True)
                 return
             
             # Показываем меню выбора сезона с отметками статуса
@@ -268,9 +267,9 @@ def register_series_callbacks(bot_instance):
                     }
                     if reply_markup_json:
                         params['reply_markup'] = reply_markup_json
-                    bot_instance.api_call('editMessageText', params)
+                    bot.api_call('editMessageText', params)
                 else:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         text_msg,
                         chat_id, message_id, reply_markup=markup, parse_mode='HTML'
                     )
@@ -279,22 +278,22 @@ def register_series_callbacks(bot_instance):
                 logger.error(f"[SERIES TRACK] Ошибка обновления сообщения: {e}", exc_info=True)
                 # При ошибке отправляем новое сообщение
                 if message_thread_id:
-                    bot_instance.send_message(chat_id, text_msg, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                    bot.send_message(chat_id, text_msg, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
                 else:
-                    bot_instance.send_message(chat_id, text_msg, reply_markup=markup, parse_mode='HTML')
-            bot_instance.answer_callback_query(call.id)
+                    bot.send_message(chat_id, text_msg, reply_markup=markup, parse_mode='HTML')
+            bot.answer_callback_query(call.id)
         except Exception as e:
             logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
     
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_season:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season:"))
     def series_season_callback(call):
         """Обработчик для выбора сезона и отметки эпизодов"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             
             parts = call.data.split(":")
             kp_id = parts[1]
@@ -313,17 +312,17 @@ def register_series_callbacks(bot_instance):
             # Используем функцию show_episodes_page для отображения эпизодов
             from moviebot.bot.handlers.seasons import show_episodes_page
             if show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=message_id, message_thread_id=message_thread_id):
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
             else:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка загрузки эпизодов", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка загрузки эпизодов", show_alert=True)
         except Exception as e:
             logger.error(f"[SERIES SEASON] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
     
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_subscribe:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_subscribe:"))
     def series_subscribe_callback(call):
         """Обработчик подписки на новые серии сериала"""
         user_id = call.from_user.id
@@ -331,7 +330,7 @@ def register_series_callbacks(bot_instance):
         
         # Сразу отвечаем на callback, чтобы убрать "крутилку"
         try:
-            bot_instance.answer_callback_query(call.id, text="⏳ Обрабатываю...")
+            bot.answer_callback_query(call.id, text="⏳ Обрабатываю...")
             logger.info(f"[SERIES SUBSCRIBE] answer_callback_query вызван сразу, callback_id={call.id}")
         except Exception as e:
             logger.warning(f"[SERIES SUBSCRIBE] Не удалось вызвать answer_callback_query сразу: {e}")
@@ -346,7 +345,7 @@ def register_series_callbacks(bot_instance):
             # Проверяем доступ к функциям уведомлений
             if not has_notifications_access(chat_id, user_id):
                 logger.warning(f"[SERIES SUBSCRIBE] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}")
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id, 
                     "🔒 Функционал можно подключить через /payment", 
                     show_alert=True
@@ -373,12 +372,12 @@ def register_series_callbacks(bot_instance):
                         logger.info(f"[SERIES SUBSCRIBE] extract_movie_info завершен, info={'получен' if info else 'None'}")
                     except Exception as api_e:
                         logger.error(f"[SERIES SUBSCRIBE] Ошибка в extract_movie_info: {api_e}", exc_info=True)
-                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при получении информации о сериале", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Ошибка при получении информации о сериале", show_alert=True)
                         return
                     
                     if not info:
                         logger.error(f"[SERIES SUBSCRIBE] Не удалось получить информацию о сериале для kp_id={kp_id}")
-                        bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
                         return
                     
                     logger.info(f"[SERIES SUBSCRIBE] Информация получена, title={info.get('title', 'N/A')}, is_series={info.get('is_series', False)}")
@@ -388,11 +387,11 @@ def register_series_callbacks(bot_instance):
                         logger.info(f"[SERIES SUBSCRIBE] ensure_movie_in_database завершен: film_id={film_id}, was_inserted={was_inserted}")
                     except Exception as db_e:
                         logger.error(f"[SERIES SUBSCRIBE] Ошибка в ensure_movie_in_database: {db_e}", exc_info=True)
-                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
                         return
                     if not film_id:
                         logger.error(f"[SERIES SUBSCRIBE] Не удалось добавить сериал в базу для kp_id={kp_id}")
-                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
                         return
                     
                     title = info.get('title', 'Сериал')
@@ -400,7 +399,7 @@ def register_series_callbacks(bot_instance):
                     
                     # Если сериал был добавлен, отправляем уведомление
                     if was_inserted:
-                        bot_instance.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                        bot.send_message(chat_id, f"✅ Сериал добавлен в базу!")
                         logger.info(f"[SERIES SUBSCRIBE] Уведомление об добавлении отправлено")
             
             # Добавление подписки
@@ -533,7 +532,7 @@ def register_series_callbacks(bot_instance):
                     message_thread_id = call.message.message_thread_id
                 
                 if message_thread_id:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         message_thread_id=message_thread_id,
@@ -542,7 +541,7 @@ def register_series_callbacks(bot_instance):
                         parse_mode='HTML'
                     )
                 else:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=new_text,
@@ -553,29 +552,29 @@ def register_series_callbacks(bot_instance):
             
             except telebot.apihelper.ApiTelegramException as tele_e:
                 logger.error(f"[SERIES SUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
-                bot_instance.send_message(chat_id, f"🔔 Подписка добавлена на {title}, но карточка не обновилась. Переоткройте.")
+                bot.send_message(chat_id, f"🔔 Подписка добавлена на {title}, но карточка не обновилась. Переоткройте.")
             
             except Exception as e:
                 logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления: {e}", exc_info=True)
-                bot_instance.send_message(chat_id, f"🔔 Подписка добавлена на {title}, но карточка не обновилась. Переоткройте.")
+                bot.send_message(chat_id, f"🔔 Подписка добавлена на {title}, но карточка не обновилась. Переоткройте.")
         
         except Exception as e:
             logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ошибка в хэндлере: {e}", exc_info=True)
             try:
-                bot_instance.send_message(chat_id, "🔔 Подписка добавлена с ошибкой. Попробуйте позже.")
+                bot.send_message(chat_id, "🔔 Подписка добавлена с ошибкой. Попробуйте позже.")
             except:
                 pass
         
         finally:
             # answer_callback_query уже вызван в начале, но вызываем еще раз для финального уведомления
             try:
-                bot_instance.answer_callback_query(call.id, text="🔔 Подписка добавлена", show_alert=False)
+                bot.answer_callback_query(call.id, text="🔔 Подписка добавлена", show_alert=False)
                 logger.info(f"[SERIES SUBSCRIBE] Финальный answer_callback_query вызван с id={call.id}")
             except Exception as e:
                 logger.warning(f"[SERIES SUBSCRIBE] Не удалось вызвать финальный answer_callback_query: {e}")
             logger.info(f"[SERIES SUBSCRIBE] ===== END: callback_id={call.id}")
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_unsubscribe:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_unsubscribe:"))
     def series_unsubscribe_callback(call):
         """Обработчик отписки от новых серий сериала"""
         user_id = call.from_user.id
@@ -591,7 +590,7 @@ def register_series_callbacks(bot_instance):
             # Проверяем доступ к функциям уведомлений
             if not has_notifications_access(chat_id, user_id):
                 logger.warning(f"[SERIES UNSUBSCRIBE] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}")
-                bot_instance.answer_callback_query(
+                bot.answer_callback_query(
                     call.id, 
                     "🔒 Функционал можно подключить через /payment", 
                     show_alert=True
@@ -700,7 +699,7 @@ def register_series_callbacks(bot_instance):
                     message_thread_id = call.message.message_thread_id
                 
                 if message_thread_id:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         message_thread_id=message_thread_id,
@@ -709,7 +708,7 @@ def register_series_callbacks(bot_instance):
                         parse_mode='HTML'
                     )
                 else:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=message_id,
                         text=new_text,
@@ -720,31 +719,31 @@ def register_series_callbacks(bot_instance):
             
             except telebot.apihelper.ApiTelegramException as tele_e:
                 logger.error(f"[SERIES UNSUBSCRIBE] Telegram ошибка: {tele_e}", exc_info=True)
-                bot_instance.send_message(chat_id, f"🔕 Отписка выполнена от {title}, но карточка не обновилась. Переоткройте.")
+                bot.send_message(chat_id, f"🔕 Отписка выполнена от {title}, но карточка не обновилась. Переоткройте.")
             
             except Exception as e:
                 logger.error(f"[SERIES UNSUBSCRIBE] Ошибка обновления: {e}", exc_info=True)
-                bot_instance.send_message(chat_id, f"🔕 Отписка выполнена от {title}, но карточка не обновилась. Переоткройте.")
+                bot.send_message(chat_id, f"🔕 Отписка выполнена от {title}, но карточка не обновилась. Переоткройте.")
         
         except Exception as e:
             logger.error(f"[SERIES UNSUBSCRIBE] КРИТИЧЕСКАЯ ошибка в хэндлере: {e}", exc_info=True)
             try:
-                bot_instance.send_message(chat_id, "🔕 Отписка выполнена с ошибкой. Попробуйте позже.")
+                bot.send_message(chat_id, "🔕 Отписка выполнена с ошибкой. Попробуйте позже.")
             except:
                 pass
         
         finally:
             try:
-                bot_instance.answer_callback_query(call.id, text="🔕 Отписка выполнена")
+                bot.answer_callback_query(call.id, text="🔕 Отписка выполнена")
                 logger.info(f"[SERIES UNSUBSCRIBE] answer_callback_query вызван с id={call.id}")
             except Exception as e:
                 logger.error(f"[ANSWER CALLBACK] Ошибка: {e}")
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_locked:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_locked:"))
     def series_locked_callback(call):
         """Обработчик для заблокированных функций сериалов (нет доступа)"""
         try:
-            bot_instance.answer_callback_query(
+            bot.answer_callback_query(
                 call.id,
                 "🔒 Функционал можно подключить через /payment",
                 show_alert=True
@@ -752,11 +751,11 @@ def register_series_callbacks(bot_instance):
         except Exception as e:
             logger.error(f"[SERIES LOCKED] Ошибка: {e}", exc_info=True)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:"))
     def handle_episode_toggle(call):
         """Обработчик переключения статуса просмотра эпизода"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             # Формат: series_episode:{kp_id}:{season_num}:{ep_num}
             parts = call.data.split(":")
             if len(parts) < 4:
@@ -790,10 +789,10 @@ def register_series_callbacks(bot_instance):
                     if was_inserted:
                         logger.info(f"[EPISODE TOGGLE] Сериал добавлен в базу при отметке эпизода: kp_id={kp_id}, film_id={film_id}")
                     if not film_id:
-                        bot_instance.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                        bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
                         return
                 else:
-                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
                     return
             
             # Проверяем текущий статус и переключаем
@@ -845,15 +844,15 @@ def register_series_callbacks(bot_instance):
         except Exception as e:
             logger.error(f"[EPISODE TOGGLE] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
     def handle_season_all_toggle(call):
         """Обработчик отметки всех эпизодов сезона как просмотренных"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             parts = call.data.split(":")
             if len(parts) < 3:
                 return
@@ -870,7 +869,7 @@ def register_series_callbacks(bot_instance):
                 cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                 row = cursor.fetchone()
                 if not row:
-                    bot_instance.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
                     return
                 
                 film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -878,12 +877,12 @@ def register_series_callbacks(bot_instance):
                 # Получаем эпизоды сезона
                 seasons_data = get_seasons_data(kp_id)
                 if not seasons_data:
-                    bot_instance.answer_callback_query(call.id, "❌ Не удалось получить данные о сезонах", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Не удалось получить данные о сезонах", show_alert=True)
                     return
                 
                 season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
                 if not season:
-                    bot_instance.answer_callback_query(call.id, "❌ Сезон не найден", show_alert=True)
+                    bot.answer_callback_query(call.id, "❌ Сезон не найден", show_alert=True)
                     return
                 
                 episodes = season.get('episodes', [])
@@ -917,15 +916,15 @@ def register_series_callbacks(bot_instance):
         except Exception as e:
             logger.error(f"[SEASON ALL] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("episodes_page:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_page:"))
     def handle_episodes_page_navigation(call):
         """Обработчик навигации по страницам эпизодов"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             parts = call.data.split(":")
             if len(parts) < 4:
                 return
@@ -946,15 +945,15 @@ def register_series_callbacks(bot_instance):
         except Exception as e:
             logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_seasons:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_seasons:"))
     def handle_episodes_back_to_seasons(call):
         """Обработчик возврата к списку сезонов из эпизодов"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             kp_id = call.data.split(":")[1]
             chat_id = call.message.chat.id
             user_id = call.from_user.id
@@ -964,17 +963,17 @@ def register_series_callbacks(bot_instance):
         except Exception as e:
             logger.error(f"[EPISODES BACK] Ошибка: {e}", exc_info=True)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_watched_list:") or call.data.startswith("episodes_back_to_series_list:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_watched_list:") or call.data.startswith("episodes_back_to_series_list:"))
     def handle_episodes_back_to_list(call):
         """Обработчик возврата к списку сериалов из эпизодов"""
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             # TODO: Вызвать функцию показа списка сериалов
             logger.info(f"[EPISODES BACK] Возврат к списку сериалов")
         except Exception as e:
             logger.error(f"[EPISODES BACK] Ошибка: {e}", exc_info=True)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
     def rate_film_callback(call):
         """Обработчик кнопки 'Оценить'"""
         try:
@@ -1000,7 +999,7 @@ def register_series_callbacks(bot_instance):
                 title = info.get('title', 'Фильм') if info else 'Фильм'
                 
                 # Отправляем сообщение с просьбой оценить
-                msg = bot_instance.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.\n\nФильм будет добавлен в базу при успешной оценке.", parse_mode='Markdown')
+                msg = bot.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.\n\nФильм будет добавлен в базу при успешной оценке.", parse_mode='Markdown')
                 
                 # Добавляем фильм в базу ПРЕДВАРИТЕЛЬНО, чтобы получить film_id
                 if info:
@@ -1017,7 +1016,7 @@ def register_series_callbacks(bot_instance):
                     # rating_messages[msg.message_id] = f"kp_id:{kp_id}"  # закомментировано, теперь сохраняем film_id  # fallback на старый способ
                     logger.warning(f"[RATE FILM] Не удалось добавить фильм в базу заранее, используем kp_id fallback")
                 
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 return
             
             # Получаем название фильма для отображения
@@ -1039,14 +1038,14 @@ def register_series_callbacks(bot_instance):
                 
                 if existing_rating:
                     rating = existing_rating.get('rating') if isinstance(existing_rating, dict) else existing_rating[0]
-                    msg = bot_instance.reply_to(call.message, f"✅ Вы уже оценили этот фильм: {rating}/10\n\nЧтобы изменить оценку, ответьте на это сообщение числом от 1 до 10.")
+                    msg = bot.reply_to(call.message, f"✅ Вы уже оценили этот фильм: {rating}/10\n\nЧтобы изменить оценку, ответьте на это сообщение числом от 1 до 10.")
                     # Добавляем сообщение в rating_messages, чтобы при ответе можно было найти film_id для изменения оценки
                     if msg:
                         rating_messages[msg.message_id] = film_id
                         logger.info(f"[RATE FILM] Сообщение {msg.message_id} добавлено в rating_messages для film_id={film_id} (изменение оценки)")
                 else:
                     # Отправляем сообщение с просьбой оценить и добавляем его в rating_messages
-                    msg = bot_instance.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.", parse_mode='Markdown')
+                    msg = bot.reply_to(call.message, f"💬 Чтобы оценить фильм *{title}*, ответьте на это сообщение числом от 1 до 10.", parse_mode='Markdown')
                     # Добавляем сообщение в rating_messages, чтобы при ответе можно было найти film_id
                     rating_messages[msg.message_id] = film_id
                     logger.info(f"[RATE FILM] Сообщение {msg.message_id} добавлено в rating_messages для film_id={film_id}")
@@ -1055,11 +1054,11 @@ def register_series_callbacks(bot_instance):
         finally:
             # ВСЕГДА отвечаем на callback!
             try:
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
             except Exception as answer_e:
                 logger.error(f"[RATE FILM] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
     def facts_callback(call):
         """Обработчик кнопки 'Интересные факты'"""
         try:
@@ -1072,16 +1071,16 @@ def register_series_callbacks(bot_instance):
             # Получаем факты
             facts = get_facts(kp_id)
             if facts:
-                bot_instance.send_message(chat_id, facts, parse_mode='HTML')
-                bot_instance.answer_callback_query(call.id, "Факты отправлены")
+                bot.send_message(chat_id, facts, parse_mode='HTML')
+                bot.answer_callback_query(call.id, "Факты отправлены")
             else:
-                bot_instance.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
+                bot.answer_callback_query(call.id, "Факты не найдены", show_alert=True)
         except Exception as e:
             logger.error(f"[FACTS] Ошибка: {e}", exc_info=True)
         finally:
             # ВСЕГДА отвечаем на callback!
             try:
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
             except Exception as answer_e:
                 logger.error(f"[FACTS] Не удалось ответить на callback: {answer_e}", exc_info=True)
 

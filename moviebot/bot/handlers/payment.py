@@ -10,8 +10,6 @@ from moviebot.database.db_operations import log_request, get_active_subscription
 
 logger = logging.getLogger(__name__)
 
-# Импортируем bot_instance для использования в функциях
-from moviebot.bot.bot_init import bot as bot_instance
 
 
 def payment_command(message):
@@ -31,24 +29,24 @@ def payment_command(message):
         text = "💳 <b>Оплата подписки</b>\n\n"
         text += "Выберите действие:"
         
-        bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
     except Exception as e:
         logger.error(f"❌ Ошибка в /payment: {e}", exc_info=True)
         try:
-            bot_instance.reply_to(message, "Произошла ошибка при обработке команды /payment")
+            bot.reply_to(message, "Произошла ошибка при обработке команды /payment")
         except:
             pass
 
 
-def register_payment_handlers(bot_instance):
+def register_\0(bot):
     """Регистрирует обработчики команды /payment"""
     
-    @bot_instance.message_handler(commands=['payment'])
+    @bot.message_handler(commands=['payment'])
     def _payment_command_handler(message):
         """Обертка для регистрации команды /payment"""
         payment_command(message)
 
-    @bot_instance.callback_query_handler(func=lambda call: call.data and (
+    @bot.callback_query_handler(func=lambda call: call.data and (
         call.data == "payment:active" or 
         call.data == "payment:tariffs" or 
         call.data == "payment:back" or 
@@ -60,7 +58,7 @@ def register_payment_handlers(bot_instance):
         """Обработчик callback для меню оплаты (active, tariffs, back, cancel)"""
         # Основные меню handlers остаются здесь, детальные обработчики в payment_callbacks.py
         try:
-            bot_instance.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             action = call.data.split(":", 1)[1]
@@ -72,9 +70,9 @@ def register_payment_handlers(bot_instance):
                 # Подтверждение получения напоминания о списании
                 try:
                     subscription_id = int(action.split(":")[1])
-                    bot_instance.answer_callback_query(call.id, "✅ Напоминание получено")
+                    bot.answer_callback_query(call.id, "✅ Напоминание получено")
                     try:
-                        bot_instance.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
                     except:
                         pass
                     logger.info(f"[PAYMENT REMINDER] Пользователь {user_id} подтвердил получение напоминания для подписки {subscription_id}")
@@ -100,7 +98,7 @@ def register_payment_handlers(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
                 
                 try:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         text,
                         call.message.chat.id,
                         call.message.message_id,
@@ -120,7 +118,7 @@ def register_payment_handlers(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
                 
                 try:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         "💰 <b>Тарифы</b>\n\nВыберите тип подписки:",
                         call.message.chat.id,
                         call.message.message_id,
@@ -143,7 +141,7 @@ def register_payment_handlers(bot_instance):
                 text += "Выберите действие:"
                 
                 try:
-                    bot_instance.edit_message_text(
+                    bot.edit_message_text(
                         text,
                         call.message.chat.id,
                         call.message.message_id,
@@ -159,7 +157,7 @@ def register_payment_handlers(bot_instance):
                 # Возврат к сообщению с кнопками оплаты после промокода
                 # Обработка полностью в payment_callbacks.py, здесь только отвечаем на callback
                 # чтобы избежать предупреждения
-                bot_instance.answer_callback_query(call.id)
+                bot.answer_callback_query(call.id)
                 # Передаем управление в payment_callbacks.py (он обработает этот callback)
                 return
             
@@ -177,6 +175,6 @@ def register_payment_handlers(bot_instance):
         except Exception as e:
             logger.error(f"[PAYMENT MENU] Ошибка: {e}", exc_info=True)
             try:
-                bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass

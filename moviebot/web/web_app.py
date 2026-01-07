@@ -79,38 +79,27 @@ def check_environment_variables():
 # Вызываем проверку при импорте модуля
 check_environment_variables()
 
-def create_web_app(bot_instance):
+def create_web_app(bot):
     """Создает Flask приложение с webhook обработчиками"""
     # КРИТИЧЕСКИ ВАЖНО: Проверяем, что это тот же экземпляр бота, что используется в обработчиках
     from moviebot.bot.bot_init import bot as bot_from_init
     
-    print(f"[WEB APP] bot_instance: {bot_instance}, id: {id(bot_instance)}", flush=True)
     print(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}", flush=True)
-    print(f"[WEB APP] bot_instance == bot_from_init: {bot_instance is bot_from_init}", flush=True)
-    logger.info(f"[WEB APP] bot_instance: {bot_instance}, id: {id(bot_instance)}")
     logger.info(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}")
-    logger.info(f"[WEB APP] bot_instance == bot_from_init: {bot_instance is bot_from_init}")
     
     # ВСЕГДА используем bot_from_init (тот, на котором зарегистрированы обработчики)
-    if bot_instance is not bot_from_init:
-        print("[WEB APP] ⚠️ ВНИМАНИЕ: bot_instance != bot_from_init! Используем bot_from_init", flush=True)
-        logger.warning("[WEB APP] ⚠️ ВНИМАНИЕ: bot_instance != bot_from_init! Используем bot_from_init")
     
     # ПЕРЕПРИСВАИВАЕМ — это ключевой момент
-    bot_instance = bot_from_init
-    print(f"[WEB APP] ✅ Используем bot_from_init: {bot_instance}, id: {id(bot_instance)}", flush=True)
-    logger.info(f"[WEB APP] ✅ Используем bot_from_init: {bot_instance}, id: {id(bot_instance)}")
     
     # Получаем ID бота
     try:
-        bot_info = bot_instance.get_me()
+        bot_info = bot.get_me()
         BOT_ID = bot_info.id
         logger.info(f"[WEB APP] ID бота: {BOT_ID}")
     except Exception as e:
         logger.warning(f"[WEB APP] Не удалось получить ID бота: {e}")
         BOT_ID = None
     
-    # === ВСЕ РОУТЫ ОПРЕДЕЛЯЕМ ТОЛЬКО ПОСЛЕ ПЕРЕПРИСВАИВАНИЯ bot_instance ===
     
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
@@ -204,14 +193,14 @@ def create_web_app(bot_instance):
                     
             # Проверка обработчиков
             print(f"[WEBHOOK] Проверка обработчиков перед process_new_updates", flush=True)
-            if hasattr(bot_instance, 'message_handlers'):
+            if hasattr(bot, 'message_handlers'):
                 print(f"[WEBHOOK] Первые 5 message handlers:", flush=True)
-                for i, handler in enumerate(bot_instance.message_handlers[:5]):
+                for i, handler in enumerate(bot.message_handlers[:5]):
                     print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
             
             # Основной вызов — теперь на правильном боте!
-            print(f"[WEBHOOK] Вызываем bot_instance.process_new_updates([update])", flush=True)
-            bot_instance.process_new_updates([update])
+            print(f"[WEBHOOK] Вызываем bot.process_new_updates([update])", flush=True)
+            bot.process_new_updates([update])
             print(f"[WEBHOOK] process_new_updates завершен", flush=True)
             logger.info("[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
             
@@ -890,10 +879,10 @@ def create_web_app(bot_instance):
                             # Отправляем сообщение
                             try:
                                 if markup:
-                                    result = bot_instance.send_message(chat_id, group_text, reply_markup=markup, parse_mode='HTML')
+                                    result = bot.send_message(chat_id, group_text, reply_markup=markup, parse_mode='HTML')
                                     logger.info(f"[YOOKASSA] ✅ Сообщение с кнопкой отправлено в группу {chat_id}, message_id={result.message_id if result else 'N/A'}")
                                 else:
-                                    result = bot_instance.send_message(chat_id, group_text, parse_mode='HTML')
+                                    result = bot.send_message(chat_id, group_text, parse_mode='HTML')
                                     logger.info(f"[YOOKASSA] ✅ Сообщение успешно отправлено в группу {chat_id}, user_id {user_id}, subscription_id {subscription_id}, message_id={result.message_id if result else 'N/A'}")
                             except Exception as send_error:
                                 logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в группу: {send_error}", exc_info=True)
@@ -921,7 +910,7 @@ def create_web_app(bot_instance):
                             private_text += "\nПриятного просмотра!"
                             
                             try:
-                                result = bot_instance.send_message(user_id, private_text, parse_mode='HTML')
+                                result = bot.send_message(user_id, private_text, parse_mode='HTML')
                                 logger.info(f"[YOOKASSA] ✅ Сообщение об успешной оплате отправлено в личку пользователю {user_id}, message_id={result.message_id if result else 'N/A'}")
                             except Exception as send_error:
                                 logger.error(f"[YOOKASSA] ❌ Ошибка отправки сообщения в личку пользователю {user_id}: {send_error}", exc_info=True)
@@ -1066,7 +1055,7 @@ def create_web_app(bot_instance):
                                 
                                 text += "\nПриятного просмотра!"
                                 
-                                bot_instance.send_message(target_chat_id, text, parse_mode='HTML')
+                                bot.send_message(target_chat_id, text, parse_mode='HTML')
                                 logger.info(f"[YOOKASSA] ✅ Сообщение отправлено для пользователя {user_id}, subscription_id {subscription_id}")
                                 
                             elif subscription_type == 'group':
@@ -1137,7 +1126,7 @@ def create_web_app(bot_instance):
                                 
                                 group_text += "\nПриятного просмотра!"
                                 
-                                bot_instance.send_message(chat_id, group_text, parse_mode='HTML')
+                                bot.send_message(chat_id, group_text, parse_mode='HTML')
                                 
                                 # Отправляем в личку
                                 private_text = "Спасибо за покупку! 🎉\n\n"
@@ -1159,7 +1148,7 @@ def create_web_app(bot_instance):
                                 
                                 private_text += "\nПриятного просмотра!"
                                 
-                                bot_instance.send_message(user_id, private_text, parse_mode='HTML')
+                                bot.send_message(user_id, private_text, parse_mode='HTML')
                                 logger.info(f"[YOOKASSA] ✅ Сообщения отправлены для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
                         except Exception as e:
                             logger.error(f"[YOOKASSA] Ошибка отправки сообщения для уже обработанного платежа: {e}", exc_info=True)
@@ -1233,7 +1222,7 @@ def create_web_app(bot_instance):
                                         text += "• Добавление билетов на сеансы и мероприятия\n"
                                         text += "• Настраиваемые уведомления с билетами перед мероприятием\n"
                                     
-                                    bot_instance.send_message(chat_id, text, parse_mode='HTML')
+                                    bot.send_message(chat_id, text, parse_mode='HTML')
                                     logger.info(f"[YOOKASSA] ✅ Сообщение отправлено для пользователя {user_id}, subscription_id {subscription_id_from_payment}")
                                 
                                 elif subscription_type == 'group':
@@ -1295,7 +1284,7 @@ def create_web_app(bot_instance):
                                     
                                     group_text += "\nСпасибо за покупку! 🎉"
                                     
-                                    bot_instance.send_message(chat_id, group_text, parse_mode='HTML')
+                                    bot.send_message(chat_id, group_text, parse_mode='HTML')
                                     
                                     # Отправляем в личку
                                     private_text = "Спасибо за подписку! Вот какой функционал вам теперь доступен:\n\n"
@@ -1307,7 +1296,7 @@ def create_web_app(bot_instance):
                                     
                                     private_text += "\n\nСпасибо за покупку! 🎉"
                                     
-                                    bot_instance.send_message(user_id, private_text, parse_mode='HTML')
+                                    bot.send_message(user_id, private_text, parse_mode='HTML')
                                     logger.info(f"[YOOKASSA] ✅ Сообщения отправлены для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id_from_payment}")
                         except Exception as e:
                             logger.error(f"[YOOKASSA] Ошибка отправки сообщения для существующей подписки: {e}", exc_info=True)
