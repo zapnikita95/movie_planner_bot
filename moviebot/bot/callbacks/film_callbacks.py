@@ -446,20 +446,43 @@ def plan_type_callback_fallback(call):
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith('plan_type:'))
 def handle_plan_type(call):
     try:
-        try:
-            try:
-                bot_instance.answer_callback_query(call.id, "Выбрано!")
-            except Exception as e:
-                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-        except Exception as e:
-            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+        bot_instance.answer_callback_query(call.id, "Выбрано!")
+    except Exception as e:
+        logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+
+    try:
         parts = call.data.split(':')
+        if len(parts) < 2:
+            logger.warning(f"[PLAN TYPE] Неправильный формат callback_data: {call.data}")
+            bot_instance.send_message(call.message.chat.id, "❌ Ошибка формата. Попробуйте заново.")
+            return
+
         plan_type = parts[1]  # 'home' или 'cinema'
-        kp_id = int(parts[2])
+        kp_id = None
+        
+        # Если есть третья часть — берём kp_id оттуда
+        if len(parts) >= 3 and parts[2]:
+            try:
+                kp_id = int(parts[2])
+                logger.info(f"[PLAN TYPE] kp_id взят из callback: {kp_id}")
+            except ValueError:
+                logger.warning(f"[PLAN TYPE] Некорректный kp_id в callback: {parts[2]}")
+        
+        # Если kp_id не в callback — пытаемся взять из состояния (если ранее сохранён)
+        if kp_id is None:
+            state = user_plan_state.get(call.from_user.id, {})
+            kp_id = state.get('kp_id')
+            if kp_id:
+                logger.info(f"[PLAN TYPE] kp_id взят из состояния: {kp_id}")
+            else:
+                logger.warning(f"[PLAN TYPE] kp_id не найден ни в callback, ни в состоянии: {call.data}")
+                bot_instance.send_message(call.message.chat.id, "❌ Фильм не определён. Начните планирование заново.")
+                return
+
         user_id = call.from_user.id
         chat_id = call.message.chat.id
 
-        # Ищем в БД link и film_id
+        # Ищем в БД link и film_id (твой код — ок)
         with db_semaphore:
             with db_lock:
                 cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
@@ -470,20 +493,21 @@ def handle_plan_type(call):
                 film_id = row[0] if not isinstance(row, dict) else row['id']
                 link = row[1] if not isinstance(row, dict) else row['link']
 
-        # Сохраняем состояние
+        # Сохраняем состояние с step=3 (число!)
         user_plan_state[user_id] = {
-            'step': 'date',
+            'step': 3,
             'plan_type': plan_type,
             'link': link,
             'kp_id': kp_id,
             'film_id': film_id
         }
+        logger.info(f"[PLAN TYPE] Состояние сохранено для user {user_id}: step=3, plan_type={plan_type}, kp_id={kp_id}")
 
-        # Можно delete_message предыдущее (с кнопками Дома/Кино), чтобы чат не засорять
+        # Удаляем сообщение с кнопками
         try:
             bot_instance.delete_message(chat_id, call.message.message_id)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"[PLAN TYPE] Не удалось удалить сообщение: {e}")
 
         bot_instance.send_message(
             chat_id,
@@ -493,13 +517,10 @@ def handle_plan_type(call):
     except Exception as e:
         logger.error(f"[PLAN TYPE] Ошибка: {e}", exc_info=True)
         try:
-            try:
-                bot_instance.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
-            except Exception as e:
-                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            bot_instance.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
         except Exception as e:
-            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-
+            logger.warning(f"[CALLBACK] Не удалось ответить на callback: {e}")
+            
 @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
 def show_film_description_callback(call):
     """Обработчик кнопки '◀️ Вернуться к описанию' - показывает описание фильма из БД без API запроса"""

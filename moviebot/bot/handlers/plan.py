@@ -918,18 +918,23 @@ def plan_type_callback(call):
             user_plan_state[user_id] = {
                 'step': 2,
                 'link': link,
-                'chat_id': chat_id
+                'chat_id': chat_id,
+                'kp_id': kp_id_str  # Сохраняем kp_id обязательно!
             }
             
             logger.info(f"[PLAN FROM ADDED] Состояние установлено: user_id={user_id}, state={user_plan_state[user_id]}")
             
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
-            markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
+            markup.add(
+                InlineKeyboardButton("Дома 🏠", callback_data=f"plan_type:home:{kp_id_str}"),
+                InlineKeyboardButton("В кино 🎥", callback_data=f"plan_type:cinema:{kp_id_str}")
+            )
             
             logger.info(f"[PLAN FROM ADDED] Отправка сообщения с выбором типа просмотра...")
-            bot_instance.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
+            prompt_msg = bot_instance.send_message(chat_id, "Где планируете смотреть?", reply_markup=markup)
+            # Если хочешь — сохрани prompt_message_id, но не обязательно
             logger.info(f"[PLAN FROM ADDED] Сообщение отправлено успешно")
+            
         except Exception as e:
             logger.error(f"[PLAN FROM ADDED] Ошибка: {e}", exc_info=True)
             try:
@@ -1049,15 +1054,37 @@ def get_plan_link_internal(message, state):
             del user_plan_state[user_id]
         return
     
+    # Извлекаем kp_id из link (поддержка film/ и series/)
+    kp_id = None
+    if 'kinopoisk.ru' in link:
+        import re
+        match = re.search(r'/film/(\d+)', link) or re.search(r'/series/(\d+)', link)
+        if match:
+            kp_id = match.group(1)
+    
+    if not kp_id:
+        # Если не удалось извлечь — пробуем по тексту сообщения (как раньше)
+        kp_id = extract_kp_id_from_text(message_text)
+    
+    if not kp_id:
+        bot_instance.reply_to(message, "❌ Не удалось определить ID фильма. Попробуйте другую ссылку.")
+        if user_id in user_plan_state:
+            del user_plan_state[user_id]
+        return
+
     user_plan_state[user_id]['link'] = link
+    user_plan_state[user_id]['kp_id'] = kp_id  # Сохраняем kp_id в состояние
     user_plan_state[user_id]['step'] = 2
+
     markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("Дома", callback_data="plan_type:home"))
-    markup.add(InlineKeyboardButton("В кино", callback_data="plan_type:cinema"))
+    markup.add(
+        InlineKeyboardButton("Дома 🏠", callback_data=f"plan_type:home:{kp_id}"),
+        InlineKeyboardButton("В кино 🎥", callback_data=f"plan_type:cinema:{kp_id}")
+    )
+    
     prompt_msg = bot_instance.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
     user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
     logger.info(f"[PLAN] Сохранен prompt_message_id={prompt_msg.message_id} для user_id={user_id} (step=2)")
-
 
 def get_plan_day_or_date_internal(message, state):
     """Внутренняя функция для получения дня/даты в /plan"""
