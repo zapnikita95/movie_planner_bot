@@ -4,19 +4,14 @@ from moviebot.bot.bot_init import bot
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
+from datetime import datetime
+import pytz
+import json
 
 from moviebot.database.db_operations import log_request, get_user_timezone_or_default
-
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
 from moviebot.states import user_edit_state
-
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
-
-from datetime import datetime
-
-import pytz
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -87,25 +82,13 @@ def edit_action_callback(call):
             
             markup = InlineKeyboardMarkup(row_width=1)
             for plan_row in plans:
-                if isinstance(plan_row, dict):
-                    plan_id = plan_row.get('id')
-                    title = plan_row.get('title')
-                    plan_type = plan_row.get('plan_type')
-                    plan_dt = plan_row.get('plan_datetime')
-                else:
-                    plan_id = plan_row[0]
-                    title = plan_row[1]
-                    plan_type = plan_row[2]
-                    plan_dt = plan_row[3]
+                plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                title = plan_row.get('title') if isinstance(plan_row, dict) else plan_row[1]
+                plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[2]
+                plan_dt = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[3]
                 
                 type_text = "🎦" if plan_type == 'cinema' else "🏠"
-                if plan_dt:
-                    if isinstance(plan_dt, datetime):
-                        dt_str = plan_dt.strftime('%d.%m.%Y %H:%M')
-                    else:
-                        dt_str = str(plan_dt)[:16]
-                else:
-                    dt_str = "не указана"
+                dt_str = plan_dt.strftime('%d.%m.%Y %H:%M') if isinstance(plan_dt, datetime) else "не указана"
                 
                 button_text = f"{type_text} {title} ({dt_str})"
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_plan:{plan_id}"))
@@ -132,16 +115,10 @@ def edit_action_callback(call):
             
             markup = InlineKeyboardMarkup(row_width=1)
             for movie_row in movies:
-                if isinstance(movie_row, dict):
-                    film_id = movie_row.get('id')
-                    title = movie_row.get('title')
-                    year = movie_row.get('year')
-                    rating = movie_row.get('rating')
-                else:
-                    film_id = movie_row[0]
-                    title = movie_row[1]
-                    year = movie_row[2]
-                    rating = movie_row[3]
+                film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
+                title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[1]
+                year = movie_row.get('year') if isinstance(movie_row, dict) else movie_row[2]
+                rating = movie_row.get('rating') if isinstance(movie_row, dict) else movie_row[3]
                 
                 year_str = f" ({year})" if year else ""
                 button_text = f"⭐ {title}{year_str} — {rating}/10"
@@ -154,20 +131,17 @@ def edit_action_callback(call):
             # Проверяем, есть ли kp_id в состоянии для возврата к описанию
             kp_id = None
             if user_id in user_edit_state:
-                kp_id = user_edit_state[user_id].get('kp_id')
+                state = user_edit_state[user_id]
+                kp_id = state.get('kp_id')
                 del user_edit_state[user_id]
             
             # Если есть kp_id, возвращаемся к описанию фильма/сериала
             if kp_id:
                 try:
                     from moviebot.bot.handlers.series import show_film_info_with_buttons
-                    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
                     from moviebot.api.kinopoisk_api import extract_movie_info
                     
-                    conn = get_db_connection()
-                    cursor = get_db_cursor()
-                    
-                    # Получаем информацию о фильме/сериале
+                    # Получаем информацию о фильме из базы
                     with db_lock:
                         cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
                         row = cursor.fetchone()
@@ -183,12 +157,16 @@ def edit_action_callback(call):
                         
                         if info:
                             show_film_info_with_buttons(
-                                chat_id, user_id, info, link, kp_id,
-                                existing=existing, message_id=call.message.message_id
+                                chat_id=chat_id,
+                                user_id=user_id,
+                                info=info,
+                                link=link,
+                                kp_id=kp_id,
+                                existing=existing,
+                                message_id=call.message.message_id
                             )
                             return
                     
-                    # Если не удалось получить информацию, просто показываем сообщение об отмене
                     bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
                 except Exception as e:
                     logger.error(f"[EDIT CANCEL] Ошибка при возврате к описанию: {e}", exc_info=True)
@@ -220,7 +198,7 @@ def edit_plan_datetime_callback(call):
         user_edit_state[user_id] = {
             'action': 'edit_plan_datetime',
             'plan_id': plan_id,
-            'prompt_message_id': call.message.message_id  # Сохраняем message_id промпта
+            'prompt_message_id': call.message.message_id
         }
         
         markup = InlineKeyboardMarkup()
@@ -236,7 +214,7 @@ def edit_plan_datetime_callback(call):
             "• в субботу 15:00",
             chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
         )
-        logger.info(f"[EDIT PLAN DATETIME] Состояние установлено для плана {plan_id}, prompt_message_id={call.message.message_id}")
+        logger.info(f"[EDIT PLAN DATETIME] Состояние установлено для плана {plan_id}")
     except Exception as e:
         logger.error(f"[EDIT PLAN DATETIME] Ошибка: {e}", exc_info=True)
         try:
@@ -255,7 +233,6 @@ def edit_plan_streaming_callback(call):
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
         
-        # Получаем информацию о плане и фильме
         with db_lock:
             cursor.execute('''
                 SELECT p.ticket_file_id, m.kp_id, p.streaming_service
@@ -275,23 +252,20 @@ def edit_plan_streaming_callback(call):
         
         sources_dict = {}
         if sources_json:
-            import json
             try:
                 sources_dict = json.loads(sources_json)
             except:
                 pass
         
-        # Если источников нет, получаем из API
         if not sources_dict and kp_id:
             from moviebot.api.kinopoisk_api import get_external_sources
             sources = get_external_sources(kp_id)
             if sources:
                 sources_dict = {platform: url for platform, url in sources[:6]}
-                # Сохраняем в базу
-                import json
                 sources_json = json.dumps(sources_dict, ensure_ascii=False)
-                cursor.execute('UPDATE plans SET ticket_file_id = %s WHERE id = %s', (sources_json, plan_id))
-                conn.commit()
+                with db_lock:
+                    cursor.execute('UPDATE plans SET ticket_file_id = %s WHERE id = %s', (sources_json, plan_id))
+                    conn.commit()
         
         if not sources_dict:
             bot.answer_callback_query(call.id, "❌ Онлайн-кинотеатры не найдены", show_alert=True)
@@ -299,11 +273,9 @@ def edit_plan_streaming_callback(call):
         
         markup = InlineKeyboardMarkup(row_width=2)
         for platform, url in sources_dict.items():
-            # Отмечаем текущий кинотеатр
             button_text = f"✅ {platform}" if platform == current_service else platform
             markup.add(InlineKeyboardButton(button_text, callback_data=f"streaming_select:{plan_id}:{platform}"))
         
-        # Кнопка "Завершить" только если кинотеатр не выбран
         if not current_service:
             markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
         
@@ -314,7 +286,6 @@ def edit_plan_streaming_callback(call):
             text += f"\n\n✅ Текущий: <b>{current_service}</b>"
         
         bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-        logger.info(f"[EDIT PLAN STREAMING] Меню выбора кинотеатра показано для плана {plan_id}")
     except Exception as e:
         logger.error(f"[EDIT PLAN STREAMING] Ошибка: {e}", exc_info=True)
         try:
@@ -348,7 +319,6 @@ def edit_plan_ticket_callback(call):
             "Отправьте фото или файл с билетами в следующем сообщении.",
             chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
         )
-        logger.info(f"[EDIT PLAN TICKET] Состояние установлено для плана {plan_id}")
     except Exception as e:
         logger.error(f"[EDIT PLAN TICKET] Ошибка: {e}", exc_info=True)
         try:
@@ -363,11 +333,9 @@ def edit_plan_switch_callback(call):
     logger.info(f"[EDIT PLAN SWITCH] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
         bot.answer_callback_query(call.id)
-        user_id = call.from_user.id
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
         
-        # Получаем текущий тип плана
         with db_lock:
             cursor.execute('SELECT plan_type FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
             plan_row = cursor.fetchone()
@@ -379,7 +347,6 @@ def edit_plan_switch_callback(call):
             current_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[0]
             new_type = 'cinema' if current_type == 'home' else 'home'
             
-            # Обновляем тип плана
             cursor.execute('UPDATE plans SET plan_type = %s WHERE id = %s', (new_type, plan_id))
             conn.commit()
         
@@ -388,7 +355,6 @@ def edit_plan_switch_callback(call):
             f"✅ Тип плана изменен на: <b>{type_text}</b>",
             chat_id, call.message.message_id, parse_mode='HTML'
         )
-        logger.info(f"[EDIT PLAN SWITCH] Тип плана {plan_id} изменен на {new_type}")
     except Exception as e:
         logger.error(f"[EDIT PLAN SWITCH] Ошибка: {e}", exc_info=True)
         try:
@@ -417,7 +383,6 @@ def edit_rating_callback(call):
             "Ответьте на это сообщение числом от 1 до 10.",
             chat_id, call.message.message_id, parse_mode='HTML'
         )
-        logger.info(f"[EDIT RATING] Состояние установлено для фильма {film_id}")
     except Exception as e:
         logger.error(f"[EDIT RATING] Ошибка: {e}", exc_info=True)
         try:
@@ -428,6 +393,4 @@ def edit_rating_callback(call):
 
 def register_edit_handlers(bot):
     """Регистрирует обработчики команды /edit"""
-    # Обработчики уже зарегистрированы через декораторы
     logger.info("Обработчики команды /edit зарегистрированы")
-
