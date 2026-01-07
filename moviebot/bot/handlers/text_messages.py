@@ -1222,8 +1222,35 @@ def handle_admin_commands_reply(message):
     handle_admin(message)
     logger.info(f"[ADMIN COMMANDS REPLY] ===== END: обработано через state_handlers.handle_admin")
 
+def check_rate_reply(message):
+    """Проверка для handler ответа на запрос оценки (реплай или следующее сообщение в личке)"""
+    is_private = message.chat.type == 'private'
+    
+    from moviebot.states import rating_messages
+    
+    if not message.text or not message.text.strip().isdigit():
+        return False
+    rating = int(message.text.strip())
+    if not 1 <= rating <= 10:
+        return False
+    
+    if not message.reply_to_message:
+        if is_private:
+            # В личке принимаем следующее сообщение, если есть активный запрос оценки
+            if rating_messages:  # если есть любой активный запрос
+                return True
+            return False
+        else:
+            return False  # в группе только реплай
+    
+    # Если реплай — проверяем, что это ответ на сообщение с запросом оценки
+    reply_msg_id = message.reply_to_message.message_id
+    if reply_msg_id in rating_messages:
+        return True
+    
+    return False
 
-@bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text)
+@bot_instance.message_handler(func=check_rate_reply)
 def handle_rate_list_reply(message):
     """Обработчик реплаев на сообщения бота с оценками"""
     logger.info(f"[HANDLE RATE LIST REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
@@ -1514,7 +1541,6 @@ def save_movie_message(message):
                 bot_instance.send_message(chat_id, f"🎉 Добавлено {added_count} новых фильмов в базу!")
     except Exception as e:
         logger.warning(f"[SAVE MESSAGE] Ошибка при обработке сообщения с фильмом: {e}", exc_info=True)
-
 
 @bot_instance.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
 def main_text_handler(message):
