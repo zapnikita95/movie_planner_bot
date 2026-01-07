@@ -81,13 +81,19 @@ def send_welcome(message):
     try:
         markup = InlineKeyboardMarkup(row_width=1)
         has_shazam_access = has_recommendations_access(message.chat.id, message.from_user.id)
+        
+        # Сначала обычные кнопки до Рандома
+        markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
+        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
+        
+        # КиноШазам — сразу после Рандома
         if has_shazam_access:
             markup.add(InlineKeyboardButton("🔮 КиноШазам", callback_data="shazam:start"))
         else:
             markup.add(InlineKeyboardButton("🔒 КиноШазам", callback_data="shazam:start"))
-        markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
-        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
-        markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
+        
+        # Остальные кнопки
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
 
@@ -104,7 +110,6 @@ def send_welcome(message):
         markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
         markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
         markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
-
         bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
         logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
 
