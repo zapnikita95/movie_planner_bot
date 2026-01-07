@@ -278,7 +278,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
         return False
-
+    
 def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None, bot=None):
     logger.info(f"[SHOW_SEASONS_LIST] chat_id={chat_id}, user_id={user_id}, message_id={message_id}, thread_id={message_thread_id}")
 
@@ -295,9 +295,22 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         text = "Нет сериалов в базе. Используйте /search, чтобы найти и добавить сериалы, или просто пришлите ссылку на Кинопоиск на сериал"
         
         if message_id:
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+            # Убрали message_thread_id — причина ошибки в старой версии библиотеки
+            bot.edit_message_text(
+                text=text,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
         else:
-            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+            bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=markup,
+                parse_mode='HTML',
+                message_thread_id=message_thread_id
+            )
         return
 
     markup = InlineKeyboardMarkup(row_width=1)
@@ -351,9 +364,22 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
     text = f"📺 Активные сериалы в базе ({num_series})"
 
     if message_id:
-        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+        # Здесь тоже убрали message_thread_id
+        bot.edit_message_text(
+            text=text,
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
     else:
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+        bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=markup,
+            parse_mode='HTML',
+            message_thread_id=message_thread_id
+        )
 
 def show_completed_series_list(chat_id: int, user_id: int, message_id: int = None):
     """
