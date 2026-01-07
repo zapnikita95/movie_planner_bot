@@ -67,3 +67,6 @@ shazam_state = {}  # user_id: {'mode': 'text' or 'voice', 'chat_id': int} - со
 
 # Состояние для личных чатов - ожидание следующего сообщения после промпта handler'а
 user_private_handler_state = {}  # user_id: {'handler': str, 'prompt_message_id': int, 'handler_func': callable}
+
+# Состояние ожидания текстового ввода от пользователя
+user_expected_text = {}  # user_id: {'chat_id': int, 'expected_for': str, 'message_id': int optional}

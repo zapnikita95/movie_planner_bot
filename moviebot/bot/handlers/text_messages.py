@@ -26,7 +26,7 @@ from moviebot.states import (
     user_refund_state, user_promo_state, user_promo_admin_state,
     user_unsubscribe_state, user_add_admin_state,
     bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages,
-    plan_notification_messages, settings_messages
+    plan_notification_messages, settings_messages, user_expected_text
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
 from moviebot.bot.handlers.series import search_films_with_type, show_film_info_with_buttons, show_film_info_without_adding
@@ -896,6 +896,149 @@ def handle_promo_reply_direct(message):
         logger.error(f"[PROMO REPLY DIRECT] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
 
 
+# ==================== ФУНКЦИЯ ДЛЯ УСТАНОВКИ ОЖИДАНИЯ ТЕКСТА ====================
+def expect_text_from_user(user_id: int, chat_id: int, expected_for: str = 'search', message_id: int = None):
+    """Бот начинает ожидать текстовый ответ от пользователя"""
+    user_expected_text[user_id] = {
+        'chat_id': chat_id,
+        'expected_for': expected_for,  # 'search', 'plan_comment', 'rating_comment' и т.д.
+        'message_id': message_id
+    }
+    logger.info(f"[EXPECT TEXT] Ожидаем текст от user_id={user_id} для '{expected_for}'")
+
+
+# ==================== ОБЩАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ПОИСКА ====================
+def process_search_query(message, query, reply_to_message=None):
+    """Единая логика поиска и отправки результатов. Используется обоими обработчиками."""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    try:
+        # Получаем тип поиска (mixed по умолчанию)
+        search_type = 'mixed'
+        if user_id in user_search_state:
+            search_type = user_search_state[user_id].get('search_type', 'mixed')
+        
+        # Выполняем поиск
+        films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
+        
+        if not films:
+            reply_text = f"❌ Ничего не найдено по запросу '{query}'"
+            if reply_to_message:
+                bot_instance.reply_to(message, reply_text)
+            else:
+                bot_instance.send_message(chat_id, reply_text)
+            return
+        
+        # Формируем текст и кнопки
+        results_text = f"🔍 Результаты поиска '{query}':\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for idx, film in enumerate(films[:10]):
+            try:
+                title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
+                year = film.get('year') or film.get('releaseYear') or 'N/A'
+                rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
+                film_type = film.get('type', '').upper() if film.get('type') else 'FILM'
+                is_series = film_type == 'TV_SERIES'
+                
+                if kp_id:
+                    type_indicator = "📺" if is_series else "🎬"
+                    button_text = f"{type_indicator} {title} ({year})"
+                    if len(button_text) > 50:
+                        button_text = button_text[:47] + "..."
+                    results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                    if rating != 'N/A':
+                        results_text += f" ⭐ {rating}"
+                    results_text += "\n"
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
+            except Exception as film_e:
+                logger.error(f"[SEARCH] Ошибка обработки фильма {idx+1}: {film_e}", exc_info=True)
+                continue
+        
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        results_text += "\n\n🎬 - фильм\n📺 - сериал"
+        
+        if len(results_text) > 4096:
+            results_text = results_text[:4000] + "\n\n... (показаны не все результаты)"
+        
+        if reply_to_message:
+            sent_message = bot_instance.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+        else:
+            sent_message = bot_instance.send_message(chat_id, results_text, reply_markup=markup, parse_mode='HTML')
+        
+        logger.info(f"[SEARCH] Результаты отправлены: message_id={sent_message.message_id}")
+        
+        # Очищаем состояние, если было
+        if user_id in user_search_state:
+            del user_search_state[user_id]
+            
+    except Exception as e:
+        logger.error(f"[SEARCH] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        error_text = "❌ Ошибка при поиске. Попробуйте позже."
+        if reply_to_message:
+            bot_instance.reply_to(message, error_text)
+        else:
+            bot_instance.send_message(chat_id, error_text)
+
+
+# ==================== 1. ОБРАБОТЧИК ДЛЯ ЛС: ТОЛЬКО ЕСЛИ БОТ ОЖИДАЕТ ТЕКСТ ====================
+def is_expected_text_in_private(message):
+    """Проверка для обработчика ожидаемого текста в ЛС"""
+    if message.chat.type != 'private':
+        return False
+    user_id = message.from_user.id
+    if user_id not in user_expected_text:
+        return False
+    if not message.text or message.text.startswith('/'):
+        return False
+    if 'kinopoisk.ru' in message.text.lower():
+        return False  # ссылки отдельно
+    return True
+
+
+@bot_instance.message_handler(content_types=['text'], func=is_expected_text_in_private)
+def handle_expected_text_in_private(message):
+    """Обрабатывает ОДНО сообщение в ЛС, когда бот его ждёт"""
+    user_id = message.from_user.id
+    state = user_expected_text.get(user_id)
+    if not state:
+        return
+    
+    query = message.text.strip()
+    expected_for = state['expected_for']
+    
+    logger.info(f"[EXPECTED TEXT PRIVATE] Получен текст от {user_id} для '{expected_for}': '{query[:50]}'")
+    
+    # Удаляем ожидание сразу — чтобы следующее сообщение НЕ обрабатывалось как поиск
+    del user_expected_text[user_id]
+    
+    if expected_for == 'search':
+        process_search_query(message, query, reply_to_message=None)
+    # Здесь можно добавить elif для других сценариев: 'plan_comment', 'review' и т.д.
+    else:
+        # fallback или ошибка
+        bot_instance.send_message(message.chat.id, "⚠️ Неизвестный контекст ожидания текста.")
+
+
+# ==================== 2. ОБРАБОТЧИК ДЛЯ ГРУПП: ТОЛЬКО REPLY НА СООБЩЕНИЕ БОТА ====================
+@bot_instance.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'] and
+                                      m.reply_to_message and
+                                      m.reply_to_message.from_user.id == BOT_ID and
+                                      m.text and
+                                      "🔍 Укажите запрос для поиска" in (m.reply_to_message.text or ""))
+def handle_group_search_reply(message):
+    """Обработчик поиска в группах - только reply на сообщение бота"""
+    query = message.text.strip()
+    if not query:
+        bot_instance.reply_to(message, "❌ Пустой запрос.")
+        return
+    logger.info(f"[GROUP SEARCH REPLY] Получен запрос от {message.from_user.id}: '{query[:50]}'")
+    process_search_query(message, query, reply_to_message=message.reply_to_message)
+
+
+# ==================== СТАРЫЙ ОБРАБОТЧИК (ОСТАВЛЯЕМ ДЛЯ СОВМЕСТИМОСТИ) ====================
 @bot_instance.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "🔍 Укажите запрос для поиска" in (m.reply_to_message.text or ""))
 def handle_search_reply_direct(message):
     """ОТДЕЛЬНЫЙ handler для реплаев на сообщение поиска - ВЫСОКИЙ ПРИОРИТЕТ"""

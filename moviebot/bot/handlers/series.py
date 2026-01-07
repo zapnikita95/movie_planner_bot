@@ -21,6 +21,7 @@ from moviebot.states import (
     user_settings_state, settings_messages, bot_messages, added_movie_messages,
     dice_game_state, user_import_state
 )
+from moviebot.bot.handlers.text_messages import expect_text_from_user
 from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection, extract_kp_user_id
 from datetime import datetime
 import pytz
@@ -88,27 +89,37 @@ def search_type_callback(call):
         # answer_callback_query уже вызван выше (строка 50)
         logger.info(f"[SEARCH TYPE] Тип поиска выбран: {type_text}")
         
+        is_private = call.message.chat.type == 'private'
+        prompt_text = f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик"
+        
         try:
-            bot_instance.edit_message_text(
-                f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик",
+            sent_msg = bot_instance.edit_message_text(
+                prompt_text,
                 chat_id,
                 call.message.message_id,
                 reply_markup=markup
             )
+            message_id = call.message.message_id if sent_msg else None
             logger.info(f"[SEARCH TYPE] ✅ Сообщение обновлено успешно")
         except Exception as edit_e:
             logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
             # Пробуем отправить новое сообщение
             try:
-                bot_instance.send_message(
+                sent_msg = bot_instance.send_message(
                     chat_id,
-                    f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик",
+                    prompt_text,
                     reply_markup=markup
                 )
+                message_id = sent_msg.message_id if sent_msg else None
                 logger.info(f"[SEARCH TYPE] ✅ Новое сообщение отправлено")
             except Exception as send_e:
                 logger.error(f"[SEARCH TYPE] ❌ Ошибка отправки нового сообщения: {send_e}", exc_info=True)
                 bot_instance.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                return
+        
+        # Для ЛС устанавливаем ожидание текста
+        if is_private and message_id:
+            expect_text_from_user(user_id, chat_id, expected_for='search', message_id=message_id)
     except Exception as e:
         logger.error(f"[SEARCH TYPE] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
@@ -167,6 +178,10 @@ def search_retry_callback(call):
             'search_type': search_type
         }
         logger.info(f"[SEARCH RETRY] Состояние поиска установлено для user_id={user_id}: {user_search_state[user_id]}")
+        
+        # Для ЛС устанавливаем ожидание текста
+        if is_private and prompt_msg:
+            expect_text_from_user(user_id, chat_id, expected_for='search', message_id=prompt_msg.message_id)
     except Exception as e:
         logger.error(f"[SEARCH RETRY] Ошибка: {e}", exc_info=True)
         try:
@@ -213,12 +228,18 @@ def handle_search(message):
             reply_msg = bot_instance.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
             # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
             user_id = message.from_user.id
+            chat_id = message.chat.id
+            is_private = message.chat.type == 'private'
             user_search_state[user_id] = {
-                'chat_id': message.chat.id, 
+                'chat_id': chat_id, 
                 'message_id': reply_msg.message_id, 
                 'search_type': 'mixed'
             }
             logger.info(f"[SEARCH] Состояние поиска установлено для user_id={user_id}: {user_search_state[user_id]}")
+            
+            # Для ЛС устанавливаем ожидание текста
+            if is_private and reply_msg:
+                expect_text_from_user(user_id, chat_id, expected_for='search', message_id=reply_msg.message_id)
             return
         
         logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
