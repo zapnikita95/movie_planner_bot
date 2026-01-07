@@ -403,7 +403,7 @@ def seasons_command(message):
 
 @bot_instance.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
 def handle_seasons_kp(call):
-    """Обработка выбора сериала — показ сезонов"""
+    """Обработка выбора сериала из /seasons — сразу показываем список сезонов"""
     try:
         bot_instance.answer_callback_query(call.id)
 
@@ -433,6 +433,21 @@ def handle_seasons_kp(call):
             row = cursor.fetchone()
             film_id = row.get('id') if row else None
 
+        # Получаем все просмотренные эпизоды один раз (оптимизация)
+        watched_set = set()
+        if film_id:
+            with db_lock:
+                cursor.execute('''
+                    SELECT season_number, episode_number FROM series_tracking
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id))
+                for w_row in cursor.fetchall():
+                    s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
+                    e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
+                    watched_set.add((s_num, e_num))
+
+        is_airing, _ = get_series_airing_status(kp_id)
+
         for season in seasons_data:
             season_num = season.get('number')
             episodes = season.get('episodes', [])
@@ -440,20 +455,7 @@ def handle_seasons_kp(call):
             if not episodes_count:
                 continue
 
-            is_airing, _ = get_series_airing_status(kp_id)
-            watched_set = set()
-            if film_id:
-                with db_lock:
-                    cursor.execute('''
-                        SELECT season_number, episode_number FROM series_tracking
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
-                    for w_row in cursor.fetchall():
-                        # Универсально: работает и с dict, и с tuple
-                        season_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
-                        ep_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
-                        watched_set.add((season_num, ep_num))
-
+            # Фильтруем только вышедшие эпизоды для подсчёта
             _, watched_in_season = count_episodes_for_watch_check([season], is_airing, watched_set, chat_id, film_id, user_id)
             total_in_season, _ = count_episodes_for_watch_check([season], is_airing, set(), chat_id, film_id, user_id)
 
@@ -461,6 +463,7 @@ def handle_seasons_kp(call):
             button_text = f"{mark}Сезон {season_num} ({episodes_count} серий)"
             markup.add(InlineKeyboardButton(button_text, callback_data=f"series_season:{kp_id}:{season_num}"))
 
+        # Кнопка назад — именно к списку всех сериалов в /seasons
         markup.add(InlineKeyboardButton("◀️ Назад к списку сериалов", callback_data="back_to_seasons_list"))
 
         text = f"📺 <b>{title}</b>\n\nВыберите сезон:"
@@ -473,7 +476,6 @@ def handle_seasons_kp(call):
             bot_instance.answer_callback_query(call.id, "Ошибка, попробуйте позже", show_alert=True)
         except:
             pass
-
 
 @bot_instance.callback_query_handler(func=lambda call: call.data == "back_to_seasons_list")
 def back_to_seasons_list(call):
