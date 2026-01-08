@@ -402,36 +402,38 @@ def handle_rating_internal(message, rating):
                 avg_row = cursor.fetchone()
                 avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
                 
-                # Получаем kp_id для похожих фильмов
+                # Получаем kp_id
                 cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                 kp_row = cursor.fetchone()
                 kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
                 
                 avg_str = f"{avg:.1f}" if avg else "—"
                 
-                # Если фильм не был просмотрен, отмечаем его как просмотренный
+                # Если фильм не был просмотрен — отмечаем как просмотренный + кнопка назад
                 if not is_watched_before:
                     cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                     conn.commit()
                     logger.info(f"[RATE INTERNAL] Фильм {film_id} отмечен как просмотренный после оценки пользователем {user_id}")
                     
-                    # Создаем кнопку "Вернуться к описанию"
+                    # Кнопка "Вернуться к описанию"
                     markup = InlineKeyboardMarkup()
                     if kp_id:
-                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"show_film_description:{kp_id}"))
+                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film_description:{kp_id}"))
                     
-                    reply_msg = bot.reply_to(message, f"Спасибо! Фильм отмечен как просмотренный, ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10", reply_markup=markup if markup.keyboard else None)
+                    reply_msg = bot.reply_to(
+                        message,
+                        f"Спасибо! Фильм отмечен как просмотренный, ваша оценка {rating}/10 сохранена.\nСредняя: {avg_str}/10",
+                        reply_markup=markup
+                    )
                     
-                    # Сохраняем message_id для удаления при возврате к описанию
                     if kp_id and reply_msg:
                         rating_messages[reply_msg.message_id] = film_id
                 else:
                     bot.reply_to(message, f"✅ Оценка {rating}/10 сохранена!\nСредняя: {avg_str}/10")
                 
-                # Обновляем кнопку "Оценить" в сообщении с описанием фильма, если оно есть
+                # Твой оригинальный блок обновления описания фильма — оставляю полностью
                 if kp_id:
                     try:
-                        # Ищем сообщение с описанием фильма в bot_messages
                         from moviebot.states import bot_messages
                         film_message_id = None
                         for msg_id, link_value in bot_messages.items():
@@ -440,11 +442,9 @@ def handle_rating_internal(message, rating):
                                 logger.info(f"[RATE INTERNAL] Найдено сообщение с описанием фильма: message_id={film_message_id}")
                                 break
                         
-                        # Если нашли сообщение, обновляем его
                         if film_message_id:
                             from moviebot.bot.handlers.series import show_film_info_with_buttons
                             
-                            # Получаем информацию о фильме из базы (без нового API запроса)
                             with db_lock:
                                 cursor.execute('''
                                     SELECT id, title, watched, link, year, genres, description, director, actors, is_series
@@ -468,7 +468,7 @@ def handle_rating_internal(message, rating):
                                         actors = existing_row.get('actors')
                                         is_series = bool(existing_row.get('is_series', 0))
                                     else:
-                                        film_id_db = existing_row.get("id") if isinstance(existing_row, dict) else (existing_row[0] if existing_row else None)
+                                        film_id_db = existing_row[0]
                                         title = existing_row[1]
                                         watched = existing_row[2]
                                         link = existing_row[3]
@@ -481,7 +481,6 @@ def handle_rating_internal(message, rating):
                                     
                                     existing = (film_id_db, title, watched)
                                     
-                                    # Формируем словарь info из данных БД (без API запроса)
                                     info = {
                                         'title': title,
                                         'year': year,
@@ -496,38 +495,50 @@ def handle_rating_internal(message, rating):
                                 link = f"https://www.kinopoisk.ru/film/{kp_id}/"
                             
                             if info and existing:
-                                # Обновляем сообщение с описанием фильма используя данные из БД
                                 show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
                                 logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено из БД: message_id={film_message_id}")
                             else:
                                 logger.warning(f"[RATE INTERNAL] Не удалось получить данные из БД, делаю API запрос")
-                            from moviebot.api.kinopoisk_api import extract_movie_info
-                            info = extract_movie_info(link)
-                            if info:
-                                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
-                                logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено через API: message_id={film_message_id}")
+                                from moviebot.api.kinopoisk_api import extract_movie_info
+                                info = extract_movie_info(link)
+                                if info:
+                                    show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
+                                    logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено через API: message_id={film_message_id}")
                     except Exception as update_e:
                         logger.warning(f"[RATE INTERNAL] Не удалось обновить сообщение с описанием фильма: {update_e}", exc_info=True)
                 
-                # Отправляем рекомендации после оценки 10
+                # Отправляем похожие фильмы после оценки 10
                 if rating == 10 and kp_id:
                     try:
                         from moviebot.utils.helpers import has_recommendations_access
                         if has_recommendations_access(chat_id, user_id):
-                            from moviebot.bot.handlers.series import random_command
-                            # Создаем фиктивное сообщение для вызова random_command
-                            class FakeMessage:
-                                def __init__(self, chat_id, user_id):
-                                    self.chat = type('obj', (object,), {'id': chat_id})()
-                                    self.from_user = type('obj', (object,), {'id': user_id})()
-                                    self.text = '/random'
-                            
-                            fake_msg = FakeMessage(chat_id, user_id)
-                            random_command(fake_msg)
-                            logger.info(f"[RATE INTERNAL] Рекомендации отправлены после оценки 10 для kp_id={kp_id}")
+                            from moviebot.api.kinopoisk_api import get_similars
+
+                            similars = get_similars(kp_id)
+                            if similars:
+                                rec_text = "🔥 Поскольку вы поставили 10/10, вот похожие фильмы, которые могут понравиться:\n\n"
+                                rec_markup = InlineKeyboardMarkup(row_width=1)
+
+                                for film_id_sim, name, is_series_sim in similars:
+                                    short_name = (name[:50] + '...') if len(name) > 50 else name
+                                    button_text = f"{'📺' if is_series_sim else '🎬'} {short_name}"
+                                    rec_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{film_id_sim}"))
+
+                                rec_markup.add(InlineKeyboardButton("✅ Готово", callback_data="delete_this_message"))
+
+                                bot.send_message(
+                                    chat_id,
+                                    rec_text,
+                                    reply_markup=rec_markup,
+                                    parse_mode='HTML'
+                                )
+                                logger.info(f"[RATE INTERNAL] Похожие фильмы отправлены после оценки 10 для kp_id={kp_id}")
+                            else:
+                                logger.info("[RATE INTERNAL] Похожих фильмов не найдено после оценки 10")
+                        else:
+                            logger.info("[RATE INTERNAL] Нет доступа к рекомендациям после оценки 10")
                     except Exception as rec_e:
-                        logger.warning(f"[RATE INTERNAL] Не удалось отправить рекомендации после оценки 10: {rec_e}", exc_info=True)
-                    
+                        logger.warning(f"[RATE INTERNAL] Ошибка при отправке похожих фильмов после оценки 10: {rec_e}", exc_info=True)
         except Exception as e:
             logger.error(f"[RATE INTERNAL] Ошибка при сохранении оценки: {e}", exc_info=True)
             bot.reply_to(message, "❌ Произошла ошибка при сохранении оценки.")

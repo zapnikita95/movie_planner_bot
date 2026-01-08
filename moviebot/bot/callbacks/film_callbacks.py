@@ -1197,8 +1197,50 @@ def confirm_remove(call):
         reply_markup=None
     )
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("back_to_film:"))
+def back_to_film_description(call):
+    """Возврат к описанию фильма после оценки"""
+    try:
+        bot.answer_callback_query(call.id)
+
+        kp_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        message_id = call.message.message_id
+
+        # Получаем инфу и показываем описание
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/" if not is_series else f"https://www.kinopoisk.ru/series/{kp_id}/"
+        info = extract_movie_info(link)
+        if not info:
+            bot.edit_message_text("❌ Не удалось загрузить описание", chat_id, message_id)
+            return
+
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            message_id=message_id  # обновляем то же сообщение
+        )
+
+    except Exception as e:
+        logger.error(f"[BACK TO FILM] Ошибка: {e}")
+        bot.answer_callback_query(call.id, "Ошибка возврата", show_alert=True)
+
+@bot.callback_query_handler(func=lambda call: call.data == "delete_this_message")
+def delete_recommendations_message(call):
+    try:
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+        bot.answer_callback_query(call.id)
+    except Exception as e:
+        logger.warning(f"[DELETE MESSAGE] Не удалось удалить: {e}")
+
 def register_film_callbacks(bot):
     """Регистрирует callback handlers для карточки фильма (уже зарегистрированы через декораторы)"""
     # Handlers уже зарегистрированы через декораторы @bot.callback_query_handler
     # при импорте модуля, поэтому эта функция просто для совместимости
     pass
+
+
