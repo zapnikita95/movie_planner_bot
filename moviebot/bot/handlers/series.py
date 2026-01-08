@@ -2759,7 +2759,7 @@ def register_series_handlers(bot_param):
                         # Создаем кнопку "Перейти к описанию" для первого фильма
                         markup = InlineKeyboardMarkup()
                         if first_movie_kp_id:
-                            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{first_movie_kp_id}"))
+                            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{first_movie_kp_id}"))
                         markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
                     else:
                         message_text = "😔 Таких фильмов в базе не найдено!"
@@ -2797,7 +2797,7 @@ def register_series_handlers(bot_param):
             
             markup = InlineKeyboardMarkup()
             if kp_id:
-                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
+                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
             markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
             
             film_message_id = None
@@ -3059,7 +3059,7 @@ def register_series_handlers(bot_param):
                 markup.add(InlineKeyboardButton("🗑️ Удалить из расписания", callback_data=f"remove_from_calendar:{plan_id}"))
             elif kp_id:
                 # Если это фильм, добавляем кнопку "📖 Перейти к описанию"
-                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
+                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
             
             if file_id:
                 # Если есть file_id, значит пользователь хочет добавить билеты к этому сеансу
@@ -4020,46 +4020,6 @@ def handle_kinopoisk_link(message):
     finally:
         logger.info(f"[KINOPOISK LINK] ===== END =====")
         
-@bot.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
-def view_film_description_callback(call):
-    """Обработчик кнопки 'Перейти к описанию'"""
-    try:
-        data = call.data
-        kp_id = int(data.replace("view_film_description:", ""))
-        
-        chat_id = call.message.chat.id
-        user_id = call.from_user.id
-        
-        # Получаем информацию о фильме
-        link = f"https://kinopoisk.ru/film/{kp_id}"
-        from moviebot.api.kinopoisk_api import extract_movie_info
-        info = extract_movie_info(link)
-        
-        if not info:
-            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-            return
-        
-        # Показываем описание фильма
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
-        show_film_info_with_buttons(
-            chat_id=chat_id,
-            user_id=user_id,
-            info=info,
-            link=link,
-            kp_id=kp_id,
-            existing=None,
-            message_id=None
-        )
-        
-        bot.answer_callback_query(call.id, "✅ Описание фильма")
-        
-    except Exception as e:
-        logger.error(f"[VIEW FILM DESCRIPTION] Ошибка: {e}", exc_info=True)
-        try:
-            bot.answer_callback_query(call.id, "❌ Ошибка при получении описания", show_alert=True)
-        except:
-            pass
-
 def ensure_movie_in_database(kp_id, title=None):
     """Убеждается, что фильм есть в базе данных. Если нет - добавляет его."""
     with db_lock:
@@ -4273,56 +4233,6 @@ def add_film_from_search_callback(call):
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
 
 # Обработчик кнопки "➕ Добавить в базу" - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
-@bot.callback_query_handler(func=lambda call: call.data.startswith("view_film_description:"))
-def view_film_description_callback(call):
-    """Обработчик кнопки 'Перейти к описанию' из сообщения об отметке как просмотренные"""
-    logger.info(f"[VIEW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}")
-    try:
-        from moviebot.bot.bot_init import safe_answer_callback_query
-        safe_answer_callback_query(bot, call.id, text="⏳ Загружаю описание...")
-        
-        kp_id = call.data.split(":")[1]
-        user_id = call.from_user.id
-        chat_id = call.message.chat.id
-        
-        logger.info(f"[VIEW FILM DESCRIPTION] Пользователь {user_id} хочет посмотреть описание фильма kp_id={kp_id}, chat_id={chat_id}")
-        
-        # Получаем информацию о фильме
-        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        logger.info(f"[VIEW FILM DESCRIPTION] Вызываю extract_movie_info для link={link}")
-        info = extract_movie_info(link)
-        
-        if not info:
-            logger.error(f"[VIEW FILM DESCRIPTION] Не удалось получить информацию о фильме для kp_id={kp_id}")
-            from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-            return
-        
-        # Если это сериал, используем правильную ссылку
-        if info.get('is_series') or info.get('type') == 'TV_SERIES':
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            logger.info(f"[VIEW FILM DESCRIPTION] Это сериал, обновлена ссылка: {link}")
-        
-        # Получаем информацию из базы (если фильм там есть)
-        existing = None
-        # Приводим kp_id к строке для корректного поиска в БД
-        kp_id_str = str(kp_id)
-        with db_lock:
-            cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id_str))
-            row = cursor.fetchone()
-            if row:
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                title = row.get('title') if isinstance(row, dict) else row[1]
-                watched = row.get('watched') if isinstance(row, dict) else row[2]
-                existing = (film_id, title, watched)
-        
-        # Показываем описание фильма (всегда, даже если просмотрен)
-        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_str, existing)
-        logger.info(f"[VIEW FILM DESCRIPTION] ✅ Описание фильма показано: kp_id={kp_id}")
-    except Exception as e:
-        logger.error(f"[VIEW FILM DESCRIPTION] ❌ Ошибка: {e}", exc_info=True)
-        from moviebot.bot.bot_init import safe_answer_callback_query
-        safe_answer_callback_query(bot, call.id, "❌ Ошибка обработки", show_alert=True)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
