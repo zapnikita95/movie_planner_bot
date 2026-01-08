@@ -1737,17 +1737,16 @@ def main_file_handler(message):
                 return
         
         if step == 'upload_ticket':
-            # Обработка загрузки билетов для фильма
             plan_id = state.get('plan_id')
             if not plan_id:
                 bot.reply_to(message, "❌ Ошибка: план не найден.")
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
                 return
-            
+
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
-            
-            # Получаем существующие билеты и добавляем новый
+
+            # Сохраняем файл (твоя существующая логика с json массивом)
             import json
             with db_lock:
                 cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))
@@ -1759,23 +1758,39 @@ def main_file_handler(message):
                         try:
                             existing_tickets = json.loads(ticket_data)
                             if not isinstance(existing_tickets, list):
-                                # Если это старый формат (один file_id), конвертируем в массив
                                 existing_tickets = [ticket_data]
                         except:
-                            # Если не JSON, значит это старый формат (один file_id)
                             existing_tickets = [ticket_data]
                 
-                # Добавляем новый билет
                 existing_tickets.append(file_id)
                 tickets_json = json.dumps(existing_tickets, ensure_ascii=False)
                 
                 cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
-                conn.commit()
-            
-            title = state.get('film_title', 'фильм')
-            dt = state.get('plan_dt', '')
-            
-            bot.reply_to(message, f"✅ Билет прикреплён! (Всего билетов: {len(existing_tickets)})\n\n<b>{title}</b> — {dt}\n\nМожете отправить ещё билеты или написать 'готово'.", parse_mode='HTML')
+                connection.commit()
+
+            # Определяем, был ли это первый билет
+            was_first = len(existing_tickets) == 1
+
+            if was_first:
+                # Первый билет — показываем кнопки
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("➕ Добавить ещё билет", callback_data=f"add_more_tickets:{plan_id}"))
+                markup.add(InlineKeyboardButton("⬅️ К списку мероприятий", callback_data="ticket_new"))
+
+                bot.reply_to(
+                    message,
+                    f"✅ Билет добавлен! (Всего: {len(existing_tickets)})\n\n"
+                    f"Можете добавить ещё или вернуться к списку.",
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+
+                # Переходим в режим ожидания дополнительных (чтобы не показывать кнопки снова)
+                state['step'] = 'add_more_tickets'
+            else:
+                # Не первый — просто подтверждаем
+                bot.reply_to(message, f"✅ Билет добавлен! (Всего: {len(existing_tickets)})")
+
             return
         
         if step == 'waiting_ticket_file':

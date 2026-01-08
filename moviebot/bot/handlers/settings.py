@@ -162,12 +162,20 @@ def handle_settings_callback(call):
             
             # Показываем настройку случайных событий
             with db_lock:
-                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
-                row = cursor.fetchone()
-                is_enabled = True
-                if row:
-                    value = row.get('value') if isinstance(row, dict) else row[0]
-                    is_enabled = value == 'true'
+                # Получаем ID бота динамически
+                bot_id = bot.get_me().id
+                
+                # Вычисляем timestamp за последние 30 дней (точно как в random_events.py)
+                threshold_time = (datetime.now(plans_tz) - timedelta(days=30)).isoformat()
+                
+                # Считаем количество активных участников (исключая бота)
+                cursor.execute('''
+                    SELECT COUNT(DISTINCT user_id) AS count
+                    FROM stats 
+                    WHERE chat_id = %s 
+                    AND timestamp >= %s
+                    AND user_id != %s
+                ''', (chat_id, threshold_time, bot_id))
             
             markup = InlineKeyboardMarkup(row_width=1)
             if is_enabled:
