@@ -275,24 +275,28 @@ def build_tmdb_index():
             import glob
             import shutil
             
-            # Скачиваем датасет (возвращает путь к папке с файлами)
             dataset_path = kagglehub.dataset_download("asaniczka/tmdb-movies-dataset-2023-930k-movies")
-            logger.info(f"Датасет скачан в папку: {dataset_path}")
+            logger.info(f"Датасет скачан и распакован в: {dataset_path}")
             
-            # Ищем parquet файл(ы) рекурсивно в этой папке
+            # Рекурсивный поиск parquet в любой поддиректории
             parquet_files = glob.glob(os.path.join(dataset_path, "**/*.parquet"), recursive=True)
             if not parquet_files:
-                raise Exception("Parquet файл не найден в скачанном датасете")
+                # Fallback: иногда kagglehub сохраняет в ~/.cache/kagglehub напрямую
+                alt_path = os.path.expanduser("~/.cache/kagglehub/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies")
+                parquet_files = glob.glob(os.path.join(alt_path, "**/*.parquet"), recursive=True)
             
-            main_parquet = parquet_files[0]  # Обычно один главный
-            logger.info(f"Найден parquet: {main_parquet}")
+            if not parquet_files:
+                raise Exception("Parquet файл не найден даже после fallback поиска")
             
-            # Копируем/перемещаем в наш CACHE_DIR
+            main_parquet = parquet_files[0]
+            logger.info(f"Найден parquet файл: {main_parquet}")
+            
+            # Копируем в наш путь
             shutil.copy(main_parquet, TMDB_PARQUET_PATH)
-            logger.info(f"TMDB parquet готов: {TMDB_PARQUET_PATH}")
+            logger.info(f"TMDB parquet успешно скопирован в: {TMDB_PARQUET_PATH}")
             
         except Exception as e:
-            logger.error(f"Ошибка скачивания TMDB: {e}")
+            logger.error(f"Ошибка скачивания/поиска TMDB: {e}", exc_info=True)
             return None, None
     
     # Vosk модель (опционально, если используешь fallback)
