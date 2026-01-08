@@ -9,4 +9,6 @@ venv/
 .venv
 pip-delete-this-directory.txt
 moviebot.db  # если используешь sqlite локально
-.DS_Store  # для Mac
+.DS_Store  # для Maccache/
+*.pt
+*.bin
