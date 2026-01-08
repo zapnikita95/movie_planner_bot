@@ -41,7 +41,7 @@ import telebot.types
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
-
+random_plan_data = {}  # user_id → данные для планирования рандомного фильма
 
 # Обработчик выбора типа поиска (фильм/сериал) - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
 # КРИТИЧЕСКИ ВАЖНО: Этот обработчик регистрируется при импорте модуля
@@ -2789,7 +2789,6 @@ def register_series_handlers(bot_param):
                 link = movie.get('link')
                 kp_id = movie.get('kp_id') if 'kp_id' in movie else None
             else:
-                # Кортеж
                 film_id = movie[0] if len(movie) > 0 else None
                 title = movie[1] if len(movie) > 1 else None
                 year = movie[2] if len(movie) > 2 else '—'
@@ -2798,7 +2797,6 @@ def register_series_handlers(bot_param):
             
             text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
             
-            # Добавляем кнопки "Перейти к описанию" и "Вернуться к меню"
             markup = InlineKeyboardMarkup()
             if kp_id:
                 markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"view_film_description:{kp_id}"))
@@ -2815,28 +2813,66 @@ def register_series_handlers(bot_param):
                 film_message_id = sent_msg.message_id
                 bot.answer_callback_query(call.id)
             
-            # Сохраняем message_id фильма для обработки реакций и реплаев
             if film_message_id:
                 bot_messages[film_message_id] = link
                 logger.info(f"[RANDOM] Saved film message_id={film_message_id} with link={link}")
             
-            # Отправляем инструкцию
+            # === Инструкция ===
             try:
                 instruction_text = (
                     "💬 <b>Что дальше?</b>\n\n"
-                    "• Ответьте на это сообщение в формате <code>дома/в кино + дата</code>, "
-                    "чтобы запланировать фильм\n"
-                    "• Поставьте реакцию просмотра на это сообщение или сообщение фильма, "
-                    "чтобы отметить фильм как просмотренный"
+                    "• Ответьте на это сообщение в формате <code>дома 20.01</code>, <code>в кино, завтра</code> или <code>дома — 15 января в 20:00</code>,\n"
+                    "чтобы запланировать просмотр\n"
+                    "• Поставьте реакцию ✅ или ❤️ на сообщение с фильмом, чтобы отметить как просмотренный"
                 )
                 sent = bot.send_message(chat_id, instruction_text, parse_mode='HTML')
-                # Также сохраняем для обработки реплаев
-                bot_messages[sent.message_id] = link
+                instruction_message_id = sent.message_id
+                bot_messages[instruction_message_id] = link
+                logger.info(f"[RANDOM] Instruction sent, message_id={instruction_message_id}")
             except Exception as e:
-                logger.error(f"[RANDOM] Error sending instruction message: {e}", exc_info=True)
-            
+                logger.error(f"[RANDOM] Error sending instruction: {e}", exc_info=True)
+                instruction_message_id = None
+
+            # === НОВЫЙ ПАРСЕР МЕСТА И ДАТЫ ===
+            def parse_plan_input(text: str):
+                """Парсит ввод вида 'дома 20.01', 'в кино завтра', 'Дома — 15 января 20:00' и т.д."""
+                text = text.strip().lower()
+
+                place = None
+                if re.search(r'\bдома\b', text):
+                    place = 'дома'
+                elif re.search(r'\b(в кино|кино|кинотеатр)\b', text):
+                    place = 'в кино'
+
+                if not place:
+                    return None, None
+
+                # Убираем слова места и разделители, оставляем дату/время
+                date_part = re.sub(r'\bдома\b|\bв кино\b|\bкино\b|\bкинотеатр\b', '', text, flags=re.IGNORECASE)
+                date_part = re.sub(r'^[.,:—\s-]+|[.,:—\s-]+$', '', date_part).strip()
+
+                return place, date_part or None
+
+            # === Сохранение данных для планирования ===
+            random_plan_data[user_id] = {
+                'link': link,
+                'kp_id': kp_id,
+                'title': title,
+                'film_message_id': film_message_id,
+                'instruction_message_id': instruction_message_id,
+                'chat_id': chat_id,
+                'parse_func': parse_plan_input  # сохраняем функцию для использования в обработчиках
+            }
+
+            # === Активация ожидания ===
+            if call.message.chat.type == 'private':
+                user_expected_text[user_id] = {'expected_for': 'random_plan'}
+                logger.info(f"[RANDOM] Ожидание планирования в ЛС включено для user_id={user_id}")
+            # В группе — будет обработано через reply на film_message_id или instruction_message_id
+
             del user_random_state[user_id]
             logger.info(f"[RANDOM] ===== COMPLETED: Film shown - {title}")
+
         except Exception as e:
             logger.error(f"[RANDOM] ERROR in _random_final: {e}", exc_info=True)
             try:
@@ -5793,3 +5829,80 @@ def handle_clean_confirm_internal(message):
         bot.reply_to(message, "❌ Неизвестный тип удаления")
         if user_id in user_clean_state:
             del user_clean_state[user_id]
+def process_random_plan(message, text: str):
+    """Обрабатывает текст планирования после рандома"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    plan_data = random_plan_data.get(user_id)
+    if not plan_data:
+        bot.send_message(chat_id, "❌ Сессия планирования истекла. Запустите /random заново.")
+        return
+
+    title = plan_data['title']
+    link = plan_data['link']
+    kp_id = plan_data['kp_id']
+
+    # Используем встроенный парсер
+    place, date_str = plan_data['parse_func'](text)
+
+    if not place:
+        bot.send_message(chat_id, "❌ Не понял место просмотра. Укажите «дома» или «в кино».")
+        return
+    if not date_str:
+        bot.send_message(chat_id, "❌ Не указана дата/время. Пример: дома 20.01 или в кино завтра")
+        return
+
+    # Здесь вызови свою функцию добавления в планы
+    # Предполагаю, что у тебя есть что-то вроде add_to_plans или plan_film
+    # Пример (подставь свою):
+    success = add_film_to_plans(
+        chat_id=chat_id,
+        user_id=user_id,
+        title=title,
+        link=link,
+        kp_id=kp_id,
+        place=place,
+        date_raw=date_str  # или уже распаршенную дату
+    )
+
+    if success:
+        bot.send_message(chat_id, f"✅ Фильм «{title}» запланирован!\n\n{place.capitalize()} — {date_str}")
+    else:
+        bot.send_message(chat_id, "❌ Не удалось добавить в планы. Попробуйте позже.")
+
+    # Очистка
+    random_plan_data.pop(user_id, None)
+    user_expected_text.pop(user_id, None)
+
+
+# Личка: следующее сообщение после рандома
+@bot.message_handler(content_types=['text'], func=is_expected_text_in_private)
+def handle_expected_text_in_private(message):
+    user_id = message.from_user.id
+    state = user_expected_text.get(user_id)
+    if not state:
+        return
+
+    query = message.text.strip()
+    expected_for = state['expected_for']
+
+    del user_expected_text[user_id]  # всегда очищаем
+
+    if expected_for == 'search':
+        process_search_query(message, query, reply_to_message=None)
+    elif expected_for == 'random_plan':
+        process_random_plan(message, query)
+    # ... другие elif если есть
+
+
+# Группа: reply на сообщение фильма или инструкцию
+@bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'] and
+                                      m.reply_to_message and
+                                      m.reply_to_message.from_user.id == bot.get_me().id and
+                                      m.reply_to_message.message_id in bot_messages)
+def handle_group_random_plan_reply(message):
+    query = message.text.strip()
+    if not query:
+        return
+    process_random_plan(message, query)
