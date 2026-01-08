@@ -83,7 +83,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                                 }
                             else:
                                 last_episode_info = {
-                                    'season': last_episode_row[0],
+                                    'season': last_episode_row.get('season_number') if isinstance(last_episode_row, dict) else last_episode_row[0],
                                     'episode': last_episode_row[1]
                                 }
         
@@ -246,7 +246,7 @@ def send_ticket_notification(chat_id, plan_id):
             title = ticket_row.get('title')
             plan_dt_value = ticket_row.get('plan_datetime')
         else:
-            ticket_file_id = ticket_row[0]
+            ticket_file_id = ticket_row.get("ticket_file_id") if isinstance(ticket_row, dict) else (ticket_row[0] if ticket_row else None)
             title = ticket_row[1]
             plan_dt_value = ticket_row[2]
         

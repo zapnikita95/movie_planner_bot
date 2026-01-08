@@ -94,7 +94,7 @@ def get_all_promocodes():
                     promo = row
                 else:
                     promo = {
-                        'id': row[0],
+                        'id': row.get('id') if isinstance(row, dict) else row[0],
                         'code': row[1],
                         'discount_type': row[2],
                         'discount_value': float(row[3]),
@@ -130,7 +130,7 @@ def get_active_promocodes():
                     promo = row
                 else:
                     promo = {
-                        'id': row[0],
+                        'id': row.get('id') if isinstance(row, dict) else row[0],
                         'code': row[1],
                         'discount_type': row[2],
                         'discount_value': float(row[3]),
@@ -180,7 +180,7 @@ def get_promocode_info(code):
                 }
             else:
                 return {
-                    'id': row[0],
+                    'id': row.get('id') if isinstance(row, dict) else row[0],
                     'code': row[1],
                     'discount_type': row[2],
                     'discount_value': float(row[3]),
@@ -344,7 +344,7 @@ def get_promocode_statistics():
                     })
                 else:
                     promocodes_list.append({
-                        'code': row[0],
+                        'code': row.get('code') if isinstance(row, dict) else row[0],
                         'discount_type': row[1],
                         'discount_value': float(row[2]),
                         'total_uses': row[3],

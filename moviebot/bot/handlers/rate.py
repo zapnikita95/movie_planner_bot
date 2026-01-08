@@ -149,7 +149,7 @@ def register_rate_handlers(bot):
                 title = row.get('title')
                 year = row.get('year')
             else:
-                film_id = row[0]
+                film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
                 kp_id = row[1]
                 title = row[2]
                 year = row[3] if len(row) > 3 else '—'
@@ -468,7 +468,7 @@ def handle_rating_internal(message, rating):
                                         actors = existing_row.get('actors')
                                         is_series = bool(existing_row.get('is_series', 0))
                                     else:
-                                        film_id_db = existing_row[0]
+                                        film_id_db = existing_row.get("id") if isinstance(existing_row, dict) else (existing_row[0] if existing_row else None)
                                         title = existing_row[1]
                                         watched = existing_row[2]
                                         link = existing_row[3]

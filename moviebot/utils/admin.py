@@ -139,7 +139,7 @@ def get_all_admins():
                     })
                 else:
                     result.append({
-                        'user_id': row[0],
+                        'user_id': row.get('user_id') if isinstance(row, dict) else row[0],
                         'added_by': row[1],
                         'added_at': row[2]
                     })

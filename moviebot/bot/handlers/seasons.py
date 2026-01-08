@@ -376,7 +376,7 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
     
     completed_series = []
     for row in all_series:
-        film_id = row[0] if not isinstance(row, dict) else row.get('id')
+        film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row.get('id')
         title = row[1] if not isinstance(row, dict) else row.get('title')
         kp_id = row[2] if not isinstance(row, dict) else row.get('kp_id')
 
@@ -463,7 +463,7 @@ def handle_seasons_kp(call):
             actors = row.get('actors')
             is_series = bool(row.get('is_series', 0))
         else:
-            film_id = row[0]
+            film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
             title = row[1]
             watched = row[2]
             link = row[3] if len(row) > 3 else f"https://www.kinopoisk.ru/film/{kp_id}/"
@@ -652,7 +652,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
     items = []
     for row in rows:
         items.append({
-            'film_id': row[0],
+            'film_id': row.get('id') if isinstance(row, dict) else row[0],
             'kp_id': row[1],
             'title': row[2],
             'year': row[3],

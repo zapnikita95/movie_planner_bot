@@ -280,7 +280,7 @@ def plan_from_added_callback(call):
                     cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                     row = cursor.fetchone()
                     if row:
-                        film_id = row[0] if not isinstance(row, dict) else row.get('id')
+                        film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row.get('id')
                     
                     if not film_id:
                         is_series_int = 1 if is_series else 0
@@ -494,7 +494,7 @@ def handle_plan_type(call):
                 if not row:
                     bot.send_message(chat_id, "❌ Фильм не найден в базе. Попробуйте заново.")
                     return
-                film_id = row[0] if not isinstance(row, dict) else row['id']
+                film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row['id']
                 link = row[1] if not isinstance(row, dict) else row['link']
 
         # Сохраняем состояние с step=3 (число!)
@@ -581,7 +581,7 @@ def show_film_description_callback(call):
             actors = row.get('actors')
             is_series = bool(row.get('is_series', 0))
         else:
-            film_id = row[0]
+            film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
             title = row[1]
             watched = row[2]
             link = row[3]

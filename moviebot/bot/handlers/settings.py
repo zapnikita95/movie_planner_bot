@@ -454,7 +454,7 @@ def handle_settings_callback(call):
                     ''', (chat_id, threshold_time, bot_id))
                     
                     row = cursor.fetchone()
-                    active_participants = row[0] if row else 0
+                    active_participants = row.get("count") if isinstance(row, dict) else (row[0] if row else 0)
                     
                 # Проверяем, что не менее 65% участников активны
                 required_participants = int(total_participants * 0.65)

@@ -433,7 +433,7 @@ def show_schedule(message):
                 plan_type = row.get('plan_type')
                 has_ticket = row.get('has_ticket', 0)
             else:
-                plan_id = row[0]
+                plan_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
                 title = row[1]
                 kp_id = row[2]
                 link = row[3]
@@ -624,7 +624,7 @@ def show_schedule(message):
                         actors = db_row.get('actors')
                         is_series = bool(db_row.get('is_series', 0))
                     else:
-                        year = db_row[0]
+                        year = db_row.get("year") if isinstance(db_row, dict) else (db_row[0] if db_row else None)
                         genres = db_row[1]
                         description = db_row[2]
                         director = db_row[3]
@@ -1416,7 +1416,7 @@ def edit_plan_callback(call):
             title = plan_row.get('title')
             kp_id = plan_row.get('kp_id')
         else:
-            plan_type = plan_row[0]
+            plan_type = plan_row.get("plan_type") if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
             plan_dt_value = plan_row[1]
             title = plan_row[2]
             kp_id = plan_row[3] if len(plan_row) > 3 else None
@@ -1695,7 +1695,7 @@ def streaming_done_callback(call):
                 plan_type = plan_row.get('plan_type')
                 title = plan_row.get('title')
             else:
-                film_id = plan_row[0]
+                film_id = plan_row.get('id') if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
                 plan_datetime = plan_row[1]
                 plan_type = plan_row[2]
                 title = plan_row[3]
@@ -1844,7 +1844,7 @@ def handle_edit_plan_datetime_internal(message, state):
             link = plan_row.get('link')
             plan_type = plan_row.get('plan_type')
         else:
-            link = plan_row[0]
+            link = plan_row.get("link") if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
             plan_type = plan_row[1]
         
         user_tz = get_user_timezone_or_default(user_id)

@@ -604,7 +604,7 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
                 plan_dt_value = row.get('plan_datetime')
                 ticket_count = row.get('ticket_count', 0)
             else:
-                plan_id = row[0]
+                plan_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
                 title = row[1]
                 plan_dt_value = row[2]
                 ticket_count = row[3] if len(row) > 3 else 0
@@ -3254,7 +3254,7 @@ def register_series_handlers(bot_param):
             if isinstance(ticket_row, dict):
                 ticket_data = ticket_row.get('ticket_file_id')
             else:
-                ticket_data = ticket_row[0]
+                ticket_data = ticket_row.get("ticket_file_id") if isinstance(ticket_row, dict) else (ticket_row[0] if ticket_row else None)
             
             if not ticket_data:
                 bot.answer_callback_query(call.id, "❌ Билеты не загружены", show_alert=True)
@@ -3944,7 +3944,7 @@ def handle_kinopoisk_link(message):
         
         if row:
             # Уже в базе — обновляем актуальными данными
-            film_id = row[0] if not isinstance(row, dict) else row.get('id')
+            film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row.get('id')
             logger.info(f"[KINOPOISK LINK] Фильм в базе (id={film_id}) — обновляем данные")
             
             with db_lock:
@@ -4038,7 +4038,7 @@ def view_film_description_callback(call):
 def ensure_movie_in_database(kp_id, title=None):
     """Убеждается, что фильм есть в базе данных. Если нет - добавляет его."""
     with db_lock:
-        cursor.execute("SELECT id FROM films WHERE kp_id = %s", (str(kp_id),)
+        cursor.execute("SELECT id FROM films WHERE kp_id = %s", (str(kp_id),))
         existing = cursor.fetchone()
         
         if not existing:
@@ -4717,7 +4717,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                                 plan_type = plan_row.get('plan_type')
                                 plan_dt_value = plan_row.get('plan_datetime')
                             else:
-                                plan_id = plan_row[0]
+                                plan_id = plan_row.get("id") if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
                                 plan_type = plan_row[1]
                                 plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
                             

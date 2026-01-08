@@ -5752,7 +5752,7 @@ def handle_successful_payment(message):
             group_size = payment_row.get('group_size')
             amount = payment_row.get('amount')
         else:
-            user_id = payment_row[0]
+            user_id = payment_row.get("user_id") if isinstance(payment_row, dict) else (payment_row[0] if payment_row else None)
             chat_id = payment_row[1]
             subscription_type = payment_row[2]
             plan_type = payment_row[3]

@@ -368,7 +368,7 @@ def register_series_callbacks(bot):
                 cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
                 if row:
-                    film_id = row[0] if isinstance(row, tuple) else row.get('id')
+                    film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if isinstance(row, tuple) else row.get('id')
                     title = row[1] if isinstance(row, tuple) else row.get('title')
                     logger.info(f"[SERIES SUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
                 else:
@@ -616,7 +616,7 @@ def register_series_callbacks(bot):
                     logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден для kp_id={kp_id}")
                     raise ValueError("Сериал не найден в БД")
                 
-                film_id = row[0] if isinstance(row, tuple) else row.get('id')
+                film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if isinstance(row, tuple) else row.get('id')
                 title = row[1] if isinstance(row, tuple) else row.get('title')
                 logger.info(f"[SERIES UNSUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
                 

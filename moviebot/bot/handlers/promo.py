@@ -144,7 +144,7 @@ def promo_info_callback(call):
             used_count = row['used_count']
             is_active = bool(row['is_active'])
         else:
-            code = row[0]
+            code = row.get("code") if isinstance(row, dict) else (row[0] if row else None)
             discount_type = row[1]
             discount_value = float(row[2])
             total_uses = row[3]

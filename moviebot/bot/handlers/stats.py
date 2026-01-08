@@ -106,7 +106,7 @@ def _process_refund(message, charge_id):
             status = row.get('status')
             stored_charge_id = row.get('telegram_payment_charge_id')
         else:
-            payment_id = row[0]
+            payment_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
             user_id = row[1]
             chat_id = row[2]
             amount = row[3]
@@ -354,7 +354,7 @@ def register_stats_handlers(bot):
                             film_id = row.get('id')
                             kp_id = row.get('kp_id')
                         else:
-                            film_id = row[0]
+                            film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
                             kp_id = row[1]
                         
                         # Получаем данные о сезонах
@@ -413,10 +413,9 @@ def register_stats_handlers(bot):
                             watched_rows = cursor.fetchall()
                             watched_set = set()
                             for w_row in watched_rows:
-                                if isinstance(w_row, dict):
-                                    watched_set.add((w_row.get('season_number'), w_row.get('episode_number')))
-                                else:
-                                    watched_set.add((w_row[0], w_row[1]))
+                                season = w_row.get('season_number') if isinstance(w_row, dict) else w_row[0]
+                                episode = w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1]
+                                watched_set.add((season, episode))
                             
                             # Подсчитываем просмотренные и общее количество эпизодов
                             total_episodes = 0
@@ -829,7 +828,7 @@ def register_stats_handlers(bot):
                         cmd = cmd_row.get('command_or_action', '')
                         count = cmd_row.get('count', 0)
                     else:
-                        cmd = cmd_row[0] if len(cmd_row) > 0 else ''
+                        cmd = cmd_row.get('command_or_action') if isinstance(cmd_row, dict) else (cmd_row[0] if cmd_row and len(cmd_row) > 0 else '')
                         count = cmd_row[1] if len(cmd_row) > 1 else 0
                     text += f"   {i}. {cmd}: {count}\n"
                 text += "\n"
@@ -843,7 +842,7 @@ def register_stats_handlers(bot):
                         cmd = cmd_row.get('command_or_action', '')
                         count = cmd_row.get('count', 0)
                     else:
-                        cmd = cmd_row[0] if len(cmd_row) > 0 else ''
+                        cmd = cmd_row.get('command_or_action') if isinstance(cmd_row, dict) else (cmd_row[0] if cmd_row and len(cmd_row) > 0 else '')
                         count = cmd_row[1] if len(cmd_row) > 1 else 0
                     text += f"   {i}. {cmd}: {count}\n"
             

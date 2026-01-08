@@ -898,7 +898,7 @@ def has_subscription_feature(chat_id, user_id, feature_type):
             subscription_id = sub_row['id']
             group_size = sub_row.get('group_size')  # .get() — безопасно, если нет ключа
         else:
-            subscription_id = sub_row[0]
+            subscription_id = sub_row.get("id") if isinstance(sub_row, dict) else (sub_row[0] if sub_row else None)
             group_size = sub_row[1] if len(sub_row) > 1 else None  # если только id вернулся
         
         # Если есть ограничение по участникам — проверяем membership
@@ -954,7 +954,7 @@ def get_active_group_users(chat_id, bot_id=None):
                 user_id = row.get('user_id')
                 username = row.get('username')
             else:
-                user_id = row[0] if len(row) > 0 else None
+                user_id = row.get("user_id") if isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
                 username = row[1] if len(row) > 1 else None
             if user_id:
                 users[user_id] = username or f"user_{user_id}"
@@ -978,7 +978,7 @@ def get_active_group_users(chat_id, bot_id=None):
                 chat_id = row.get('chat_id')
                 username = row.get('username')
             else:
-                chat_id = row[0] if len(row) > 0 else None
+                chat_id = row.get("chat_id") if isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
                 username = row[1] if len(row) > 1 else None
             
 def get_user_groups(user_id, bot=None):
@@ -998,7 +998,7 @@ def get_user_groups(user_id, bot=None):
                 chat_id = row.get('chat_id')
                 username = row.get('username')
             else:
-                chat_id = row[0] if len(row) > 0 else None
+                chat_id = row.get("chat_id") if isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
                 username = row[1] if len(row) > 1 else None
             
             if chat_id and chat_id < 0:  # Только группы (отрицательные ID)
@@ -1170,7 +1170,7 @@ def get_payment_by_yookassa_id(yookassa_payment_id):
                 return dict(row)
             else:
                 return {
-                    'id': row[0],
+                    'id': row.get('id') if isinstance(row, dict) else row[0],
                     'payment_id': row[1],
                     'yookassa_payment_id': row[2],
                     'user_id': row[3],
