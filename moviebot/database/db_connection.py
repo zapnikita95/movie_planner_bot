@@ -2,6 +2,7 @@
 Подключение к базе данных и инициализация таблиц
 """
 import psycopg2
+import psycopg2.extras
 from psycopg2.extras import RealDictCursor
 import threading
 import logging
@@ -35,12 +36,13 @@ def get_db_connection():
     return _conn
 
 def get_db_cursor():
-    """Получить курсор БД"""
-    global _cursor
-    if _cursor is None:
-        conn = get_db_connection()
-        _cursor = conn.cursor()
-    return _cursor
+    """Возвращает cursor с RealDictCursor (возвращает dict вместо tuple)"""
+    global conn
+    if conn is None or conn.closed:
+        init_db_connection()
+    
+    # Вот ключевой фикс — RealDictCursor
+    return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
 def init_database():
     """Инициализация базы данных: создание таблиц и миграции"""

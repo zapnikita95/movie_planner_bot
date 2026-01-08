@@ -599,17 +599,17 @@ def handle_seasons_command(message):
     )
 
 def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 10):
-    """Возвращает страницу сериалов пользователя с приоритетной сортировкой и данными о подписке"""
     offset = (page - 1) * page_size
 
     with db_lock:
-        # Сначала считаем общее количество
+        # Считаем количество (теперь dict)
         cursor.execute("""
-            SELECT COUNT(DISTINCT m.id)
+            SELECT COUNT(DISTINCT m.id) AS total_count
             FROM movies m
             WHERE m.chat_id = %s AND m.is_series = 1
         """, (chat_id,))
-        total_count = cursor.fetchone()[0]
+        count_row = cursor.fetchone()
+        total_count = count_row['total_count'] if count_row else 0
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
 
         # Основной запрос
@@ -639,11 +639,11 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
             WHERE m.chat_id = %s AND m.is_series = 1
             GROUP BY m.id
             ORDER BY
-                (m.is_ongoing = TRUE AND BOOL_OR(ss.subscribed = TRUE)) DESC,  -- 1: выходит + подписан
-                (m.is_ongoing = TRUE) DESC,                                   -- 2: выходит, но не подписан
-                (COUNT(st.id) > 0 AND BOOL_OR(ss.subscribed = TRUE)) DESC,    -- 3: не выходит, смотрит + подписан
-                (COUNT(st.id) > 0) DESC,                                      -- 4: не выходит, смотрит
-                m.added_date DESC                                             -- тайбрейкер
+                (m.is_ongoing = TRUE AND BOOL_OR(ss.subscribed = TRUE)) DESC,
+                (m.is_ongoing = TRUE) DESC,
+                (COUNT(st.id) > 0 AND BOOL_OR(ss.subscribed = TRUE)) DESC,
+                (COUNT(st.id) > 0) DESC,
+                m.added_date DESC
             LIMIT %s OFFSET %s
         """, (chat_id, user_id, chat_id, user_id, chat_id, page_size, offset))
 
@@ -652,18 +652,18 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
     items = []
     for row in rows:
         items.append({
-            'film_id': row.get('id') if isinstance(row, dict) else row[0],
-            'kp_id': row[1],
-            'title': row[2],
-            'year': row[3],
-            'poster_url': row[4],
-            'link': row[5] or f"https://www.kinopoisk.ru/series/{row[1]}/",
-            'is_ongoing': row[6],
-            'seasons_count': row[7],
-            'next_episode': row[8],
-            'last_api_update': row[9],
-            'watched_count': row[10],
-            'has_subscription': row[11],
+            'film_id': row['film_id'],
+            'kp_id': row['kp_id'],
+            'title': row['title'],
+            'year': row['year'],
+            'poster_url': row['poster_url'],
+            'link': row['link'] or f"https://www.kinopoisk.ru/series/{row['kp_id']}/",
+            'is_ongoing': row['is_ongoing'],
+            'seasons_count': row['seasons_count'],
+            'next_episode': row['next_episode'],
+            'last_api_update': row['last_api_update'],
+            'watched_count': row['watched_episodes_count'],
+            'has_subscription': row['has_subscription'],
         })
 
     return {
