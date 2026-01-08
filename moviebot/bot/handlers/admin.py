@@ -514,7 +514,6 @@ def handle_unsubscribe_callback(call):
             target_user_id = int(parts[2]) if len(parts) > 2 else None
             
             if target_user_id:
-                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                 
                 text_result = f"👤 <b>Пользователь: {target_user_id}</b>\n\n"
                 text_result += "Что вы хотите отменить?\n\n"

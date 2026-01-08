@@ -1,4 +1,3 @@
-from moviebot.bot.bot_init import bot
 """
 Callback handlers для работы с платежами
 """
@@ -7,11 +6,9 @@ import os
 import uuid
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-
+from moviebot.bot.bot_init import bot
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
 from moviebot.database.db_operations import (
-
     get_active_subscription, save_payment, create_subscription,
     get_user_personal_subscriptions, get_user_group_subscriptions,
     cancel_subscription, get_active_group_users, get_subscription_by_id,
@@ -20,19 +17,12 @@ from moviebot.database.db_operations import (
     has_subscription_feature
 )
 from moviebot.bot.bot_init import BOT_ID
-
 from moviebot.api.yookassa_api import create_subscription_payment, YOOKASSA_AVAILABLE
-
 from moviebot.config import YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
-
 from moviebot.states import user_payment_state, user_promo_state
-
 from moviebot.utils.promo import apply_promocode, get_promocode_info
-
 from moviebot.utils.payments import create_stars_invoice
-
 from datetime import datetime, timedelta
-
 import pytz
 
 logger = logging.getLogger(__name__)
@@ -167,16 +157,16 @@ def calculate_discounted_price(user_id, subscription_type, plan_type, period_typ
     return base_price
 
 
-def register_payment_callbacks(bot):
+def register_payment_callbacks(bot_instance):
     """Регистрирует callback handlers для платежей"""
     
-    @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("payment:"))
+    @bot_instance.callback_query_handler(func=lambda call: call.data and call.data.startswith("payment:"))
     def handle_payment_callback(call):
         """Обработчик callback для кнопок оплаты"""
         # Явно указываем, что используем глобальные переменные
         global YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, pytz
         try:
-            bot.answer_callback_query(call.id)
+            bot_instance.answer_callback_query(call.id)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             action = call.data.split(":", 1)[1]
@@ -194,10 +184,10 @@ def register_payment_callbacks(bot):
                 # Подтверждение получения напоминания о списании
                 try:
                     subscription_id = int(action.split(":")[1])
-                    bot.answer_callback_query(call.id, "✅ Напоминание получено")
+                    bot_instance.answer_callback_query(call.id, "✅ Напоминание получено")
                     # Удаляем кнопки из сообщения
                     try:
-                        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                        bot_instance.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
                     except:
                         pass
                     logger.info(f"[PAYMENT REMINDER] Пользователь {user_id} подтвердил получение напоминания для подписки {subscription_id}")
@@ -209,24 +199,24 @@ def register_payment_callbacks(bot):
                 # Повторная попытка провести платеж
                 try:
                     subscription_id = int(action.split(":")[1])
-                    bot.answer_callback_query(call.id, "⏳ Обработка платежа...")
+                    bot_instance.answer_callback_query(call.id, "⏳ Обработка платежа...")
                     
                     # Получаем информацию о подписке
                     from moviebot.database.db_operations import get_subscription_by_id
                     sub = get_subscription_by_id(subscription_id)
                     
                     if not sub:
-                        bot.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
                         return
                     
                     # Проверяем, что подписка принадлежит пользователю
                     if sub.get('user_id') != user_id:
-                        bot.answer_callback_query(call.id, "❌ У вас нет доступа к этой подписке", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа к этой подписке", show_alert=True)
                         return
                     
                     payment_method_id = sub.get('payment_method_id')
                     if not payment_method_id:
-                        bot.answer_callback_query(call.id, "❌ Сохраненный способ оплаты не найден", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "❌ Сохраненный способ оплаты не найден", show_alert=True)
                         return
                     
                     # Получаем параметры подписки
@@ -257,7 +247,7 @@ def register_payment_callbacks(bot):
                     )
                     
                     if not payment:
-                        bot.answer_callback_query(call.id, "❌ Не удалось создать платеж", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "❌ Не удалось создать платеж", show_alert=True)
                         return
                     
                     # Сохраняем платеж в БД
@@ -293,32 +283,144 @@ def register_payment_callbacks(bot):
                         
                         # Удаляем кнопки из сообщения
                         try:
-                            bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                            bot_instance.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
                         except:
                             pass
                         
-                        bot.answer_callback_query(call.id, "✅ Платеж успешно проведен!")
+                        bot_instance.answer_callback_query(call.id, "✅ Платеж успешно проведен!")
                         logger.info(f"[RETRY PAYMENT] Платеж успешно проведен для подписки {subscription_id}")
                     else:
-                        bot.answer_callback_query(call.id, f"❌ Платеж не прошел. Статус: {payment.status}", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, f"❌ Платеж не прошел. Статус: {payment.status}", show_alert=True)
                         logger.warning(f"[RETRY PAYMENT] Платеж {payment.id} не успешен, статус: {payment.status}")
                     
                 except Exception as e:
                     logger.error(f"[RETRY PAYMENT] Ошибка обработки повторной попытки платежа: {e}", exc_info=True)
-                    bot.answer_callback_query(call.id, "❌ Ошибка при обработке платежа", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка при обработке платежа", show_alert=True)
                 return
             
             if action == "success_ok":
                 # Подтверждение получения уведомления об успешном платеже
                 try:
-                    bot.answer_callback_query(call.id, "✅ Готово")
+                    bot_instance.answer_callback_query(call.id, "✅ Готово")
                     # Удаляем кнопки из сообщения
                     try:
-                        bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
+                        bot_instance.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
                     except:
                         pass
                 except Exception as e:
                     logger.error(f"[PAYMENT SUCCESS] Ошибка обработки подтверждения: {e}")
+                return
+            
+            if action == "test_10rub":
+                # Дополнительная проверка — только ты в личке
+                if call.message.chat.type != 'private' or call.from_user.id != 301810276:
+                    bot_instance.answer_callback_query(call.id, "❌ Доступ запрещён", show_alert=True)
+                    return
+                
+                logger.info(f"[PAYMENT] Тестовый платёж 10 ₽ запрошен пользователем {user_id}")
+                
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                except:
+                    pass
+                
+                # Создаем тестовый платеж 10₽
+                # Используем тестовый тариф
+                sub_type = 'personal'
+                plan_type = 'test'
+                period_type = 'test'
+                final_price = 10.0
+                
+                # Инициализируем ЮKassa
+                if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+                    logger.error(f"[PAYMENT] YooKassa ключи не настроены!")
+                    bot_instance.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены", show_alert=True)
+                    return
+                
+                from yookassa import Configuration, Payment
+                shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
+                secret_key = YOOKASSA_SECRET_KEY.strip() if YOOKASSA_SECRET_KEY else None
+                Configuration.account_id = shop_id
+                Configuration.secret_key = secret_key
+                
+                # Создаем уникальный ID платежа
+                import uuid as uuid_module
+                payment_id = str(uuid_module.uuid4())
+                
+                # Определяем URL для возврата
+                return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
+                
+                # Подготавливаем metadata для платежа
+                metadata = {
+                    "user_id": str(user_id),
+                    "chat_id": str(chat_id),
+                    "subscription_type": sub_type,
+                    "plan_type": plan_type,
+                    "period_type": period_type,
+                    "payment_id": payment_id,
+                    "telegram_username": call.from_user.username or ""
+                }
+                
+                # Создаем платеж через ЮKassa
+                try:
+                    payment = create_subscription_payment(
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        subscription_type=sub_type,
+                        plan_type=plan_type,
+                        period_type=period_type,
+                        amount=final_price,
+                        return_url=return_url,
+                        metadata=metadata,
+                        group_size=None,
+                        telegram_username=call.from_user.username,
+                        group_username=None
+                    )
+                    
+                    if not payment:
+                        logger.error(f"[PAYMENT] Не удалось создать тестовый платеж для пользователя {user_id}")
+                        bot_instance.answer_callback_query(call.id, "❌ Ошибка создания платежа", show_alert=True)
+                        return
+                    
+                    # Сохраняем платеж в БД
+                    from moviebot.database.db_operations import save_payment
+                    save_payment(
+                        payment_id=payment_id,
+                        yookassa_payment_id=payment.id,
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        subscription_type=sub_type,
+                        plan_type=plan_type,
+                        period_type=period_type,
+                        group_size=None,
+                        amount=final_price,
+                        status=payment.status
+                    )
+                    
+                    # Отправляем ссылку на оплату
+                    payment_url = payment.confirmation.confirmation_url if payment.confirmation else None
+                    if payment_url:
+                        text = f"🧪 <b>Тестовый платёж 10 ₽</b>\n\n"
+                        text += f"Ссылка на оплату:\n{payment_url}"
+                        markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton("💳 Оплатить", url=payment_url))
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                        
+                        try:
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                                bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                    else:
+                        logger.error(f"[PAYMENT] Платеж создан, но нет ссылки на оплату")
+                        bot_instance.answer_callback_query(call.id, "❌ Ошибка: нет ссылки на оплату", show_alert=True)
+                    
+                    logger.info(f"[PAYMENT] Тестовый платёж 10 ₽ создан для пользователя {user_id}, payment_id={payment_id}")
+                    
+                except Exception as e:
+                    logger.error(f"[PAYMENT] Ошибка создания тестового платежа: {e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка создания платежа", show_alert=True)
                 return
         
             if action == "active":
@@ -339,7 +441,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
             
                 try:
-                    bot.edit_message_text(
+                    bot_instance.edit_message_text(
                         text,
                         call.message.chat.id,
                         call.message.message_id,
@@ -466,7 +568,7 @@ def register_payment_callbacks(bot):
                         
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                         try:
-                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -478,7 +580,7 @@ def register_payment_callbacks(bot):
                         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                         try:
-                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -597,7 +699,7 @@ def register_payment_callbacks(bot):
                         
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     try:
-                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -609,7 +711,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -619,7 +721,7 @@ def register_payment_callbacks(bot):
             if action == "active:group:current":
                 # Проверка подписки текущей группы
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
@@ -657,7 +759,7 @@ def register_payment_callbacks(bot):
                 
                     # Получаем информацию о группе
                     try:
-                        chat = bot.get_chat(chat_id)
+                        chat = bot_instance.get_chat(chat_id)
                         group_title = chat.title
                         group_username = chat.username
                     except Exception as chat_error:
@@ -799,7 +901,7 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -832,7 +934,7 @@ def register_payment_callbacks(bot):
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -842,7 +944,7 @@ def register_payment_callbacks(bot):
                 # Добавление участника в подписку после оплаты
                 parts = action.split(":")
                 if len(parts) < 3:
-                    bot.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
                     return
                 
                 subscription_id = int(parts[1])
@@ -856,26 +958,26 @@ def register_payment_callbacks(bot):
                 # Проверяем, что подписка существует и принадлежит этому чату
                 sub = get_subscription_by_id(subscription_id)
                 if not sub or sub.get('chat_id') != chat_id:
-                    bot.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
                     return
                 
                 # Проверяем, что целевой пользователь в группе
                 active_users = get_active_group_users(chat_id, BOT_ID)
                 if target_user_id not in active_users:
-                    bot.answer_callback_query(call.id, "❌ Пользователь не найден в группе", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "❌ Пользователь не найден в группе", show_alert=True)
                     return
                 
                 # Проверяем, что пользователь еще не в подписке
                 members = get_subscription_members(subscription_id)
                 if target_user_id in members:
-                    bot.answer_callback_query(call.id, "✅ Этот пользователь уже в подписке")
+                    bot_instance.answer_callback_query(call.id, "✅ Этот пользователь уже в подписке")
                     return
                 
                 # Добавляем участника
                 target_username = active_users.get(target_user_id, f"user_{target_user_id}")
                 add_subscription_member(subscription_id, target_user_id, target_username)
                 
-                bot.answer_callback_query(call.id, f"✅ {target_username} добавлен в подписку")
+                bot_instance.answer_callback_query(call.id, f"✅ {target_username} добавлен в подписку")
                 
                 # Обновляем сообщение, удаляя кнопку добавленного участника
                 try:
@@ -918,7 +1020,7 @@ def register_payment_callbacks(bot):
                     
                     markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))
                     
-                    bot.edit_message_text(
+                    bot_instance.edit_message_text(
                         message_text,
                         call.message.chat.id,
                         call.message.message_id,
@@ -932,10 +1034,10 @@ def register_payment_callbacks(bot):
             if action == "success_ok":
                 # Закрываем сообщение об успешной оплате
                 try:
-                    bot.delete_message(call.message.chat.id, call.message.message_id)
+                    bot_instance.delete_message(call.message.chat.id, call.message.message_id)
                 except Exception as e:
                     logger.warning(f"[PAYMENT] Не удалось удалить сообщение: {e}")
-                bot.answer_callback_query(call.id)
+                bot_instance.answer_callback_query(call.id)
                 return
         
             if action.startswith("expand:"):
@@ -951,7 +1053,7 @@ def register_payment_callbacks(bot):
             
                 sub = get_active_subscription(chat_id, user_id, 'group')
                 if not sub or sub.get('id') != subscription_id:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 current_size = sub.get('group_size') or 2
@@ -1041,7 +1143,7 @@ def register_payment_callbacks(bot):
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1059,12 +1161,12 @@ def register_payment_callbacks(bot):
                     # Проверяем, что подписка существует и принадлежит пользователю или группе
                     sub = get_subscription_by_id(subscription_id)
                     if not sub:
-                        bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                         return
                 
                     # Проверяем, что пользователь имеет право добавлять участников (владелец подписки)
                     if sub.get('user_id') != user_id:
-                        bot.answer_callback_query(call.id, "Только владелец подписки может добавлять участников", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Только владелец подписки может добавлять участников", show_alert=True)
                         return
                 
                     existing_members = get_subscription_members(subscription_id)
@@ -1074,27 +1176,27 @@ def register_payment_callbacks(bot):
                         existing_members = {uid: uname for uid, uname in existing_members.items() if uid != BOT_ID}
                 
                     if member_user_id in existing_members:
-                        bot.answer_callback_query(call.id, "Участник уже в подписке", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Участник уже в подписке", show_alert=True)
                         return
                 
                     # Проверяем лимит участников
                     group_size = sub.get('group_size')
                     if group_size and len(existing_members) >= int(group_size):
-                        bot.answer_callback_query(call.id, f"Достигнут лимит участников ({group_size})", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, f"Достигнут лимит участников ({group_size})", show_alert=True)
                         return
                 
                     # Добавляем участника
                     active_users = get_active_group_users(sub.get('chat_id', chat_id))
                     username = active_users.get(member_user_id, f"user_{member_user_id}")
                     add_subscription_member(subscription_id, member_user_id, username)
-                    bot.answer_callback_query(call.id, f"✅ Участник @{username} добавлен")
+                    bot_instance.answer_callback_query(call.id, f"✅ Участник @{username} добавлен")
                 
                     # Обновляем сообщение с информацией о подписке
                     # Можно отправить обновленное сообщение или просто подтвердить
                     logger.info(f"[PAYMENT] Участник {member_user_id} добавлен в подписку {subscription_id}")
                 except Exception as e:
                     logger.error(f"[PAYMENT] Ошибка добавления участника: {e}", exc_info=True)
-                    bot.answer_callback_query(call.id, "Ошибка добавления участника", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка добавления участника", show_alert=True)
                 return
         
             if action.startswith("toggle_member:"):
@@ -1115,14 +1217,14 @@ def register_payment_callbacks(bot):
                 if member_user_id in existing_members:
                     # Удаляем участника (нужно добавить функцию удаления)
                     # Пока просто пропускаем
-                    bot.answer_callback_query(call.id, "Участник уже в подписке")
+                    bot_instance.answer_callback_query(call.id, "Участник уже в подписке")
                     return
                 else:
                     # Добавляем участника
                     active_users = get_active_group_users(state.get('chat_id', chat_id))
                     username = active_users.get(member_user_id, f"user_{member_user_id}")
                     add_subscription_member(subscription_id, member_user_id, username)
-                    bot.answer_callback_query(call.id, "Участник добавлен")
+                    bot_instance.answer_callback_query(call.id, "Участник добавлен")
             
                 # Обновляем список
                 return
@@ -1137,14 +1239,14 @@ def register_payment_callbacks(bot):
             
                 if member_user_id in state['selected_members']:
                     state['selected_members'].remove(member_user_id)
-                    bot.answer_callback_query(call.id, "Участник удален из выбора")
+                    bot_instance.answer_callback_query(call.id, "Участник удален из выбора")
                 else:
                     group_size = int(state.get('group_size', 2))
                     if len(state['selected_members']) >= group_size:
-                        bot.answer_callback_query(call.id, f"Можно выбрать только {group_size} участников", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, f"Можно выбрать только {group_size} участников", show_alert=True)
                         return
                     state['selected_members'].add(member_user_id)
-                    bot.answer_callback_query(call.id, "Участник добавлен в выбор")
+                    bot_instance.answer_callback_query(call.id, "Участник добавлен в выбор")
             
                 # Обновляем сообщение
                 from moviebot.database.db_operations import get_active_group_users
@@ -1173,7 +1275,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Отмена", callback_data="payment:back"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1188,14 +1290,14 @@ def register_payment_callbacks(bot):
                 # Получаем информацию о подписке
                 sub = get_subscription_by_id(subscription_id)
                 if not sub:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 group_chat_id = sub.get('chat_id')
                 group_size = sub.get('group_size')
             
                 if not group_chat_id:
-                    bot.answer_callback_query(call.id, "Не удалось определить группу", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Не удалось определить группу", show_alert=True)
                     return
             
                 # Получаем активных пользователей и текущих участников подписки
@@ -1210,7 +1312,7 @@ def register_payment_callbacks(bot):
                 active_count = len(active_users) if active_users else 0
             
                 if not active_users or active_count == 0:
-                    bot.answer_callback_query(call.id, "В группе нет активных участников", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "В группе нет активных участников", show_alert=True)
                     return
             
                 # Сохраняем состояние для выбора участников
@@ -1246,7 +1348,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1262,12 +1364,12 @@ def register_payment_callbacks(bot):
             
                 state = user_payment_state.get(user_id, {})
                 if state.get('subscription_id') != subscription_id:
-                    bot.answer_callback_query(call.id, "Ошибка состояния", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка состояния", show_alert=True)
                     return
             
                 sub = get_subscription_by_id(subscription_id)
                 if not sub:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 group_chat_id = sub.get('chat_id')
@@ -1288,18 +1390,18 @@ def register_payment_callbacks(bot):
                     selected_members.remove(member_user_id)
                     if member_user_id in existing_member_ids:
                         remove_subscription_member(subscription_id, member_user_id)
-                    bot.answer_callback_query(call.id, "Участник удален")
+                    bot_instance.answer_callback_query(call.id, "Участник удален")
                 else:
                     # Проверяем лимит
                     if group_size and len(selected_members) >= group_size:
-                        bot.answer_callback_query(call.id, f"Можно выбрать только {group_size} участников", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, f"Можно выбрать только {group_size} участников", show_alert=True)
                         return
                     # Добавляем участника
                     selected_members.add(member_user_id)
                     username = active_users.get(member_user_id, f"user_{member_user_id}")
                     if member_user_id not in existing_member_ids:
                         add_subscription_member(subscription_id, member_user_id, username)
-                    bot.answer_callback_query(call.id, "Участник добавлен")
+                    bot_instance.answer_callback_query(call.id, "Участник добавлен")
             
                 state['selected_members'] = selected_members
             
@@ -1328,7 +1430,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1342,7 +1444,7 @@ def register_payment_callbacks(bot):
             
                 sub = get_subscription_by_id(subscription_id)
                 if not sub:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 members = get_subscription_members(subscription_id)
@@ -1364,7 +1466,7 @@ def register_payment_callbacks(bot):
                     del user_payment_state[user_id]
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1377,7 +1479,7 @@ def register_payment_callbacks(bot):
                 group_size = int(state.get('group_size', 2))
             
                 if len(selected_members) < group_size:
-                    bot.answer_callback_query(call.id, f"Нужно выбрать {group_size} участников", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, f"Нужно выбрать {group_size} участников", show_alert=True)
                     return
             
                 # Переходим к подтверждению подписки
@@ -1404,7 +1506,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1452,7 +1554,7 @@ def register_payment_callbacks(bot):
                     del user_payment_state[user_id]
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1461,7 +1563,7 @@ def register_payment_callbacks(bot):
             if action == "active:group:other":
                 # Проверка подписки другой группы - показываем список групп
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
@@ -1475,7 +1577,7 @@ def register_payment_callbacks(bot):
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1512,7 +1614,7 @@ def register_payment_callbacks(bot):
                     ))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1523,7 +1625,7 @@ def register_payment_callbacks(bot):
                 group_chat_id = int(action.split(":")[1])
             
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
@@ -1531,12 +1633,12 @@ def register_payment_callbacks(bot):
             
                 # Получаем информацию о группе
                 try:
-                    chat = bot.get_chat(group_chat_id)
+                    chat = bot_instance.get_chat(group_chat_id)
                     group_username = chat.username
                     group_title = chat.title
                 except Exception as e:
                     logger.error(f"[PAYMENT] Ошибка получения информации о группе {group_chat_id}: {e}")
-                    bot.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
                     return
             
                 sub = get_active_subscription(group_chat_id, user_id, 'group')
@@ -1662,7 +1764,7 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1676,7 +1778,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
             
                 try:
-                    bot.edit_message_text(
+                    bot_instance.edit_message_text(
                         "💰 <b>Тарифы</b>\n\nВыберите тип подписки:",
                         call.message.chat.id,
                         call.message.message_id,
@@ -1696,7 +1798,7 @@ def register_payment_callbacks(bot):
                     try:
                         from moviebot.database.db_operations import get_subscription_members
                     
-                        chat = bot.get_chat(chat_id)
+                        chat = bot_instance.get_chat(chat_id)
                         group_username = chat.username
                         group_title = chat.title
                     
@@ -1778,14 +1880,14 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     
                         try:
-                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                         return
                     except Exception as e:
                         logger.error(f"[PAYMENT] Ошибка получения информации о группе {chat_id}: {e}")
-                        bot.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
                         return
             
                 if is_private:
@@ -1800,7 +1902,7 @@ def register_payment_callbacks(bot):
                         markup = InlineKeyboardMarkup(row_width=1)
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                         try:
-                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1837,7 +1939,7 @@ def register_payment_callbacks(bot):
                         ))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1849,7 +1951,7 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("📍 Другая группа", callback_data="payment:active:group:other"))
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     try:
-                        bot.edit_message_text(
+                        bot_instance.edit_message_text(
                             "👥 <b>Групповая подписка</b>\n\nВыберите группу:",
                             call.message.chat.id,
                             call.message.message_id,
@@ -1918,27 +2020,34 @@ def register_payment_callbacks(bot):
                     is_active = False
                     if expires_at:
                         if isinstance(expires_at, datetime):
+                            # Приводим expires_at к aware datetime, если он naive
                             if expires_at.tzinfo is None:
                                 expires_at = pytz.UTC.localize(expires_at)
+                            # Приводим к UTC для корректного сравнения
                             if expires_at.tzinfo != pytz.UTC:
                                 expires_at = expires_at.astimezone(pytz.UTC)
                             is_active = expires_at > now
                         else:
+                            # Если expires_at - это строка или другой тип, пытаемся преобразовать
                             try:
                                 if isinstance(expires_at, str):
                                     expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                                    # Убеждаемся, что datetime aware
                                     if expires_dt.tzinfo is None:
                                         expires_dt = pytz.UTC.localize(expires_dt)
+                                    # Приводим к UTC для корректного сравнения
                                     if expires_dt.tzinfo != pytz.UTC:
                                         expires_dt = expires_dt.astimezone(pytz.UTC)
                                     is_active = expires_dt > now
                                 else:
-                                    is_active = True
+                                    is_active = True  # Если не можем проверить, считаем активной
                             except:
                                 is_active = True
                     else:
+                        # Если нет expires_at, считаем подписку активной (lifetime)
                         is_active = True
                 
+                    # Добавляем только активные и уникальные по plan_type
                     if is_active and plan_type and plan_type not in seen_plan_types:
                         active_subs.append(sub)
                         seen_plan_types.add(plan_type)
@@ -1947,6 +2056,7 @@ def register_payment_callbacks(bot):
                 has_all = 'all' in existing_plan_types
             
                 if active_subs and not has_all:
+                    # Есть подписки, но нет пакетной
                     text += "⚠️ <b>У вас уже есть активные подписки:</b>\n"
                     for sub in active_subs:
                         plan_type = sub.get('plan_type')
@@ -1975,24 +2085,23 @@ def register_payment_callbacks(bot):
                         markup.add(InlineKeyboardButton("🎯 Рекомендации (100₽/мес)", callback_data="payment:subscribe:personal:recommendations:month"))
                     if 'tickets' not in existing_plan_types:
                         markup.add(InlineKeyboardButton("🎫 Билеты (150₽/мес)", callback_data="payment:subscribe:personal:tickets:month"))
-                    # "Все режимы" всегда показываем
+                    # "Все режимы" всегда показываем, так как это замена текущих подписок
                     markup.add(InlineKeyboardButton("📦 Все режимы - месяц (249₽/мес)", callback_data="payment:subscribe:personal:all:month"))
                     markup.add(InlineKeyboardButton("📦 Все режимы - 3 месяца (599₽)", callback_data="payment:subscribe:personal:all:3months"))
                     markup.add(InlineKeyboardButton("📦 Все режимы - год (1799₽)", callback_data="payment:subscribe:personal:all:year"))
                     markup.add(InlineKeyboardButton("📦 Все режимы - навсегда (2299₽)", callback_data="payment:subscribe:personal:all:lifetime"))
                     
-                    # === ТЕСТОВЫЙ ПЛАТЁЖ 10 ₽ — ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА БОТА ===
+                    # Тестовый тариф только для владельца бота
                     from moviebot.bot.handlers.promo import get_bot_owner_id
                     owner_id = get_bot_owner_id()
                     if owner_id and user_id == owner_id:
-                        markup.add(InlineKeyboardButton("🧪 Тестовый платёж 10 ₽", callback_data="payment:test_10rub"))
-                
-                # Кнопка назад
+                        markup.add(InlineKeyboardButton("🧪 Тестовый тариф (10₽, раз в 10 мин)", callback_data="payment:subscribe:personal:test:test"))
+                # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
                 back_callback = "payment:active:personal" if action == "tariffs:personal" and user_payment_state.get(user_id, {}).get('from_active') else "payment:tariffs"
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2025,7 +2134,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2081,7 +2190,7 @@ def register_payment_callbacks(bot):
                 if not is_private and chat_id < 0:
                     # Это группа - используем текущую группу
                     try:
-                        chat = bot.get_chat(chat_id)
+                        chat = bot_instance.get_chat(chat_id)
                         group_username = chat.username
                         group_title = chat.title
                     
@@ -2149,14 +2258,14 @@ def register_payment_callbacks(bot):
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
                     
                         try:
-                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                         return
                     except Exception as e:
                         logger.error(f"[PAYMENT] Ошибка получения информации о группе {chat_id}: {e}")
-                        bot.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
                         return
             
                 # Если команда вызвана в личке, показываем список групп
@@ -2174,7 +2283,7 @@ def register_payment_callbacks(bot):
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:group"))
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2202,14 +2311,14 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:group"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2223,12 +2332,12 @@ def register_payment_callbacks(bot):
             
                 # Получаем информацию о группе
                 try:
-                    chat = bot.get_chat(group_chat_id)
+                    chat = bot_instance.get_chat(group_chat_id)
                     group_username = chat.username
                     group_title = chat.title
                 except Exception as e:
                     logger.error(f"[PAYMENT] Ошибка получения информации о группе {group_chat_id}: {e}")
-                    bot.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
                     return
             
                 # Сохраняем выбранную группу в состоянии
@@ -2284,7 +2393,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2382,7 +2491,7 @@ def register_payment_callbacks(bot):
                     action = f"pay:group:{group_size}:{plan_type}:{period_type}"
                     # Продолжаем выполнение ниже
                 else:
-                    bot.answer_callback_query(call.id, "Ошибка: неверное состояние", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверное состояние", show_alert=True)
                     return
             
                 # Продолжаем выполнение - обрабатываем как pay:...
@@ -2438,7 +2547,7 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                 
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2453,7 +2562,7 @@ def register_payment_callbacks(bot):
                     next_sub = state.get('next_sub')
                 
                     if not next_sub:
-                        bot.answer_callback_query(call.id, "Ошибка: не найдена подписка для обновления", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Ошибка: не найдена подписка для обновления", show_alert=True)
                         return
                 
                     # Если переход на "Все режимы", отменяем все старые подписки
@@ -2568,7 +2677,7 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
                 
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2611,7 +2720,7 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2621,7 +2730,7 @@ def register_payment_callbacks(bot):
                 # Обработка кнопки "Изменить подписку"
                 logger.info(f"[PAYMENT MODIFY] Получен callback modify: action={action}, user_id={user_id}")
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
                 
@@ -2711,7 +2820,7 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
                     
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2757,7 +2866,7 @@ def register_payment_callbacks(bot):
                         if not is_private:
                             group_chat_id = chat_id
                             try:
-                                chat_info = bot.get_chat(chat_id)
+                                chat_info = bot_instance.get_chat(chat_id)
                                 group_username = chat_info.username
                                 group_title = chat_info.title
                             except:
@@ -2767,7 +2876,7 @@ def register_payment_callbacks(bot):
                             from moviebot.database.db_operations import get_user_groups
                             user_groups = get_user_groups(user_id, bot)
                             if not user_groups:
-                                bot.answer_callback_query(call.id, "Сначала выберите группу", show_alert=True)
+                                bot_instance.answer_callback_query(call.id, "Сначала выберите группу", show_alert=True)
                                 return
                         
                             # Показываем выбор группы
@@ -2791,7 +2900,7 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
                         
                             try:
-                                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2816,7 +2925,7 @@ def register_payment_callbacks(bot):
                         # Получаем информацию о группе для проверки подписки
                         try:
                             if not group_username:
-                                chat_info = bot.get_chat(group_chat_id)
+                                chat_info = bot_instance.get_chat(group_chat_id)
                                 group_username = chat_info.username
                         except:
                             pass
@@ -2873,7 +2982,7 @@ def register_payment_callbacks(bot):
                                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:select_group:{group_size}:{group_chat_id}"))
                                 
                                     try:
-                                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                                     except Exception as e:
                                         if "message is not modified" not in str(e):
                                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2924,7 +3033,7 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                         
                             try:
-                                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2995,7 +3104,7 @@ def register_payment_callbacks(bot):
                             markup = InlineKeyboardMarkup(row_width=1)
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             try:
-                                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3079,7 +3188,7 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
                             try:
-                                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3114,7 +3223,7 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
                             try:
-                                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3133,7 +3242,7 @@ def register_payment_callbacks(bot):
                             markup = InlineKeyboardMarkup(row_width=1)
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             try:
-                                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3211,7 +3320,7 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                         
                             try:
-                                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3413,7 +3522,7 @@ def register_payment_callbacks(bot):
                                 markup = InlineKeyboardMarkup(row_width=1)
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
                                 try:
-                                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                                 except Exception as e:
                                     if "message is not modified" not in str(e):
                                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3440,7 +3549,7 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
                         
                             try:
-                                bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3672,17 +3781,17 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                        bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
                 return
         
             if action.startswith("pay:"):
                 # Обработка нажатия на кнопку "Оплатить" - создание платежа через ЮKassa
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
@@ -3717,7 +3826,7 @@ def register_payment_callbacks(bot):
                 # Проверка на пустые значения
                 if not plan_type or not period_type:
                     logger.error(f"[PAYMENT] Ошибка парсинга callback_data: {action}, parts={parts}")
-                    bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
                     return
             
                 # Вычисляем финальную цену с учетом скидок
@@ -3734,7 +3843,7 @@ def register_payment_callbacks(bot):
                     logger.info(f"[PAYMENT] Используется промокод: {payment_state.get('promocode')}, цена: {final_price}₽")
             
                 if final_price <= 0:
-                    bot.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
                     return
                 
                     is_combined = False
@@ -3748,7 +3857,7 @@ def register_payment_callbacks(bot):
                 # Инициализируем ЮKassa
                 if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
                     logger.error(f"[PAYMENT] YooKassa ключи не настроены! YOOKASSA_SHOP_ID={YOOKASSA_SHOP_ID is not None}, YOOKASSA_SECRET_KEY={YOOKASSA_SECRET_KEY is not None}")
-                    bot.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
                     return
             
                 # Логируем первые и последние символы для отладки (безопасно)
@@ -3911,21 +4020,21 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                 
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                            bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
                 
                 except Exception as e:
                     logger.error(f"[PAYMENT] Ошибка создания платежа в ЮKassa: {e}", exc_info=True)
-                    bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
                 return
         
             if action.startswith("pay_stars:"):
                 # Обработка нажатия на кнопку "Оплатить звездами Telegram"
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
@@ -3957,7 +4066,7 @@ def register_payment_callbacks(bot):
                     # или: payment:pay_stars:group:2:all:month:payment_id
                     if len(parts) < 6:
                         logger.error(f"[STARS] Ошибка парсинга callback_data: {action}, parts={parts}")
-                        bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
                         return
                     
                     sub_type = parts[1]  # personal или group
@@ -3985,11 +4094,11 @@ def register_payment_callbacks(bot):
                 # Проверка на пустые значения
                 if not plan_type or not period_type:
                     logger.error(f"[STARS] Ошибка: неверные параметры платежа: plan_type={plan_type}, period_type={period_type}")
-                    bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
                     return
             
                 if final_price <= 0:
-                    bot.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверная сумма платежа", show_alert=True)
                     return
             
                 # Конвертируем рубли в звезды
@@ -4067,16 +4176,16 @@ def register_payment_callbacks(bot):
                     if success:
                         logger.info(f"[STARS] Инвойс отправлен: user_id={user_id}, payment_id={payment_id}, stars={stars_amount}, price={final_price}₽")
                     else:
-                        bot.answer_callback_query(call.id, "Ошибка создания инвойса. Попробуйте позже.", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Ошибка создания инвойса. Попробуйте позже.", show_alert=True)
                 except Exception as e:
                     logger.error(f"[STARS] Ошибка создания инвойса через Stars: {e}", exc_info=True)
-                    bot.answer_callback_query(call.id, "Ошибка создания инвойса. Попробуйте позже.", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка создания инвойса. Попробуйте позже.", show_alert=True)
                 return
         
             if action.startswith("pay_yookassa:"):
                 # Обработка нажатия на кнопку "Оплатить картой/ЮMoney" через YooKassa
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
                 
@@ -4090,7 +4199,7 @@ def register_payment_callbacks(bot):
                 
                 if not payment_data:
                     logger.error(f"[YOOKASSA] Не найдены данные платежа в состоянии для user_id={user_id}")
-                    bot.answer_callback_query(call.id, "Ошибка: данные платежа не найдены. Начните заново.", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: данные платежа не найдены. Начните заново.", show_alert=True)
                     return
                 
                 sub_type = payment_data.get('sub_type', 'personal')
@@ -4105,7 +4214,7 @@ def register_payment_callbacks(bot):
                 
                 if not plan_type or not period_type or final_price <= 0:
                     logger.error(f"[YOOKASSA] Неверные данные платежа: plan_type={plan_type}, period_type={period_type}, final_price={final_price}")
-                    bot.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры платежа", show_alert=True)
                     return
                 
                 logger.info(f"[YOOKASSA] Создание платежа: user_id={user_id}, sub_type={sub_type}, plan_type={plan_type}, period_type={period_type}, final_price={final_price}₽")
@@ -4113,7 +4222,7 @@ def register_payment_callbacks(bot):
                 # Инициализируем ЮKassa
                 if not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
                     logger.error(f"[YOOKASSA] YooKassa ключи не настроены!")
-                    bot.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: ключи оплаты не настроены. Обратитесь к администратору.", show_alert=True)
                     return
                 
                 shop_id = YOOKASSA_SHOP_ID.strip() if YOOKASSA_SHOP_ID else None
@@ -4220,24 +4329,24 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                     
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[YOOKASSA] Ошибка редактирования сообщения: {e}")
-                            bot.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
                     
                     logger.info(f"[YOOKASSA] Платеж создан: payment_id={payment_id}, yookassa_id={payment.id}, url={confirmation_url}")
                     
                 except Exception as e:
                     logger.error(f"[YOOKASSA] Ошибка создания платежа: {e}", exc_info=True)
-                    bot.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка создания платежа. Попробуйте позже.", show_alert=True)
                 return
         
             if action.startswith("modify:"):
                 # Изменение подписки - показываем варианты продления/расширения
                 subscription_id = action.split(":")[1]
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
@@ -4246,7 +4355,7 @@ def register_payment_callbacks(bot):
                 sub = get_subscription_by_id(int(subscription_id)) if subscription_id.isdigit() else None
             
                 if not sub:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 subscription_type = sub.get('subscription_type', 'personal')
@@ -4269,7 +4378,7 @@ def register_payment_callbacks(bot):
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 
                     try:
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4308,7 +4417,7 @@ def register_payment_callbacks(bot):
                     # Добавляем информацию о группе для групповой подписки
                     if chat_id_sub:
                         try:
-                            chat = bot.get_chat(chat_id_sub)
+                            chat = bot_instance.get_chat(chat_id_sub)
                             group_title = chat.title
                             group_username = chat.username
                             text += f"Группа: <b>{group_title}</b>\n"
@@ -4434,7 +4543,7 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4453,7 +4562,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
             
                 try:
-                    bot.edit_message_text(
+                    bot_instance.edit_message_text(
                         "❌ <b>Отмена подписки</b>\n\nВыберите подписку для отмены:",
                         call.message.chat.id,
                         call.message.message_id,
@@ -4468,7 +4577,7 @@ def register_payment_callbacks(bot):
             if action.startswith("modify:"):
                 # Изменение подписки - показываем информацию о текущей подписке и варианты изменения
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
@@ -4483,7 +4592,7 @@ def register_payment_callbacks(bot):
                     sub = cursor.fetchone()
             
                 if not sub:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 plan_type = sub.get('plan_type', 'all')
@@ -4525,7 +4634,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:{subscription_type}" if subscription_type == 'personal' else "payment:active:group:current"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4534,14 +4643,14 @@ def register_payment_callbacks(bot):
             if action.startswith("upgrade_plan:"):
                 # Обновление подписки до другого типа (например, с "notifications" до "all")
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
                 # Парсим callback_data: payment:upgrade_plan:{subscription_id}:{new_plan_type}
                 parts = action.split(":")
                 if len(parts) < 3:
-                    bot.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
                     return
             
                 subscription_id = int(parts[1])
@@ -4552,7 +4661,7 @@ def register_payment_callbacks(bot):
                 sub = get_subscription_by_id(subscription_id)
             
                 if not sub or sub.get('user_id') != user_id:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 current_plan_type = sub.get('plan_type')
@@ -4561,11 +4670,11 @@ def register_payment_callbacks(bot):
                 subscription_type = sub.get('subscription_type')
             
                 if subscription_type != 'group':
-                    bot.answer_callback_query(call.id, "Эта функция доступна только для групповых подписок", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Эта функция доступна только для групповых подписок", show_alert=True)
                     return
             
                 if current_plan_type == new_plan_type:
-                    bot.answer_callback_query(call.id, "У вас уже есть эта подписка", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "У вас уже есть эта подписка", show_alert=True)
                     return
             
                 # Вычисляем цену для новой подписки
@@ -4646,7 +4755,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4655,14 +4764,14 @@ def register_payment_callbacks(bot):
             if action.startswith("change_from_next:"):
                 # Изменение подписки со следующего платежа (без доплаты)
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
                 
                 # Парсим callback_data: payment:change_from_next:{subscription_id}:{new_plan_type}
                 parts = action.split(":")
                 if len(parts) < 3:
-                    bot.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
                     return
                 
                 subscription_id = int(parts[1])
@@ -4673,7 +4782,7 @@ def register_payment_callbacks(bot):
                 sub = get_subscription_by_id(subscription_id)
                 
                 if not sub or sub.get('user_id') != user_id:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
                 
                 current_plan_type = sub.get('plan_type')
@@ -4722,7 +4831,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4731,14 +4840,14 @@ def register_payment_callbacks(bot):
             if action.startswith("pay_upgrade_now:"):
                 # Создание платежа для обновления подписки с оплатой сейчас
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
             
                 # Парсим callback_data: payment:pay_upgrade_now:{subscription_id}:{new_plan_type}
                 parts = action.split(":")
                 if len(parts) < 3:
-                    bot.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
                     return
             
                 subscription_id = int(parts[1])
@@ -4749,7 +4858,7 @@ def register_payment_callbacks(bot):
                 sub = get_subscription_by_id(subscription_id)
             
                 if not sub or sub.get('user_id') != user_id:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 current_plan_type = sub.get('plan_type')
@@ -4776,7 +4885,7 @@ def register_payment_callbacks(bot):
                     upgrade_period_type = period_type
             
                 if upgrade_price <= 0:
-                    bot.answer_callback_query(call.id, "Ошибка расчета цены", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка расчета цены", show_alert=True)
                     return
                 
                 # Показываем информацию о подписке перед оплатой
@@ -4810,7 +4919,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:upgrade_plan:{subscription_id}:{new_plan_type}"))
                 
                 try:
-                    bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4819,14 +4928,14 @@ def register_payment_callbacks(bot):
             if action.startswith("confirm_upgrade_pay:"):
                 # Подтверждение оплаты доплаты для обновления подписки
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                 except:
                     pass
                 
                 # Парсим callback_data: payment:confirm_upgrade_pay:{subscription_id}:{new_plan_type}:{upgrade_price}
                 parts = action.split(":")
                 if len(parts) < 4:
-                    bot.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
                     return
                 
                 subscription_id = int(parts[1])
@@ -4838,7 +4947,7 @@ def register_payment_callbacks(bot):
                 sub = get_subscription_by_id(subscription_id)
             
                 if not sub or sub.get('user_id') != user_id:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 current_plan_type = sub.get('plan_type')
@@ -4877,7 +4986,7 @@ def register_payment_callbacks(bot):
             
                 # Получаем username группы
                 try:
-                    chat = bot.get_chat(chat_id)
+                    chat = bot_instance.get_chat(chat_id)
                     if chat.username:
                         metadata["group_username"] = chat.username
                 except:
@@ -4885,7 +4994,7 @@ def register_payment_callbacks(bot):
             
                 # Создаем платеж через YooKassa
                 if not YOOKASSA_AVAILABLE:
-                    bot.answer_callback_query(call.id, "Платежная система временно недоступна", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Платежная система временно недоступна", show_alert=True)
                     return
             
                 try:
@@ -4943,13 +5052,13 @@ def register_payment_callbacks(bot):
                         markup.add(InlineKeyboardButton("💳 Оплатить", url=payment.confirmation.confirmation_url))
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                     
-                        bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     else:
-                        bot.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
                     
                 except Exception as e:
                     logger.error(f"[PAYMENT] Ошибка создания платежа для обновления подписки: {e}", exc_info=True)
-                    bot.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
                 return
         
             if action.startswith("cancel_confirm:"):
@@ -4959,13 +5068,13 @@ def register_payment_callbacks(bot):
             
                 sub = get_subscription_by_id(subscription_id)
                 if not sub or sub.get('user_id') != user_id:
-                    bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                     return
             
                 subscription_type = sub.get('subscription_type', 'personal')
                 
                 if cancel_subscription(subscription_id, user_id):
-                    bot.answer_callback_query(call.id, "Подписка отменена")
+                    bot_instance.answer_callback_query(call.id, "Подписка отменена")
                     logger.info(f"[PAYMENT CANCEL CONFIRM] Подписка {subscription_id} успешно отменена для user_id={user_id}, subscription_type={subscription_type}")
                     
                     # Обновляем сообщение с информацией о подписках
@@ -5080,7 +5189,7 @@ def register_payment_callbacks(bot):
                                 markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                             
-                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         elif subscription_type == 'group':
                             # Для групповых подписок получаем информацию о групповой подписке
                             from moviebot.database.db_operations import get_subscription_members, get_active_group_users, get_active_group_subscription_by_chat_id
@@ -5098,7 +5207,7 @@ def register_payment_callbacks(bot):
                                 
                                 # Получаем информацию о группе
                                 try:
-                                    chat = bot.get_chat(chat_id)
+                                    chat = bot_instance.get_chat(chat_id)
                                     group_title = chat.title
                                     group_username = chat.username
                                 except Exception as chat_error:
@@ -5167,12 +5276,12 @@ def register_payment_callbacks(bot):
                                 markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:group"))
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                             
-                            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as update_e:
                         logger.error(f"[PAYMENT CANCEL CONFIRM] Ошибка обновления информации о подписках: {update_e}", exc_info=True)
                         # Если не удалось обновить, показываем простое сообщение
                         try:
-                            bot.edit_message_text(
+                            bot_instance.edit_message_text(
                                 "✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
                                 call.message.chat.id,
                                 call.message.message_id,
@@ -5182,7 +5291,7 @@ def register_payment_callbacks(bot):
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 else:
-                    bot.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка отмены подписки", show_alert=True)
                 return
         
             if action.startswith("cancel:"):
@@ -5226,7 +5335,7 @@ def register_payment_callbacks(bot):
                             cheaper_options.sort(key=lambda x: x[1])
                             cheaper_options = cheaper_options[:3]  # Берем 3 самых дешевых
                         
-                            bot.answer_callback_query(call.id)
+                            bot_instance.answer_callback_query(call.id)
                         
                             # Формируем сообщение с подтверждением
                             text = "Точно хотите отменить подписку? Вы можете изменить подписку на другие варианты:\n\n"
@@ -5243,7 +5352,7 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:group:current"))
                         
                             try:
-                                bot.edit_message_text(
+                                bot_instance.edit_message_text(
                                     text,
                                     call.message.chat.id,
                                     call.message.message_id,
@@ -5276,7 +5385,7 @@ def register_payment_callbacks(bot):
                                 cheaper_options.sort(key=lambda x: x[1])
                                 cheaper_options = cheaper_options[:3]  # Берем 3 самых дешевых
                         
-                            bot.answer_callback_query(call.id)
+                            bot_instance.answer_callback_query(call.id)
                         
                             # Формируем сообщение с подтверждением
                             text = "Точно хотите отменить подписку? Вы можете изменить подписку на другие варианты:\n\n"
@@ -5293,7 +5402,7 @@ def register_payment_callbacks(bot):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:{subscription_type}"))
                         
                             try:
-                                bot.edit_message_text(
+                                bot_instance.edit_message_text(
                                     text,
                                     call.message.chat.id,
                                     call.message.message_id,
@@ -5304,7 +5413,7 @@ def register_payment_callbacks(bot):
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                     else:
-                        bot.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                         return
                 except ValueError:
                     # Это строка (personal/group) - используем старую логику
@@ -5313,13 +5422,13 @@ def register_payment_callbacks(bot):
                 
                 # Если sub_type не определен, не можем продолжить
                 if not sub_type:
-                    bot.answer_callback_query(call.id, "Ошибка: не удалось определить тип подписки", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка: не удалось определить тип подписки", show_alert=True)
                     return
                 
                 sub = get_active_subscription(chat_id, user_id, sub_type)
             
                 if not sub:
-                    bot.answer_callback_query(call.id, "Активная подписка не найдена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Активная подписка не найдена", show_alert=True)
                     return
             
                 sub_id = sub.get('id')
@@ -5341,9 +5450,9 @@ def register_payment_callbacks(bot):
                 
                     if rows_updated > 0:
                         logger.info(f"[PAYMENT CANCEL] Деактивировано {rows_updated} виртуальных подписок")
-                    bot.answer_callback_query(call.id, "Подписка отменена")
+                    bot_instance.answer_callback_query(call.id, "Подписка отменена")
                     try:
-                        bot.edit_message_text(
+                        bot_instance.edit_message_text(
                             f"✅ <b>Подписка отменена</b>\n\nВаша {sub_type} подписка была успешно отменена.",
                             call.message.chat.id,
                             call.message.message_id,
@@ -5354,7 +5463,7 @@ def register_payment_callbacks(bot):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 else:
                     logger.info(f"[PAYMENT CANCEL] Виртуальная подписка не найдена в БД для деактивации")
-                    bot.answer_callback_query(call.id, "Виртуальная подписка уже отменена", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Виртуальная подписка уже отменена", show_alert=True)
                     return
             
                 # Для реальных подписок (id > 0) показываем подтверждение с предложением более дешевых вариантов
@@ -5388,7 +5497,7 @@ def register_payment_callbacks(bot):
                 cheaper_options.sort(key=lambda x: x[1])
                 cheaper_options = cheaper_options[:3]  # Берем 3 самых дешевых
             
-                bot.answer_callback_query(call.id)
+                bot_instance.answer_callback_query(call.id)
             
                 # Формируем сообщение с подтверждением
                 text = "Точно хотите отменить подписку? Вы можете изменить подписку на другие варианты:\n\n"
@@ -5406,7 +5515,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
                 try:
-                    bot.edit_message_text(
+                    bot_instance.edit_message_text(
                         text,
                         call.message.chat.id,
                         call.message.message_id,
@@ -5442,7 +5551,7 @@ def register_payment_callbacks(bot):
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
                 try:
-                    bot.edit_message_text(
+                    bot_instance.edit_message_text(
                         "💳 <b>Оплата подписки</b>\n\nВыберите действие:",
                         call.message.chat.id,
                         call.message.message_id,
@@ -5458,7 +5567,7 @@ def register_payment_callbacks(bot):
                 # Обработка нажатия на кнопку "🏷️ Промокод"
                 # Поддерживаем оба формата: новый (короткий) и старый (длинный)
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                     user_id = call.from_user.id
                     chat_id = call.message.chat.id
                     
@@ -5492,7 +5601,7 @@ def register_payment_callbacks(bot):
                                 # Если не удалось распарсить, пытаемся получить из payment_state
                                 payment_state = user_payment_state.get(user_id, {})
                                 if not payment_state:
-                                    bot.answer_callback_query(call.id, "❌ Ошибка: состояние не найдено", show_alert=True)
+                                    bot_instance.answer_callback_query(call.id, "❌ Ошибка: состояние не найдено", show_alert=True)
                                     return
                                 
                                 # Создаем состояние из payment_state
@@ -5510,7 +5619,7 @@ def register_payment_callbacks(bot):
                             # Новый формат - пытаемся получить из payment_state
                             payment_state = user_payment_state.get(user_id, {})
                             if not payment_state:
-                                bot.answer_callback_query(call.id, "❌ Ошибка: состояние не найдено", show_alert=True)
+                                bot_instance.answer_callback_query(call.id, "❌ Ошибка: состояние не найдено", show_alert=True)
                                 return
                             
                             # Создаем состояние из payment_state
@@ -5542,32 +5651,32 @@ def register_payment_callbacks(bot):
                     if len(callback_data_back.encode('utf-8')) > 64:
                         logger.error(f"[PROMO] ❌ callback_data слишком длинный: {len(callback_data_back)} байт")
                         # Отправляем без кнопки, если callback_data слишком длинный
-                        msg = bot.send_message(chat_id, text)
+                        msg = bot_instance.send_message(chat_id, text)
                     else:
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=callback_data_back))
                         try:
-                            msg = bot.send_message(chat_id, text, reply_markup=markup)
+                            msg = bot_instance.send_message(chat_id, text, reply_markup=markup)
                         except Exception as send_e:
                             logger.error(f"[PROMO] Ошибка отправки сообщения с кнопкой: {send_e}", exc_info=True)
                             # Пробуем отправить без кнопки
-                            msg = bot.send_message(chat_id, text)
+                            msg = bot_instance.send_message(chat_id, text)
                     logger.info(f"[PROMO] Запрос промокода: user_id={user_id}, payment_id={payment_id}")
                     
                 except Exception as e:
                     logger.error(f"[PROMO] Ошибка при запросе промокода: {e}", exc_info=True)
-                    bot.answer_callback_query(call.id, "Ошибка обработки", show_alert=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка обработки", show_alert=True)
                 return
             
             if action == "back_from_promo":
                 # Возврат к сообщению с кнопками оплаты
                 try:
-                    bot.answer_callback_query(call.id)
+                    bot_instance.answer_callback_query(call.id)
                     user_id = call.from_user.id
                     chat_id = call.message.chat.id
                     
                     # Получаем данные из состояния промокода (вместо парсинга из callback_data)
                     if user_id not in user_promo_state:
-                        bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+                        bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
                         return
                     
                     promo_state = user_promo_state[user_id]
@@ -5658,9 +5767,9 @@ def register_payment_callbacks(bot):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                     
                     try:
-                        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except:
-                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                        bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                     
                 except Exception as e:
                     logger.error(f"[PROMO] Ошибка при возврате: {e}", exc_info=True)
@@ -5669,7 +5778,7 @@ def register_payment_callbacks(bot):
         except Exception as e:
             logger.error(f"❌ Ошибка в handle_payment_callback: {e}", exc_info=True)
             try:
-                bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+                bot_instance.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
             except:
                 pass
 
@@ -5745,7 +5854,7 @@ def handle_successful_payment(message):
             group_size = payment_row.get('group_size')
             amount = payment_row.get('amount')
         else:
-            user_id = payment_row.get("user_id") if isinstance(payment_row, dict) else (payment_row[0] if payment_row else None)
+            user_id = payment_row[0]
             chat_id = payment_row[1]
             subscription_type = payment_row[2]
             plan_type = payment_row[3]

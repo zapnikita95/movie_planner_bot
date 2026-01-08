@@ -230,7 +230,6 @@ def handle_list_mark_watched_reply(message):
                 response_text += f"\n⚠️ Ошибки: {len(errors)}"
         
         # Создаем кнопки для перехода к описанию
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup()
         
         # Добавляем кнопки для каждого отмеченного фильма (максимум 5, чтобы не перегружать)
@@ -704,7 +703,6 @@ def handle_promo_reply_direct(message):
                 error_text = f"❌ Промокод уже применен к этому платежу.\n\n"
                 error_text += "Вы не можете применить промокод повторно."
                 
-                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
                 
@@ -791,7 +789,6 @@ def handle_promo_reply_direct(message):
             text_result += f"💰 Сумма: <b>{state['original_price']}₽</b> → <b>{discounted_price}₽</b>\n\n"
             text_result += "Нажмите кнопку ниже для перехода к оплате:"
             
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             markup = InlineKeyboardMarkup(row_width=1)
             
             # Создаем платеж YooKassa с учетом скидки (копируем логику из main_text_handler)
@@ -907,7 +904,6 @@ def handle_promo_reply_direct(message):
             error_text = f"❌ {message_text}\n\n"
             error_text += "Введите другой промокод или оплатите полную стоимость подписки."
             
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back_from_promo"))
             
@@ -1136,7 +1132,6 @@ def handle_search_reply_direct(message):
         
         # Формируем сообщение с результатами
         results_text = f"🔍 Результаты поиска '{query}':\n\n"
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup(row_width=1)
         
         for idx, film in enumerate(films[:10]):
@@ -1848,7 +1843,6 @@ def main_file_handler(message):
                 logger.info(f"[TICKET FILE] Билет сохранен в БД для plan_id={plan_id}, file_id={file_id}, всего билетов: {len(existing_tickets)}")
                 
                 # Добавляем кнопки после сохранения билета
-                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("✏️ Изменить время", callback_data=f"ticket_edit_time:{plan_id}"))
                 markup.add(InlineKeyboardButton("➕ Добавить еще билет к сеансу", callback_data=f"add_ticket:{plan_id}"))
@@ -1901,7 +1895,6 @@ def main_file_handler(message):
         state['file_id'] = file_id
         
         # Добавляем кнопки после получения файла
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🎟️ Вернуться к билетам", callback_data="ticket_new"))
         

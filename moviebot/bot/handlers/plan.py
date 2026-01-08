@@ -1504,7 +1504,6 @@ def handle_remove_from_calendar_callback(call):
             
             if has_tickets:
                 # Если есть билеты, показываем подтверждение
-                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("✅ Да, удалить", callback_data=f"confirm_remove_plan:{plan_id}"))
                 markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_remove_plan:{plan_id}"))
@@ -1741,7 +1740,6 @@ def streaming_done_callback(call):
                 kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
         
         # Создаем кнопку "Перейти к описанию"
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup()
         if kp_id:
             markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))

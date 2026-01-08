@@ -73,7 +73,6 @@ def _process_promo_success(message, state, promo_code, discounted_price, message
         text_result += f"💰 Сумма: <b>{state['original_price']}₽</b> → <b>{discounted_price}₽</b>\n\n"
         text_result += "Нажмите кнопку ниже для перехода к оплате:"
         
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup(row_width=1)
         
         # Создаем платеж YooKassa с учетом скидки
@@ -248,9 +247,7 @@ def send_error_message(message, error_text, prompt_message_id=None, state=None, 
         prompt_message_id: ID сообщения-промпта (для повторной отправки)
         state: Состояние пользователя (для кнопки "Назад")
         back_callback: Callback для кнопки "Назад"
-    """
-    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-    
+    """    
     markup = InlineKeyboardMarkup(row_width=1)
     
     # Кнопка "Попробовать снова" - отправляет промпт еще раз
@@ -873,7 +870,6 @@ def handle_search(message):
     try:
         from moviebot.states import user_search_state
         from moviebot.bot.handlers.series import search_films_with_type
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         
         user_id = message.from_user.id
         chat_id = message.chat.id
@@ -1537,7 +1533,6 @@ def handle_admin(message):
                                 text_result += f"ID: <code>{target_id}</code>\n"
                                 text_result += f"Тип: Группа"
                                 
-                                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                                 markup = InlineKeyboardMarkup()
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
                                 
@@ -1553,7 +1548,6 @@ def handle_admin(message):
                             del user_unsubscribe_state[user_id]
                         else:
                             # Если это пользователь, показываем меню выбора типа отмены
-                            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                             
                             text_result = f"👤 <b>Пользователь: {target_id}</b>\n\n"
                             text_result += "Что вы хотите отменить?\n\n"
@@ -1620,7 +1614,6 @@ def handle_admin(message):
                             text_result += f"ID администратора: <code>{admin_id}</code>\n\n"
                             text_result += "Уведомление отправлено новому администратору."
                             
-                            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                             markup = InlineKeyboardMarkup()
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back_to_list"))
                             
