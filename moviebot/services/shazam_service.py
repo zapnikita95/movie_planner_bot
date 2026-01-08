@@ -38,10 +38,11 @@ BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / 'data' / 'shazam'
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Кэш для моделей (Railway Volume)
-CACHE_DIR = Path(os.getenv('CACHE_DIR', '/app/cache'))
+# Локально — кэш в корне проекта, на Railway — /app/cache
+CACHE_DIR = Path('cache')  # относительный путь — создаст папку cache в текущей рабочей директории
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # Настраиваем кэш для HuggingFace моделей
 os.environ['HF_HOME'] = str(CACHE_DIR / 'huggingface')
 os.environ['TRANSFORMERS_CACHE'] = str(CACHE_DIR / 'huggingface' / 'transformers')

@@ -1,5 +1,12 @@
-*.db
-movies.db
-__pycache__/
 .env
-
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv
+pip-delete-this-directory.txt
+moviebot.db  # если используешь sqlite локально
+.DS_Store  # для Mac
