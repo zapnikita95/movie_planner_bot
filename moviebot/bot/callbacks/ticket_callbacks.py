@@ -4,7 +4,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.states import user_ticket_state
 from moviebot.utils.helpers import has_tickets_access
 from moviebot.bot.bot_init import bot
-from moviebot.bot.handlers.series import show_cinema_sessions  # Импортируем функцию списка сеансов
 import logging
 
 logger = logging.getLogger(__name__)
@@ -34,14 +33,12 @@ def add_ticket_from_plan_callback(call):
             )
             return
 
-        # Устанавливаем состояние как при первом добавлении билетов
         user_ticket_state[user_id] = {
-            'step': 'upload_ticket',  # Этот шаг уже обрабатывается в main_file_handler
+            'step': 'upload_ticket',
             'plan_id': plan_id,
             'chat_id': chat_id
         }
 
-        # Простое приглашение — без упоминания "готово"
         bot.edit_message_text(
             chat_id=chat_id,
             message_id=call.message.message_id,
@@ -58,7 +55,7 @@ def add_ticket_from_plan_callback(call):
         bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
 
 
-# 2. Кнопка "Добавить ещё билет" — после первого файла
+# 2. Кнопка "Добавить ещё билет"
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_more_tickets:"))
 def add_more_tickets_from_plan(call):
     logger.info(f"[TICKET CALLBACK] add_more_tickets сработал: data='{call.data}'")
@@ -74,9 +71,8 @@ def add_more_tickets_from_plan(call):
     user_id = call.from_user.id
     chat_id = call.message.chat.id
 
-    # Переходим в режим продолжения добавления
     user_ticket_state[user_id] = {
-        'step': 'add_more_tickets',  # Этот шаг уже есть в main_file_handler
+        'step': 'add_more_tickets',
         'plan_id': plan_id,
         'chat_id': chat_id
     }
@@ -92,7 +88,7 @@ def add_more_tickets_from_plan(call):
     logger.info(f"[TICKET] Перешли в режим add_more_tickets для plan_id={plan_id}")
 
 
-# 3. Кнопка "⬅️ К списку мероприятий" — завершение и возврат в /ticket
+# 3. Кнопка "⬅️ К списку мероприятий"
 @bot.callback_query_handler(func=lambda call: call.data == "ticket_new")
 def back_to_ticket_list(call):
     logger.info(f"[TICKET CALLBACK] ticket_new (возврат к списку) сработал, user_id={call.from_user.id}")
@@ -102,16 +98,17 @@ def back_to_ticket_list(call):
     user_id = call.from_user.id
     chat_id = call.message.chat.id
 
-    # Очищаем состояние
     if user_id in user_ticket_state:
         del user_ticket_state[user_id]
         logger.info(f"[TICKET] Состояние очищено при возврате к списку")
 
-    # Показываем список сеансов (как при /ticket без файла)
+    # Ленивый импорт — безопасно, без цикла
+    from moviebot.bot.handlers.series import show_cinema_sessions
+
     show_cinema_sessions(chat_id, user_id, None)
 
 
-# 4. Заблокированная кнопка (для бесплатных пользователей)
+# 4. Заблокированная кнопка
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("ticket_locked:"))
 def handle_ticket_locked(call):
     bot.answer_callback_query(
