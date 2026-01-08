@@ -11,6 +11,7 @@ import pytz
 import telebot.types
 from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from moviebot.bot.handlers.text_messages import is_expected_text_in_private
 from moviebot.database.db_operations import (
 
     log_request, get_user_timezone_or_default, set_user_timezone,
