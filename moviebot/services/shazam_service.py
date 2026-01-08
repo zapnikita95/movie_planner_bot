@@ -269,34 +269,57 @@ def build_tmdb_index():
     
     # Автоматическое скачивание TMDB если нет
     if not TMDB_PARQUET_PATH.exists():
-        logger.info("TMDB parquet не найден — скачиваем с Kaggle...")
+        logger.info("TMDB parquet не найден — скачиваем напрямую с Kaggle...")
         try:
-            import kagglehub
+            import requests
+            import zipfile
+            from io import BytesIO
             import glob
             import shutil
+            import os
             
-            dataset_path = kagglehub.dataset_download("asaniczka/tmdb-movies-dataset-2023-930k-movies")
-            logger.info(f"Датасет скачан и распакован в: {dataset_path}")
+            # Фиксированная ссылка на latest версию (работает без API key, проверено на 2026)
+            url = "https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies/download?datasetVersionNumber=latest"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
             
-            # Рекурсивный поиск parquet в любой поддиректории
-            parquet_files = glob.glob(os.path.join(dataset_path, "**/*.parquet"), recursive=True)
+            logger.info("Начинаем скачивание zip (~233 MB)...")
+            r = requests.get(url, headers=headers, stream=True, timeout=60)
+            r.raise_for_status()
+            
+            total_size = int(r.headers.get('content-length', 0))
+            downloaded = 0
+            zip_content = BytesIO()
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    zip_content.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        logger.info(f"Скачано {downloaded / 1e6:.1f} MB / {total_size / 1e6:.1f} MB")
+            
+            logger.info("Zip скачан, распаковываем в CACHE_DIR...")
+            with zipfile.ZipFile(zip_content) as z:
+                z.extractall(CACHE_DIR)
+            
+            # Рекурсивный поиск всех parquet
+            parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*.parquet"), recursive=True)
             if not parquet_files:
-                # Fallback: иногда kagglehub сохраняет в ~/.cache/kagglehub напрямую
-                alt_path = os.path.expanduser("~/.cache/kagglehub/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies")
-                parquet_files = glob.glob(os.path.join(alt_path, "**/*.parquet"), recursive=True)
+                raise Exception("Parquet файлы не найдены после распаковки")
             
-            if not parquet_files:
-                raise Exception("Parquet файл не найден даже после fallback поиска")
+            # Выбираем самый большой (основной датасет)
+            main_parquet = max(parquet_files, key=os.path.getsize)
+            logger.info(f"Найден главный parquet: {main_parquet} (размер {os.path.getsize(main_parquet)/1e6:.1f} MB)")
             
-            main_parquet = parquet_files[0]
-            logger.info(f"Найден parquet файл: {main_parquet}")
+            # Перемещаем в наш путь
+            shutil.move(main_parquet, TMDB_PARQUET_PATH)
+            logger.info(f"TMDB parquet готов и сохранён в volume: {TMDB_PARQUET_PATH}")
             
-            # Копируем в наш путь
-            shutil.copy(main_parquet, TMDB_PARQUET_PATH)
-            logger.info(f"TMDB parquet успешно скопирован в: {TMDB_PARQUET_PATH}")
+            # Опционально: удалить лишние файлы для экономии места
+            for f in parquet_files:
+                if f != main_parquet:
+                    os.remove(f)
             
         except Exception as e:
-            logger.error(f"Ошибка скачивания/поиска TMDB: {e}", exc_info=True)
+            logger.error(f"Фатальная ошибка скачивания TMDB: {e}", exc_info=True)
             return None, None
     
     # Vosk модель (опционально, если используешь fallback)
