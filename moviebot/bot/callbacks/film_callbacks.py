@@ -768,30 +768,47 @@ def mark_watched_from_description_callback(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_select:"))
 def streaming_select_callback(call):
-    """Выбор онлайн-кинотеатра для плана 'дома'"""
+    """Показывает онлайн-кинотеатры для просмотра фильма"""
     try:
-        bot.answer_callback_query(call.id, "Выбран онлайн-кинотеатр!")
-    except:
-        pass
-    
-    parts = call.data.split(":", 2)  # plan_id:platform (url в JSON)
-    plan_id = int(parts[1])
-    platform = parts[2] if len(parts) > 2 else ""
-    chat_id = call.message.chat.id
-    
-    # Получаем url из сохранённого JSON
-    selected_url = ""
-    with db_lock:
-        cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-        row = cursor.fetchone()
-        if row:
-            sources_json = row[0] if not isinstance(row, dict) else row.get('ticket_file_id')
-            if sources_json:
-                try:
-                    sources = json.loads(sources_json)
-                    selected_url = sources.get(platform, "")
-                except:
-                    pass
+        bot.answer_callback_query(call.id)
+
+        kp_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+
+        from moviebot.api.kinopoisk_api import get_external_sources
+        sources = get_external_sources(kp_id)
+
+        if not sources:
+            bot.edit_message_text(
+                "😔 Не найдено онлайн-кинотеатров для просмотра.\n\n◀️ Назад",
+                chat_id,
+                message_id,
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film_description:{kp_id}")
+                )
+            )
+            return
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        for platform, url in sources:
+            markup.add(InlineKeyboardButton(platform, url=url))
+
+        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film_description:{kp_id}"))
+
+        bot.edit_message_text(
+            "Где смотреть онлайн:\n\nВыберите платформу:",
+            chat_id,
+            message_id,
+            reply_markup=markup
+        )
+
+    except Exception as e:
+        logger.error(f"[STREAMING SELECT] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "Ошибка загрузки платформ", show_alert=True)
+        except:
+            pass
     
     # Сохраняем выбранный сервис и url
     with db_lock:
