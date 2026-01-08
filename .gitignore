@@ -12,3 +12,8 @@ moviebot.db  # если используешь sqlite локально
 .DS_Store  # для Maccache/
 *.pt
 *.bin
+cache/
+*.pt # на всякий случай модели
+*.bin
+cache/
+*.pt
