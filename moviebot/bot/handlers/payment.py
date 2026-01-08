@@ -29,6 +29,7 @@ def payment_command(message):
         markup.add(InlineKeyboardButton("📋 Действующая подписка", callback_data="payment:active"))
         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        markup.add(InlineKeyboardButton("🧪 Тестовый платёж 10 ₽", callback_data="payment:test_10rub"))
         
         text = "💳 <b>Оплата подписки</b>\n\n"
         text += "Выберите действие:"

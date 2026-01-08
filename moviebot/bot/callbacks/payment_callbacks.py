@@ -1918,34 +1918,27 @@ def register_payment_callbacks(bot):
                     is_active = False
                     if expires_at:
                         if isinstance(expires_at, datetime):
-                            # Приводим expires_at к aware datetime, если он naive
                             if expires_at.tzinfo is None:
                                 expires_at = pytz.UTC.localize(expires_at)
-                            # Приводим к UTC для корректного сравнения
                             if expires_at.tzinfo != pytz.UTC:
                                 expires_at = expires_at.astimezone(pytz.UTC)
                             is_active = expires_at > now
                         else:
-                            # Если expires_at - это строка или другой тип, пытаемся преобразовать
                             try:
                                 if isinstance(expires_at, str):
                                     expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                                    # Убеждаемся, что datetime aware
                                     if expires_dt.tzinfo is None:
                                         expires_dt = pytz.UTC.localize(expires_dt)
-                                    # Приводим к UTC для корректного сравнения
                                     if expires_dt.tzinfo != pytz.UTC:
                                         expires_dt = expires_dt.astimezone(pytz.UTC)
                                     is_active = expires_dt > now
                                 else:
-                                    is_active = True  # Если не можем проверить, считаем активной
+                                    is_active = True
                             except:
                                 is_active = True
                     else:
-                        # Если нет expires_at, считаем подписку активной (lifetime)
                         is_active = True
                 
-                    # Добавляем только активные и уникальные по plan_type
                     if is_active and plan_type and plan_type not in seen_plan_types:
                         active_subs.append(sub)
                         seen_plan_types.add(plan_type)
@@ -1954,7 +1947,6 @@ def register_payment_callbacks(bot):
                 has_all = 'all' in existing_plan_types
             
                 if active_subs and not has_all:
-                    # Есть подписки, но нет пакетной
                     text += "⚠️ <b>У вас уже есть активные подписки:</b>\n"
                     for sub in active_subs:
                         plan_type = sub.get('plan_type')
@@ -1983,18 +1975,19 @@ def register_payment_callbacks(bot):
                         markup.add(InlineKeyboardButton("🎯 Рекомендации (100₽/мес)", callback_data="payment:subscribe:personal:recommendations:month"))
                     if 'tickets' not in existing_plan_types:
                         markup.add(InlineKeyboardButton("🎫 Билеты (150₽/мес)", callback_data="payment:subscribe:personal:tickets:month"))
-                    # "Все режимы" всегда показываем, так как это замена текущих подписок
+                    # "Все режимы" всегда показываем
                     markup.add(InlineKeyboardButton("📦 Все режимы - месяц (249₽/мес)", callback_data="payment:subscribe:personal:all:month"))
                     markup.add(InlineKeyboardButton("📦 Все режимы - 3 месяца (599₽)", callback_data="payment:subscribe:personal:all:3months"))
                     markup.add(InlineKeyboardButton("📦 Все режимы - год (1799₽)", callback_data="payment:subscribe:personal:all:year"))
                     markup.add(InlineKeyboardButton("📦 Все режимы - навсегда (2299₽)", callback_data="payment:subscribe:personal:all:lifetime"))
                     
-                    # Тестовый тариф только для владельца бота
+                    # === ТЕСТОВЫЙ ПЛАТЁЖ 10 ₽ — ТОЛЬКО ДЛЯ ВЛАДЕЛЬЦА БОТА ===
                     from moviebot.bot.handlers.promo import get_bot_owner_id
                     owner_id = get_bot_owner_id()
                     if owner_id and user_id == owner_id:
-                        markup.add(InlineKeyboardButton("🧪 Тестовый тариф (10₽, раз в 10 мин)", callback_data="payment:subscribe:personal:test:test"))
-                # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
+                        markup.add(InlineKeyboardButton("🧪 Тестовый платёж 10 ₽", callback_data="payment:test_10rub"))
+                
+                # Кнопка назад
                 back_callback = "payment:active:personal" if action == "tariffs:personal" and user_payment_state.get(user_id, {}).get('from_active') else "payment:tariffs"
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
