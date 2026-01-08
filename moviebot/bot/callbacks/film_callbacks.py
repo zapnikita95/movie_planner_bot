@@ -1073,13 +1073,17 @@ def remove_from_database_prompt(call):
             bot.answer_callback_query(call.id, "Ошибка: неверный ID фильма", show_alert=True)
             return
 
+        kp_id_str = str(kp_id)  # ← Фикс: приводим к строке для запроса
+
         chat_id = call.message.chat.id
         message_id = call.message.message_id
         user_id = call.from_user.id
 
         # Получаем название фильма для подтверждения
         with db_lock:
-            cursor.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor = get_db_cursor()  # Лучше через функцию
+
+            cursor.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
             row = cursor.fetchone()
 
         if not row:
@@ -1116,8 +1120,7 @@ def remove_from_database_prompt(call):
             bot.answer_callback_query(call.id, "Ошибка при обработке", show_alert=True)
         except:
             pass
-
-
+        
 @bot.callback_query_handler(func=lambda call: call.data == "delete_cancel")
 def delete_cancel(call):
     """Отмена удаления"""
