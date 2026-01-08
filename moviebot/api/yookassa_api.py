@@ -69,28 +69,16 @@ def create_payment(
     metadata: Optional[Dict[str, Any]] = None,
     payment_method_id: Optional[str] = None,
     capture: bool = True,
-    save_payment_method: bool = False
+    save_payment_method: bool = False,  # по умолчанию False, но мы будем передавать True для рекуррентных
+    is_recurring: bool = False  # новый параметр для ясности
 ) -> Optional[Any]:
     """
     Создает платеж в YooKassa
-    
-    Args:
-        amount: Сумма платежа в рублях
-        description: Описание платежа
-        return_url: URL для возврата после оплаты (по умолчанию deep link Telegram)
-        metadata: Метаданные платежа (user_id, chat_id, subscription_type и т.д.)
-        payment_method_id: ID сохраненного способа оплаты (для рекуррентных платежей)
-        capture: Автоматически подтверждать платеж
-        save_payment_method: Сохранять способ оплаты для автоплатежей
-    
-    Returns:
-        Объект Payment или None в случае ошибки
     """
     if not YOOKASSA_AVAILABLE:
         logger.error("[YOOKASSA] Модуль yookassa не установлен")
         return None
     
-    # Инициализируем YooKassa, если еще не инициализирован
     if not Configuration.account_id or not Configuration.secret_key:
         if not init_yookassa():
             return None
@@ -112,19 +100,19 @@ def create_payment(
             "metadata": metadata
         }
         
-        # Если есть payment_method_id, используем его для безакцептного платежа
         if payment_method_id:
             payment_data["payment_method_id"] = payment_method_id
+            logger.info(f"[YOOKASSA] Рекуррентный платёж с payment_method_id={payment_method_id}")
         else:
-            # Для обычного платежа добавляем confirmation
             payment_data["confirmation"] = {
                 "type": "redirect",
                 "return_url": return_url
             }
-            # Если нужно сохранить способ оплаты, добавляем параметр
-            if save_payment_method:
+            
+            # Для всех рекуррентных подписок (кроме lifetime) — просим сохранить карту
+            if save_payment_method or is_recurring:
                 payment_data["save_payment_method"] = True
-                logger.info(f"[YOOKASSA] Параметр save_payment_method=True добавлен для сохранения способа оплаты")
+                logger.info("[YOOKASSA] save_payment_method=True — просим сохранить карту для автоплатежей")
         
         payment = Payment.create(payment_data)
         logger.info(f"[YOOKASSA] Платеж создан: id={payment.id}, status={payment.status}")
@@ -132,7 +120,6 @@ def create_payment(
     except Exception as e:
         logger.error(f"[YOOKASSA] Ошибка создания платежа: {e}", exc_info=True)
         return None
-
 
 def get_payment_info(payment_id: str) -> Optional[Any]:
     """
