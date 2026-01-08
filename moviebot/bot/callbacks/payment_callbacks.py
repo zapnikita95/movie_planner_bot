@@ -1790,178 +1790,121 @@ def register_payment_callbacks(bot_instance):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
         
-            # Общая проверка для групповых подписок (после обработки точных совпадений)
+            # Общая проверка для групповых подписок
             if action == "active:group":
-                # Проверка групповой подписки (общий случай, не current и не other)
-                if not is_private and chat_id < 0:
-                    # В группе - показываем только текущую группу
+                if is_private:
+                    # В личке — сразу показываем список всех групп пользователя
+                    from moviebot.database.db_operations import get_user_groups
+                    
+                    user_groups = get_user_groups(user_id)
+                    
+                    # Дедупликация по chat_id
+                    seen = set()
+                    unique_groups = []
+                    for g in user_groups:
+                        cid = g.get('chat_id')
+                        if cid and cid not in seen:
+                            seen.add(cid)
+                            unique_groups.append(g)
+                    
+                    if not unique_groups:
+                        text = "👥 <b>Групповая подписка</b>\n\n"
+                        text += "❌ Нет групп, где вы и бот состоите вместе.\n\n"
+                        text += "Добавьте бота в группу и напишите любое сообщение."
+                        
+                        markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                    else:
+                        text = "👥 <b>Групповая подписка</b>\n\n"
+                        text += "Выберите группу для проверки:\n\n"
+                        
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        for group in unique_groups[:10]:
+                            title = group.get('title', f"Группа {group.get('chat_id')}")
+                            username = group.get('username')
+                            button_text = f"📍 {title}"
+                            if username:
+                                button_text += f" (@{username})"
+                            if len(button_text) > 60:
+                                button_text = button_text[:57] + "..."
+                            markup.add(InlineKeyboardButton(
+                                button_text,
+                                callback_data=f"payment:check_group:{group.get('chat_id')}"
+                            ))
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
+                    
+                    bot.edit_message_text(
+                        text,
+                        call.message.chat.id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    return
+                
+                else:
+                    # В группе — показываем только текущую группу
                     try:
-                        from moviebot.database.db_operations import get_subscription_members
-                    
-                        chat = bot_instance.get_chat(chat_id)
+                        chat = bot.get_chat(chat_id)
+                        group_title = chat.title or "Без названия"
                         group_username = chat.username
-                        group_title = chat.title
-                    
-                        # Получаем подписку для текущей группы
+                        
                         sub = get_active_subscription(chat_id, user_id, 'group')
-                    
+                        
+                        text = "👥 <b>Групповая подписка</b>\n\n"
+                        text += f"Группа: <b>{group_title}</b>\n"
+                        if group_username:
+                            text += f"@{group_username}\n"
+                        
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        
                         if sub:
+                            # Есть активная подписка
                             expires_at = sub.get('expires_at')
                             next_payment = sub.get('next_payment_date')
                             price = sub.get('price', 0)
-                            activated = sub.get('activated_at')
                             group_size = sub.get('group_size')
                             subscription_id = sub.get('id')
                             plan_type = sub.get('plan_type', 'all')
-                            period_type = sub.get('period_type', 'lifetime')
-                        
-                            text = f"👥 <b>Групповая подписка</b>\n\n"
-                            if plan_type == 'all':
-                                text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
-                            text += f"Группа: <b>{group_title}</b>\n"
-                            if group_username:
-                                text += f"@{group_username}\n"
-                            text += f"\n💰 Сумма платежа: <b>{price}₽</b>\n"
+                            
+                            text += f"\n💰 Сумма: <b>{price}₽</b>\n"
                             if group_size:
-                                text += f"👥 Количество участников: <b>{group_size}</b>\n"
-                                if subscription_id and subscription_id > 0:
-                                    try:
-                                        members = get_subscription_members(subscription_id)
-                                        # Исключаем бота из списка участников
-                                        if BOT_ID and BOT_ID in members:
-                                            members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
-                                        members_count = len(members) if members else 0
-                                        text += f"✅ Участников в подписке: <b>{members_count}</b>\n"
-                                    except Exception as members_error:
-                                        logger.error(f"[PAYMENT] Ошибка получения участников подписки: {members_error}")
-                                        # Пытаемся получить количество из активных пользователей группы
-                                        try:
-                                            active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
-                                            if active_users and BOT_ID:
-                                                active_users = {uid: uname for uid, uname in active_users.items() if uid != BOT_ID}
-                                            active_count = len(active_users) if active_users else 0
-                                            text += f"✅ Участников в подписке: <b>{active_count}</b>\n"
-                                        except Exception as active_error:
-                                            logger.error(f"[PAYMENT] Ошибка получения активных пользователей: {active_error}")
-                                            text += f"✅ Участников в подписке: <b>?</b>\n"
-                            if activated:
-                                text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
-                            if next_payment:
-                                text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                                text += f"👥 Участников: <b>{group_size}</b>\n"
+                                members = get_subscription_members(subscription_id)
+                                if members and BOT_ID in members:
+                                    members = {k: v for k, v in members.items() if k != BOT_ID}
+                                text += f"✅ В подписке: <b>{len(members)}</b>\n"
                             if expires_at:
-                                text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                                text += f"⏰ До: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
                             else:
-                                text += f"⏰ Действует: <b>Навсегда</b>\n"
-                        
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            if subscription_id and subscription_id > 0:
-                                markup.add(InlineKeyboardButton("👥 Список участников", callback_data=f"payment:group_members:{subscription_id}"))
-                        
-                            if subscription_id and subscription_id > 0:
-                                markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data=f"payment:modify:{subscription_id}"))
+                                text += "⏰ <b>Навсегда</b>\n"
+                            
+                            if subscription_id:
+                                markup.add(InlineKeyboardButton("👥 Участники", callback_data=f"payment:group_members:{subscription_id}"))
+                                markup.add(InlineKeyboardButton("✏️ Изменить", callback_data=f"payment:modify:{subscription_id}"))
                                 markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"payment:cancel:{subscription_id}"))
-                            elif subscription_id == 0 or subscription_id is None:
-                                markup.add(InlineKeyboardButton("✏️ Изменить подписку", callback_data="payment:tariffs:group"))
-                                markup.add(InlineKeyboardButton("❌ Отменить", callback_data="payment:cancel:group"))
-                        
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                        
-                            # Добавляем сообщение о других группах
-                            text += "\n\n💬 <i>Если хотите посмотреть остальные группы, в которых вы состоите, напишите в личку боту.</i>"
                         else:
-                            text = f"👥 <b>Групповая подписка</b>\n\n"
-                            text += f"Группа: <b>{group_title}</b>\n"
-                            if group_username:
-                                text += f"@{group_username}\n"
-                            text += "\n❌ Активная подписка отсутствует, выберите тариф для подключения\n\n"
-                            text += "💬 <i>Если хотите посмотреть остальные группы, в которых вы состоите, напишите в личку боту.</i>"
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:group"))
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                    
-                        try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                        except Exception as e:
-                            if "message is not modified" not in str(e):
-                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                        return
-                    except Exception as e:
-                        logger.error(f"[PAYMENT] Ошибка получения информации о группе {chat_id}: {e}")
-                        bot_instance.answer_callback_query(call.id, "Ошибка получения информации о группе", show_alert=True)
-                        return
-            
-                if is_private:
-                    # В личке - показываем список групп для выбора
-                    from moviebot.database.db_operations import get_user_groups
-                    user_groups = get_user_groups(user_id, bot)
-                
-                    if not user_groups:
-                        text = "👥 <b>Проверка групповой подписки</b>\n\n"
-                        text += "❌ Не найдено групп, где вы и бот состоите вместе.\n\n"
-                        text += "Добавьте бота в группу и отправьте любое сообщение, чтобы группа появилась в списке."
-                        markup = InlineKeyboardMarkup(row_width=1)
+                            # Нет подписки
+                            text += "\n❌ Активная подписка отсутствует"
+                            markup.add(InlineKeyboardButton("💰 Подключить", callback_data="payment:tariffs:group"))
+                        
+                        # Кнопка "Другие группы" только в группе
+                        markup.add(InlineKeyboardButton("📍 Другие группы", callback_data="payment:active:group:other"))
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                        try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                        except Exception as e:
-                            if "message is not modified" not in str(e):
-                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                        return
-                
-                    # Дедупликация по chat_id
-                    seen_chat_ids = set()
-                    unique_groups = []
-                    for group in user_groups:
-                        chat_id = group.get('chat_id')
-                        if chat_id and chat_id not in seen_chat_ids:
-                            seen_chat_ids.add(chat_id)
-                            unique_groups.append(group)
-                    user_groups = unique_groups
-                
-                    # Показываем список групп для выбора
-                    text = "👥 <b>Проверка групповой подписки</b>\n\n"
-                    text += "Выберите группу из списка:"
-                
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    for group in user_groups[:10]:  # Ограничиваем до 10 групп
-                        group_title = group.get('title', f"Группа {group.get('chat_id')}")
-                        group_username = group.get('username')
-                        if group_username:
-                            button_text = f"📍 {group_title} (@{group_username})"
-                        else:
-                            button_text = f"📍 {group_title}"
-                        # Ограничиваем длину текста кнопки
-                        if len(button_text) > 50:
-                            button_text = button_text[:47] + "..."
-                        markup.add(InlineKeyboardButton(
-                            button_text,
-                            callback_data=f"payment:check_group:{group.get('chat_id')}"
-                        ))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                    try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                    except Exception as e:
-                        if "message is not modified" not in str(e):
-                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                    return
-                else:
-                    # В группе - показываем выбор текущей или другой группы
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    markup.add(InlineKeyboardButton("📍 Текущая группа", callback_data="payment:active:group:current"))
-                    markup.add(InlineKeyboardButton("📍 Другая группа", callback_data="payment:active:group:other"))
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
-                    try:
-                        bot_instance.edit_message_text(
-                            "👥 <b>Групповая подписка</b>\n\nВыберите группу:",
+                        
+                        bot.edit_message_text(
+                            text,
                             call.message.chat.id,
                             call.message.message_id,
                             reply_markup=markup,
                             parse_mode='HTML'
                         )
+                        return
+                        
                     except Exception as e:
-                        if "message is not modified" not in str(e):
-                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                    return
+                        logger.error(f"Ошибка получения информации о группе: {e}")
+                        bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+                        return
         
             if action.startswith("tariffs:personal"):
                 # Сохраняем информацию о том, откуда пришли (из действующей подписки или из главного меню)
