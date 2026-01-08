@@ -5,7 +5,7 @@ import re
 import logging
 import pytz
 from datetime import datetime
-from moviebot.config import MONTHS_MAP, DAYS_MAP
+from moviebot.config import MONTHS_MAP, DAYS_FULL, PLANS_TZ
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_operations import get_user_timezone
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
@@ -382,3 +382,97 @@ def show_timezone_selection(chat_id, user_id, prompt_text="Выберите ча
         reply_markup=markup,
         parse_mode='HTML'
     )
+
+def parse_plan_date_text(text: str, user_id: int) -> datetime | None:
+    """
+    Парсит текст вроде 'завтра', '15 января', 'в пятницу 20:00', '20.01 19:30'
+    Возвращает datetime в часовом поясе пользователя или None
+    """
+    text = text.strip().lower()
+    user_tz = get_user_timezone_or_default(user_id)
+    now = datetime.now(user_tz)
+
+    # Сначала пробуем parse_session_time, если она есть (у тебя в коде есть вызов)
+    try:
+        from moviebot.bot.handlers.plan import parse_session_time
+        parsed = parse_session_time(text, user_tz)
+        if parsed:
+            return parsed
+    except ImportError:
+        pass  # если нет — идём дальше
+
+    extracted_time = None
+    time_match = re.search(r'\b(\d{1,2}):(\d{2})\b', text)
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            extracted_time = (hour, minute)
+
+    plan_dt = None
+
+    # Дни недели
+    target_weekday = None
+    for phrase, wd in DAYS_FULL.items():
+        if phrase in text:
+            target_weekday = wd
+            break
+
+    if target_weekday is not None:
+        current_wd = now.weekday()
+        delta = (target_weekday - current_wd + 7) % 7
+        if delta == 0:
+            delta = 7
+        plan_date = now.date() + timedelta(days=delta)
+        hour, minute = extracted_time or (19 if plan_date.weekday() < 5 else 10, 0)
+        plan_dt = user_tz.localize(datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute)))
+        return plan_dt
+
+    # Специальные слова
+    if 'сегодня' in text:
+        plan_date = now.date()
+        hour, minute = extracted_time or (19 if plan_date.weekday() < 5 else 10, 0)
+        plan_dt = user_tz.localize(datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute)))
+        return plan_dt
+    if 'завтра' in text:
+        plan_date = now.date() + timedelta(days=1)
+        hour, minute = extracted_time or (19 if plan_date.weekday() < 5 else 10, 0)
+        plan_dt = user_tz.localize(datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute)))
+        return plan_dt
+
+    # Текстовый формат: "15 января"
+    date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+    if date_match:
+        day = int(date_match.group(1))
+        month_str = date_match.group(2)
+        month = MONTHS_MAP.get(month_str)
+        if month:
+            year = now.year
+            try:
+                candidate = datetime(year, month, day)
+                if candidate.date() < now.date():
+                    year += 1
+                hour, minute = extracted_time or (19 if candidate.weekday() < 5 else 10, 0)
+                plan_dt = user_tz.localize(datetime(year, month, day, hour, minute))
+                return plan_dt
+            except ValueError:
+                pass
+
+    # Числовой формат: "20.01" или "20.01 20:30"
+    date_match = re.search(r'(\d{1,2})[./](\d{1,2})', text)
+    if date_match:
+        day = int(date_match.group(1))
+        month = int(date_match.group(2))
+        if 1 <= month <= 12 and 1 <= day <= 31:
+            year = now.year
+            try:
+                candidate = datetime(year, month, day)
+                if candidate.date() < now.date():
+                    year += 1
+                hour, minute = extracted_time or (19 if candidate.weekday() < 5 else 10, 0)
+                plan_dt = user_tz.localize(datetime(year, month, day, hour, minute))
+                return plan_dt
+            except ValueError:
+                pass
+
+    return None
