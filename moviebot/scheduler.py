@@ -2387,6 +2387,3 @@ def update_series_status_cache():
             logger.info(f"[CACHE] Обновлён кэш для kp_id={kp_id}")
         except Exception as e:
             logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id}: {e}")
-
-# Добавь в init_scheduler() или где запускаешь scheduler:
-scheduler.add_job(update_series_status_cache, 'interval', hours=24, next_run_time=datetime.now())

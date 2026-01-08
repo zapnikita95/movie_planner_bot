@@ -77,14 +77,28 @@ except Exception as e:
 scheduler = BackgroundScheduler()
 scheduler.start()
 
+# Устанавливаем экземпляр бота и scheduler в модуле scheduler
+from moviebot.scheduler import set_bot_instance, set_scheduler_instance
+set_bot_instance(bot)
+set_scheduler_instance(scheduler)
+
 # Экспортируем scheduler в bot_init для использования в handlers
 from moviebot.bot.bot_init import set_scheduler
 set_scheduler(scheduler)
 
-# Устанавливаем экземпляр бота и scheduler в модуле scheduler
-from moviebot.scheduler import set_bot_instance, set_scheduler_instance
-set_bot_instance(bot)          # ← передаём сам bot
-set_scheduler_instance(scheduler)
+# ← СРАЗУ ПОСЛЕ ЭТОГО БЛОКА добавляем наш новый job
+from moviebot.scheduler import update_series_status_cache
+from datetime import timedelta
+
+scheduler.add_job(
+    update_series_status_cache,
+    'interval',
+    hours=24,
+    next_run_time=datetime.now() + timedelta(minutes=5),
+    id='update_series_cache',
+    replace_existing=True
+)
+logger.info("[MAIN] Добавлена фоновая задача обновления кэша сериалов (каждые 24 часа)")
 
 # Настраиваем задачи планировщика
 from moviebot.scheduler import (
@@ -130,6 +144,8 @@ scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minut
 logger.info("=" * 80)
 logger.info("[MAIN] ===== РЕГИСТРАЦИЯ ВСЕХ HANDLERS =====")
 
+import moviebot.bot.callbacks.ticket_callbacks  # noqa: F401
+logger.info("✅ ticket_callbacks импортирован (приоритетный хэндлер для add_ticket: и ticket_locked:)")
 # Импортируем модули с callback handlers для автоматической регистрации декораторов (если они используют глобальный bot)
 import moviebot.bot.callbacks.film_callbacks  # noqa: F401
 import moviebot.bot.callbacks.series_callbacks  # noqa: F401
