@@ -269,57 +269,35 @@ def build_tmdb_index():
     
     # Автоматическое скачивание TMDB если нет
     if not TMDB_PARQUET_PATH.exists():
-        logger.info("TMDB parquet не найден — скачиваем напрямую с Kaggle...")
+        logger.info("TMDB parquet не найден — скачиваем через Kaggle API...")
         try:
-            import requests
-            import zipfile
-            from io import BytesIO
+            import subprocess
             import glob
             import shutil
             import os
             
-            # Фиксированная ссылка на latest версию (работает без API key, проверено на 2026)
-            url = "https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies/download?datasetVersionNumber=latest"
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+            # Настраиваем kaggle.json из env (Railway variables)
+            kaggle_dir = Path("/root/.kaggle")
+            kaggle_dir.mkdir(parents=True, exist_ok=True)
+            kaggle_json = kaggle_dir / "kaggle.json"
+            with open(kaggle_json, "w") as f:
+                f.write(f'{{"username":"{os.getenv("KAGGLE_USERNAME")}","key":"{os.getenv("KAGGLE_KEY")}"}}')
+            os.chmod(kaggle_json, 0o600)
             
-            logger.info("Начинаем скачивание zip (~233 MB)...")
-            r = requests.get(url, headers=headers, stream=True, timeout=60)
-            r.raise_for_status()
+            # Скачиваем датасет
+            subprocess.check_call(["kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies", "-p", str(CACHE_DIR), "--unzip"])
             
-            total_size = int(r.headers.get('content-length', 0))
-            downloaded = 0
-            zip_content = BytesIO()
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    zip_content.write(chunk)
-                    downloaded += len(chunk)
-                    if total_size > 0:
-                        logger.info(f"Скачано {downloaded / 1e6:.1f} MB / {total_size / 1e6:.1f} MB")
-            
-            logger.info("Zip скачан, распаковываем в CACHE_DIR...")
-            with zipfile.ZipFile(zip_content) as z:
-                z.extractall(CACHE_DIR)
-            
-            # Рекурсивный поиск всех parquet
+            # Ищем parquet
             parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*.parquet"), recursive=True)
             if not parquet_files:
-                raise Exception("Parquet файлы не найдены после распаковки")
+                raise Exception("Parquet не найден после скачивания")
             
-            # Выбираем самый большой (основной датасет)
-            main_parquet = max(parquet_files, key=os.path.getsize)
-            logger.info(f"Найден главный parquet: {main_parquet} (размер {os.path.getsize(main_parquet)/1e6:.1f} MB)")
-            
-            # Перемещаем в наш путь
+            main_parquet = max(parquet_files, key=os.path.getsize)  # Самый большой
             shutil.move(main_parquet, TMDB_PARQUET_PATH)
-            logger.info(f"TMDB parquet готов и сохранён в volume: {TMDB_PARQUET_PATH}")
-            
-            # Опционально: удалить лишние файлы для экономии места
-            for f in parquet_files:
-                if f != main_parquet:
-                    os.remove(f)
+            logger.info(f"TMDB parquet готов: {TMDB_PARQUET_PATH}")
             
         except Exception as e:
-            logger.error(f"Фатальная ошибка скачивания TMDB: {e}", exc_info=True)
+            logger.error(f"Ошибка скачивания TMDB через Kaggle API: {e}", exc_info=True)
             return None, None
     
     # Vosk модель (опционально, если используешь fallback)

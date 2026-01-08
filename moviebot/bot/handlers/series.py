@@ -17,7 +17,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data
 
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
-
+from moviebot.utils.parsing import parse_plan_date_text
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
 
 from moviebot.config import KP_TOKEN, PLANS_TZ
@@ -2833,25 +2833,42 @@ def register_series_handlers(bot_param):
                 logger.error(f"[RANDOM] Error sending instruction: {e}", exc_info=True)
                 instruction_message_id = None
 
-            # === НОВЫЙ ПАРСЕР МЕСТА И ДАТЫ ===
+            # === УЛУЧШЕННЫЙ ПАРСЕР МЕСТА И ДАТЫ ===
             def parse_plan_input(text: str):
-                """Парсит ввод вида 'дома 20.01', 'в кино завтра', 'Дома — 15 января 20:00' и т.д."""
-                text = text.strip().lower()
+                """Парсит ввод: 'дома 20.01', 'в кино, завтра в 20:00', 'Дома — 15 января' и т.д.
+                Возвращает (place, date_raw_str) — где date_raw_str это оригинальная часть с датой без места"""
+                original = text.strip()
+                lower = text.lower().strip()
 
                 place = None
-                if re.search(r'\bдома\b', text):
+                place_match = None
+
+                # Ищем место просмотра
+                if re.search(r'\bдома\b', lower):
                     place = 'дома'
-                elif re.search(r'\b(в кино|кино|кинотеатр)\b', text):
+                    place_match = 'дома'
+                elif re.search(r'\bв\s+кино\b|\bкинотеатр\b|\bкино\b', lower):
                     place = 'в кино'
+                    place_match = 'в кино' if 'в кино' in lower else 'кино' if 'кино' in lower else 'кинотеатр'
 
                 if not place:
                     return None, None
 
-                # Убираем слова места и разделители, оставляем дату/время
-                date_part = re.sub(r'\bдома\b|\bв кино\b|\bкино\b|\bкинотеатр\b', '', text, flags=re.IGNORECASE)
-                date_part = re.sub(r'^[.,:—\s-]+|[.,:—\s-]+$', '', date_part).strip()
+                # Удаляем все вхождения слов места + возможные разделители вокруг них
+                cleaned = re.sub(rf'\b{re.escape(place_match)}\b', '', lower, flags=re.IGNORECASE)
+                # Убираем разделители в начале и конце
+                cleaned = re.sub(r'^[.,:;—\s\-]+|[.,:;—\s\-]+$', '', cleaned).strip()
 
-                return place, date_part or None
+                # Если после удаления места ничего не осталось — дата не указана
+                if not cleaned:
+                    return place, None
+
+                # Возвращаем место и оригинальный текст даты (не lower, чтобы сохранить "Завтра", "Января" и т.д.)
+                # Выделяем часть после места из оригинального текста
+                date_raw = re.sub(rf'\b{re.escape(place_match)}\b.*?(?=\b.{{\b|$)', '', original, flags=re.IGNORECASE).strip()
+                date_raw = re.sub(r'^[.,:;—\s\-]+|[.,:;—\s\-]+$', '', date_raw).strip()
+
+                return place, date_raw or cleaned  # fallback на cleaned, если не удалось точно выделить
 
             # === Сохранение данных для планирования ===
             random_plan_data[user_id] = {
@@ -2861,14 +2878,16 @@ def register_series_handlers(bot_param):
                 'film_message_id': film_message_id,
                 'instruction_message_id': instruction_message_id,
                 'chat_id': chat_id,
-                'parse_func': parse_plan_input  # сохраняем функцию для использования в обработчиках
+                'place_and_date_raw': None  # будет заполнено в process_random_plan после парсинга
             }
+
+            # Сохраняем функцию парсинга отдельно (или можно просто вызвать здесь, но лучше в process)
+            # Вместо сохранения функции — просто сохраним оригинальный текст позже
 
             # === Активация ожидания ===
             if call.message.chat.type == 'private':
                 user_expected_text[user_id] = {'expected_for': 'random_plan'}
                 logger.info(f"[RANDOM] Ожидание планирования в ЛС включено для user_id={user_id}")
-            # В группе — будет обработано через reply на film_message_id или instruction_message_id
 
             del user_random_state[user_id]
             logger.info(f"[RANDOM] ===== COMPLETED: Film shown - {title}")
@@ -2879,9 +2898,11 @@ def register_series_handlers(bot_param):
                 bot.answer_callback_query(call.id, "Ошибка поиска фильма")
                 if user_id in user_random_state:
                     del user_random_state[user_id]
+                if user_id in random_plan_data:
+                    del random_plan_data[user_id]
             except:
                 pass
-
+            
     @bot.callback_query_handler(func=lambda call: call.data == "random_back_to_menu")
     def handle_random_back_to_menu(call):
         """Обработчик кнопки 'Вернуться к меню' в рандоме - возвращает к выбору режима"""
@@ -5829,33 +5850,36 @@ def handle_clean_confirm_internal(message):
         bot.reply_to(message, "❌ Неизвестный тип удаления")
         if user_id in user_clean_state:
             del user_clean_state[user_id]
+
 def process_random_plan(message, text: str):
-    """Обрабатывает текст планирования после рандома"""
     user_id = message.from_user.id
     chat_id = message.chat.id
 
     plan_data = random_plan_data.get(user_id)
     if not plan_data:
-        bot.send_message(chat_id, "❌ Сессия планирования истекла. Запустите /random заново.")
+        bot.send_message(chat_id, "❌ Сессия истекла. Запустите /random заново.")
         return
 
     title = plan_data['title']
     link = plan_data['link']
     kp_id = plan_data['kp_id']
 
-    # Используем встроенный парсер
-    place, date_str = plan_data['parse_func'](text)
+    place, date_raw = parse_plan_input(text)  # твой парсер места
 
     if not place:
-        bot.send_message(chat_id, "❌ Не понял место просмотра. Укажите «дома» или «в кино».")
+        bot.send_message(chat_id, "❌ Укажите место: «дома» или «в кино»")
         return
-    if not date_str:
-        bot.send_message(chat_id, "❌ Не указана дата/время. Пример: дома 20.01 или в кино завтра")
+    if not date_raw:
+        bot.send_message(chat_id, "❌ Укажите дату после места")
         return
 
-    # Здесь вызови свою функцию добавления в планы
-    # Предполагаю, что у тебя есть что-то вроде add_to_plans или plan_film
-    # Пример (подставь свою):
+    planned_dt = parse_plan_date_text(date_raw, user_id)
+
+    if not planned_dt:
+        bot.send_message(chat_id, "❌ Не понял дату. Примеры: завтра, 20.01, 15 января, в пятницу 20:00")
+        return
+
+    # Здесь вызов твоей функции добавления в планы
     success = add_film_to_plans(
         chat_id=chat_id,
         user_id=user_id,
@@ -5863,18 +5887,18 @@ def process_random_plan(message, text: str):
         link=link,
         kp_id=kp_id,
         place=place,
-        date_raw=date_str  # или уже распаршенную дату
+        planned_at=planned_dt
     )
 
     if success:
-        bot.send_message(chat_id, f"✅ Фильм «{title}» запланирован!\n\n{place.capitalize()} — {date_str}")
+        formatted = planned_dt.astimezone(PLANS_TZ).strftime("%d.%m %H:%M")
+        bot.send_message(chat_id, f"✅ «{title}» запланирован!\n\n{place.capitalize()} — {formatted}")
     else:
-        bot.send_message(chat_id, "❌ Не удалось добавить в планы. Попробуйте позже.")
+        bot.send_message(chat_id, "❌ Не удалось сохранить план")
 
     # Очистка
     random_plan_data.pop(user_id, None)
     user_expected_text.pop(user_id, None)
-
 
 # Личка: следующее сообщение после рандома
 @bot.message_handler(content_types=['text'], func=is_expected_text_in_private)

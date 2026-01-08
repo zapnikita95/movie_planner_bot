@@ -298,8 +298,16 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         )
         if need_update:
             is_airing, next_ep = get_series_airing_status(kp_id)
-            seasons_count = len(get_seasons_data(str(kp_id))) if get_seasons_data(kp_id) else 0
-            next_ep_json = json.dumps(next_ep) if next_ep else None
+            seasons_data = get_seasons_data(kp_id)
+            seasons_count = len(seasons_data) if seasons_data else 0
+
+            # Кастомный сериалайзер для datetime
+            def default_serializer(o):
+                if isinstance(o, (datetime.date, datetime.datetime)):
+                    return o.isoformat()
+                raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
+
+            next_ep_json = json.dumps(next_ep, default=default_serializer) if next_ep else None
 
             with db_lock:
                 cursor.execute("""
@@ -311,7 +319,7 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
             item['is_ongoing'] = is_airing
             item['seasons_count'] = seasons_count
-            item['next_episode'] = next_ep
+            item['next_episode'] = next_ep  # оставляем оригинал для отображения
 
         # Формируем строку сериала
         line = f"<b>{title}</b> ({year})\n"
