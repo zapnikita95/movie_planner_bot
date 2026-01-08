@@ -543,9 +543,7 @@ def show_film_description_callback(call):
         kp_id = call.data.split(":")[1]
         user_id = call.from_user.id
         chat_id = call.message.chat.id
-        thread_id = None
-        if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-            thread_id = call.message.thread_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
         
         logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
         
@@ -621,7 +619,7 @@ def show_film_description_callback(call):
         from moviebot.bot.handlers.series import show_film_info_with_buttons
         show_film_info_with_buttons(
             chat_id, user_id, info, link, kp_id, existing=existing,
-            message_id=film_message_id, message_thread_id=thread_id
+            message_id=film_message_id, message_thread_id=message_thread_id
         )
         
         # Удаляем сообщение с оценкой, если оно есть
@@ -671,9 +669,7 @@ def mark_watched_from_description_callback(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         message_id = call.message.message_id if call.message else None
-        thread_id = None
-        if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-            thread_id = call.message.thread_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
         
         logger.info(f"[MARK WATCHED] film_id={film_id}, user_id={user_id}, chat_id={chat_id}, message_id={message_id}")
         
@@ -743,7 +739,7 @@ def mark_watched_from_description_callback(call):
         from moviebot.bot.handlers.series import show_film_info_with_buttons
         show_film_info_with_buttons(
             chat_id, user_id, info, link, kp_id, existing=existing,
-            message_id=message_id, message_thread_id=thread_id
+            message_id=message_id, message_thread_id=message_thread_id
         )
         
         logger.info(f"[MARK WATCHED] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
@@ -872,9 +868,7 @@ def mark_watched_from_description_kp_callback(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         message_id = call.message.message_id if call.message else None
-        thread_id = None
-        if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-            thread_id = call.message.thread_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
         
         logger.info(f"[MARK WATCHED KP] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}, message_id={message_id}")
         
@@ -915,7 +909,7 @@ def mark_watched_from_description_kp_callback(call):
         from moviebot.bot.handlers.series import show_film_info_with_buttons
         show_film_info_with_buttons(
             chat_id, user_id, info, link, kp_id, existing=existing,
-            message_id=message_id, message_thread_id=thread_id
+            message_id=message_id, message_thread_id=message_thread_id
         )
         
         logger.info(f"[MARK WATCHED KP] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")
@@ -962,9 +956,7 @@ def toggle_watched_from_description_callback(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         message_id = call.message.message_id if call.message else None
-        thread_id = None
-        if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-            thread_id = call.message.thread_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
         
         logger.info(f"[TOGGLE WATCHED] film_id={film_id}, user_id={user_id}, chat_id={chat_id}, message_id={message_id}")
         
@@ -1034,7 +1026,7 @@ def toggle_watched_from_description_callback(call):
         from moviebot.bot.handlers.series import show_film_info_with_buttons
         show_film_info_with_buttons(
             chat_id, user_id, info, link, kp_id, existing=existing,
-            message_id=message_id, message_thread_id=thread_id
+            message_id=message_id, message_thread_id=message_thread_id
         )
         
         logger.info(f"[TOGGLE WATCHED] Сообщение обновлено: film_id={film_id}, kp_id={kp_id}")

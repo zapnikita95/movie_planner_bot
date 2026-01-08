@@ -256,26 +256,39 @@ def register_series_callbacks(bot):
             
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{kp_id}"))
             
-            # Получаем thread_id из сообщения, если оно есть
-            thread_id = None
-            if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-                thread_id = call.message.thread_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
             
-            logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={thread_id}")
+            logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
             try:
                 text_msg = f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:"
                 if all_seasons_watched:
                     text_msg += f"\n\n✅ Отлично, все сезоны просмотрены! Оцените сериал"
-                if thread_id:
-                    # Используем API напрямую для поддержки тредов
-                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
-                    params = {
+                try:
+                    kwargs = {
                         'chat_id': chat_id,
                         'message_id': message_id,
                         'text': text_msg,
-                        'parse_mode': 'HTML',
-                        'thread_id': thread_id
+                        'reply_markup': markup,
+                        'parse_mode': 'HTML'
                     }
+                    if message_thread_id is not None:
+                        kwargs['message_thread_id'] = message_thread_id
+                    bot.edit_message_text(**kwargs)
+                except Exception as e:
+                    logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
+                    # фолбэк — новое сообщение
+                    try:
+                        send_kwargs = {
+                            'chat_id': chat_id,
+                            'text': text_msg,
+                            'reply_markup': markup,
+                            'parse_mode': 'HTML'
+                        }
+                        if message_thread_id is not None:
+                            send_kwargs['message_thread_id'] = message_thread_id
+                        bot.send_message(**send_kwargs)
+                    except:
+                        pass
                     if reply_markup_json:
                         params['reply_markup'] = reply_markup_json
                     bot.api_call('editMessageText', params)
@@ -288,10 +301,15 @@ def register_series_callbacks(bot):
             except Exception as e:
                 logger.error(f"[SERIES TRACK] Ошибка обновления сообщения: {e}", exc_info=True)
                 # При ошибке отправляем новое сообщение
-                if thread_id:
-                    bot.send_message(chat_id, text_msg, reply_markup=markup, parse_mode='HTML', message_thread_id=thread_id)
-                else:
-                    bot.send_message(chat_id, text_msg, reply_markup=markup, parse_mode='HTML')
+                send_kwargs = {
+                    'chat_id': chat_id,
+                    'text': text_msg,
+                    'reply_markup': markup,
+                    'parse_mode': 'HTML'
+                }
+                if message_thread_id is not None:
+                    send_kwargs['message_thread_id'] = message_thread_id
+                bot.send_message(**send_kwargs)
             bot.answer_callback_query(call.id)
         except Exception as e:
             logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
@@ -316,13 +334,11 @@ def register_series_callbacks(bot):
             message_id = call.message.message_id
             
             # Получаем thread_id из сообщения, если оно есть
-            thread_id = None
-            if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-                thread_id = call.message.thread_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
             
             # Используем функцию show_episodes_page для отображения эпизодов
             from moviebot.bot.handlers.seasons import show_episodes_page
-            if show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=message_id, message_thread_id=thread_id):
+            if show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=message_id, message_thread_id=message_thread_id):
                 bot.answer_callback_query(call.id)
             else:
                 bot.answer_callback_query(call.id, "❌ Ошибка загрузки эпизодов", show_alert=True)
@@ -538,27 +554,19 @@ def register_series_callbacks(bot):
                 
                 # Обновляем текст и клавиатуру
                 message_id = call.message.message_id if call.message else None
-                thread_id = None
-                if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-                    thread_id = call.message.thread_id
+                message_thread_id = getattr(call.message, 'message_thread_id', None)
                 
-                if thread_id:
-                    bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        message_thread_id=thread_id,
-                        text=new_text,
-                        reply_markup=new_markup,
-                        parse_mode='HTML'
-                    )
-                else:
-                    bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=new_text,
-                        reply_markup=new_markup,
-                        parse_mode='HTML'
-                    )
+                kwargs = {
+                    'chat_id': chat_id,
+                    'message_id': message_id,
+                    'text': new_text,
+                    'reply_markup': new_markup,
+                    'parse_mode': 'HTML'
+                }
+                if message_thread_id is not None:
+                    kwargs['message_thread_id'] = message_thread_id
+
+                bot.edit_message_text(**kwargs)
                 logger.info("[SERIES SUBSCRIBE] Текст и клавиатура обновлены напрямую (без API)")
             
             except telebot.apihelper.ApiTelegramException as tele_e:
@@ -705,27 +713,19 @@ def register_series_callbacks(bot):
                 
                 # Обновляем текст и клавиатуру
                 message_id = call.message.message_id if call.message else None
-                thread_id = None
-                if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-                    thread_id = call.message.thread_id
+                message_thread_id = getattr(call.message, 'message_thread_id', None)
                 
-                if thread_id:
-                    bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        message_thread_id=thread_id,
-                        text=new_text,
-                        reply_markup=new_markup,
-                        parse_mode='HTML'
-                    )
-                else:
-                    bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        text=new_text,
-                        reply_markup=new_markup,
-                        parse_mode='HTML'
-                    )
+                kwargs = {
+                    'chat_id': chat_id,
+                    'message_id': message_id,
+                    'text': new_text,
+                    'reply_markup': new_markup,
+                    'parse_mode': 'HTML'
+                }
+                if message_thread_id is not None:
+                    kwargs['message_thread_id'] = message_thread_id
+
+                bot.edit_message_text(**kwargs)
                 logger.info("[SERIES UNSUBSCRIBE] Текст и клавиатура обновлены напрямую (без API)")
             
             except telebot.apihelper.ApiTelegramException as tele_e:
@@ -840,9 +840,7 @@ def register_series_callbacks(bot):
             # Обновляем страницу эпизодов
             from moviebot.bot.handlers.seasons import show_episodes_page
             message_id = call.message.message_id if call.message else None
-            thread_id = None
-            if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-                thread_id = call.message.thread_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
             
             # Получаем текущую страницу из состояния
             current_page = 1
@@ -851,7 +849,7 @@ def register_series_callbacks(bot):
                 if state.get('kp_id') == kp_id and state.get('season_num') == season_num:
                     current_page = state.get('page', 1)
             
-            show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=thread_id)
+            show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
         except Exception as e:
             logger.error(f"[EPISODE TOGGLE] Ошибка: {e}", exc_info=True)
             try:
@@ -913,9 +911,7 @@ def register_series_callbacks(bot):
             # Обновляем страницу эпизодов
             from moviebot.bot.handlers.seasons import show_episodes_page
             message_id = call.message.message_id if call.message else None
-            thread_id = None
-            if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-                thread_id = call.message.thread_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
             
             current_page = 1
             if user_id in user_episodes_state:
@@ -923,7 +919,7 @@ def register_series_callbacks(bot):
                 if state.get('kp_id') == kp_id and state.get('season_num') == season_num:
                     current_page = state.get('page', 1)
             
-            show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=thread_id)
+            show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
         except Exception as e:
             logger.error(f"[SEASON ALL] Ошибка: {e}", exc_info=True)
             try:
@@ -948,11 +944,9 @@ def register_series_callbacks(bot):
             
             from moviebot.bot.handlers.seasons import show_episodes_page
             message_id = call.message.message_id if call.message else None
-            thread_id = None
-            if call.message and hasattr(call.message, 'thread_id') and call.message.thread_id:
-                thread_id = call.message.thread_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
             
-            show_episodes_page(kp_id, season_num, chat_id, user_id, page=page, message_id=message_id, message_thread_id=thread_id)
+            show_episodes_page(kp_id, season_num, chat_id, user_id, page=page, message_id=message_id, message_thread_id=message_thread_id)
         except Exception as e:
             logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
             try:

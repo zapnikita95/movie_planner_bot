@@ -5055,16 +5055,59 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         else:
             logger.info(f"[SHOW FILM INFO] Финальный текст длиной {len(text)}, markup отсутствует")
         
-        # ГАРАНТИРОВАННАЯ ОТПРАВКА: Всегда отправляем сообщение
+        # ===== ГАРАНТИРОВАННАЯ ОТПРАВКА СООБЩЕНИЯ =====
         logger.info(f"[SHOW FILM INFO] ===== ГАРАНТИРОВАННАЯ ОТПРАВКА СООБЩЕНИЯ =====")
-        logger.info(f"[SHOW FILM INFO] Отправляю сообщение в чат...")
+
+        try:
+            common_kwargs = {
+                'text': text,
+                'chat_id': chat_id,
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': False,
+                'reply_markup': markup if markup and markup_valid else None
+            }
+            if message_thread_id is not None:
+                common_kwargs['message_thread_id'] = message_thread_id
+
+            if message_id:
+                common_kwargs['message_id'] = message_id
+                bot.edit_message_text(**common_kwargs)
+                logger.info(f"[SHOW FILM INFO] Сообщение успешно обновлено (message_id={message_id})")
+            else:
+                sent_msg = bot.send_message(**common_kwargs)
+                logger.info(f"[SHOW FILM INFO] Новое сообщение отправлено (message_id={sent_msg.message_id})")
+
+        except Exception as e:
+            logger.error(f"[SHOW FILM INFO] Ошибка при отправке/обновлении: {e}", exc_info=True)
+            # Фолбэк: пытаемся без message_thread_id
+            try:
+                fallback_kwargs = {
+                    'text': text,
+                    'chat_id': chat_id,
+                    'parse_mode': 'HTML',
+                    'disable_web_page_preview': False,
+                    'reply_markup': markup if markup and markup_valid else None
+                }
+                if message_id:
+                    fallback_kwargs['message_id'] = message_id
+                    bot.edit_message_text(**fallback_kwargs)
+                else:
+                    bot.send_message(**fallback_kwargs)
+                logger.info("[SHOW FILM INFO] Сообщение отправлено в фолбэк-режиме (без thread_id)")
+            except Exception as e2:
+                logger.error(f"[SHOW FILM INFO] Полная ошибка отправки: {e2}", exc_info=True)
+                # Последняя попытка — минимальное сообщение
+                try:
+                    bot.send_message(chat_id, f"🎬 {info.get('title', 'Фильм')}\n\n<a href='{link}'>Кинопоиск</a>", parse_mode='HTML')
+                except:
+                    pass
         
         # Отправляем или обновляем сообщение
         if message_id:
             # Обновляем существующее сообщение
             logger.info(f"[SHOW FILM INFO] Обновление существующего сообщения message_id={message_id}")
             try:
-                if thread_id:
+                if message_thread_id:
                     # Для тредов используем API напрямую
                     import json
                     reply_markup_json = json.dumps(markup.to_dict()) if markup else None
@@ -5074,7 +5117,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         'text': text,
                         'parse_mode': 'HTML',
                         'disable_web_page_preview': False,
-                        'thread_id': thread_id
+                        'message_thread_id': message_thread_id
                     }
                     if reply_markup_json:
                         params['reply_markup'] = reply_markup_json
@@ -5095,28 +5138,32 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     # Если текст не изменился — просто обновляем клавиатуру
                     logger.info(f"[SHOW FILM INFO] Текст не изменился, обновляю только клавиатуру...")
                     try:
-                        if thread_id:
-                            import json
-                            reply_markup_json = json.dumps(markup.to_dict()) if markup else None
-                            params = {
-                                'chat_id': chat_id,
-                                'message_id': message_id,
-                                'thread_id': thread_id
-                            }
-                            if reply_markup_json:
-                                params['reply_markup'] = reply_markup_json
-                            bot.api_call('editMessageReplyMarkup', params)
-                        else:
-                            bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
+                        # Пытаемся обновить только клавиатуру
+                        kwargs = {
+                            'chat_id': chat_id,
+                            'message_id': message_id,
+                            'reply_markup': markup
+                        }
+                        if message_thread_id is not None:
+                            kwargs['message_thread_id'] = message_thread_id
+
+                        bot.edit_message_reply_markup(**kwargs)
                         logger.info(f"[SHOW FILM INFO] Клавиатура обновлена успешно")
                     except Exception as e2:
                         logger.error(f"[SHOW FILM INFO] Не удалось обновить markup: {e2}", exc_info=True)
                         # При ошибке отправляем новое сообщение
                         try:
-                            if thread_id:
-                                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=thread_id)
-                            else:
-                                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
+                            send_kwargs = {
+                                'chat_id': chat_id,
+                                'text': text,
+                                'parse_mode': 'HTML',
+                                'disable_web_page_preview': False,
+                                'reply_markup': markup
+                            }
+                            if message_thread_id is not None:
+                                send_kwargs['message_thread_id'] = message_thread_id
+
+                            bot.send_message(**send_kwargs)
                             logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
                         except Exception as send_e:
                             logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
@@ -5124,10 +5171,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     # Другая ошибка API - отправляем новое сообщение
                     logger.warning(f"[SHOW FILM INFO] Другая ошибка Telegram API, отправляю новое сообщение")
                     try:
-                        if thread_id:
-                            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=thread_id)
-                        else:
-                            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                         logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
                     except Exception as send_e:
                         logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
@@ -5135,10 +5178,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.error(f"[SHOW FILM INFO] Неизвестная ошибка обновления сообщения: {e}", exc_info=True)
                 # При ошибке отправляем новое сообщение
                 try:
-                    if thread_id:
-                        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=thread_id)
-                    else:
-                        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                     logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
                 except Exception as send_e:
                     logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
@@ -5163,11 +5202,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     logger.info(f"[SHOW FILM INFO] Markup добавлен в параметры отправки")
                 else:
                     logger.info(f"[SHOW FILM INFO] Markup не добавлен (valid={markup_valid}, exists={markup is not None})")
-                
-                # Добавляем thread_id если есть
-                if thread_id:
-                    send_params['thread_id'] = thread_id
-                    logger.info(f"[SHOW FILM INFO] Отправка в тред message_thread_id={thread_id}")
                 
                 logger.info(f"[SHOW FILM INFO] Параметры подготовлены, вызываю send_message...")
                 logger.info(f"[SHOW FILM INFO] send_params keys: {list(send_params.keys())}, text_length: {len(send_params.get('text', ''))}")

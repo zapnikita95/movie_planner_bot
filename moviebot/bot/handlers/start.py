@@ -129,7 +129,7 @@ def register_start_handlers(bot):
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             message_id = call.message.message_id
-            thread_id = getattr(call.message, 'thread_id', None)
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
             action = call.data.split(":")[1]
 
             logger.info(f"[START MENU] Обработка действия: {action}, user_id={user_id}")
@@ -169,7 +169,7 @@ def register_start_handlers(bot):
                         text=text,
                         reply_markup=markup,
                         parse_mode='HTML',
-                        message_thread_id=thread_id
+                        message_thread_id=message_thread_id
                     )
                 return
 
@@ -179,7 +179,7 @@ def register_start_handlers(bot):
                     chat_id=chat_id,
                     user_id=user_id,
                     message_id=message_id,
-                    message_thread_id=thread_id,
+                    message_thread_id=message_thread_id,
                     bot=bot
                 )
             elif action == 'premieres':
@@ -222,7 +222,7 @@ def register_start_handlers(bot):
                             text=text,
                             reply_markup=markup,
                             parse_mode='HTML',
-                            message_thread_id=thread_id
+                            message_thread_id=message_thread_id
                         )
                     return
                 else:
