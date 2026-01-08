@@ -262,17 +262,22 @@ logger.info("✅ ВСЕ ХЭНДЛЕРЫ ЗАРЕГИСТРИРОВАНЫ")
 logger.info("=" * 80)
 
 # Предзагрузка модели Whisper
-try:
-    logger.info("Предзагрузка модели Whisper...")
-    from moviebot.services.shazam_service import get_whisper
-    whisper = get_whisper()
-    if whisper and whisper is not False:
-        logger.info("✅ Модель Whisper предзагружена и готова к использованию")
-    else:
-        logger.warning("⚠️ Модель Whisper недоступна, будет использован Vosk как fallback")
-except Exception as e:
-    logger.warning(f"⚠️ Не удалось предзагрузить Whisper: {e}. Будет загружена при первом использовании.")
-
+import platform
+if platform.system() == "Darwin":  # Только на Mac (локально у тебя)
+    logger.info("⚠️ Предзагрузка Whisper отключена на Mac (из-за segfault) — ленивая загрузка при первом использовании")
+else:
+    # На Railway и Linux — предзагружаем нормально
+    try:
+        logger.info("Предзагрузка модели Whisper...")
+        from moviebot.services.shazam_service import get_whisper
+        whisper = get_whisper()
+        if whisper and whisper is not False:
+            logger.info("✅ Модель Whisper предзагружена и готова к использованию")
+        else:
+            logger.warning("⚠️ Модель Whisper недоступна, будет использован Vosk как fallback")
+    except Exception as e:
+        logger.warning(f"⚠️ Не удалось предзагрузить Whisper: {e}. Будет загружена при первом использовании.")
+        
 # Debug-хэндлер для settings
 @bot.callback_query_handler(func=lambda call: 'settings' in call.data.lower())
 def debug_settings(call):
