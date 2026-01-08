@@ -272,30 +272,23 @@ def build_tmdb_index():
         logger.info("TMDB parquet не найден — скачиваем с Kaggle...")
         try:
             import kagglehub
-            import zipfile
             import glob
             import shutil
             
-            # Скачиваем весь датасет (он в zip)
+            # Скачиваем датасет (возвращает путь к папке с файлами)
             dataset_path = kagglehub.dataset_download("asaniczka/tmdb-movies-dataset-2023-930k-movies")
-            logger.info(f"Датасет скачан в: {dataset_path}")
+            logger.info(f"Датасет скачан в папку: {dataset_path}")
             
-            # Находим zip файл(ы)
-            zip_files = glob.glob(os.path.join(dataset_path, "*.zip"))
-            if not zip_files:
-                raise Exception("Zip файл не найден в датасете")
-            
-            # Распаковываем первый zip
-            with zipfile.ZipFile(zip_files[0], 'r') as zip_ref:
-                zip_ref.extractall(CACHE_DIR)
-            
-            # Находим parquet и перемещаем/переименовываем
-            parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*.parquet"), recursive=True)
+            # Ищем parquet файл(ы) рекурсивно в этой папке
+            parquet_files = glob.glob(os.path.join(dataset_path, "**/*.parquet"), recursive=True)
             if not parquet_files:
-                raise Exception("Parquet не найден после распаковки")
+                raise Exception("Parquet файл не найден в скачанном датасете")
             
-            main_parquet = parquet_files[0]
-            shutil.move(main_parquet, TMDB_PARQUET_PATH)
+            main_parquet = parquet_files[0]  # Обычно один главный
+            logger.info(f"Найден parquet: {main_parquet}")
+            
+            # Копируем/перемещаем в наш CACHE_DIR
+            shutil.copy(main_parquet, TMDB_PARQUET_PATH)
             logger.info(f"TMDB parquet готов: {TMDB_PARQUET_PATH}")
             
         except Exception as e:
