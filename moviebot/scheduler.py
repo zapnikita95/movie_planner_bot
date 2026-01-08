@@ -2377,13 +2377,21 @@ def update_series_status_cache():
         return
 
     for row in rows:
-        # row — tuple, проверяем длину и None
-        if len(row) < 2 or row[0] is None:
-            logger.warning(f"[CACHE] Пропущена битая запись: {row}")
-            continue
+        # Универсальная обработка: row может быть tuple или dict
+        if isinstance(row, dict):
+            kp_id = row.get('kp_id')
+            chat_id = row.get('chat_id')
+        else:
+            # Предполагаем порядок из SELECT: kp_id, chat_id
+            if len(row) < 2:
+                logger.warning(f"[CACHE] Пропущена битая запись (слишком короткая): {row}")
+                continue
+            kp_id = row[0]
+            chat_id = row[1]
         
-        kp_id = row[0]
-        chat_id = row[1]
+        if kp_id is None:
+            logger.warning(f"[CACHE] Пропущена запись с kp_id=None: {row}")
+            continue
         
         try:
             # Основная логика: получаем актуальные данные из Kinopoisk API
