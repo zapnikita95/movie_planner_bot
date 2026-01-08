@@ -2368,7 +2368,7 @@ def update_series_status_cache():
             FROM movies
             WHERE is_series = 1
               AND (last_api_update IS NULL OR last_api_update < NOW() - INTERVAL '1 day')
-            LIMIT 30  -- чтобы не перегружать API
+            LIMIT 30
         """)
         rows = cursor.fetchall()
 
@@ -2377,57 +2377,22 @@ def update_series_status_cache():
         return
 
     for row in rows:
-        if row is None:
-            logger.warning("[CACHE] Пропущена пустая запись")
-            continue
-
-        # Безопасное получение kp_id и chat_id
-        kp_id = row.get('kp_id') if isinstance(row, dict) else row[0]
-        chat_id = row.get('chat_id') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
-
-        if kp_id is None or chat_id is None:
-            logger.warning(f"[CACHE] Пропущена битая запись (kp_id или chat_id None): {row}")
-            continue
-
-        try:
-            # Здесь твоя логика обновления статуса сериала по kp_id и chat_id
-            # Например:
-            info = get_film_info(kp_id)  # или другая функция
-            if info and info.get('is_series'):
-                status = info.get('status') or 'ongoing'
-                episodes_total = info.get('episodes_total')
-                
-                with db_lock:
-                    cursor.execute("""
-                        UPDATE movies 
-                        SET status = %s, 
-                            episodes_total = %s,
-                            last_api_update = NOW()
-                        WHERE kp_id = %s AND chat_id = %s
-                    """, (status, episodes_total, kp_id, chat_id))
-                    conn.commit()
-                
-                logger.info(f"[CACHE] Обновлён кэш для kp_id={kp_id}, chat_id={chat_id}, status={status}")
-            else:
-                logger.debug(f"[CACHE] Не сериал или нет данных: kp_id={kp_id}")
-                
-        except Exception as e:
-            logger.error(f"[CACHE] Ошибка при обновлении kp_id={kp_id}, chat_id={chat_id}: {e}", exc_info=True)
-            # Продолжаем с остальными — одна ошибка не должна останавливать всю задачу
+        # row — tuple, проверяем длину и None
+        if len(row) < 2 or row[0] is None:
+            logger.warning(f"[CACHE] Пропущена битая запись: {row}")
             continue
         
-        kp_id, chat_id = row[0], row[1]
+        kp_id = row[0]
+        chat_id = row[1]
         
         try:
-            # Получаем статус и сезоны
+            # Основная логика: получаем актуальные данные из Kinopoisk API
             is_airing, next_ep = get_series_airing_status(kp_id)
             seasons_data = get_seasons_data(kp_id)
             seasons_count = len(seasons_data) if seasons_data else 0
-            
-            # Сериализуем next_episode в JSON (безопасно)
             next_ep_json = json.dumps(next_ep) if next_ep else None
 
-            # Обновляем в БД
+            # Обновляем только нужные колонки
             with db_lock:
                 cursor.execute("""
                     UPDATE movies
@@ -2443,6 +2408,5 @@ def update_series_status_cache():
 
         except Exception as e:
             logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id} (chat_id={chat_id}): {e}", exc_info=True)
-            # Продолжаем со следующими — не падаем полностью
 
     logger.info("[CACHE] Обновление кэша сериалов завершено")
