@@ -263,7 +263,6 @@ def premieres_back_to_periods_callback(call):
         except:
             pass
 
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_detail:"))
 def premiere_detail_handler(call):
     """Показывает детали премьеры с постером и трейлером"""
@@ -299,39 +298,31 @@ def premiere_detail_handler(call):
                 videos_data = videos_response.json()
                 items = videos_data.get('items', [])
                 if items:
-                    # Берем первый трейлер/тизер
                     trailer_url = items[0].get('url')
                     logger.info(f"[PREMIERES DETAIL] Найден трейлер для {kp_id}: {trailer_url}")
-            else:
-                logger.warning(f"[PREMIERES DETAIL] Не удалось получить трейлер для {kp_id}, статус: {videos_response.status_code}")
         except Exception as e:
             logger.error(f"[PREMIERES DETAIL] Ошибка получения трейлера: {e}", exc_info=True)
         
-        # Если не получилось через отдельный запрос, пробуем из основного ответа
         if not trailer_url:
             videos = data.get('videos', {}).get('trailers', [])
             if videos:
-                trailer_url = videos[0].get('url')  # Первый трейлер
+                trailer_url = videos[0].get('url')
         
         description = data.get('description') or data.get('shortDescription') or "Нет описания"
         genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
         countries = ', '.join([c['country'] for c in data.get('countries', [])]) or '—'
         
-        # Получаем режиссера
         directors = data.get('directors', [])
         director_str = ', '.join([d.get('nameRu') or d.get('nameEn', '') for d in directors if d.get('nameRu') or d.get('nameEn')]) or '—'
         
-        # Получаем информацию о прокате в России (приоритет)
         russia_release = get_film_distribution(kp_id)
         premiere_date = None
         premiere_date_str = ""
         
-        # Если есть информация о прокате в России с будущей датой
         if russia_release and russia_release.get('date'):
             premiere_date = russia_release['date']
             premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
         else:
-            # Иначе получаем дату премьеры из основного ответа
             for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
                 date_value = data.get(date_field)
                 if date_value:
@@ -359,23 +350,30 @@ def premiere_detail_handler(call):
         text += f"\n{description}\n\n"
         text += f"🎭 {genres}\n"
         
-        # Проверяем, есть ли фильм в базе пользователя
-        in_database = False
+        # Улучшенная проверка: получаем id, title и watched за один запрос
+        existing_row = None
         with db_lock:
-            cursor.execute('SELECT 1 FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
-            if cursor.fetchone():
-                in_database = True
+            cursor.execute(
+                'SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s',
+                (chat_id, str(kp_id))
+            )
+            existing_row = cursor.fetchone()
+        
+        in_database = existing_row is not None
+        
+        # Опционально: добавляем статус в текст (очень полезно для пользователя)
+        if in_database:
+            watched_emoji = " ✅" if existing_row[2] else ""
+            text += f"\n\n🎬 Фильм уже в твоём списке{watched_emoji}"
         
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Проверяем, нужно ли показывать кнопку "Уведомить о премьере"
         today = date.today()
         show_notify_button = False
         date_for_callback = ''
         
         if premiere_date:
-            is_future = premiere_date > today
-            if is_future:
+            if premiere_date > today:
                 show_notify_button = True
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
         elif not premiere_date:
@@ -389,20 +387,18 @@ def premiere_detail_handler(call):
                 except:
                     pass
         
-        # Кнопка уведомления о премьере (если фильм ещё не вышел)
         if show_notify_button:
             markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
         
-        # Кнопки добавить / удалить из базы
+        # Кнопки добавить / удалить
         if in_database:
             markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
         else:
             markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
         
-        # Кнопка "Назад"
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{period}"))
         
-        # Отправляем сообщение с постером
+        # Отправка с постером
         if poster_url:
             try:
                 bot.send_photo(
@@ -433,7 +429,7 @@ def premiere_detail_handler(call):
                 disable_web_page_preview=False
             )
         
-        # Отправляем трейлер
+        # Трейлер
         if trailer_url:
             try:
                 bot.send_video(chat_id, trailer_url, caption=f"📺 Трейлер: <b>{title}</b>", parse_mode='HTML')
@@ -450,7 +446,7 @@ def premiere_detail_handler(call):
             bot.answer_callback_query(call.id, "Ошибка загрузки фильма", show_alert=True)
         except:
             pass
-
+        
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_add:"))
 def premiere_add_to_db(call):
     """Добавляет премьеру в базу и показывает описание фильма с кнопками БЕЗ повторного API запроса"""
@@ -470,7 +466,7 @@ def premiere_add_to_db(call):
         
         # Проверяем, есть ли фильм уже в базе
         with db_lock:
-            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
             existing_row = cursor.fetchone()
         
         if existing_row:
