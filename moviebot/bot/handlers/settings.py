@@ -25,7 +25,7 @@ from moviebot.states import (
     user_settings_state, settings_messages,
     dice_game_state, user_import_state
 )
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 
@@ -178,6 +178,12 @@ def handle_settings_callback(call):
                     AND user_id != %s
                 ''', (chat_id, threshold_time, bot_id))
             
+            # Получаем текущий статус случайных событий из базы
+            with db_lock:
+                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+                row = cursor.fetchone()
+                is_enabled = row is not None and row[0] == 'true'
+
             markup = InlineKeyboardMarkup(row_width=1)
             if is_enabled:
                 markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
@@ -438,7 +444,7 @@ def handle_settings_callback(call):
                         WHERE chat_id = %s 
                         AND timestamp >= %s
                         AND user_id != %s
-                    ''', (chat_id, some_timestamp, bot_id))
+                    ''', (chat_id, threshold_time, bot_id))
                     
                     row = cursor.fetchone()
                     active_participants = row[0] if row else 0
