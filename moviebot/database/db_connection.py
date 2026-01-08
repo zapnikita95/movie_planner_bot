@@ -11,8 +11,6 @@ from moviebot.config import DATABASE_URL, DEFAULT_WATCHED_EMOJIS
 logger = logging.getLogger(__name__)
 
 # Глобальные переменные для подключения
-_conn = None
-_cursor = None
 db_lock = threading.Lock()
 
 # Семафор: разрешаем только 2 одновременные операции с БД
@@ -21,29 +19,22 @@ db_semaphore = threading.Semaphore(2)
 
 logger.info("[DB] Семафор для БД инициализирован (макс. 2 одновременных операции)")
 
+def create_new_connection():
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        logger.info("Подключение к PostgreSQL успешно!")
+        return conn
+    except Exception as e:
+        logger.error(f"Ошибка подключения к PostgreSQL: {e}", exc_info=True)
+        raise
+
 def get_db_connection():
-    """Получить подключение к БД"""
-    global _conn
-    if _conn is None:
-        if not DATABASE_URL:
-            raise ValueError("DATABASE_URL не задан!")
-        try:
-            _conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-            logger.info("Подключение к PostgreSQL успешно!")
-        except Exception as e:
-            logger.error(f"Не удалось подключиться к БД: {e}")
-            raise
-    return _conn
+    if not hasattr(_thread_local, "conn") or _thread_local.conn is None or _thread_local.conn.closed:
+        _thread_local.conn = create_new_connection()
+    return _thread_local.conn
 
 def get_db_cursor():
-    """Возвращает cursor с RealDictCursor (возвращает dict вместо tuple)"""
-    global conn
-    if conn is None or conn.closed:
-        init_db_connection()
-    
-    # Вот ключевой фикс — RealDictCursor
-    return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
+    return get_db_connection().cursor(cursor_factory=RealDictCursor)
 def init_database():
     """Инициализация базы данных: создание таблиц и миграции"""
     conn = get_db_connection()
