@@ -1285,11 +1285,11 @@ def create_web_app(bot):
     logger.info(f"[WEB APP] Возвращаем app: {app}")
 
     @app.route('/')
-    def root():
-        """Health check для Railway — чтобы не было 'Application failed to respond'"""
-        logger.info("[ROOT] Запрос на корневой URL — health check")
-        return "Movie Planner Bot is alive and running! 🚀", 200
-
+    @app.route('/health')
+    def health():
+        """Healthcheck для Railway — возвращает 200 OK"""
+        return "Movie Planner Bot OK 🍿", 200
+    
     return app
 
 

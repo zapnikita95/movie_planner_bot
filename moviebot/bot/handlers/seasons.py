@@ -267,20 +267,32 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
     series_data = get_user_series_page(chat_id, user_id, page=page)
 
     if not series_data['items']:
-        text = "📺 У тебя пока нет сериалов в списке.\nДобавь их через поиск!"
+        text = "У тебя пока нет сериалов в списке.\nДобавь их через поиск!"
         try:
+            common_kwargs = {
+                'text': text,
+                'chat_id': chat_id,
+                'parse_mode': 'HTML'
+            }
+            if message_thread_id is not None:
+                common_kwargs['message_thread_id'] = message_thread_id
+
             if message_id:
-                bot.edit_message_text(text, chat_id, message_id, message_thread_id=message_thread_id)
+                common_kwargs['message_id'] = message_id
+                bot.edit_message_text(**common_kwargs)
             else:
-                bot.send_message(chat_id, text, message_thread_id=message_thread_id)
+                bot.send_message(**common_kwargs)
         except Exception as e:
-            logger.error(f"[SHOW_SEASONS_LIST] Ошибка отправки: {e}")
+            logger.error(f"[SHOW_SEASONS_LIST] Ошибка отправки пустого списка: {e}")
         return
 
     items = series_data['items']
-    text = f"<b>📺 Твои сериалы</b> ({series_data['total_count']} шт.)\n"
+
+    # Текст сообщения — короткий и чистый
+    text = f"<b>📺 Твои сериалы</b> ({series_data['total_count']} шт.)\n\n"
     if series_data['total_pages'] > 1:
         text += f"<i>Страница {page}/{series_data['total_pages']}</i>\n\n"
+    text += "Нажми на сериал → описание и сезоны"
 
     markup = InlineKeyboardMarkup(row_width=1)
 
@@ -289,9 +301,8 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         title = item['title']
         year = item['year']
         watched = item['watched_count']
-        total_ep = item['seasons_count'] * 20 if item['seasons_count'] else None  # примерный подсчёт
 
-        # Обновляем кэш, если старый (>1 день) или пустой
+        # Обновление кэша (оставляем как есть)
         need_update = (
             item['last_api_update'] is None or
             (datetime.now() - item['last_api_update']) > timedelta(days=1)
@@ -301,13 +312,10 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
             seasons_data = get_seasons_data(kp_id)
             seasons_count = len(seasons_data) if seasons_data else 0
 
-            # Кастомный сериалайзер для datetime
             def default_serializer(o):
-                if isinstance(o, datetime):
+                if isinstance(o, (datetime, date)):
                     return o.isoformat()
-                if isinstance(o, date):
-                    return o.isoformat()
-                raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
+                raise TypeError("not serializable")
 
             next_ep_json = json.dumps(next_ep, default=default_serializer) if next_ep else None
 
@@ -321,44 +329,63 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
             item['is_ongoing'] = is_airing
             item['seasons_count'] = seasons_count
-            item['next_episode'] = next_ep  # оставляем оригинал для отображения
+            item['next_episode'] = next_ep
 
-        # Формируем строку сериала
-        line = f"<b>{title}</b> ({year})\n"
-        line += f"👀 Просмотрено: {watched}"
-        if item['seasons_count']:
-            line += f" / ~{item['seasons_count'] * 20} серий\n"
+        # Строгий порядок эмодзи — как в твоём примере
+        emojis = ""
+        if item['is_ongoing']:
+            emojis += "🟢"
+            if item['has_subscription']:
+                emojis += "🔔"
+            if watched == 0:
+                emojis += "⏳"
         else:
-            line += " серий\n"
+            emojis += "🔴"
+            if watched == 0:
+                emojis += "⏳"
 
-        if item['has_subscription']:
-            line += "🔔 Подписка активна\n"
+        # Кнопка
+        button_text = f"{emojis} {title} ({year})"
 
-        if item['is_ongoing'] and item['next_episode']:
-            ne = item['next_episode']
-            if isinstance(ne['date'], str):
-                try:
-                    date_obj = datetime.strptime(ne['date'], '%Y-%m-%d').date()
-                    date_str = date_obj.strftime('%d.%m')
-                except:
-                    date_str = ne['date']  # fallback
-            else:
-                date_str = ne['date'].strftime('%d.%m')
-            
-            line += f"🟢 <b>Выходит</b> → С{ne['season']} Э{ne['episode']} — {date_str}\n"
-            
-        elif item['is_ongoing']:
-            line += "🟢 <b>Сериал выходит</b>\n"
+        # Обрезка длинных названий
+        if len(button_text) > 62:
+            available_len = 62 - len(emojis) - len(f" ({year})") - 4
+            short_title = title[:available_len] + "..."
+            button_text = f"{emojis} {short_title} ({year})"
+
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+
+    # Пагинация
+    if series_data['total_pages'] > 1:
+        nav_buttons = []
+        if page > 1:
+            nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_page:{page-1}"))
+        if page < series_data['total_pages']:
+            nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"seasons_page:{page+1}"))
+        markup.row(*nav_buttons)
+
+    # Кнопка назад в главное меню — всегда внизу, отдельной строкой
+    markup.row(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
+
+    # Отправка/редактирование с безопасным thread_id
+    try:
+        common_kwargs = {
+            'text': text,
+            'chat_id': chat_id,
+            'reply_markup': markup,
+            'parse_mode': 'HTML',
+            'disable_web_page_preview': True
+        }
+        if message_thread_id is not None:
+            common_kwargs['message_thread_id'] = message_thread_id
+
+        if message_id:
+            common_kwargs['message_id'] = message_id
+            bot.edit_message_text(**common_kwargs)
         else:
-            line += "🔴 <b>Завершён / не выходит</b>\n"
-
-        if watched == 0:
-            line += "⏳ <b>Ещё не просмотрено</b>\n"
-
-        text += line + "\n"
-
-        # Кнопка на сериал
-        markup.add(InlineKeyboardButton(f"📺 {title}", callback_data=f"seasons_kp:{kp_id}"))
+            bot.send_message(**common_kwargs)
+    except Exception as e:
+        logger.error(f"[SHOW_SEASONS_LIST] Ошибка отправки: {e}", exc_info=True)
 
     # Пагинация (в стиле show_episodes_page)
     if series_data['total_pages'] > 1:
@@ -371,15 +398,39 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         markup.row(*nav_buttons)
 
     try:
+        common_kwargs = {
+            'text': text,
+            'chat_id': chat_id,
+            'reply_markup': markup,
+            'parse_mode': 'HTML'
+        }
+        if message_thread_id is not None:
+            common_kwargs['message_thread_id'] = message_thread_id
+
         if message_id:
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup,
-                                  parse_mode='HTML', disable_web_page_preview=True,
-                                  message_thread_id=message_thread_id)
+            common_kwargs['message_id'] = message_id
+            bot.edit_message_text(**common_kwargs)
         else:
-            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML',
-                             disable_web_page_preview=True, message_thread_id=message_thread_id)
+            bot.send_message(**common_kwargs)
+
     except Exception as e:
-        logger.error(f"[SHOW_SEASONS_LIST] Ошибка редактирования: {e}")
+        logger.error(f"[SHOW_SEASONS_LIST] Ошибка редактирования/отправки: {e}", exc_info=True)
+        # Фолбэк без message_thread_id (на случай очень старой версии telebot)
+        try:
+            fallback_kwargs = {
+                'text': text,
+                'chat_id': chat_id,
+                'reply_markup': markup,
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': True
+            }
+            if message_id:
+                fallback_kwargs['message_id'] = message_id
+                bot.edit_message_text(**fallback_kwargs)
+            else:
+                bot.send_message(**fallback_kwargs)
+        except Exception as e2:
+            logger.error(f"[SHOW_SEASONS_LIST] Полный фейл отправки: {e2}")
 
 def show_completed_series_list(chat_id: int, user_id: int, message_id: int = None, message_thread_id: int = None, bot=None):
     if bot is None:
@@ -396,9 +447,10 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
     
     completed_series = []
     for row in all_series:
-        film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row.get('id')
-        title = row[1] if not isinstance(row, dict) else row.get('title')
-        kp_id = row[2] if not isinstance(row, dict) else row.get('kp_id')
+        # Упрощаем получение полей — cursor возвращает DictRow, так что .get() везде безопасно
+        film_id = row.get('id') if row else None
+        title = row.get('title')
+        kp_id = row.get('kp_id')
 
         is_airing, _ = get_series_airing_status(kp_id)
         seasons_data = get_seasons_data(kp_id)
@@ -410,42 +462,61 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
                 WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
             ''', (chat_id, film_id, user_id))
             for w_row in cursor.fetchall():
-                s_num = str(w_row[0] if not isinstance(w_row, dict) else w_row.get('season_number'))
-                e_num = str(w_row[1] if not isinstance(w_row, dict) else w_row.get('episode_number'))
+                s_num = str(w_row.get('season_number', ''))
+                e_num = str(w_row.get('episode_number', ''))
                 watched_set.add((s_num, e_num))
 
         total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
 
         if total_ep == watched_ep and total_ep > 0 and not is_airing:
-            status = "✅ "
-            button_text = f"{status}{title}"
+            button_text = f"✅ {title}"
             completed_series.append((kp_id, button_text))
 
+    # Общий kwargs для отправки/редактирования
     if not completed_series:
         text = "Нет полностью просмотренных сериалов."
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("◀️ К активным сериалам", callback_data="back_to_seasons_list"))
-        
-        if message_id:
-            bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
-        else:
-            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
-        return
-
-    markup = InlineKeyboardMarkup(row_width=1)
-    for kp_id, button_text in completed_series:
-        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
-
-    markup.add(InlineKeyboardButton("◀️ К активным сериалам", callback_data="back_to_seasons_list"))
-
-    text = f"✅ Просмотренные сериалы ({len(completed_series)})"
-
-    if message_id:
-        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
     else:
-        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+        text = f"✅ Просмотренные сериалы ({len(completed_series)})"
+        markup = InlineKeyboardMarkup(row_width=1)
+        for kp_id, button_text in completed_series:
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+        markup.add(InlineKeyboardButton("◀️ К активным сериалам", callback_data="back_to_seasons_list"))
 
+    try:
+        common_kwargs = {
+            'text': text,
+            'chat_id': chat_id,
+            'reply_markup': markup,
+            'parse_mode': 'HTML'
+        }
+        if message_thread_id is not None:
+            common_kwargs['message_thread_id'] = message_thread_id
 
+        if message_id:
+            common_kwargs['message_id'] = message_id
+            bot.edit_message_text(**common_kwargs)
+        else:
+            bot.send_message(**common_kwargs)
+    except Exception as e:
+        logger.error(f"[SHOW_COMPLETED_SERIES_LIST] Ошибка отправки/редактирования: {e}", exc_info=True)
+        # Фолбэк без thread_id на случай совсем старой библиотеки
+        try:
+            fallback_kwargs = {
+                'text': text,
+                'chat_id': chat_id,
+                'reply_markup': markup,
+                'parse_mode': 'HTML'
+            }
+            if message_id:
+                fallback_kwargs['message_id'] = message_id
+                bot.edit_message_text(**fallback_kwargs)
+            else:
+                bot.send_message(**fallback_kwargs)
+        except Exception as e2:
+            logger.error(f"[SHOW_COMPLETED_SERIES_LIST] Полная ошибка отправки: {e2}")
+            
 @bot.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
 def handle_seasons_kp(call):
     """Клик по сериалу в /seasons → показываем стандартное описание с постером и кнопками"""
@@ -590,7 +661,6 @@ def handle_back_to_seasons_list(call):
         bot=bot
     )
 
-
 @bot.message_handler(commands=['seasons'])
 def handle_seasons_command(message):
     log_request(message)
@@ -619,72 +689,86 @@ def handle_seasons_command(message):
     )
 
 def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 10):
+    """Возвращает страницу сериалов пользователя с пагинацией"""
     offset = (page - 1) * page_size
-
-    with db_lock:
-        # Считаем количество (теперь dict)
-        cursor.execute("""
-            SELECT COUNT(DISTINCT m.id) AS total_count
-            FROM movies m
-            WHERE m.chat_id = %s AND m.is_series = 1
-        """, (chat_id,))
-        count_row = cursor.fetchone()
-        total_count = count_row['total_count'] if count_row else 0
-        total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-
-        # Основной запрос
-        cursor.execute("""
-            SELECT 
-                m.id AS film_id,
-                m.kp_id,
-                m.title,
-                m.year,
-                m.poster_url,
-                m.link,
-                m.is_ongoing,
-                m.seasons_count,
-                m.next_episode,
-                m.last_api_update,
-                COUNT(st.id) AS watched_episodes_count,
-                BOOL_OR(ss.subscribed = TRUE) AS has_subscription
-            FROM movies m
-            LEFT JOIN series_tracking st 
-                ON st.film_id = m.id 
-                AND st.chat_id = %s 
-                AND st.user_id = %s
-            LEFT JOIN series_subscriptions ss 
-                ON ss.film_id = m.id 
-                AND ss.chat_id = %s 
-                AND ss.user_id = %s
-            WHERE m.chat_id = %s AND m.is_series = 1
-            GROUP BY m.id
-            ORDER BY
-                (m.is_ongoing = TRUE AND BOOL_OR(ss.subscribed = TRUE)) DESC,
-                (m.is_ongoing = TRUE) DESC,
-                (COUNT(st.id) > 0 AND BOOL_OR(ss.subscribed = TRUE)) DESC,
-                (COUNT(st.id) > 0) DESC,
-                m.added_date DESC
-            LIMIT %s OFFSET %s
-        """, (chat_id, user_id, chat_id, user_id, chat_id, page_size, offset))
-
-        rows = cursor.fetchall()
-
     items = []
-    for row in rows:
-        items.append({
-            'film_id': row['film_id'],
-            'kp_id': row['kp_id'],
-            'title': row['title'],
-            'year': row['year'],
-            'poster_url': row['poster_url'],
-            'link': row['link'] or f"https://www.kinopoisk.ru/series/{row['kp_id']}/",
-            'is_ongoing': row['is_ongoing'],
-            'seasons_count': row['seasons_count'],
-            'next_episode': row['next_episode'],
-            'last_api_update': row['last_api_update'],
-            'watched_count': row['watched_episodes_count'],
-            'has_subscription': row['has_subscription'],
-        })
+    total_count = 0
+    total_pages = 1
+
+    try:
+        with db_lock:
+            # Считаем общее количество
+            cursor.execute("""
+                SELECT COUNT(DISTINCT m.id) AS total_count
+                FROM movies m
+                WHERE m.chat_id = %s AND m.is_series = 1
+            """, (chat_id,))
+            count_row = cursor.fetchone()
+            total_count = count_row['total_count'] if count_row else 0  # ← по ключу!
+            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+
+            # Основной запрос
+            cursor.execute("""
+                SELECT 
+                    m.id AS film_id,
+                    m.kp_id,
+                    m.title,
+                    m.year,
+                    m.poster_url,
+                    m.link,
+                    m.is_ongoing,
+                    m.seasons_count,
+                    m.next_episode,
+                    m.last_api_update,
+                    COUNT(st.id) AS watched_episodes_count,
+                    BOOL_OR(ss.subscribed = TRUE) AS has_subscription
+                FROM movies m
+                LEFT JOIN series_tracking st 
+                    ON st.film_id = m.id 
+                    AND st.chat_id = %s 
+                    AND st.user_id = %s
+                LEFT JOIN series_subscriptions ss 
+                    ON ss.film_id = m.id 
+                    AND ss.chat_id = %s 
+                    AND ss.user_id = %s
+                WHERE m.chat_id = %s AND m.is_series = 1
+                GROUP BY m.id
+                ORDER BY
+                    (m.is_ongoing = TRUE AND BOOL_OR(ss.subscribed = TRUE)) DESC,
+                    (m.is_ongoing = TRUE) DESC,
+                    (COUNT(st.id) > 0 AND BOOL_OR(ss.subscribed = TRUE)) DESC,
+                    (COUNT(st.id) > 0) DESC,
+                    m.added_date DESC
+                LIMIT %s OFFSET %s
+            """, (chat_id, user_id, chat_id, user_id, chat_id, page_size, offset))
+
+            rows = cursor.fetchall()
+
+        for row in rows:
+            next_episode = row['next_episode']
+            if isinstance(next_episode, str):
+                try:
+                    next_episode = json.loads(next_episode)
+                except:
+                    next_episode = None
+
+            items.append({
+                'film_id': row['film_id'],
+                'kp_id': row['kp_id'],
+                'title': row['title'],
+                'year': row['year'],
+                'poster_url': row['poster_url'],
+                'link': row['link'] or f"https://www.kinopoisk.ru/series/{row['kp_id']}/",
+                'is_ongoing': row['is_ongoing'],
+                'seasons_count': row['seasons_count'],
+                'next_episode': next_episode,
+                'last_api_update': row['last_api_update'],
+                'watched_count': row['watched_episodes_count'],
+                'has_subscription': row['has_subscription'],
+            })
+
+    except Exception as e:
+        logger.error(f"[GET_USER_SERIES_PAGE] Ошибка: {e}", exc_info=True)
 
     return {
         'items': items,

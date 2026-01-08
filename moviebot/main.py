@@ -2,9 +2,14 @@
 Главная точка входа приложения
 Создает bot, запускает webhook/polling
 """
+import os
+
+print("Starting bot... PID:", os.getpid())
+import sys
+print("Python version:", sys.version)
+
 # КРИТИЧЕСКИ ВАЖНО: Настройка logging ДО всех импортов
 import logging
-import sys
 from datetime import datetime, timedelta
 
 # Простая настройка — работает на Railway 100%
@@ -277,7 +282,7 @@ else:
             logger.warning("⚠️ Модель Whisper недоступна, будет использован Vosk как fallback")
     except Exception as e:
         logger.warning(f"⚠️ Не удалось предзагрузить Whisper: {e}. Будет загружена при первом использовании.")
-        
+
 # Debug-хэндлер для settings
 @bot.callback_query_handler(func=lambda call: 'settings' in call.data.lower())
 def debug_settings(call):

@@ -4420,7 +4420,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         kp_id: ID фильма на Кинопоиске
         existing: Кортеж (film_id, title, watched) или None
         message_id: ID сообщения для обновления (если None - отправляет новое)
-        message_thread_id: ID треда для групповых чатов
+        thread_id: ID треда для групповых чатов
     """
     logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
     try:
@@ -5064,7 +5064,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             # Обновляем существующее сообщение
             logger.info(f"[SHOW FILM INFO] Обновление существующего сообщения message_id={message_id}")
             try:
-                if message_thread_id:
+                if thread_id:
                     # Для тредов используем API напрямую
                     import json
                     reply_markup_json = json.dumps(markup.to_dict()) if markup else None
@@ -5074,7 +5074,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         'text': text,
                         'parse_mode': 'HTML',
                         'disable_web_page_preview': False,
-                        'message_thread_id': message_thread_id
+                        'thread_id': thread_id
                     }
                     if reply_markup_json:
                         params['reply_markup'] = reply_markup_json
@@ -5095,13 +5095,13 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     # Если текст не изменился — просто обновляем клавиатуру
                     logger.info(f"[SHOW FILM INFO] Текст не изменился, обновляю только клавиатуру...")
                     try:
-                        if message_thread_id:
+                        if thread_id:
                             import json
                             reply_markup_json = json.dumps(markup.to_dict()) if markup else None
                             params = {
                                 'chat_id': chat_id,
                                 'message_id': message_id,
-                                'message_thread_id': message_thread_id
+                                'thread_id': thread_id
                             }
                             if reply_markup_json:
                                 params['reply_markup'] = reply_markup_json
@@ -5113,8 +5113,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         logger.error(f"[SHOW FILM INFO] Не удалось обновить markup: {e2}", exc_info=True)
                         # При ошибке отправляем новое сообщение
                         try:
-                            if message_thread_id:
-                                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                            if thread_id:
+                                bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=thread_id)
                             else:
                                 bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                             logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
@@ -5124,8 +5124,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     # Другая ошибка API - отправляем новое сообщение
                     logger.warning(f"[SHOW FILM INFO] Другая ошибка Telegram API, отправляю новое сообщение")
                     try:
-                        if message_thread_id:
-                            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                        if thread_id:
+                            bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=thread_id)
                         else:
                             bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                         logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
@@ -5135,8 +5135,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.error(f"[SHOW FILM INFO] Неизвестная ошибка обновления сообщения: {e}", exc_info=True)
                 # При ошибке отправляем новое сообщение
                 try:
-                    if message_thread_id:
-                        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=message_thread_id)
+                    if thread_id:
+                        bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup, message_thread_id=thread_id)
                     else:
                         bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
                     logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
@@ -5164,10 +5164,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 else:
                     logger.info(f"[SHOW FILM INFO] Markup не добавлен (valid={markup_valid}, exists={markup is not None})")
                 
-                # Добавляем message_thread_id если есть
-                if message_thread_id:
-                    send_params['message_thread_id'] = message_thread_id
-                    logger.info(f"[SHOW FILM INFO] Отправка в тред message_thread_id={message_thread_id}")
+                # Добавляем thread_id если есть
+                if thread_id:
+                    send_params['thread_id'] = thread_id
+                    logger.info(f"[SHOW FILM INFO] Отправка в тред message_thread_id={thread_id}")
                 
                 logger.info(f"[SHOW FILM INFO] Параметры подготовлены, вызываю send_message...")
                 logger.info(f"[SHOW FILM INFO] send_params keys: {list(send_params.keys())}, text_length: {len(send_params.get('text', ''))}")
