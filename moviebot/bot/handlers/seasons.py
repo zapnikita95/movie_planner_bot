@@ -607,7 +607,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
         cursor.execute("""
             SELECT COUNT(DISTINCT m.id)
             FROM movies m
-            WHERE m.chat_id = %s AND m.is_series = TRUE
+            WHERE m.chat_id = %s AND m.is_series = 1
         """, (chat_id,))
         total_count = cursor.fetchone()[0]
         total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
@@ -636,7 +636,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                 ON ss.film_id = m.id 
                 AND ss.chat_id = %s 
                 AND ss.user_id = %s
-            WHERE m.chat_id = %s AND m.is_series = TRUE
+            WHERE m.chat_id = %s AND m.is_series = 1
             GROUP BY m.id
             ORDER BY
                 (m.is_ongoing = TRUE AND BOOL_OR(ss.subscribed = TRUE)) DESC,  -- 1: выходит + подписан
@@ -672,6 +672,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
         'total_count': total_count,
         'current_page': page
     }
+
 @bot.callback_query_handler(func=lambda c: c.data.startswith(('seasons_page:', 'seasons_refresh:')))
 def handle_seasons_pagination(call):
     try:
