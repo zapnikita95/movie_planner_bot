@@ -10,6 +10,8 @@ from moviebot.config import DATABASE_URL, DEFAULT_WATCHED_EMOJIS
 
 logger = logging.getLogger(__name__)
 
+_thread_local = threading.local()
+
 # Глобальные переменные для подключения
 db_lock = threading.Lock()
 
