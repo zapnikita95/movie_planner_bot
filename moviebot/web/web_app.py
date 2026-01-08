@@ -1283,6 +1283,13 @@ def create_web_app(bot):
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
     logger.info(f"[WEB APP] Возвращаем app: {app}")
+
+    @app.route('/')
+    def root():
+        """Health check для Railway — чтобы не было 'Application failed to respond'"""
+        logger.info("[ROOT] Запрос на корневой URL — health check")
+        return "Movie Planner Bot is alive and running! 🚀", 200
+
     return app
 
 
