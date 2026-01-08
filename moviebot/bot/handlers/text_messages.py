@@ -2125,6 +2125,35 @@ def handle_reaction(reaction):
     rating_messages[msg.message_id] = film_id
     logger.info(f"[REACTION] Сообщение об оценке отправлено для {user_name}, message_id={msg.message_id}, film_id={film_id}")
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_more_tickets:"))
+def add_more_tickets_from_plan(call):
+    bot.answer_callback_query(call.id)
+    plan_id = int(call.data.split(":")[1])
+    user_id = call.from_user.id
+
+    user_ticket_state[user_id] = {
+        'step': 'add_more_tickets',
+        'plan_id': plan_id,
+        'chat_id': call.message.chat.id
+    }
+
+    bot.edit_message_text(
+        chat_id=call.message.chat.id,
+        message_id=call.message.message_id,
+        text="➕ Продолжаем добавлять билеты.\n\nОтправьте ещё фото/файлы.",
+        parse_mode='HTML'
+    )
+
+@bot.callback_query_handler(func=lambda call: call.data == "ticket_new")
+def back_to_ticket_list(call):
+    bot.answer_callback_query(call.id)
+    user_id = call.from_user.id
+    if user_id in user_ticket_state:
+        del user_ticket_state[user_id]
+
+    # Вызываем твою функцию показа списка билетов/мероприятий
+    from moviebot.bot.handlers.series import show_cinema_sessions  # или какая у тебя функция для /tickets
+    show_cinema_sessions(call.message.chat.id, user_id, call.message.message_id)  # адаптируй под свою функцию
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_emoji:"))
 def add_emoji_callback(call):
