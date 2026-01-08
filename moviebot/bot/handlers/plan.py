@@ -593,7 +593,7 @@ def show_schedule(message):
                     watched = row.get('watched')
                     link = row.get('link')
                 else:
-                    film_id = row[0]
+                    film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
                     title = row[1]
                     watched = row[2]
                     link = row[3] if len(row) > 3 else None

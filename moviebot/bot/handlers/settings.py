@@ -178,11 +178,17 @@ def handle_settings_callback(call):
                     AND user_id != %s
                 ''', (chat_id, threshold_time, bot_id))
             
-            # Получаем текущий статус случайных событий из базы
+            # Получаем текущий статус случайных событий из базы (работает и с dict, и с tuple)
             with db_lock:
                 cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
                 row = cursor.fetchone()
-                is_enabled = row is not None and row[0] == 'true'
+                
+                if row is None:
+                    is_enabled = True  # по умолчанию включено, если записи нет
+                else:
+                    # Универсальное получение значения
+                    value = row.get('value') if isinstance(row, dict) else (row[0] if row else default)
+                    is_enabled = str(value).lower() == 'true'
 
             markup = InlineKeyboardMarkup(row_width=1)
             if is_enabled:
@@ -193,6 +199,7 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
+            status_text = "включены" if is_enabled else "выключены"
             status_text = "включены" if is_enabled else "выключены"
             bot.edit_message_text(
                 f"🎲 <b>Случайные события</b>\n\n"

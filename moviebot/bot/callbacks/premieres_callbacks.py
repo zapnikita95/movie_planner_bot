@@ -505,7 +505,7 @@ def premiere_add_to_db(call):
                     is_series = bool(db_row.get('is_series', 0))
                     link = db_row.get('link') or link
                 else:
-                    year = db_row[0] if len(db_row) > 0 else None
+                    year = db_row.get('year') if isinstance(db_row, dict) else (db_row[0] if db_row else None)
                     genres = db_row[1] if len(db_row) > 1 else None
                     description = db_row[2] if len(db_row) > 2 else None
                     director = db_row[3] if len(db_row) > 3 else None

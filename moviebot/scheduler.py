@@ -116,7 +116,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                         streaming_done = plan_row.get('streaming_done', False)
                         ticket_file_id = plan_row.get('ticket_file_id')
                     else:
-                        streaming_service = plan_row[0]
+                        streaming_service = plan_row.get('streaming_service') if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
                         streaming_url = plan_row[1]
                         streaming_done = plan_row[2] if len(plan_row) > 2 else False
                         ticket_file_id = plan_row[3] if len(plan_row) > 3 else None
