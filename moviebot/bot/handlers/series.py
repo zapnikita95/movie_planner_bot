@@ -4,25 +4,27 @@ from moviebot.bot.bot_init import bot
 """
 import logging
 import re
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 import random
+import threading
+import requests
+import pytz
+import telebot.types
+from datetime import datetime
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_operations import (
 
     log_request, get_user_timezone_or_default, set_user_timezone,
     get_watched_emojis, get_user_timezone, get_notification_settings, set_notification_setting
 )
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
+from moviebot.database.db_operations import get_user_timezone_or_default
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data
-
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
 from moviebot.utils.parsing import parse_plan_date_text
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
 
 from moviebot.config import KP_TOKEN, PLANS_TZ
 
-import requests
 from moviebot.states import (
 
     user_search_state, user_random_state, user_ticket_state,
@@ -32,11 +34,6 @@ from moviebot.states import (
 from moviebot.bot.handlers.text_messages import expect_text_from_user
 
 from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection, extract_kp_user_id
-
-from datetime import datetime
-
-import pytz
-import telebot.types
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -4503,7 +4500,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 user_rating = None
                 try:
                     # Чтение безопасно без блокировки, используем короткий таймаут только для защиты от deadlock
-                    import threading
                     lock_acquired = False
                     try:
                         # Короткий таймаут 1 секунда - если lock занят, просто пропускаем запрос
@@ -4568,7 +4564,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     user_rating = None
                     try:
                         # Чтение безопасно без блокировки, используем короткий таймаут только для защиты от deadlock
-                        import threading
                         lock_acquired = False
                         try:
                             # Короткий таймаут 1 секунда - если lock занят, просто пропускаем запрос
@@ -4611,7 +4606,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 # Для запланированных фильмов показываем среднюю оценку, если фильм просмотрен
                 if watched and film_id:
                     try:
-                        import threading
                         lock_acquired = db_lock.acquire(timeout=3.0)
                         if lock_acquired:
                             try:
@@ -4692,7 +4686,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         else:
             logger.info(f"[SHOW FILM INFO] Запрос film_id из БД...")
             try:
-                import threading
                 lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
                     try:
@@ -4723,8 +4716,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if film_id:
             try:
                 # КРИТИЧЕСКИЙ ФИКС: Обернуто в try-except с таймаутом для предотвращения зависания
-                import threading
-                from moviebot.database.db_operations import get_user_timezone_or_default
                 
                 # Пробуем получить lock с таймаутом
                 lock_acquired = db_lock.acquire(timeout=3.0)
@@ -4760,7 +4751,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                                     else:
                                         dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
                                     date_str = dt.strftime('%d.%m.%Y %H:%M')
-                                except:
+                                except Exception as e:
+                                    logger.warning(f"[SHOW FILM INFO] Ошибка парсинга plan_datetime: {e}")
                                     date_str = str(plan_dt_value)[:16]
                             else:
                                 date_str = "не указана"
@@ -4826,7 +4818,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             avg_rating = None
             rating_text = "💬 Оценить"
             try:
-                import threading
                 # КРИТИЧЕСКИЙ ФИКС: Увеличен таймаут до 5 секунд и добавлена обработка ошибок
                 lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
@@ -4942,7 +4933,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if film_id:
             try:
                 # КРИТИЧЕСКИЙ ФИКС: Обернуто в try-except с таймаутом для предотвращения зависания
-                import threading
                 lock_acquired = db_lock.acquire(timeout=3.0)
                 if lock_acquired:
                     try:
@@ -4972,7 +4962,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 ticket_file_id = None
                 if plan_type == 'cinema':
                     try:
-                        import threading
                         lock_acquired = db_lock.acquire(timeout=3.0)
                         if lock_acquired:
                             try:
@@ -5645,7 +5634,6 @@ def handle_import_count_callback(call):
         del user_import_state[user_id]
         
         # Запускаем импорт в фоновом потоке
-        import threading
         
         def background_import():
             try:
