@@ -3090,7 +3090,6 @@ def register_series_handlers(bot_param):
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
-            # Проверяем доступ к функциям билетов
             if not has_tickets_access(chat_id, user_id):
                 bot.edit_message_text(
                     "🎫 <b>Билеты в кино</b>\n\n"
@@ -3102,14 +3101,13 @@ def register_series_handlers(bot_param):
                 )
                 return
             
-            # Парсим file_id из callback_data, если есть
             parts = call.data.split(":")
             file_id = parts[1] if len(parts) > 1 else None
             
-            # Показываем выбор: добавить билет на фильм или на мероприятие
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("➕ Добавить фильм", callback_data=f"ticket_new_film:{file_id}" if file_id else "ticket_new_film"))
             markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))  # ← НОВАЯ КНОПКА
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
             
             bot.edit_message_text(
@@ -3126,7 +3124,6 @@ def register_series_handlers(bot_param):
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
-
     @bot.callback_query_handler(func=lambda call: call.data == "ticket:add_event")
     def ticket_add_event_callback(call):
         """Обработчик кнопки 'Добавить билет' - начинает флоу добавления билета на мероприятие"""
