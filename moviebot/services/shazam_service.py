@@ -268,7 +268,6 @@ def build_tmdb_index():
         except Exception as e:
             logger.warning(f"Ошибка загрузки индекса: {e}, пересоздаем...")
     
-    # Автоматическое скачивание TMDB если нет
     if not TMDB_PARQUET_PATH.exists():
         logger.info("TMDB parquet не найден — скачиваем через Kaggle API...")
         try:
@@ -277,7 +276,7 @@ def build_tmdb_index():
             import shutil
             import os
             
-            # Настраиваем kaggle.json из env (Railway variables)
+            # Настройка kaggle.json
             kaggle_dir = Path("/root/.kaggle")
             kaggle_dir.mkdir(parents=True, exist_ok=True)
             kaggle_json = kaggle_dir / "kaggle.json"
@@ -285,21 +284,28 @@ def build_tmdb_index():
                 f.write(f'{{"username":"{os.getenv("KAGGLE_USERNAME")}","key":"{os.getenv("KAGGLE_KEY")}"}}')
             os.chmod(kaggle_json, 0o600)
             
-            # Скачиваем датасет
-            subprocess.check_call(["kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies", "-p", str(CACHE_DIR), "--unzip"])
+            # Скачиваем и распаковываем
+            subprocess.check_call([
+                "kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies",
+                "-p", str(CACHE_DIR), "--unzip"
+            ])
             
-            # Ищем parquet
+            # Рекурсивный поиск parquet в CACHE_DIR и поддиректориях
             parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*.parquet"), recursive=True)
             if not parquet_files:
-                raise Exception("Parquet не найден после скачивания")
+                raise Exception("Parquet не найден после скачивания и распаковки")
             
-            main_parquet = max(parquet_files, key=os.path.getsize)  # Самый большой
+            # Берём самый большой файл — это основной датасет
+            main_parquet = max(parquet_files, key=os.path.getsize)
+            logger.info(f"Найден главный parquet: {main_parquet} (размер: {os.path.getsize(main_parquet)/1e6:.1f} MB)")
+            
             shutil.move(main_parquet, TMDB_PARQUET_PATH)
-            logger.info(f"TMDB parquet готов: {TMDB_PARQUET_PATH}")
+            logger.info(f"TMDB parquet успешно сохранён в volume: {TMDB_PARQUET_PATH}")
             
         except Exception as e:
-            logger.error(f"Ошибка скачивания TMDB через Kaggle API: {e}", exc_info=True)
+            logger.error(f"Ошибка скачивания TMDB: {e}", exc_info=True)
             return None, None
+    
     
     # Vosk модель (опционально, если используешь fallback)
     vosk_model_dir = DATA_DIR / 'vosk-model-small-ru-0.22'

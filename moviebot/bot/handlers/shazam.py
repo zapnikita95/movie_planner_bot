@@ -54,10 +54,14 @@ def process_shazam_text_query(message, query, reply_to_message=None):
         results = search_movies(query, top_k=5)
         
         if not results:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+            
             bot.edit_message_text(
-                "❌ Не удалось найти подходящие фильмы. Попробуйте описать по-другому.",
+                "❌ Не удалось найти подходящие фильмы.\nПопробуйте описать по-другому.",
                 loading_msg.chat.id,
-                loading_msg.message_id
+                loading_msg.message_id,
+                reply_markup=markup
             )
             shazam_state.pop(user_id, None)
             return
@@ -86,10 +90,14 @@ def process_shazam_text_query(message, query, reply_to_message=None):
                 })
         
         if not films_info:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+            
             bot.edit_message_text(
                 "❌ Не удалось получить информацию о найденных фильмах.",
                 loading_msg.chat.id,
-                loading_msg.message_id
+                loading_msg.message_id,
+                reply_markup=markup
             )
             shazam_state.pop(user_id, None)
             return
@@ -125,10 +133,15 @@ def process_shazam_text_query(message, query, reply_to_message=None):
         
     except Exception as e:
         logger.error(f"Ошибка в process_shazam_text_query: {e}", exc_info=True)
+        
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+        
         bot.edit_message_text(
             "❌ Произошла ошибка при поиске. Попробуйте еще раз.",
             loading_msg.chat.id,
-            loading_msg.message_id
+            loading_msg.message_id,
+            reply_markup=markup
         )
         shazam_state.pop(user_id, None)
 
@@ -187,10 +200,15 @@ def process_shazam_voice_async(message, loading_msg):
         
         if not text:
             logger.warning(f"[SHAZAM VOICE ASYNC] Не удалось распознать речь")
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+            
             bot.edit_message_text(
-                "❌ Не удалось распознать речь. Попробуйте записать еще раз или опишите фильм текстом.",
+                "❌ Не удалось распознать речь.\nПопробуйте записать еще раз или опишите фильм текстом.",
                 loading_msg.chat.id,
-                loading_msg.message_id
+                loading_msg.message_id,
+                reply_markup=markup
             )
             shazam_state.pop(user_id, None)
             return
@@ -214,10 +232,14 @@ def process_shazam_voice_async(message, loading_msg):
         logger.info(f"[SHAZAM VOICE ASYNC] Поиск завершен, найдено результатов: {len(results)}")
         
         if not results:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+            
             bot.edit_message_text(
-                "❌ Не удалось найти подходящие фильмы. Попробуйте описать по-другому.",
+                "❌ Не удалось найти подходящие фильмы.\nПопробуйте описать по-другому.",
                 loading_msg.chat.id,
-                loading_msg.message_id
+                loading_msg.message_id,
+                reply_markup=markup
             )
             shazam_state.pop(user_id, None)
             return
@@ -297,20 +319,23 @@ def process_shazam_voice_async(message, loading_msg):
         
     except Exception as e:
         logger.error(f"[SHAZAM VOICE ASYNC] ===== ERROR: {e}", exc_info=True)
+        
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+        
         try:
             bot.edit_message_text(
-                f"❌ Произошла ошибка при обработке голосового сообщения: {str(e)[:100]}\n\nПопробуйте еще раз или опишите фильм текстом.",
+                "❌ Произошла ошибка при обработке голосового.\nПопробуйте еще раз.",
                 loading_msg.chat.id,
-                loading_msg.message_id
+                loading_msg.message_id,
+                reply_markup=markup
             )
-        except Exception as edit_e:
-            logger.error(f"[SHAZAM VOICE ASYNC] Не удалось обновить сообщение об ошибке: {edit_e}")
+        except:
             try:
-                bot.reply_to(message, f"❌ Произошла ошибка: {str(e)[:100]}")
+                bot.reply_to(message, "❌ Произошла ошибка при обработке голосового.")
             except:
                 pass
         shazam_state.pop(user_id, None)
-
 
 def register_shazam_handlers(bot):
     """Регистрирует обработчики для КиноШазам"""
