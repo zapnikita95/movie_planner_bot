@@ -1067,7 +1067,13 @@ def create_web_app(bot):
         try:
             # Пытаемся получить статус от watchdog, если он доступен
             try:
-                from moviebot.utils.watchdog import get_watchdog
+                import sys
+                import os
+                # Добавляем путь к корню проекта для импорта utils.watchdog
+                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                if project_root not in sys.path:
+                    sys.path.insert(0, project_root)
+                from utils.watchdog import get_watchdog
                 watchdog = get_watchdog()
                 health_status = watchdog.get_health_status()
                 
@@ -1283,12 +1289,6 @@ def create_web_app(bot):
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
     logger.info(f"[WEB APP] Возвращаем app: {app}")
-
-    @app.route('/')
-    @app.route('/health')
-    def health():
-        """Healthcheck для Railway — возвращает 200 OK"""
-        return "Movie Planner Bot OK 🍿", 200
     
     return app
 
