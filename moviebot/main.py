@@ -5,6 +5,7 @@
 # КРИТИЧЕСКИ ВАЖНО: Настройка logging ДО всех импортов
 import logging
 import sys
+from datetime import datetime, timedelta
 
 # Простая настройка — работает на Railway 100%
 logging.basicConfig(
