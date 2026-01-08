@@ -420,16 +420,20 @@ def handle_settings_callback(call):
                     return
                 
                 with db_lock:
-                    # BOT_ID всегда должен быть определен при импорте
+                    # Получаем ID бота динамически — всегда актуально и безопасно
+                    bot_id = bot.get_me().id
+                    
                     cursor.execute('''
-                        SELECT COUNT(DISTINCT user_id) 
+                        SELECT COUNT(DISTINCT user_id) AS count
                         FROM stats 
                         WHERE chat_id = %s 
+                        AND timestamp >= %s
                         AND user_id != %s
-                    ''', (chat_id, BOT_ID))
-                    participants_count_row = cursor.fetchone()
-                    active_participants = participants_count_row.get('count') if isinstance(participants_count_row, dict) else (participants_count_row[0] if participants_count_row else 0)
-                
+                    ''', (chat_id, some_timestamp, bot_id))
+                    
+                    row = cursor.fetchone()
+                    active_participants = row[0] if row else 0
+                    
                 # Проверяем, что не менее 65% участников активны
                 required_participants = int(total_participants * 0.65)
                 if active_participants < required_participants:
