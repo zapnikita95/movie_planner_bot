@@ -192,7 +192,7 @@ def handle_list_mark_watched_reply(message):
             for kp_id in kp_ids:
                 try:
                     # Сначала получаем название фильма
-                    cursor.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    cursor.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                     film_row = cursor.fetchone()
                     film_title = None
                     if film_row:
@@ -203,7 +203,7 @@ def handle_list_mark_watched_reply(message):
                         UPDATE movies 
                         SET watched = 1 
                         WHERE chat_id = %s AND kp_id = %s AND watched = 0
-                    ''', (chat_id, kp_id))
+                    ''', (chat_id, str(str(kp_id))))
                     if cursor.rowcount > 0:
                         marked_count += 1
                         marked_films.append((kp_id, film_title))
@@ -1380,7 +1380,7 @@ def handle_rate_list_reply(message):
                 cursor.execute('''
                     SELECT id, title FROM movies
                     WHERE chat_id = %s AND kp_id = %s AND watched = 1
-                ''', (chat_id, kp_id))
+                ''', (chat_id, str(str(kp_id))))
                 film_row = cursor.fetchone()
                 
                 if not film_row:

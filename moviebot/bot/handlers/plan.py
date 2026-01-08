@@ -75,7 +75,7 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     
     with db_lock:
         if kp_id:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
         else:
             cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
         row = cursor.fetchone()
@@ -256,7 +256,7 @@ def register_plan_handlers(bot):
                 if id_match:
                     kp_id = id_match.group(1)
                     with db_lock:
-                        cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                         row = cursor.fetchone()
                         if row:
                             link = row.get('link') if isinstance(row, dict) else row[0]
@@ -581,7 +581,7 @@ def show_schedule(message):
             
             # Проверяем, есть ли фильм в базе
             with db_lock:
-                cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
             
             existing = None
@@ -1046,7 +1046,7 @@ def get_plan_link_internal(message, state):
             else:
                 # Это ID, проверяем в базе или создаем ссылку
                 with db_lock:
-                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                     row = cursor.fetchone()
                     if row:
                         link = row.get('link') if isinstance(row, dict) else row[0]

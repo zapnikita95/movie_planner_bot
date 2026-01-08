@@ -143,7 +143,7 @@ def edit_action_callback(call):
                     
                     # Получаем информацию о фильме из базы
                     with db_lock:
-                        cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                         row = cursor.fetchone()
                     
                     if row:

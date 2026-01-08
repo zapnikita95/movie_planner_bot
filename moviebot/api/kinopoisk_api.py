@@ -222,7 +222,7 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                 watched_episodes = set()
                 if chat_id and user_id:
                     with db_lock:
-                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                         row = cursor.fetchone()
                         if row:
                             film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -323,7 +323,7 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                     watched_episodes = set()
                     if chat_id and user_id:
                         with db_lock:
-                            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                             row = cursor.fetchone()
                             if row:
                                 film_id = row.get('id') if isinstance(row, dict) else row[0]

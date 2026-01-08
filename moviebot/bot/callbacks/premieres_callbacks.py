@@ -361,7 +361,7 @@ def premiere_detail_handler(call):
         
         # Проверяем, есть ли фильм в базе
         with db_lock:
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
             film_in_db = cursor.fetchone()
         
         markup = InlineKeyboardMarkup(row_width=1)
@@ -475,7 +475,7 @@ def premiere_add_to_db(call):
         
         # Проверяем, есть ли фильм уже в базе
         with db_lock:
-            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
             existing_row = cursor.fetchone()
         
         if existing_row:
@@ -652,7 +652,7 @@ def premiere_notify_handler(call):
         
         # Проверяем, есть ли фильм уже в базе
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
             existing = cursor.fetchone()
             
             if existing:
@@ -800,7 +800,7 @@ def premiere_cancel_handler(call):
                 cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s AND user_id = %s', (plan_id, chat_id, user_id))
             
             # Получаем film_id
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
             film_row = cursor.fetchone()
             
             if film_row:

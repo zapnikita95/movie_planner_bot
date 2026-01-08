@@ -61,7 +61,7 @@ def register_rate_handlers(bot):
                 cursor.execute('''
                     SELECT id, title FROM movies
                     WHERE chat_id = %s AND kp_id = %s AND watched = 1
-                ''', (chat_id, kp_id))
+                ''', (chat_id, str(str(kp_id))))
                 film_row = cursor.fetchone()
                 
                 if not film_row:
@@ -199,7 +199,7 @@ def register_rate_handlers(bot):
             
             # Получаем информацию о фильме из базы
             with db_lock:
-                cursor.execute('SELECT id, title, link, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id, title, link, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
             
             if not row:
@@ -293,7 +293,7 @@ def handle_rating_internal(message, rating):
                                 if match:
                                     kp_id = match.group(2)
                                     with db_lock:
-                                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                                         row = cursor.fetchone()
                                         if row:
                                             film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -344,7 +344,7 @@ def handle_rating_internal(message, rating):
                 # Это kp_id - проверяем, есть ли такой фильм в базе для этого чата
                 kp_id_candidate = value.split(":")[1]
                 with db_lock:
-                    cursor.execute('SELECT id FROM movies WHERE kp_id = %s AND chat_id = %s', (kp_id_candidate, chat_id))
+                    cursor.execute('SELECT id FROM movies WHERE kp_id = %s AND chat_id = %s', (str(kp_id_candidate), chat_id))
                     row = cursor.fetchone()
                     if row:
                         found_film_id = row.get('id') if isinstance(row, dict) else row[0]

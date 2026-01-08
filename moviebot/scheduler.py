@@ -2374,7 +2374,7 @@ def update_series_status_cache():
         kp_id, chat_id = row
         try:
             is_airing, next_ep = get_series_airing_status(kp_id)
-            seasons_count = len(get_seasons_data(kp_id)) if get_seasons_data(kp_id) else 0
+            seasons_count = len(get_seasons_data(str(kp_id))) if get_seasons_data(kp_id) else 0
             next_ep_json = json.dumps(next_ep) if next_ep else None
 
             with db_lock:

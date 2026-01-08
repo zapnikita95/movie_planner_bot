@@ -365,7 +365,7 @@ def register_series_callbacks(bot):
             
             # Получение film_id и title из БД (добавляем в базу, если нет)
             with db_lock:
-                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
                 if row:
                     film_id = row[0] if isinstance(row, tuple) else row.get('id')
@@ -476,7 +476,7 @@ def register_series_callbacks(bot):
                 # Получаем ссылку на Кинопоиск из базы данных
                 link = None
                 with db_lock:
-                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                     link_row = cursor.fetchone()
                     if link_row:
                         link = link_row[0] if isinstance(link_row, tuple) else link_row.get('link')
@@ -610,7 +610,7 @@ def register_series_callbacks(bot):
             
             # Получение film_id
             with db_lock:
-                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
                 if not row:
                     logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден для kp_id={kp_id}")
@@ -643,7 +643,7 @@ def register_series_callbacks(bot):
                 # Получаем ссылку на Кинопоиск из базы данных
                 link = None
                 with db_lock:
-                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                     link_row = cursor.fetchone()
                     if link_row:
                         link = link_row[0] if isinstance(link_row, tuple) else link_row.get('link')
@@ -783,7 +783,7 @@ def register_series_callbacks(bot):
             
             # Получаем film_id (добавляем сериал в базу, если его еще нет)
             with db_lock:
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
                 
             film_id = None
@@ -877,7 +877,7 @@ def register_series_callbacks(bot):
             
             # Получаем film_id и эпизоды сезона
             with db_lock:
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
                 if not row:
                     bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
@@ -996,7 +996,7 @@ def register_series_callbacks(bot):
             
             # Проверяем, есть ли фильм в базе
             with db_lock:
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
             
             film_id = None

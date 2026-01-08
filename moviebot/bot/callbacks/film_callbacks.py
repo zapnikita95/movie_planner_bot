@@ -48,7 +48,7 @@ def add_to_database_callback(call):
             with db_semaphore:
                 with db_lock:
                     # ← ФИКС: str(kp_id) — чтобы избежать "text = integer"
-                    cursor.execute('SELECT id, title, link, watched, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                    cursor.execute('SELECT id, title, link, watched, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                     row = cursor.fetchone()
         except Exception as e:
             logger.error(f"[ADD TO DATABASE] Ошибка при проверке фильма в базе: {e}", exc_info=True)
@@ -249,7 +249,7 @@ def plan_from_added_callback(call):
         
         # 1. Пробуем взять из базы (самое быстрое)
         with db_lock:
-            cursor.execute('SELECT title, link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+            cursor.execute('SELECT title, link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
             row = cursor.fetchone()
             if row:
                 title = row[0] if not isinstance(row, dict) else row.get('title')
@@ -277,7 +277,7 @@ def plan_from_added_callback(call):
         try:
             with db_semaphore:
                 with db_lock:
-                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                     row = cursor.fetchone()
                     if row:
                         film_id = row[0] if not isinstance(row, dict) else row.get('id')
@@ -489,7 +489,7 @@ def handle_plan_type(call):
         # Ищем в БД link и film_id (твой код — ок)
         with db_semaphore:
             with db_lock:
-                cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor.fetchone()
                 if not row:
                     bot.send_message(chat_id, "❌ Фильм не найден в базе. Попробуйте заново.")
@@ -554,7 +554,7 @@ def show_film_description_callback(call):
             cursor.execute('''
                 SELECT id, title, watched, link, year, genres, description, director, actors, is_series
                 FROM movies WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, str(kp_id)))
+            ''', (chat_id, str(str(kp_id))))
             row = cursor.fetchone()
         
         if not row:
@@ -1149,7 +1149,7 @@ def confirm_remove_from_database(call):
 
         with db_lock:
             # Получаем film_id и название
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
             film = cursor.fetchone()
 
             if not film:
@@ -1195,7 +1195,7 @@ def confirm_remove(call):
     chat_id = call.message.chat.id
 
     with db_lock:
-        cursor.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+        cursor.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
         conn.commit()
 
     bot.edit_message_text(

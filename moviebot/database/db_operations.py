@@ -1474,7 +1474,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
 
     # Проверяем, есть ли фильм в базе
     with db_lock:
-        cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+        cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
         existing = cursor.fetchone()
 
     try:

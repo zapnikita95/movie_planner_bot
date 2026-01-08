@@ -118,7 +118,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         EPISODES_PER_PAGE = 20
         
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
             row = cursor.fetchone()
             if not row:
                 logger.warning(f"[SHOW EPISODES PAGE] Сериал не найден: chat_id={chat_id}, kp_id={kp_id}")
@@ -298,7 +298,7 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         )
         if need_update:
             is_airing, next_ep = get_series_airing_status(kp_id)
-            seasons_count = len(get_seasons_data(kp_id)) if get_seasons_data(kp_id) else 0
+            seasons_count = len(get_seasons_data(str(kp_id))) if get_seasons_data(kp_id) else 0
             next_ep_json = json.dumps(next_ep) if next_ep else None
 
             with db_lock:
@@ -444,7 +444,7 @@ def handle_seasons_kp(call):
             cursor.execute('''
                 SELECT id, title, watched, link, year, genres, description, director, actors, is_series
                 FROM movies WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, str(kp_id)))
+            ''', (chat_id, str(str(kp_id))))
             row = cursor.fetchone()
 
         if not row:
@@ -688,7 +688,7 @@ def handle_seasons_pagination(call):
             for item in series_data['items']:
                 kp_id = item['kp_id']
                 is_airing, next_ep = get_series_airing_status(kp_id)
-                seasons_count = len(get_seasons_data(kp_id)) if get_seasons_data(kp_id) else 0
+                seasons_count = len(get_seasons_data(str(kp_id))) if get_seasons_data(kp_id) else 0
                 next_ep_json = json.dumps(next_ep) if next_ep else None
                 with db_lock:
                     cursor.execute("""
