@@ -9,6 +9,7 @@ import random
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.config import PLANS_TZ
 from moviebot.states import plan_notification_messages
+from moviebot.bot.handlers.seasons import get_series_airing_status, get_seasons_data
 from moviebot.database.db_operations import print_daily_stats, get_user_timezone_or_default, get_notification_settings
 from telebot.apihelper import ApiTelegramException
 logger = logging.getLogger(__name__)
@@ -2360,6 +2361,7 @@ def start_dice_game():
 def update_series_status_cache():
     """Фоновая задача: обновляет статусы сериалов раз в день"""
     logger.info("[CACHE] Запуск обновления кэша сериалов")
+    
     with db_lock:
         cursor.execute("""
             SELECT DISTINCT kp_id, chat_id
@@ -2370,20 +2372,43 @@ def update_series_status_cache():
         """)
         rows = cursor.fetchall()
 
+    if not rows:
+        logger.info("[CACHE] Нет сериалов для обновления кэша")
+        return
+
     for row in rows:
-        kp_id, chat_id = row
+        # Распаковываем с проверкой
+        if len(row) < 2 or row[0] is None:
+            logger.warning(f"[CACHE] Пропущена битая запись: {row}")
+            continue
+        
+        kp_id, chat_id = row[0], row[1]
+        
         try:
+            # Получаем статус и сезоны
             is_airing, next_ep = get_series_airing_status(kp_id)
-            seasons_count = len(get_seasons_data(str(kp_id))) if get_seasons_data(kp_id) else 0
+            seasons_data = get_seasons_data(kp_id)
+            seasons_count = len(seasons_data) if seasons_data else 0
+            
+            # Сериализуем next_episode в JSON (безопасно)
             next_ep_json = json.dumps(next_ep) if next_ep else None
 
+            # Обновляем в БД
             with db_lock:
                 cursor.execute("""
                     UPDATE movies
-                    SET is_ongoing = %s, seasons_count = %s, next_episode = %s, last_api_update = NOW()
+                    SET is_ongoing = %s, 
+                        seasons_count = %s, 
+                        next_episode = %s, 
+                        last_api_update = NOW()
                     WHERE chat_id = %s AND kp_id = %s
                 """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
                 conn.commit()
-            logger.info(f"[CACHE] Обновлён кэш для kp_id={kp_id}")
+            
+            logger.info(f"[CACHE] Обновлён кэш для kp_id={kp_id} (chat_id={chat_id}), seasons={seasons_count}, ongoing={is_airing}")
+
         except Exception as e:
-            logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id}: {e}")
+            logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id} (chat_id={chat_id}): {e}", exc_info=True)
+            # Продолжаем со следующими — не падаем полностью
+
+    logger.info("[CACHE] Обновление кэша сериалов завершено")
