@@ -290,17 +290,27 @@ def build_tmdb_index():
                 "-p", str(CACHE_DIR), "--unzip"
             ])
             
-            # Рекурсивный поиск parquet в CACHE_DIR и поддиректориях
+            # ДЕБАГ: печатаем, что лежит в CACHE_DIR
+            logger.info(f"[DEBUG] Содержимое CACHE_DIR после распаковки: {os.listdir(CACHE_DIR)}")
+            for root, dirs, files in os.walk(CACHE_DIR):
+                logger.info(f"[DEBUG] Папка {root}: dirs={dirs}, files={files[:10]}")  # Первые 10 файлов
+            
+            # Ищем parquet по имени (часто tmdb_movies.parquet или movies.parquet)
             parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*.parquet"), recursive=True)
             if not parquet_files:
-                raise Exception("Parquet не найден после скачивания и распаковки")
+                # Fallback на csv, если parquet нет (иногда датасет меняется)
+                parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*movies*.csv"), recursive=True)
+                if not parquet_files:
+                    raise Exception("Ни parquet, ни csv не найден после распаковки")
+                logger.info("[DEBUG] Parquet не найден, используем CSV как fallback")
             
-            # Берём самый большой файл — это основной датасет
-            main_parquet = max(parquet_files, key=os.path.getsize)
-            logger.info(f"Найден главный parquet: {main_parquet} (размер: {os.path.getsize(main_parquet)/1e6:.1f} MB)")
+            # Берём самый большой файл
+            main_file = max(parquet_files, key=os.path.getsize)
+            logger.info(f"Найден главный файл базы: {main_file} (размер: {os.path.getsize(main_file)/1e6:.1f} MB)")
             
-            shutil.move(main_parquet, TMDB_PARQUET_PATH)
-            logger.info(f"TMDB parquet успешно сохранён в volume: {TMDB_PARQUET_PATH}")
+            # Копируем/перемещаем в наш путь
+            shutil.move(main_file, TMDB_PARQUET_PATH)
+            logger.info(f"База готова: {TMDB_PARQUET_PATH}")
             
         except Exception as e:
             logger.error(f"Ошибка скачивания TMDB: {e}", exc_info=True)

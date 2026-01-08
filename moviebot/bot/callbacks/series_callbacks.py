@@ -5,14 +5,11 @@ Callback handlers для работы с сериалами
 import logging
 import json
 import re
-from datetime import datetime as dt, timedelta
 
 import pytz
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-
-
+from moviebot.scheduler import scheduler
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
 from moviebot.database.db_operations import get_watched_emojis, get_watched_custom_emoji_ids
@@ -93,8 +90,7 @@ def register_series_callbacks(bot):
                 return
             
             # Показываем меню выбора сезона с отметками статуса
-            from datetime import datetime as dt
-            now = dt.now()
+            now = datetime.now()
             
             markup = InlineKeyboardMarkup(row_width=1)
             for season in seasons_data:
@@ -260,53 +256,33 @@ def register_series_callbacks(bot):
             
             logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
             try:
-                text_msg = f"📺 <b>{title}</b>\n\nВыберите сезон для отметки просмотренных эпизодов:"
-                if all_seasons_watched:
-                    text_msg += f"\n\n✅ Отлично, все сезоны просмотрены! Оцените сериал"
+                kwargs = {
+                    'chat_id': chat_id,
+                    'message_id': message_id,
+                    'text': text_msg,
+                    'reply_markup': markup,
+                    'parse_mode': 'HTML'
+                }
+                if message_thread_id is not None:
+                    kwargs['message_thread_id'] = message_thread_id
+
+                bot.edit_message_text(**kwargs)
+                logger.info(f"[SERIES TRACK] Сообщение обновлено успешно")
+            except Exception as e:
+                logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
+                # фолбэк — новое сообщение
                 try:
-                    kwargs = {
+                    send_kwargs = {
                         'chat_id': chat_id,
-                        'message_id': message_id,
                         'text': text_msg,
                         'reply_markup': markup,
                         'parse_mode': 'HTML'
                     }
                     if message_thread_id is not None:
-                        kwargs['message_thread_id'] = message_thread_id
-                    bot.edit_message_text(**kwargs)
-                except Exception as e:
-                    logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
-                    # фолбэк — новое сообщение
-                    try:
-                        send_kwargs = {
-                            'chat_id': chat_id,
-                            'text': text_msg,
-                            'reply_markup': markup,
-                            'parse_mode': 'HTML'
-                        }
-                        if message_thread_id is not None:
-                            send_kwargs['message_thread_id'] = message_thread_id
-                        bot.send_message(**send_kwargs)
-                    except:
-                        pass
-                    if reply_markup_json:
-                        params['reply_markup'] = reply_markup_json
-                    bot.api_call('editMessageText', params)
-                else:
-                    bot.edit_message_text(
-                        text_msg,
-                        chat_id, message_id, reply_markup=markup, parse_mode='HTML'
-                    )
-                logger.info(f"[SERIES TRACK] Сообщение обновлено успешно")
-            except Exception as e:
-                logger.error(f"[SERIES TRACK] Ошибка обновления сообщения: {e}", exc_info=True)
-                # При ошибке отправляем новое сообщение
-                send_kwargs = {
-                    'chat_id': chat_id,
-                    'text': text_msg,
-                    'reply_markup': markup,
-                    'parse_mode': 'HTML'
-                }
+                        send_kwargs['message_thread_id'] = message_thread_id
+                    bot.send_message(**send_kwargs)
+                except Exception as send_e:
+                    logger.error(f"[SERIES TRACK] Фейл отправки: {send_e}")
                 if message_thread_id is not None:
                     send_kwargs['message_thread_id'] = message_thread_id
                 bot.send_message(**send_kwargs)

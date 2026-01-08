@@ -418,7 +418,7 @@ def handle_rating_internal(message, rating):
                     # Кнопка "Вернуться к описанию"
                     markup = InlineKeyboardMarkup()
                     if kp_id:
-                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film_description:{kp_id}"))
+                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{kp_id}"))
                     
                     reply_msg = bot.reply_to(
                         message,

@@ -7,6 +7,7 @@ import json
 import math
 from datetime import datetime, date, timedelta
 
+
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request
@@ -27,7 +28,7 @@ def get_series_airing_status(kp_id):
         if not seasons_data:
             return False, None
         
-        now = dt.now()
+        now = datetime.now()
         is_airing = False
         next_episode = None
         next_episode_date = None
@@ -68,7 +69,7 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
     """
     Подсчитывает общее количество эпизодов и просмотренных для проверки "все просмотрены"
     """
-    now = dt.now()
+    now = datetime.now()
     
     total_episodes = 0
     watched_episodes = 0

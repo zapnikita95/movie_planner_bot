@@ -340,14 +340,13 @@ def register_stats_handlers(bot):
                 is_group = chat_id < 0
                 
                 if is_group:
-                    from datetime import datetime as dt
                     from moviebot.api.kinopoisk_api import get_seasons_data
                     
                     # Получаем все сериалы группы
                     cursor.execute('SELECT id, kp_id FROM movies WHERE chat_id = %s AND is_series = 1', (chat_id,))
                     all_series = cursor.fetchall()
                     
-                    now = dt.now()
+                    now = datetime.now()
                     
                     for row in all_series:
                         if isinstance(row, dict):

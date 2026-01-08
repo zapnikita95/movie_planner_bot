@@ -238,8 +238,7 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                                     episode = w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1]
                                     watched_episodes.add((season, episode))
 
-                from datetime import datetime as dt
-                now = dt.now()
+                now = datetime.now()
                 
                 # Получаем информацию о выходе серий
                 next_episode = None
@@ -339,8 +338,7 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                                         episode = w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1]
                                         watched_episodes.add((season, episode))
                     
-                    from datetime import datetime as dt
-                    now = dt.now()
+                    now = datetime.now()
                     
                     # Получаем информацию о выходе серий
                     next_episode = None

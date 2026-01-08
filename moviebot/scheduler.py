@@ -38,10 +38,8 @@ def hourly_stats():
 
 
 # Функции для уведомлений о планах (определяем до использования в scheduler)
-
 def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None, user_id=None):
     """Отправляет уведомление о запланированном просмотре"""
-
     try:
         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         from moviebot.api.kinopoisk_api import get_external_sources
@@ -49,13 +47,11 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         import json
 
         plan_type_text = "дома" if plan_type == 'home' else "в кино"
-
         text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
-
         text += f"<b>{title}</b>\n{link}"
-        
+       
         markup = None
-        
+       
         # Проверяем, является ли фильм сериалом, и получаем информацию о последней просмотренной серии
         is_series = False
         last_episode_info = None
@@ -65,12 +61,11 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                 movie_row = cursor.fetchone()
                 if movie_row:
                     is_series = bool(movie_row.get('is_series') if isinstance(movie_row, dict) else movie_row[0])
-                    
-                    # Если это сериал, получаем последнюю просмотренную серию
+                   
                     if is_series:
                         cursor.execute('''
-                            SELECT season_number, episode_number 
-                            FROM series_tracking 
+                            SELECT season_number, episode_number
+                            FROM series_tracking
                             WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
                             ORDER BY season_number DESC, episode_number DESC
                             LIMIT 1
@@ -84,32 +79,30 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                                 }
                             else:
                                 last_episode_info = {
-                                    'season': last_episode_row.get('season_number') if isinstance(last_episode_row, dict) else last_episode_row[0],
+                                    'season': last_episode_row[0],
                                     'episode': last_episode_row[1]
                                 }
-        
-        # Добавляем информацию о последней просмотренной серии, если это сериал
+       
         if is_series and last_episode_info:
             text += f"\n\n📺 <b>Последняя просмотренная серия:</b> Сезон {last_episode_info['season']}, Серия {last_episode_info['episode']}"
-        
-        # Проверяем подписку и добавляем информацию, если нет доступа к уведомлениям
+       
         has_access = False
         if user_id:
             has_access = has_notifications_access(chat_id, user_id)
-        
+       
         if not has_access and user_id:
             text += "\n\n💡 <b>Вы можете отслеживать просмотренные серии и подключить напоминания о выходе новых серий с тарифом 🔔 Уведомления</b>"
-        
-        # Для планов "дома" проверяем онлайн-кинотеатры
+       
+        # Для планов "дома" — существующий код с онлайн-кинотеатрами
         if plan_type == 'home' and plan_id:
             with db_lock:
                 cursor.execute('''
                     SELECT streaming_service, streaming_url, streaming_done, ticket_file_id
-                    FROM plans 
+                    FROM plans
                     WHERE id = %s AND chat_id = %s
                 ''', (plan_id, chat_id))
                 plan_row = cursor.fetchone()
-                
+               
                 if plan_row:
                     if isinstance(plan_row, dict):
                         streaming_service = plan_row.get('streaming_service')
@@ -117,50 +110,43 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                         streaming_done = plan_row.get('streaming_done', False)
                         ticket_file_id = plan_row.get('ticket_file_id')
                     else:
-                        streaming_service = plan_row.get('streaming_service') if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
-                        streaming_url = plan_row[1]
+                        streaming_service = plan_row[0] if plan_row else None
+                        streaming_url = plan_row[1] if len(plan_row) > 1 else None
                         streaming_done = plan_row[2] if len(plan_row) > 2 else False
                         ticket_file_id = plan_row[3] if len(plan_row) > 3 else None
-                    
-                    # Если пользователь нажал "Завершить", не показываем кинотеатры
+                   
                     if streaming_done:
                         logger.info(f"[PLAN NOTIFICATION] streaming_done=True для плана {plan_id}, кинотеатры не показываем")
-                    # Если выбран кинотеатр, показываем ссылку
                     elif streaming_service and streaming_url:
                         text += f"\n\n📺 <b>Онлайн-кинотеатр:</b> <a href='{streaming_url}'>{streaming_service}</a>"
                         logger.info(f"[PLAN NOTIFICATION] Показываем ссылку на кинотеатр {streaming_service} для плана {plan_id}")
-                    # Если кинотеатр не выбран и не нажато "Завершить", показываем кнопки
                     else:
-                        # Получаем kp_id из фильма
+                        # ... (твой код с кнопками кинотеатров остаётся без изменений)
                         cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                         movie_row = cursor.fetchone()
                         kp_id = None
                         if movie_row:
                             kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
-                        
-                        # Пробуем получить источники из сохраненных данных или из API
+                       
                         sources_dict = {}
                         if ticket_file_id:
                             try:
                                 sources_dict = json.loads(ticket_file_id)
                             except:
                                 pass
-                        
-                        # Если нет сохраненных источников, получаем из API
+                       
                         if not sources_dict and kp_id:
                             sources = get_external_sources(kp_id)
                             if sources:
                                 sources_dict = {platform: url for platform, url in sources[:6]}
-                                # Сохраняем в базу
                                 sources_json = json.dumps(sources_dict, ensure_ascii=False)
                                 cursor.execute('''
-                                    UPDATE plans 
-                                    SET ticket_file_id = %s 
+                                    UPDATE plans
+                                    SET ticket_file_id = %s
                                     WHERE id = %s AND chat_id = %s
                                 ''', (sources_json, plan_id, chat_id))
                                 conn.commit()
-                        
-                        # Показываем кнопки с кинотеатрами
+                       
                         if sources_dict:
                             if not markup:
                                 markup = InlineKeyboardMarkup(row_width=2)
@@ -168,63 +154,58 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                                 markup.add(InlineKeyboardButton(platform, url=url))
                             text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
                             logger.info(f"[PLAN NOTIFICATION] Показываем кнопки с кинотеатрами для плана {plan_id}")
-        
-        # Добавляем кнопку "Перейти к подписке", если нет доступа к уведомлениям
+       
+        # Новый блок для планов "в кино"
+        elif plan_type == 'cinema' and plan_id:
+            with db_lock:
+                cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                row = cursor.fetchone()
+                ticket_file_id = None
+                if row:
+                    if isinstance(row, dict):
+                        ticket_file_id = row.get('ticket_file_id')
+                    else:
+                        ticket_file_id = row[0]
+               
+                if not markup:
+                    markup = InlineKeyboardMarkup()
+               
+                if not ticket_file_id or str(ticket_file_id).strip() == '' or ticket_file_id == 'null':
+                    markup.add(InlineKeyboardButton("📸 Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                    text += "\n\n🎟 Не забудьте добавить фото билетов!"
+                    logger.info(f"[PLAN NOTIFICATION] Кнопка 'Добавить билеты' для плана {plan_id}")
+                else:
+                    markup.add(InlineKeyboardButton("🎟 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
+                    logger.info(f"[PLAN NOTIFICATION] Кнопка 'Показать билеты' для плана {plan_id}")
+
+        # Кнопка подписки в конце
         if not has_access and user_id:
             if not markup:
                 markup = InlineKeyboardMarkup()
-            # Определяем тип подписки (личная или групповая) на основе chat_id
             subscription_type = 'personal' if chat_id > 0 else 'group'
             markup.add(InlineKeyboardButton("🔔 Перейти к подписке", callback_data=f"payment:tariffs:{subscription_type}"))
-
+       
         msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-
-        # Сохраняем message_id для обработки реакций (сохраняем link, film_id и plan_id)
-
+       
         plan_notification_messages[msg.message_id] = {
-
             'link': link,
-
             'film_id': film_id,
-
             'plan_id': plan_id
-
         }
-
+       
         logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}, message_id={msg.message_id}, plan_id={plan_id}")
-
-        
-
-        # Отмечаем как отправленное в базе данных, если plan_id передан
-
+       
         if plan_id:
-
             try:
-
                 with db_lock:
-
-                    cursor.execute('''
-
-                        UPDATE plans 
-
-                        SET notification_sent = TRUE 
-
-                        WHERE id = %s
-
-                    ''', (plan_id,))
-
+                    cursor.execute('UPDATE plans SET notification_sent = TRUE WHERE id = %s', (plan_id,))
                     conn.commit()
-
                 logger.info(f"[PLAN NOTIFICATION] План {plan_id} отмечен как уведомление отправлено")
-
             except Exception as e:
-
                 logger.warning(f"[PLAN NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}")
 
     except Exception as e:
-
         logger.error(f"[PLAN NOTIFICATION] Ошибка отправки уведомления: {e}")
-
 
 def send_ticket_notification(chat_id, plan_id):
     """Отправляет напоминание с билетами за 10 минут до сеанса"""
@@ -1065,9 +1046,8 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
         seasons = get_seasons_data(kp_id)
         
         if seasons:
-            from datetime import datetime as dt, timedelta
             import pytz
-            now = dt.now()
+            now = datetime.now()
             next_episode_date = None
             next_episode = None
             
@@ -1175,8 +1155,7 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
             return
         
         # Ищем следующую серию
-        from datetime import datetime as dt
-        now = dt.now()
+        now = datetime.now()
         next_episode_date = None
         next_episode = None
         

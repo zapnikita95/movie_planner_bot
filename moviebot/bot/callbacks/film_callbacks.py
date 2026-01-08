@@ -768,7 +768,6 @@ def mark_watched_from_description_callback(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_select:"))
 def streaming_select_callback(call):
-    """Показывает онлайн-кинотеатры для просмотра фильма"""
     try:
         bot.answer_callback_query(call.id)
 
@@ -776,7 +775,6 @@ def streaming_select_callback(call):
         chat_id = call.message.chat.id
         message_id = call.message.message_id
 
-        from moviebot.api.kinopoisk_api import get_external_sources
         sources = get_external_sources(kp_id)
 
         if not sources:
@@ -785,19 +783,21 @@ def streaming_select_callback(call):
                 chat_id,
                 message_id,
                 reply_markup=InlineKeyboardMarkup().add(
-                    InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film_description:{kp_id}")
+                    InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}")
                 )
             )
             return
 
         markup = InlineKeyboardMarkup(row_width=1)
         for platform, url in sources:
-            markup.add(InlineKeyboardButton(platform, url=url))
+            from base64 import urlsafe_b64encode
+            encoded_url = urlsafe_b64encode(url.encode()).decode().strip("=")  # на всякий укоротим
+            markup.add(InlineKeyboardButton(platform, callback_data=f"select_platform:{kp_id}:{platform}:{encoded_url}"))
 
-        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film_description:{kp_id}"))
+        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}"))
 
         bot.edit_message_text(
-            "Где смотреть онлайн:\n\nВыберите платформу:",
+            "Выберите онлайн-кинотеатр:",
             chat_id,
             message_id,
             reply_markup=markup
@@ -805,32 +805,57 @@ def streaming_select_callback(call):
 
     except Exception as e:
         logger.error(f"[STREAMING SELECT] Ошибка: {e}", exc_info=True)
-        try:
-            bot.answer_callback_query(call.id, "Ошибка загрузки платформ", show_alert=True)
-        except:
-            pass
-    
-    # Сохраняем выбранный сервис и url
-    with db_lock:
-        cursor.execute('''
-            UPDATE plans 
-            SET streaming_service = %s, streaming_url = %s, streaming_done = FALSE
-            WHERE id = %s AND chat_id = %s
-        ''', (platform, selected_url, plan_id, chat_id))
-        conn.commit()
-    
-    logger.info(f"[STREAMING SELECT] Для плана {plan_id} выбран {platform} ({selected_url})")
-    
-    # Обновляем сообщение
-    new_text = call.message.text.split("\n\n📺")[0] + f"\n\n✅ Выбран: <b>{platform}</b>"
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text=new_text,
-        parse_mode='HTML',
-        reply_markup=call.message.reply_markup  # Оставляем кнопки, включая "Завершить"
-    )
+        bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
 
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("select_platform:"))
+def select_platform_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+
+        parts = call.data.split(":")
+        kp_id = int(parts[1])
+        platform = parts[2]
+        encoded_url = parts[3] + "=="  # добавляем паддинг обратно, если стриппали
+        from base64 import urlsafe_b64decode
+        url = urlsafe_b64decode(encoded_url.encode()).decode()
+
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+
+        # Находим последний план дома для этого фильма
+        with db_lock:
+            cursor.execute('''
+                SELECT p.id FROM plans p
+                JOIN movies m ON p.film_id = m.id
+                WHERE m.kp_id = %s AND p.chat_id = %s AND p.plan_type = 'home'
+                ORDER BY p.plan_datetime DESC LIMIT 1
+            ''', (kp_id, chat_id))
+            row = cursor.fetchone()
+            if row:
+                plan_id = row[0]
+                cursor.execute('''
+                    UPDATE plans 
+                    SET streaming_service = %s, streaming_url = %s 
+                    WHERE id = %s AND chat_id = %s
+                ''', (platform, url, plan_id, chat_id))
+                conn.commit()
+
+                bot.edit_message_text(
+                    f"✅ Запомнили: {platform}\nСсылка будет в напоминании!",
+                    chat_id,
+                    message_id,
+                    reply_markup=InlineKeyboardMarkup().add(
+                        InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}")
+                    )
+                )
+            else:
+                bot.edit_message_text("План не найден :(", chat_id, message_id)
+
+    except Exception as e:
+        logger.error(f"[SELECT PLATFORM] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "Ошибка сохранения", show_alert=True)
+        
 @bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_done:"))
 def streaming_done_callback(call):
     """Завершение выбора онлайн-кинотеатров"""
