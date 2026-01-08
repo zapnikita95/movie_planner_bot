@@ -1065,7 +1065,7 @@ def remove_from_database_prompt(call):
             bot.answer_callback_query(call.id, "Ошибка: неверный ID фильма", show_alert=True)
             return
 
-        kp_id_str = str(kp_id)  # ← Фикс: приводим к строке для запроса
+        kp_id_str = str(kp_id)
 
         chat_id = call.message.chat.id
         message_id = call.message.message_id
@@ -1073,8 +1073,6 @@ def remove_from_database_prompt(call):
 
         # Получаем название фильма для подтверждения
         with db_lock:
-            cursor = get_db_cursor()  # Лучше через функцию
-
             cursor.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
             row = cursor.fetchone()
 
@@ -1085,7 +1083,8 @@ def remove_from_database_prompt(call):
             )
             return
 
-        title = row[0] if isinstance(row, dict) else row[0]
+        # Безопасно берём title — row это DictRow
+        title = row.get('title') or "Фильм/сериал"
         short_title = (title[:50] + '...') if len(title) > 50 else title
 
         # Клавиатура подтверждения
@@ -1096,18 +1095,19 @@ def remove_from_database_prompt(call):
         )
 
         bot.edit_message_text(
-            f"🗑️ Вы уверены, что хотите удалить фильм из базы?\n\n"
+            f"🗑️ Вы уверены, что хотите удалить из базы?\n\n"
             f"<b>{short_title}</b>\n\n"
             f"Это действие нельзя отменить.",
-            chat_id, message_id,
+            chat_id=chat_id,
+            message_id=message_id,
             reply_markup=markup,
             parse_mode='HTML'
         )
 
-        logger.info(f"[REMOVE FROM DB] Пользователь {user_id} запросил подтверждение удаления kp_id={kp_id}")
+        logger.info(f"[REMOVE FROM DB PROMPT] Запрос подтверждения: user_id={user_id}, kp_id={kp_id}, title={title}")
 
     except Exception as e:
-        logger.error(f"[REMOVE FROM DB PROMPT] Ошибка: user_id={call.from_user.id}, data={call.data} | {e}", exc_info=True)
+        logger.error(f"[REMOVE FROM DB PROMPT] Ошибка: user_id={user_id}, data={call.data} | {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "Ошибка при обработке", show_alert=True)
         except:
