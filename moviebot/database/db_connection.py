@@ -37,6 +37,7 @@ def get_db_connection():
 
 def get_db_cursor():
     return get_db_connection().cursor(cursor_factory=RealDictCursor)
+
 def init_database():
     """Инициализация базы данных: создание таблиц и миграции"""
     conn = get_db_connection()
@@ -567,7 +568,20 @@ def init_database():
         logger.error(f"Ошибка при создании таблицы администраторов: {e}", exc_info=True)
         conn.rollback()
     
+
+    # Миграция: добавление полей для сериалов в таблицу movies
+    try:
+        cursor.execute("ALTER TABLE movies ADD COLUMN IF NOT EXISTS poster_url TEXT")
+        cursor.execute("ALTER TABLE movies ADD COLUMN IF NOT EXISTS is_ongoing BOOLEAN DEFAULT FALSE")
+        cursor.execute("ALTER TABLE movies ADD COLUMN IF NOT EXISTS seasons_count INTEGER")
+        cursor.execute("ALTER TABLE movies ADD COLUMN IF NOT EXISTS next_episode TEXT")
+        cursor.execute("ALTER TABLE movies ADD COLUMN IF NOT EXISTS last_api_update TIMESTAMP WITH TIME ZONE")
+        cursor.execute("ALTER TABLE movies ADD COLUMN IF NOT EXISTS added_date TIMESTAMP WITH TIME ZONE DEFAULT NOW()")  # если нужно для сортировки
+        conn.commit()
+        logger.info("Миграция: поля для сериалов добавлены в таблицу movies")
+    except Exception as e:
+        logger.warning(f"Ошибка при добавлении полей для сериалов: {e}")
+        conn.rollback()
+
     conn.commit()
     logger.info("База данных инициализирована")
-
-
