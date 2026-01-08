@@ -3,6 +3,7 @@ from moviebot.bot.bot_init import bot
 Обработчики команды /settings - настройки бота
 """
 import logging
+from moviebot.config import PLANS_TZ
 import random
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -166,7 +167,7 @@ def handle_settings_callback(call):
                 bot_id = bot.get_me().id
                 
                 # Вычисляем timestamp за последние 30 дней (точно как в random_events.py)
-                threshold_time = (datetime.now(plans_tz) - timedelta(days=30)).isoformat()
+                threshold_time = (datetime.now(PLANS_TZ) - timedelta(days=30)).isoformat()
                 
                 # Считаем количество активных участников (исключая бота)
                 cursor.execute('''
