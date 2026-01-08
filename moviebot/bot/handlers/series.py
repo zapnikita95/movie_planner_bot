@@ -4332,6 +4332,12 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         message_id: ID сообщения для обновления (если None - отправляет новое)
         thread_id: ID треда для групповых чатов
     """
+    if message_id:
+        try:
+            bot.edit_message_text("⏳ Загружаю...", chat_id, message_id)
+        except:
+            message_id = None  # если сообщение удалено или недоступно — отправим новое
+            
     logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
     try:
         logger.info(f"[SHOW FILM INFO] info keys: {list(info.keys()) if info else 'None'}")
@@ -4838,91 +4844,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
 
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
-        # Проверяем, есть ли план для этого фильма (дома) - чтение безопасно без lock
-        logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
-        plan_row = None
-        if film_id:
-            try:
-                # КРИТИЧЕСКИЙ ФИКС: Обернуто в try-except с таймаутом для предотвращения зависания
-                lock_acquired = db_lock.acquire(timeout=3.0)
-                if lock_acquired:
-                    try:
-                        cursor.execute('''
-                            SELECT id, plan_type FROM plans 
-                            WHERE film_id = %s AND chat_id = %s
-                            ORDER BY plan_datetime ASC
-                            LIMIT 1
-                        ''', (film_id, chat_id))
-                        plan_row = cursor.fetchone()
-                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (с lock), plan_row={plan_row is not None}")
-                    finally:
-                        db_lock.release()
-                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов (второй блок)")
-                else:
-                    logger.warning(f"[SHOW FILM INFO] db_lock timeout (5 сек) - пропускаем проверку планов (не критично)")
-                    plan_row = None
-            except Exception as plan_e:
-                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при проверке планов (пропускаем): {plan_e}", exc_info=True)
-                plan_row = None
-            
-            if plan_row:
-                plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
-                plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[1]
-                
-                # Проверяем наличие билетов для планов "в кино"
-                ticket_file_id = None
-                if plan_type == 'cinema':
-                    try:
-                        lock_acquired = db_lock.acquire(timeout=3.0)
-                        if lock_acquired:
-                            try:
-                                cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
-                                ticket_row = cursor.fetchone()
-                                if ticket_row:
-                                    ticket_file_id = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else ticket_row[0]
-                                logger.info(f"[SHOW FILM INFO] Запрос билетов выполнен, ticket_file_id={ticket_file_id is not None}")
-                            finally:
-                                db_lock.release()
-                                logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки билетов")
-                        else:
-                            logger.warning(f"[SHOW FILM INFO] db_lock timeout (1 сек) - пропускаем проверку билетов (не критично)")
-                            ticket_file_id = None
-                    except Exception as ticket_e:
-                        logger.error(f"[SHOW FILM INFO] ❌ Ошибка при проверке билетов (пропускаем): {ticket_e}", exc_info=True)
-                        ticket_file_id = None
-                
-                if plan_type == 'home':
-                    # Кнопка "Отметить просмотренным" (если фильм еще не просмотрен)
-                    if existing:
-                        watched = existing.get('watched') if isinstance(existing, dict) else existing[2]
-                        if not watched:
-                            markup.add(InlineKeyboardButton("✅ Отметить просмотренным", callback_data=f"mark_watched_from_description:{film_id}"))
-                    
-                    # Кнопки "Изменить" и "Удалить" в одной строке
-                    markup.row(
-                        InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan:{plan_id}"),
-                        InlineKeyboardButton("🗑️ Удалить", callback_data=f"remove_from_calendar:{plan_id}")
-                    )
-                elif plan_type == 'cinema':
-                    # Кнопки для планов "в кино" с проверкой доступа к билетам
-                    if has_tickets_access(chat_id, user_id):
-                        if ticket_file_id:
-                            markup.add(InlineKeyboardButton("🎟️ Перейти к билетам", callback_data=f"ticket_session:{plan_id}"))
-                        else:
-                            markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
-                    else:
-                        if ticket_file_id:
-                            markup.add(InlineKeyboardButton("🔒 Перейти к билетам", callback_data=f"ticket_locked:{plan_id}"))
-                        else:
-                            markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
-                    
-                    # Кнопки "Изменить" и "Удалить" в одной строке
-                    markup.row(
-                        InlineKeyboardButton("✏️ Изменить", callback_data=f"edit_plan:{plan_id}"),
-                        InlineKeyboardButton("🗑️ Удалить", callback_data=f"remove_from_calendar:{plan_id}")
-                    )
-        logger.info(f"[SHOW FILM INFO] Обработка планов завершена")
-        
         # Проверяем длину текста перед отправкой
         logger.info(f"[SHOW FILM INFO] Текст сформирован, длина={len(text)}, message_id={message_id}")
         if len(text) > 4096:
@@ -4964,210 +4885,61 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.info(f"[SHOW FILM INFO] Финальный текст длиной {len(text)}, markup присутствует")
         else:
             logger.info(f"[SHOW FILM INFO] Финальный текст длиной {len(text)}, markup отсутствует")
-        
-        # ===== ГАРАНТИРОВАННАЯ ОТПРАВКА СООБЩЕНИЯ =====
-        logger.info(f"[SHOW FILM INFO] ===== ГАРАНТИРОВАННАЯ ОТПРАВКА СООБЩЕНИЯ =====")
 
-        try:
-            common_kwargs = {
-                'text': text,
-                'chat_id': chat_id,
-                'parse_mode': 'HTML',
-                'disable_web_page_preview': False,
-                'reply_markup': markup if markup and markup_valid else None
-            }
-            if message_thread_id is not None:
-                common_kwargs['message_thread_id'] = message_thread_id
+        # === ОБНОВЛЕНИЕ ИЛИ ОТПРАВКА СООБЩЕНИЯ (единственный блок) ===
+        logger.info("[SHOW FILM INFO] Попытка обновления или отправки")
 
-            if message_id:
-                common_kwargs['message_id'] = message_id
-                bot.edit_message_text(**common_kwargs)
-                logger.info(f"[SHOW FILM INFO] Сообщение успешно обновлено (message_id={message_id})")
-            else:
-                sent_msg = bot.send_message(**common_kwargs)
-                logger.info(f"[SHOW FILM INFO] Новое сообщение отправлено (message_id={sent_msg.message_id})")
+        send_kwargs = {
+            'chat_id': chat_id,
+            'text': text,
+            'parse_mode': 'HTML',
+            'disable_web_page_preview': False,
+            'reply_markup': markup if markup else None
+        }
+        if message_thread_id is not None:
+            send_kwargs['message_thread_id'] = message_thread_id
 
-        except Exception as e:
-            logger.error(f"[SHOW FILM INFO] Ошибка при отправке/обновлении: {e}", exc_info=True)
-            # Фолбэк: пытаемся без message_thread_id
-            try:
-                fallback_kwargs = {
-                    'text': text,
-                    'chat_id': chat_id,
-                    'parse_mode': 'HTML',
-                    'disable_web_page_preview': False,
-                    'reply_markup': markup if markup and markup_valid else None
-                }
-                if message_id:
-                    fallback_kwargs['message_id'] = message_id
-                    bot.edit_message_text(**fallback_kwargs)
-                else:
-                    bot.send_message(**fallback_kwargs)
-                logger.info("[SHOW FILM INFO] Сообщение отправлено в фолбэк-режиме (без thread_id)")
-            except Exception as e2:
-                logger.error(f"[SHOW FILM INFO] Полная ошибка отправки: {e2}", exc_info=True)
-                # Последняя попытка — минимальное сообщение
-                try:
-                    bot.send_message(chat_id, f"🎬 {info.get('title', 'Фильм')}\n\n<a href='{link}'>Кинопоиск</a>", parse_mode='HTML')
-                except:
-                    pass
-        
-        # Отправляем или обновляем сообщение
+        sent_new = False
         if message_id:
-            # Обновляем существующее сообщение
-            logger.info(f"[SHOW FILM INFO] Обновление существующего сообщения message_id={message_id}")
+            send_kwargs['message_id'] = message_id
             try:
-                if message_thread_id:
-                    # Для тредов используем API напрямую
-                    import json
-                    reply_markup_json = json.dumps(markup.to_dict()) if markup else None
-                    params = {
-                        'chat_id': chat_id,
-                        'message_id': message_id,
-                        'text': text,
-                        'parse_mode': 'HTML',
-                        'disable_web_page_preview': False,
-                        'message_thread_id': message_thread_id
-                    }
-                    if reply_markup_json:
-                        params['reply_markup'] = reply_markup_json
-                    logger.info(f"[SHOW FILM INFO] Вызов api_call editMessageText для треда")
-                    bot.api_call('editMessageText', params)
-                else:
-                    logger.info(f"[SHOW FILM INFO] Вызов edit_message_text")
-                    logger.info(f"[SHOW FILM INFO] Параметры edit: chat_id={chat_id}, message_id={message_id}, text_length={len(text)}, has_markup={markup is not None}")
-                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                logger.info(f"[SHOW FILM INFO] Сообщение обновлено успешно: {info.get('title')}, kp_id={kp_id}, message_id={message_id}")
-            except telebot.apihelper.ApiTelegramException as e:
-                error_str = str(e).lower()
-                logger.error(f"[SHOW FILM INFO] Telegram API ошибка при обновлении сообщения: {e}", exc_info=True)
-                logger.error(f"[SHOW FILM INFO] error_code={getattr(e, 'error_code', 'N/A')}, result_json={getattr(e, 'result_json', {})}")
-                
-                # Проверяем, является ли это ошибкой "message is not modified"
-                if "message is not modified" in error_str or "message_not_modified" in error_str or "bad request: message is not modified" in error_str:
-                    # Если текст не изменился — просто обновляем клавиатуру
-                    logger.info(f"[SHOW FILM INFO] Текст не изменился, обновляю только клавиатуру...")
-                    try:
-                        # Пытаемся обновить только клавиатуру
-                        kwargs = {
-                            'chat_id': chat_id,
-                            'message_id': message_id,
-                            'reply_markup': markup
-                        }
-                        if message_thread_id is not None:
-                            kwargs['message_thread_id'] = message_thread_id
-
-                        bot.edit_message_reply_markup(**kwargs)
-                        logger.info(f"[SHOW FILM INFO] Клавиатура обновлена успешно")
-                    except Exception as e2:
-                        logger.error(f"[SHOW FILM INFO] Не удалось обновить markup: {e2}", exc_info=True)
-                        # При ошибке отправляем новое сообщение
+                bot.edit_message_text(**send_kwargs)
+                logger.info(f"[SHOW FILM INFO] Обновлено успешно, message_id={message_id}")
+            except ApiTelegramException as e:
+                if "message is not modified" in str(e).lower():
+                    if "exactly the same" in str(e):
+                        logger.info("[SHOW FILM INFO] Ничего не изменилось — пропускаем")
+                        sent_new = False
+                    else:
+                        # Пробуем только markup
                         try:
-                            send_kwargs = {
-                                'chat_id': chat_id,
-                                'text': text,
-                                'parse_mode': 'HTML',
-                                'disable_web_page_preview': False,
-                                'reply_markup': markup
-                            }
-                            if message_thread_id is not None:
-                                send_kwargs['message_thread_id'] = message_thread_id
-
-                            bot.send_message(**send_kwargs)
-                            logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
-                        except Exception as send_e:
-                            logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
+                            bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
+                            logger.info("[SHOW FILM INFO] Только markup обновлён")
+                        except ApiTelegramException as e2:
+                            if "message is not modified" in str(e2):
+                                logger.info("[SHOW FILM INFO] Markup одинаковый — пропускаем")
+                            else:
+                                logger.error(f"[SHOW FILM INFO] Ошибка markup: {e2}")
+                                sent_new = True
                 else:
-                    # Другая ошибка API - отправляем новое сообщение
-                    logger.warning(f"[SHOW FILM INFO] Другая ошибка Telegram API, отправляю новое сообщение")
-                    try:
-                        logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
-                    except Exception as send_e:
-                        logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
+                    logger.error(f"[SHOW FILM INFO] Ошибка edit: {e}")
+                    sent_new = True
             except Exception as e:
-                logger.error(f"[SHOW FILM INFO] Неизвестная ошибка обновления сообщения: {e}", exc_info=True)
-                # При ошибке отправляем новое сообщение
-                try:
-                    logger.info(f"[SHOW FILM INFO] Отправлено новое сообщение вместо обновления: {info.get('title')}, kp_id={kp_id}")
-                except Exception as send_e:
-                    logger.error(f"[SHOW FILM INFO] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
+                logger.error(f"[SHOW FILM INFO] Неизвестная ошибка edit: {e}")
+                sent_new = True
         else:
-            # Отправляем новое сообщение
-            logger.info(f"[SHOW FILM INFO] ===== ОТПРАВКА НОВОГО СООБЩЕНИЯ =====")
-            logger.info(f"[SHOW FILM INFO] chat_id={chat_id}, text_length={len(text)}, has_markup={markup is not None}, markup_valid={markup_valid}")
+            sent_new = True
+
+        if sent_new:
             try:
-                logger.info(f"[SHOW FILM INFO] Вызов send_message, chat_id={chat_id}, text_length={len(text)}")
-                
-                # Подготавливаем параметры для отправки
-                send_params = {
-                    'chat_id': chat_id,
-                    'text': text,
-                    'parse_mode': 'HTML',
-                    'disable_web_page_preview': False
-                }
-                
-                # Добавляем markup только если он валиден
-                if markup and markup_valid:
-                    send_params['reply_markup'] = markup
-                    logger.info(f"[SHOW FILM INFO] Markup добавлен в параметры отправки")
-                else:
-                    logger.info(f"[SHOW FILM INFO] Markup не добавлен (valid={markup_valid}, exists={markup is not None})")
-                
-                logger.info(f"[SHOW FILM INFO] Параметры подготовлены, вызываю send_message...")
-                logger.info(f"[SHOW FILM INFO] send_params keys: {list(send_params.keys())}, text_length: {len(send_params.get('text', ''))}")
-                msg = bot.send_message(**send_params)
-                logger.info(f"[SHOW FILM INFO] ✅ Описание фильма отправлено: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
-                logger.info(f"[SHOW FILM INFO] ✅ Сообщение отправлено успешно")
-                return  # Успешно отправлено, выходим
-                
-            except telebot.apihelper.ApiTelegramException as api_e:
-                error_code = getattr(api_e, 'error_code', None)
-                error_str = str(api_e).lower()
-                logger.error(f"[SHOW FILM INFO] ❌ Telegram API ошибка при отправке сообщения: {api_e}", exc_info=True)
-                logger.error(f"[SHOW FILM INFO] error_code={error_code}, result_json={getattr(api_e, 'result_json', {})}")
-                
-                # Пытаемся отправить упрощенное сообщение без markup
-                try:
-                    logger.info(f"[SHOW FILM INFO] Попытка отправить упрощенное сообщение без markup...")
-                    fallback_text = f"🎬 <b>{info.get('title', 'Фильм')}</b> ({info.get('year', '—')})\n\n"
-                    if info.get('description'):
-                        desc = info.get('description', '')[:500]  # Ограничиваем описание
-                        fallback_text += f"{desc}...\n\n"
-                    fallback_text += f"<a href='{link}'>Кинопоиск</a>"
-                    
-                    if len(fallback_text) > 4096:
-                        fallback_text = fallback_text[:4093] + "..."
-                    
-                    bot.send_message(chat_id, fallback_text, parse_mode='HTML', disable_web_page_preview=False)
-                    logger.info(f"[SHOW FILM INFO] ✅ Упрощенное сообщение отправлено")
-                except Exception as fallback_e:
-                    logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить даже упрощенное сообщение: {fallback_e}", exc_info=True)
-                    # Последняя попытка - самое простое сообщение
-                    try:
-                        simple_text = f"🎬 {info.get('title', 'Фильм')}\n\n<a href='{link}'>Кинопоиск</a>"
-                        bot.send_message(chat_id, simple_text, parse_mode='HTML', disable_web_page_preview=False)
-                        logger.info(f"[SHOW FILM INFO] ✅ Простейшее сообщение отправлено")
-                    except Exception as simple_e:
-                        logger.error(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА: не удалось отправить даже простое сообщение: {simple_e}", exc_info=True)
-                        
-            except Exception as send_e:
-                error_type = type(send_e).__name__
-                error_str = str(send_e)
-                logger.error(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА при отправке сообщения: {send_e}", exc_info=True)
-                logger.error(f"[SHOW FILM INFO] Тип ошибки: {error_type}, args: {send_e.args}")
-                logger.error(f"[SHOW FILM INFO] text length: {len(text) if text else 'None'}, markup: {markup is not None}")
-                
-                # Пытаемся отправить упрощенное сообщение
-                try:
-                    logger.info(f"[SHOW FILM INFO] Попытка отправить упрощенное сообщение...")
-                    fallback_text = f"🎬 <b>{info.get('title', 'Фильм')}</b>\n\n<a href='{link}'>Кинопоиск</a>"
-                    if len(fallback_text) > 4096:
-                        fallback_text = fallback_text[:4093] + "..."
-                    bot.send_message(chat_id, fallback_text, parse_mode='HTML', disable_web_page_preview=False)
-                    logger.info(f"[SHOW FILM INFO] ✅ Упрощенное сообщение отправлено после ошибки")
-                except Exception as fallback_e:
-                    logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить упрощенное сообщение: {fallback_e}", exc_info=True)
-                    # НЕ пробрасываем ошибку дальше - бот должен продолжать работать
+                sent = bot.send_message(**send_kwargs)
+                logger.info(f"[SHOW FILM INFO] Отправлено новое, message_id={sent.message_id}, title={info.get('title')}")
+            except Exception as e:
+                logger.error(f"[SHOW FILM INFO] Не отправилось даже новое: {e}")
+                bot.send_message(chat_id, f"🎬 {info.get('title','Фильм')}\n\n<a href='{link}'>Кинопоиск</a>", parse_mode='HTML')
+
+        logger.info("[SHOW FILM INFO] ===== END (успешно) =====")
+        
         
     except Exception as e:
         error_type = type(e).__name__
