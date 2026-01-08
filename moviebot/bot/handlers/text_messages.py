@@ -6,7 +6,7 @@ from moviebot.bot.bot_init import bot
 import logging
 import re
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
+from moviebot.database.db_connection import db_lock, cursor, connection
 
 
 # Логируем, что модуль импортирован (декораторы выполнятся при импорте)
@@ -1766,7 +1766,32 @@ def main_file_handler(message):
                 tickets_json = json.dumps(existing_tickets, ensure_ascii=False)
                 
                 cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
-                connection.commit()
+                
+                # ФИКС: используем get_db_connection() вместо глобальной connection
+                conn = get_db_connection()
+                conn.commit()
+
+            total_tickets = len(existing_tickets)
+            was_first = total_tickets == 1
+
+            if was_first:
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("➕ Добавить ещё билет", callback_data=f"add_more_tickets:{plan_id}"))
+                markup.add(InlineKeyboardButton("⬅️ К списку мероприятий", callback_data="ticket_new"))
+
+                bot.reply_to(
+                    message,
+                    f"✅ Билет добавлен! (Всего: {total_tickets})\n\n"
+                    f"Можете добавить ещё или вернуться к списку.",
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+
+                state['step'] = 'add_more_tickets'
+            else:
+                bot.reply_to(message, f"✅ Билет добавлен! (Всего: {total_tickets})")
+
+            logger.info(f"[TICKET UPLOAD] Билет добавлен к plan_id={plan_id}, всего: {total_tickets}")
 
             # Определяем, был ли это первый билет
             was_first = len(existing_tickets) == 1
