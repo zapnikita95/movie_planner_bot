@@ -6,7 +6,7 @@ import logging
 import os
 import tempfile
 from threading import Thread
-
+from moviebot.bot.bot_init import BOT_ID
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
