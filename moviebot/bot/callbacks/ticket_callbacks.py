@@ -14,10 +14,11 @@ def add_ticket_from_plan_callback(call):
     logger.info(f"[TICKET CALLBACK] 🔥 add_ticket сработал: data='{call.data}', user_id={call.from_user.id}")
 
     try:
-        bot.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id, "Открываю загрузку билетов...")  # видимый тултип
 
         user_id = call.from_user.id
         chat_id = call.message.chat.id
+        message_id = call.message.message_id
 
         try:
             plan_id = int(call.data.split(":")[1])
@@ -33,19 +34,24 @@ def add_ticket_from_plan_callback(call):
             )
             return
 
+        # Состояние
         user_ticket_state[user_id] = {
             'step': 'upload_ticket',
             'plan_id': plan_id,
             'chat_id': chat_id
         }
 
+        # Клавиатура с отменой
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_ticket_upload:{plan_id}"))
+
         bot.edit_message_text(
             chat_id=chat_id,
-            message_id=call.message.message_id,
+            message_id=message_id,
             text="🎟️ <b>Загрузка билетов</b>\n\n"
-                 "Отправьте фото или файл с билетом(ами).\n"
-                 "Можно отправить несколько сообщений подряд.",
-            parse_mode='HTML'
+                 "Отправьте фото или файл с билетом(ами).",
+            parse_mode='HTML',
+            reply_markup=markup
         )
 
         logger.info(f"[TICKET] Начато добавление билетов к plan_id={plan_id}")
@@ -116,3 +122,20 @@ def handle_ticket_locked(call):
         "🎫 Загрузка билетов доступна только с подпиской «Билеты» или «Все режимы».\nПодключите через /payment",
         show_alert=True
     )
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_ticket_upload:"))
+def cancel_ticket_upload(call):
+    try:
+        bot.answer_callback_query(call.id)
+
+        user_id = call.from_user.id
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
+
+        bot.edit_message_text(
+            "Загрузка билетов отменена.",
+            call.message.chat.id,
+            call.message.message_id
+        )
+    except Exception as e:
+        logger.error(f"[CANCEL TICKET] Ошибка: {e}")
