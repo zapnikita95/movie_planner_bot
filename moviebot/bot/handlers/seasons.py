@@ -5,8 +5,7 @@ from moviebot.bot.bot_init import bot
 import logging
 import json
 import math
-from datetime import datetime as dt
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -304,7 +303,9 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
             # Кастомный сериалайзер для datetime
             def default_serializer(o):
-                if isinstance(o, (datetime.date, datetime.datetime)):
+                if isinstance(o, datetime):
+                    return o.isoformat()
+                if isinstance(o, date):
                     return o.isoformat()
                 raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
 
@@ -335,7 +336,17 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
         if item['is_ongoing'] and item['next_episode']:
             ne = item['next_episode']
-            line += f"🟢 <b>Выходит</b> → С{ne['season']} Э{ne['episode']} — {ne['date'].strftime('%d.%m')}\n"
+            if isinstance(ne['date'], str):
+                try:
+                    date_obj = datetime.strptime(ne['date'], '%Y-%m-%d').date()
+                    date_str = date_obj.strftime('%d.%m')
+                except:
+                    date_str = ne['date']  # fallback
+            else:
+                date_str = ne['date'].strftime('%d.%m')
+            
+            line += f"🟢 <b>Выходит</b> → С{ne['season']} Э{ne['episode']} — {date_str}\n"
+            
         elif item['is_ongoing']:
             line += "🟢 <b>Сериал выходит</b>\n"
         else:
