@@ -6,7 +6,7 @@ from moviebot.bot.bot_init import bot
 import logging
 import re
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from moviebot.database.db_connection import db_lock, cursor, connection
+from moviebot.database.db_connection import db_lock, get_db_connection, get_db_cursor
 
 
 # Логируем, что модуль импортирован (декораторы выполнятся при импорте)
@@ -1746,9 +1746,11 @@ def main_file_handler(message):
 
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
 
-            # Сохраняем файл (твоя существующая логика с json массивом)
             import json
             with db_lock:
+                cursor = get_db_cursor()
+                conn = get_db_connection()
+
                 cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))
                 ticket_row = cursor.fetchone()
                 existing_tickets = []
@@ -1766,9 +1768,6 @@ def main_file_handler(message):
                 tickets_json = json.dumps(existing_tickets, ensure_ascii=False)
                 
                 cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
-                
-                # ФИКС: используем get_db_connection() вместо глобальной connection
-                conn = get_db_connection()
                 conn.commit()
 
             total_tickets = len(existing_tickets)
@@ -1792,7 +1791,7 @@ def main_file_handler(message):
                 bot.reply_to(message, f"✅ Билет добавлен! (Всего: {total_tickets})")
 
             logger.info(f"[TICKET UPLOAD] Билет добавлен к plan_id={plan_id}, всего: {total_tickets}")
-
+            return
             # Определяем, был ли это первый билет
             was_first = len(existing_tickets) == 1
 
