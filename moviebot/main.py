@@ -145,7 +145,7 @@ scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minut
 logger.info("=" * 80)
 logger.info("[MAIN] ===== РЕГИСТРАЦИЯ ВСЕХ HANDLERS =====")
 
-import moviebot.bot.callbacks.ticket_callbacks  # noqa: F401
+#import moviebot.bot.callbacks.ticket_callbacks  # noqa: F401
 logger.info("✅ ticket_callbacks импортирован (приоритетный хэндлер для add_ticket: и ticket_locked:)")
 # Импортируем модули с callback handlers для автоматической регистрации декораторов (если они используют глобальный bot)
 import moviebot.bot.callbacks.film_callbacks  # noqa: F401
