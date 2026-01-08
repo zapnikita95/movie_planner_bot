@@ -2364,7 +2364,7 @@ def update_series_status_cache():
         cursor.execute("""
             SELECT DISTINCT kp_id, chat_id
             FROM movies
-            WHERE is_series = TRUE
+            WHERE is_series = 1
               AND (last_api_update IS NULL OR last_api_update < NOW() - INTERVAL '1 day')
             LIMIT 30  -- чтобы не перегружать API
         """)
