@@ -1141,86 +1141,48 @@ def register_series_handlers(bot_param):
             periods = state.get('periods', [])
             mode = state.get('mode')
             
-            with db_lock:
-                if mode == 'my_votes':
-                    # Для режима "по моим оценкам" - получаем жанры из импортированных фильмов с оценкой 9-10
-                    base_query = """
-                        SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-                        FROM movies m
-                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                        WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
-                    """
-                    params = [chat_id, user_id]
-                    
-                    # Добавляем фильтр по периодам, если они выбраны
-                    if periods:
-                        period_conditions = []
-                        for p in periods:
-                            if p == "До 1980":
-                                period_conditions.append("m.year < 1980")
-                            elif p == "1980–1990":
-                                period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
-                            elif p == "1990–2000":
-                                period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
-                            elif p == "2000–2010":
-                                period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
-                            elif p == "2010–2020":
-                                period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
-                            elif p == "2020–сейчас":
-                                period_conditions.append("m.year >= 2020")
-                        if period_conditions:
-                            base_query += " AND (" + " OR ".join(period_conditions) + ")"
-                    
-                    cursor.execute(base_query, params)
-                elif mode == 'group_votes':
-                    # Для режима "По оценкам в базе" - получаем жанры из фильмов со средней оценкой группы >= 9
-                    base_query = """
-                        SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-                        FROM movies m
-                        WHERE m.chat_id = %s
-                        AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
-                        AND EXISTS (
-                            SELECT 1 FROM ratings r 
-                            WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
-                            GROUP BY r.film_id, r.chat_id 
-                            HAVING AVG(r.rating) >= 9
-                        )
-                    """
-                    params = [chat_id]
-                    
-                    # Добавляем фильтр по периодам, если они выбраны
-                    if periods:
-                        period_conditions = []
-                        for p in periods:
-                            if p == "До 1980":
-                                period_conditions.append("m.year < 1980")
-                            elif p == "1980–1990":
-                                period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
-                            elif p == "1990–2000":
-                                period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
-                            elif p == "2000–2010":
-                                period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
-                            elif p == "2010–2020":
-                                period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
-                            elif p == "2020–сейчас":
-                                period_conditions.append("m.year >= 2020")
-                        if period_conditions:
-                            base_query += " AND (" + " OR ".join(period_conditions) + ")"
-                    
-                    cursor.execute(base_query, params)
-                else:
-                    # Для остальных режимов - используем старую логику
-                    base_query = """
-                        SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-                        FROM movies m
-                        LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                        WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-                        AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
-                    """
-                    params = [chat_id]
+            # --------------------- Формируем запрос ---------------------
+            params = []
             
-            # Добавляем фильтр по периодам, если они выбраны
+            if mode == 'my_votes':
+                # Жанры из импортированных фильмов пользователя с оценкой 9-10
+                base_query = """
+                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                    FROM movies m
+                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                    WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                """
+                params = [chat_id, user_id]
+                
+            elif mode == 'group_votes':
+                # Жанры из фильмов со средней оценкой группы >= 9
+                base_query = """
+                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                    FROM movies m
+                    WHERE m.chat_id = %s
+                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                    AND EXISTS (
+                        SELECT 1 FROM ratings r 
+                        WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                        GROUP BY r.film_id, r.chat_id 
+                        HAVING AVG(r.rating) >= 9
+                    )
+                """
+                params = [chat_id]
+                
+            else:
+                # Обычный режим – жанры из непросмотренных фильмов чата
+                base_query = """
+                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                    FROM movies m
+                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                """
+                params = [chat_id]
+            
+            # --------------------- Фильтр по периодам ---------------------
             if periods:
                 period_conditions = []
                 for p in periods:
@@ -1239,50 +1201,58 @@ def register_series_handlers(bot_param):
                 if period_conditions:
                     base_query += " AND (" + " OR ".join(period_conditions) + ")"
             
+            # --------------------- Выполняем запрос ---------------------
+            genres = []  # всегда инициализируем, даже если запрос вернёт пусто
+            with db_lock:
                 cursor.execute(base_query, params)
-                        
                 rows = cursor.fetchall()
-                genres = []
+                
                 for row in rows:
-                    genre = row.get('genre') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                    genre = row.get('genre') if isinstance(row, dict) else (row[0] if row else None)
                     if genre and genre.strip():
                         genres.append(genre.strip())
-                logger.info(f"[RANDOM] Genres found: {len(genres)}")
             
+            logger.info(f"[RANDOM] Genres found: {len(genres)}")
+            
+            # --------------------- Формируем клавиатуру ---------------------
             markup = InlineKeyboardMarkup(row_width=1)
+            
             if genres:
-                for genre in sorted(set(genres))[:20]:  # Ограничиваем до 20 жанров
+                for genre in sorted(set(genres))[:20]:  # ограничиваем до 20 самых популярных
                     label = f"✓ {genre}" if genre in selected_genres else genre
                     markup.add(InlineKeyboardButton(label, callback_data=f"rand_genre:{genre}"))
             
-            # Кнопки навигации: "Назад" и "Пропустить"/"Продолжить" в одной строке
-            nav_buttons = []
-            nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="rand_genre:back"))
+            # Навигация
+            nav_buttons = [
+                InlineKeyboardButton("⬅️ Назад", callback_data="rand_genre:back")
+            ]
             if selected_genres:
                 nav_buttons.append(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_genre:done"))
             else:
                 nav_buttons.append(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_genre:skip"))
             markup.row(*nav_buttons)
             
+            # Текст с выбранными жанрами
             selected_text = f"\n\nВыбрано: {', '.join(selected_genres)}" if selected_genres else ""
+            
+            text = f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}"
+            
             try:
-                bot.edit_message_text(f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}", 
-                                    chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot.answer_callback_query(call.id)
+                bot.edit_message_text(text, chat_id, call.message.message_id,
+                                      reply_markup=markup, parse_mode='HTML')
                 logger.info(f"[RANDOM] Genre step shown, user_id={user_id}, selected={len(selected_genres)}")
             except Exception as e:
-                logger.error(f"[RANDOM] Error showing genre step: {e}", exc_info=True)
-                # Пробуем отправить новое сообщение
-                bot.send_message(chat_id, f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}", 
-                                reply_markup=markup, parse_mode='HTML')
-                bot.answer_callback_query(call.id)
+                logger.warning(f"[RANDOM] Edit failed, sending new message: {e}")
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            
+            bot.answer_callback_query(call.id)
+            
         except Exception as e:
             logger.error(f"[RANDOM] ERROR in _show_genre_step: {e}", exc_info=True)
             try:
                 bot.answer_callback_query(call.id, "Ошибка загрузки жанров")
             except:
                 pass
-    
     def _show_genre_step_kinopoisk(call, chat_id, user_id):
         """Показывает шаг выбора жанра для режима kinopoisk - жанры из API Кинопоиска"""
         try:

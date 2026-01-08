@@ -359,15 +359,16 @@ def premiere_detail_handler(call):
         text += f"\n{description}\n\n"
         text += f"🎭 {genres}\n"
         
-        # Проверяем, есть ли фильм в базе
+        # Проверяем, есть ли фильм в базе пользователя
+        in_database = False
         with db_lock:
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-            film_in_db = cursor.fetchone()
+            cursor.execute('SELECT 1 FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+            if cursor.fetchone():
+                in_database = True
         
         markup = InlineKeyboardMarkup(row_width=1)
         
         # Проверяем, нужно ли показывать кнопку "Уведомить о премьере"
-        # Показываем если премьера/прокат еще не состоялись (независимо от наличия в базе)
         today = date.today()
         show_notify_button = False
         date_for_callback = ''
@@ -375,36 +376,33 @@ def premiere_detail_handler(call):
         if premiere_date:
             is_future = premiere_date > today
             if is_future:
-                # Дата в будущем - показываем "Уведомить о премьере"
                 show_notify_button = True
                 date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
         elif not premiere_date:
-            # Если дата не определена, но есть год, проверяем год
             year_val = data.get('year')
             if year_val:
                 try:
                     year_int = int(year_val)
                     current_year = today.year
                     if year_int > current_year or (year_int == current_year and today.month < 12):
-                        # Год в будущем или текущий год, но еще не декабрь - показываем кнопку
                         show_notify_button = True
                 except:
                     pass
         
-        # Кнопка "Уведомить о премьере" показывается первой, если фильм еще не вышел
+        # Кнопка уведомления о премьере (если фильм ещё не вышел)
         if show_notify_button:
             markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
         
-        # Если фильма нет в базе, показываем кнопку "Добавить в базу"
+        # Кнопки добавить / удалить из базы
         if in_database:
             markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
         else:
             markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
         
-        # Добавляем кнопку "Назад" - возвращаемся к списку премьер
+        # Кнопка "Назад"
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{period}"))
         
-        # Отправляем с постером
+        # Отправляем сообщение с постером
         if poster_url:
             try:
                 bot.send_photo(
@@ -435,15 +433,13 @@ def premiere_detail_handler(call):
                 disable_web_page_preview=False
             )
         
-        # Отправляем трейлер, если есть
+        # Отправляем трейлер
         if trailer_url:
             try:
-                # Пытаемся отправить как видео
                 bot.send_video(chat_id, trailer_url, caption=f"📺 Трейлер: <b>{title}</b>", parse_mode='HTML')
             except Exception as e:
                 logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как видео: {e}")
                 try:
-                    # Если не получилось как видео, отправляем как ссылку
                     bot.send_message(chat_id, f"📺 <a href='{trailer_url}'>Смотреть трейлер: {title}</a>", parse_mode='HTML')
                 except Exception as e2:
                     logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как ссылки: {e2}")
@@ -454,7 +450,6 @@ def premiere_detail_handler(call):
             bot.answer_callback_query(call.id, "Ошибка загрузки фильма", show_alert=True)
         except:
             pass
-
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_add:"))
 def premiere_add_to_db(call):
