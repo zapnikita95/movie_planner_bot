@@ -2356,3 +2356,37 @@ def start_dice_game():
             
     except Exception as e:
         logger.error(f"[DICE GAME] Критическая ошибка в start_dice_game: {e}", exc_info=True)
+
+def update_series_status_cache():
+    """Фоновая задача: обновляет статусы сериалов раз в день"""
+    logger.info("[CACHE] Запуск обновления кэша сериалов")
+    with db_lock:
+        cursor.execute("""
+            SELECT DISTINCT kp_id, chat_id
+            FROM movies
+            WHERE is_series = TRUE
+              AND (last_api_update IS NULL OR last_api_update < NOW() - INTERVAL '1 day')
+            LIMIT 30  -- чтобы не перегружать API
+        """)
+        rows = cursor.fetchall()
+
+    for row in rows:
+        kp_id, chat_id = row
+        try:
+            is_airing, next_ep = get_series_airing_status(kp_id)
+            seasons_count = len(get_seasons_data(kp_id)) if get_seasons_data(kp_id) else 0
+            next_ep_json = json.dumps(next_ep) if next_ep else None
+
+            with db_lock:
+                cursor.execute("""
+                    UPDATE movies
+                    SET is_ongoing = %s, seasons_count = %s, next_episode = %s, last_api_update = NOW()
+                    WHERE chat_id = %s AND kp_id = %s
+                """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
+                conn.commit()
+            logger.info(f"[CACHE] Обновлён кэш для kp_id={kp_id}")
+        except Exception as e:
+            logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id}: {e}")
+
+# Добавь в init_scheduler() или где запускаешь scheduler:
+scheduler.add_job(update_series_status_cache, 'interval', hours=24, next_run_time=datetime.now())
