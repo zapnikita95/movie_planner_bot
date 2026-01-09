@@ -280,7 +280,9 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
             if message_id:
                 common_kwargs['message_id'] = message_id
-                bot.edit_message_text(**common_kwargs)
+                edit_kwargs = common_kwargs.copy()
+                edit_kwargs.pop('message_thread_id', None)  # ← убираем то, что edit не жрёт
+                bot.edit_message_text(**edit_kwargs)
             else:
                 bot.send_message(**common_kwargs)
         except Exception as e:
@@ -382,9 +384,12 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
         if message_id:
             common_kwargs['message_id'] = message_id
-            bot.edit_message_text(**common_kwargs)
+            edit_kwargs = common_kwargs.copy()
+            edit_kwargs.pop('message_thread_id', None)  # ← убираем то, что edit не жрёт
+            bot.edit_message_text(**edit_kwargs)
         else:
             bot.send_message(**common_kwargs)
+
     except Exception as e:
         logger.error(f"[SHOW_SEASONS_LIST] Ошибка отправки: {e}", exc_info=True)
 
@@ -410,7 +415,9 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
         if message_id:
             common_kwargs['message_id'] = message_id
-            bot.edit_message_text(**common_kwargs)
+            edit_kwargs = common_kwargs.copy()
+            edit_kwargs.pop('message_thread_id', None)  # ← убираем то, что edit не жрёт
+            bot.edit_message_text(**edit_kwargs)
         else:
             bot.send_message(**common_kwargs)
 
@@ -511,10 +518,12 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
                 'parse_mode': 'HTML'
             }
             if message_id:
-                fallback_kwargs['message_id'] = message_id
-                bot.edit_message_text(**fallback_kwargs)
+                common_kwargs['message_id'] = message_id
+                edit_kwargs = common_kwargs.copy()
+                edit_kwargs.pop('message_thread_id', None)  # ← убираем то, что edit не жрёт
+                bot.edit_message_text(**edit_kwargs)
             else:
-                bot.send_message(**fallback_kwargs)
+                bot.send_message(**common_kwargs)
         except Exception as e2:
             logger.error(f"[SHOW_COMPLETED_SERIES_LIST] Полная ошибка отправки: {e2}")
             
