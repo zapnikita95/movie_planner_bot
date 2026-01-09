@@ -262,29 +262,30 @@ def build_tmdb_index():
         try:
             import subprocess
             
-            # Настройка kaggle.json
+            # Настройка kaggle.json (если ещё нет)
             kaggle_dir = Path("/root/.kaggle")
             kaggle_dir.mkdir(parents=True, exist_ok=True)
             kaggle_json = kaggle_dir / "kaggle.json"
-            with open(kaggle_json, "w") as f:
-                f.write(f'{{"username":"{os.getenv("KAGGLE_USERNAME")}","key":"{os.getenv("KAGGLE_KEY")}"}}')
-            os.chmod(kaggle_json, 0o600)
+            if not kaggle_json.exists():
+                with open(kaggle_json, "w") as f:
+                    f.write(f'{{"username":"{os.getenv("KAGGLE_USERNAME")}","key":"{os.getenv("KAGGLE_KEY")}"}}')
+                os.chmod(kaggle_json, 0o600)
             
-            # Скачиваем и сразу распаковываем
+            # Скачиваем с --unzip — файл сразу в CACHE_DIR
             subprocess.check_call([
                 "kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies",
                 "-p", str(CACHE_DIR), "--unzip"
             ])
             
-            # После --unzip файл должен лежать прямо в CACHE_DIR
-            downloaded_files = list(CACHE_DIR.glob("TMDB_movie_dataset_v11.csv"))
-            if not downloaded_files:
-                raise Exception("CSV файл не найден после распаковки")
+            # Прямо ищем нужный файл
+            possible_files = list(CACHE_DIR.glob("TMDB_movie_dataset_v*.csv"))
+            if not possible_files:
+                raise Exception("CSV файл TMDB_movie_dataset_v*.csv не найден после распаковки")
             
-            # Если имя чуть отличается — переименуем для надёжности
-            actual_csv = downloaded_files[0]
+            actual_csv = possible_files[0]
             if actual_csv != TMDB_CSV_PATH:
-                actual_csv.rename(TMDB_CSV_PATH)
+                actual_csv.rename(TMDB_CSV_PATH)  # переименуем для надёжности
+            
             logger.info(f"TMDB CSV готов: {TMDB_CSV_PATH}")
             
         except Exception as e:
