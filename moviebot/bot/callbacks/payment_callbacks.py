@@ -2845,6 +2845,8 @@ def register_payment_callbacks(bot_instance):
                 bot_instance.answer_callback_query(call.id, "Неизвестный формат изменения подписки", show_alert=True)
 
 
+
+
             if action.startswith("subscribe:"):
                 # Обработка подписки
                 parts = action.split(":")
@@ -3109,242 +3111,146 @@ def register_payment_callbacks(bot_instance):
                             seen_plan_types.add(plan_type)
                 
                     if active_subs:
+                        # Выносим общую подготовку данных один раз
                         existing_plan_types = [sub.get('plan_type') for sub in active_subs]
                         has_all = 'all' in existing_plan_types
-                    
-                        # Проверяем, можно ли добавить новую подписку
-                        can_add = True
+                        
+                        # Считаем сумму и имена существующих
+                        plan_names_short = {
+                            'notifications': 'Уведомления',
+                            'recommendations': 'Рекомендации',
+                            'tickets': 'Билеты'
+                        }
+                        existing_sub_names = [plan_names_short.get(pt, pt) for pt in existing_plan_types]
+                        total_existing_price = sum(sub.get('price', 0) for sub in active_subs)
+                        
+                        # Ищем ближайшее следующее списание
+                        next_payment_date = None
+                        next_sub = None
+                        for sub in active_subs:
+                            npd = sub.get('next_payment_date')
+                            if npd:
+                                if not next_payment_date or (isinstance(npd, datetime) and isinstance(next_payment_date, datetime) and npd < next_payment_date):
+                                    next_payment_date = npd
+                                    next_sub = sub
+                        
+                        # Цена новой подписки (для month всегда, для других — берём month эквивалент)
+                        new_price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period_type, 0)
+                        if period_type != 'month':
+                            new_price = SUBSCRIPTION_PRICES['personal'][plan_type].get('month', 0)  # fallback
+                        
+                        combined_price = total_existing_price + new_price
+                        
+                        # Сохраняем в состояние сразу
+                        if user_id not in user_payment_state:
+                            user_payment_state[user_id] = {}
+                        state = user_payment_state[user_id]
+                        state['existing_subs'] = active_subs
+                        state['total_existing_price'] = total_existing_price
+                        state['new_plan_type'] = plan_type
+                        state['new_period_type'] = period_type
+                        state['new_price'] = new_price
+                        state['next_sub'] = next_sub
+                        state['next_payment_date'] = next_payment_date
+                        
                         if has_all:
-                            # Если есть пакетная, нельзя добавить другую
-                            can_add = False
                             text = "⚠️ <b>У вас уже есть подписка \"Все режимы\"</b>\n\n"
                             text += "Вы не можете добавить дополнительные подписки к пакетной.\n\n"
-                            text += "Если вы хотите изменить подписку, сначала отмените текущую."
+                            text += "Если хотите изменить — сначала отмените текущую."
                             markup = InlineKeyboardMarkup(row_width=1)
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             return
+                        
                         elif plan_type == 'all':
-                            # Если пытаются добавить пакетную, когда есть другие подписки
-                            # Предлагаем два варианта: отменить сейчас или увеличить со следующего списания
-                            can_add = False
-                            
-                            # Сохраняем информацию о существующих подписках в состоянии
-                            if user_id not in user_payment_state:
-                                user_payment_state[user_id] = {}
-                            user_payment_state[user_id]['existing_subs'] = active_subs
-                            
-                            # Вычисляем сумму существующих подписок
-                            total_existing_price = sum(sub.get('price', 0) for sub in active_subs)
-                            all_price = SUBSCRIPTION_PRICES['personal']['all'].get(period_type, 0)
-                            
-                            # Определяем, есть ли следующее списание
-                            next_payment_date = None
-                            next_sub = None
-                            for sub in active_subs:
-                                next_payment = sub.get('next_payment_date')
-                                if next_payment:
-                                    if not next_payment_date or (isinstance(next_payment, datetime) and next_payment < next_payment_date):
-                                        next_payment_date = next_payment
-                                        next_sub = sub
-                            
-                            plan_names = {
-                                'notifications': 'Уведомления о сериалах',
-                                'recommendations': 'Рекомендации',
-                                'tickets': 'Билеты'
-                            }
-                            
+                            # Пытаемся добавить пакетную, когда есть отдельные
                             text = "📦 <b>Оформление подписки \"Все режимы\"</b>\n\n"
                             text += "⚠️ <b>У вас уже есть активные подписки:</b>\n"
-                            for sub in active_subs:
-                                plan_type_existing = sub.get('plan_type')
-                                plan_name = plan_names.get(plan_type_existing, plan_type_existing)
-                                text += f"• {plan_name}\n"
-                            
-                            text += f"\n💰 <b>Текущие подписки:</b> {total_existing_price}₽/мес\n"
-                            text += f"💰 <b>Подписка \"Все режимы\":</b> {all_price}₽"
-                            if period_type != 'month':
-                                period_names = {'3months': '3 месяца', 'year': 'год', 'lifetime': 'навсегда'}
-                                period_name = period_names.get(period_type, period_type)
-                                text += f" за {period_name}"
-                            text += "\n\n"
-                            
-                            # Вычисляем разницу
-                            if period_type == 'month':
-                                diff_price = all_price - total_existing_price
-                                if diff_price > 0:
-                                    text += f"💡 <b>Доплата:</b> {diff_price}₽/мес\n\n"
-                                elif diff_price < 0:
-                                    text += f"💡 <b>Экономия:</b> {abs(diff_price)}₽/мес\n\n"
-                            
-                            text += "Выберите способ оформления:\n\n"
-                            text += "1️⃣ <b>Отменить текущие подписки и оформить новую</b> — текущие подписки будут отменены сразу, новая подписка начнется после оплаты.\n\n"
-                            
-                            if next_payment_date and next_sub:
-                                text += f"2️⃣ <b>Увеличить со следующего списания</b> — текущие подписки будут отменены, сумма следующего списания будет изменена на {all_price}₽"
-                                if isinstance(next_payment_date, datetime):
-                                    text += f" (дата: {next_payment_date.strftime('%d.%m.%Y')})"
-                                text += "\n\n"
-                            
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            
-                            # Кнопка "Отменить сейчас и оформить новую"
-                            if period_type == 'month':
-                                markup.add(InlineKeyboardButton("1️⃣ Отменить сейчас и оформить", callback_data=f"payment:combine:upgrade_to_all:{period_type}"))
-                            else:
-                                # Для не месячных подписок только вариант "отменить сейчас"
-                                markup.add(InlineKeyboardButton("✅ Отменить текущие и оформить", callback_data=f"payment:combine:upgrade_to_all:{period_type}"))
-                            
-                            # Кнопка "Увеличить со следующего списания" (только для месячных подписок и если есть следующее списание)
-                            if period_type == 'month' and next_payment_date and next_sub:
-                                user_payment_state[user_id]['next_sub'] = next_sub
-                                markup.add(InlineKeyboardButton("2️⃣ Увеличить со следующего списания", callback_data=f"payment:combine:add_to_next:all:{period_type}"))
-                            
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            
-                            try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                            return
-                        elif len(existing_plan_types) == 2 and plan_type != 'all':
-                            # Если у пользователя уже есть 2 подписки из 3, и он пытается добавить третью отдельную (не пакетную)
-                            # Показываем сообщение с предложением пакетной подписки
-                            can_add = False
-                            plan_names = {
-                                'notifications': 'Уведомления о сериалах',
-                                'recommendations': 'Рекомендации',
-                                'tickets': 'Билеты'
-                            }
-                            existing_sub_names = [plan_names.get(pt, pt) for pt in existing_plan_types]
-                            text = f"⚠️ <b>У вас уже есть подписки: \"{', '.join(existing_sub_names)}\"</b>\n\n"
-                            text += "У вас есть 2/3 функционала бота. Оформите пакетную подписку для полного функционала.\n\n"
-                            text += "ℹ️ <b>Важно:</b> При оформлении подписки \"Все режимы\" ваши текущие подписки будут автоматически отменены, и будет создана новая подписка \"Все режимы\"."
-                            
-                            # Сохраняем информацию о существующих подписках в состоянии для последующей отмены
-                            if user_id not in user_payment_state:
-                                user_payment_state[user_id] = {}
-                            user_payment_state[user_id]['existing_subs'] = active_subs
-                            
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            # Кнопки для оформления пакетных подписок
-                            all_month_price = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
-                            all_3months_price = SUBSCRIPTION_PRICES['personal']['all'].get('3months', 0)
-                            all_lifetime_price = SUBSCRIPTION_PRICES['personal']['all'].get('lifetime', 0)
-                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_month_price}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
-                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_3months_price}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
-                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_lifetime_price}₽/навсегда)", callback_data="payment:subscribe:personal:all:lifetime"))
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            
-                            try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                            return
-                        elif plan_type in existing_plan_types:
-                            # Если пытаются добавить подписку, которая уже есть
-                            can_add = False
-                            plan_names = {
-                                'notifications': 'Уведомления о сериалах',
-                                'recommendations': 'Рекомендации',
-                                'tickets': 'Билеты'
-                            }
-                            plan_name = plan_names.get(plan_type, plan_type)
-                            text = f"⚠️ <b>У вас уже есть подписка \"{plan_name}\"</b>\n\n"
-                            text += "Если вы хотите изменить подписку, сначала отмените текущую."
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                            return
-                        else:
-                            # Можно добавить - показываем предложение объединения платежей
-                            # Находим подписку с ближайшим списанием
-                            next_sub = None
-                            next_payment_date = None
-                            total_existing_price = 0
-                            existing_sub_names = []
-                        
-                            for sub in active_subs:
-                                sub_price = sub.get('price', 0)
-                                total_existing_price += sub_price
-                                plan_type_existing = sub.get('plan_type')
-                                plan_names = {
-                                    'notifications': 'Уведомления о сериалах',
-                                    'recommendations': 'Рекомендации',
-                                    'tickets': 'Билеты'
-                                }
-                                existing_sub_names.append(plan_names.get(plan_type_existing, plan_type_existing))
-                            
-                                sub_next_payment = sub.get('next_payment_date')
-                                if sub_next_payment:
-                                    if not next_payment_date or (isinstance(sub_next_payment, datetime) and isinstance(next_payment_date, datetime) and sub_next_payment < next_payment_date):
-                                        next_payment_date = sub_next_payment
-                                        next_sub = sub
-                        
-                            # Цена новой подписки
-                            new_price = SUBSCRIPTION_PRICES['personal'][plan_type].get(period_type, 0) if period_type == 'month' else SUBSCRIPTION_PRICES['personal'][plan_type].get('month', 0)
-                            combined_price = total_existing_price + new_price
-                        
-                            plan_names = {
-                                'notifications': 'Уведомления о сериалах',
-                                'recommendations': 'Рекомендации',
-                                'tickets': 'Билеты',
-                                'all': 'Все режимы'
-                            }
-                            new_plan_name = plan_names.get(plan_type, plan_type)
-                        
-                            text = "💎 <b>Объединение подписок</b>\n\n"
-                            text += f"У вас уже есть активные подписки:\n"
                             for name in existing_sub_names:
                                 text += f"• {name}\n"
-                            text += f"\nВы хотите добавить: <b>{new_plan_name}</b>\n\n"
-                            text += f"💰 <b>Стоимость:</b>\n"
-                            text += f"• Текущие подписки: {total_existing_price}₽/мес\n"
-                            text += f"• Новая подписка: {new_price}₽/мес\n"
-                            text += f"• <b>Итого: {combined_price}₽/мес</b>\n\n"
-                        
-                            if next_payment_date:
-                                text += f"📅 Следующее списание: {next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else next_payment_date}\n\n"
-                        
-                            text += "Выберите способ оплаты:"
-                        
+                            
+                            text += f"\n💰 Текущие: {total_existing_price}₽/мес\n"
+                            text += f"💰 \"Все режимы\": {new_price}₽"
+                            if period_type != 'month':
+                                period_names = {'3months': '3 мес', 'year': 'год', 'lifetime': 'навсегда'}
+                                text += f" за {period_names.get(period_type, period_type)}"
+                            text += "\n\n"
+                            
+                            if period_type == 'month':
+                                diff = new_price - total_existing_price
+                                if diff > 0:
+                                    text += f"Доплата: {diff}₽/мес\n"
+                                elif diff < 0:
+                                    text += f"Экономия: {abs(diff)}₽/мес\n"
+                            
+                            text += "Выберите способ:\n\n"
+                            text += "1️⃣ Отменить текущие и оформить новую сразу\n"
+                            
                             markup = InlineKeyboardMarkup(row_width=1)
-                            # Сохраняем информацию для обработки
-                            user_payment_state[user_id]['existing_subs'] = active_subs
-                            user_payment_state[user_id]['combined_price'] = combined_price
-                            user_payment_state[user_id]['new_plan_type'] = plan_type
-                            user_payment_state[user_id]['new_period_type'] = period_type
-                            user_payment_state[user_id]['new_price'] = new_price
-                            user_payment_state[user_id]['next_sub'] = next_sub
-                            user_payment_state[user_id]['next_payment_date'] = next_payment_date
-                        
-                            # Кнопка "Списать сейчас"
-                            markup.add(InlineKeyboardButton(f"💳 Списать сейчас ({combined_price}₽)", callback_data=f"payment:combine:pay_now:{plan_type}:{period_type}"))
-                            # Кнопка "Добавить к следующему списанию"
-                            markup.add(InlineKeyboardButton(f"📅 Добавить к следующему списанию ({combined_price}₽)", callback_data=f"payment:combine:add_to_next:{plan_type}:{period_type}"))
-                            # Кнопка "Все режимы"
-                            all_price = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
-                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_price}₽/мес)", callback_data="payment:combine:upgrade_to_all:month"))
-                            # Кнопка "Назад"
+                            markup.add(InlineKeyboardButton("1️⃣ Отменить сейчас и оформить", callback_data=f"payment:combine:upgrade_to_all:{period_type}"))
+                            
+                            if period_type == 'month' and next_payment_date:
+                                text += f"2️⃣ Увеличить со следующего списания ({new_price}₽) — дата: {next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else next_payment_date}\n"
+                                markup.add(InlineKeyboardButton("2️⃣ Увеличить со следующего", callback_data=f"payment:combine:add_to_next:all:{period_type}"))
+                            
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                        
-                            try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                            
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                             return
-            
+                        
+                        elif len(existing_plan_types) == 2 and plan_type != 'all':
+                            # 2 из 3 отдельных — предлагаем пакетную
+                            text = f"⚠️ У вас уже \"{', '.join(existing_sub_names)}\"\n\n"
+                            text += "Оформите \"Все режимы\" для полного доступа.\n"
+                            text += "Текущие подписки будут отменены автоматически."
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            all_month = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
+                            all_3m = SUBSCRIPTION_PRICES['personal']['all'].get('3months', 0)
+                            all_life = SUBSCRIPTION_PRICES['personal']['all'].get('lifetime', 0)
+                            markup.add(InlineKeyboardButton(f"Все режимы ({all_month}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
+                            if all_3m > 0:
+                                markup.add(InlineKeyboardButton(f"Все режимы ({all_3m}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
+                            if all_life > 0:
+                                markup.add(InlineKeyboardButton(f"Все режимы ({all_life}₽ навсегда)", callback_data="payment:subscribe:personal:all:lifetime"))
+                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                            
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            return
+                        
+                        elif plan_type in existing_plan_types:
+                            # Уже есть такой план
+                            plan_name = plan_names_short.get(plan_type, plan_type)
+                            text = f"⚠️ У вас уже есть \"{plan_name}\"\n\nОтмените текущую, если хотите изменить."
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            return
+                        
+                        else:
+                            # Обычное добавление — объединение
+                            text = "💎 <b>Объединение подписок</b>\n\n"
+                            text += f"Текущие: {', '.join(existing_sub_names)}\n"
+                            text += f"Добавляем: {plan_names_short.get(plan_type, plan_type)}\n\n"
+                            text += f"Текущие: {total_existing_price}₽/мес\n"
+                            text += f"Новая: {new_price}₽/мес\n"
+                            text += f"<b>Итого: {combined_price}₽/мес</b>\n\n"
+                            
+                            if next_payment_date:
+                                text += f"Следующее списание: {next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else next_payment_date}\n\n"
+                            
+                            text += "Выберите оплату:"
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            markup.add(InlineKeyboardButton(f"💳 Списать сейчас ({combined_price}₽)", callback_data=f"payment:combine:pay_now:{plan_type}:{period_type}"))
+                            if next_payment_date:
+                                markup.add(InlineKeyboardButton(f"📅 Добавить к следующему ({combined_price}₽)", callback_data=f"payment:combine:add_to_next:{plan_type}:{period_type}"))
+                            markup.add(InlineKeyboardButton("📦 Все режимы", callback_data="payment:combine:upgrade_to_all:month"))
+                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                            
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            return
+                            
                 # Показываем подробное описание тарифа
                 if sub_type == 'personal':
                     if plan_type == 'notifications':
