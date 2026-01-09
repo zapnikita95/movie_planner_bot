@@ -301,6 +301,11 @@ scheduler.add_job(
     replace_existing=True
 )
 
+# Грузим базу imdb
+from moviebot.services.shazam_service import build_imdb_database
+# При старте
+build_imdb_database()
+
 # Устанавливаем команды бота
 setup_bot_commands(bot)
 

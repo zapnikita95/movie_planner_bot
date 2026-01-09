@@ -21,6 +21,7 @@ tqdm
 sentencepiece
 sacremoses
 vosk
+sqlite3
 librosa
 soundfile
 openai-whisper

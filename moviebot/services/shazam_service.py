@@ -1,7 +1,7 @@
 """
 Сервис для поиска фильмов по описанию (КиноШазам)
 Использует TMDB датасет (оффлайн), semantic search, переводчик и распознавание речи
-+ теперь с OMDB для актёров, режиссёров, рейтинга и постера
++ OMDB для постеров/рейтинга + IMDb-база для актёров/режиссёров
 """
 import os
 import logging
@@ -11,6 +11,9 @@ import faiss
 import json
 import soundfile as sf
 import librosa
+import sqlite3
+import requests
+import subprocess
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
@@ -19,7 +22,6 @@ import torch
 import gc
 from tqdm import tqdm
 from datetime import datetime
-import requests  # <-- добавили для OMDB
 
 # Настройка для предотвращения segmentation fault на macOS
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
@@ -35,44 +37,154 @@ _vosk = None
 _index = None
 _movies_df = None
 
-# Путь к данным
+# Пути
 BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / 'data' / 'shazam'
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# Локально — кэш в корне проекта, на Railway — /app/cache
 CACHE_DIR = Path('cache')
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Настраиваем кэш для HuggingFace моделей
 os.environ['HF_HOME'] = str(CACHE_DIR / 'huggingface')
 os.environ['TRANSFORMERS_CACHE'] = str(CACHE_DIR / 'huggingface' / 'transformers')
 os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sentence_transformers')
 
-# Путь к TMDB файлу (теперь CSV, а не parquet)
 TMDB_CSV_PATH = CACHE_DIR / 'TMDB_movie_dataset_v11.csv'
-
-# Индексы и обработанные данные
 INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'
 DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'
 
-# Настройки фильтрации
+# IMDb пути
+IMDB_RAW_DIR = BASE_DIR / 'data' / 'imdb_raw'
+IMDB_RAW_DIR.mkdir(parents=True, exist_ok=True)
+IMDB_DB_PATH = BASE_DIR / 'data' / 'imdb_minimal.db'
+
+# Настройки TMDB
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 50000
 
-# OMDB API ключ из .env
 OMDB_API_KEY = os.getenv("OMDB_API_KEY")
 
 
+def build_imdb_database():
+    """Скачивает и строит минимальную IMDb-базу один раз, если её нет"""
+    if IMDB_DB_PATH.exists():
+        logger.info("IMDb-база уже существует, пропускаем построение")
+        return
+
+    logger.info("IMDb-база отсутствует — начинаем скачивание и построение")
+
+    files = {
+        'title.basics.tsv.gz': 'https://datasets.imdbws.com/title.basics.tsv.gz',
+        'title.crew.tsv.gz': 'https://datasets.imdbws.com/title.crew.tsv.gz',
+        'title.principals.tsv.gz': 'https://datasets.imdbws.com/title.principals.tsv.gz',
+        'name.basics.tsv.gz': 'https://datasets.imdbws.com/name.basics.tsv.gz'
+    }
+
+    for fname, url in files.items():
+        path = IMDB_RAW_DIR / fname
+        if not path.exists():
+            logger.info(f"Скачиваем {fname}...")
+            try:
+                response = requests.get(url, stream=True)
+                response.raise_for_status()
+                with open(path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                logger.info(f"{fname} скачан")
+            except Exception as e:
+                logger.error(f"Ошибка скачивания {fname}: {e}")
+                return
+
+    # Загрузка и фильтрация
+    def load_tsv(file_name):
+        path = IMDB_RAW_DIR / file_name
+        return pd.read_csv(path, sep='\t', low_memory=False, na_values='\\N')
+
+    logger.info("Загружаем basics...")
+    basics = load_tsv('title.basics.tsv.gz')
+    movies = basics[basics['titleType'] == 'movie']
+    movies_tconst = set(movies['tconst'])
+
+    logger.info(f"Фильмов: {len(movies)}")
+
+    logger.info("Загружаем crew...")
+    crew = load_tsv('title.crew.tsv.gz')
+    crew = crew[crew['tconst'].isin(movies_tconst)]
+
+    logger.info("Загружаем principals...")
+    principals = load_tsv('title.principals.tsv.gz')
+    principals = principals[principals['tconst'].isin(movies_tconst)]
+
+    logger.info("Загружаем names...")
+    used_nconst = set(principals['nconst'].dropna())
+    used_nconst.update(crew['directors'].str.cat(sep=',').split(','))
+    used_nconst.update(crew['writers'].str.cat(sep=',').split(','))
+    used_nconst = {x for x in used_nconst if pd.notna(x) and x}
+    names = load_tsv('name.basics.tsv.gz')
+    names = names[names['nconst'].isin(used_nconst)]
+
+    # Создаём базу
+    conn = sqlite3.connect(IMDB_DB_PATH)
+
+    logger.info("Записываем таблицы...")
+    movies[['tconst', 'primaryTitle', 'originalTitle', 'startYear']].to_sql('movies', conn, if_exists='replace', index=False)
+    crew.to_sql('crew', conn, if_exists='replace', index=False)
+    principals[['tconst', 'ordering', 'nconst', 'category']].to_sql('principals', conn, if_exists='replace', index=False)
+    names[['nconst', 'primaryName']].to_sql('names', conn, if_exists='replace', index=False)
+
+    conn.close()
+    logger.info(f"IMDb-база создана: {IMDB_DB_PATH} ({IMDB_DB_PATH.stat().st_size / 1e9:.2f} GB)")
+
+    # Удаляем gz-файлы, чтобы освободить место
+    for f in IMDB_RAW_DIR.glob('*.gz'):
+        f.unlink()
+        logger.info(f"Удалён {f}")
+
+
+def get_imdb_enrich(imdb_id):
+    """Возвращает актёров и режиссёров из локальной IMDb-базы"""
+    if not IMDB_DB_PATH.exists():
+        logger.warning("IMDb-база не найдена, пропускаем enrich")
+        return {}
+
+    if not imdb_id.startswith('tt'):
+        imdb_id = f"tt{imdb_id.zfill(7)}"
+
+    conn = sqlite3.connect(IMDB_DB_PATH)
+    cur = conn.cursor()
+
+    # Топ-10 актёров
+    cur.execute("""
+        SELECT GROUP_CONCAT(n.primaryName, ', ')
+        FROM principals p
+        JOIN names n ON p.nconst = n.nconst
+        WHERE p.tconst = ? AND p.category IN ('actor', 'actress')
+        ORDER BY p.ordering LIMIT 10
+    """, (imdb_id,))
+    actors = cur.fetchone()[0] or ''
+
+    # Режиссёры (может быть несколько)
+    cur.execute("""
+        SELECT GROUP_CONCAT(DISTINCT n.primaryName, ', ')
+        FROM crew c
+        JOIN names n ON ',' || c.directors || ',' LIKE '%,' || n.nconst || ',%'
+        WHERE c.tconst = ?
+    """, (imdb_id,))
+    directors = cur.fetchone()[0] or ''
+
+    conn.close()
+
+    return {
+        'actors': actors,
+        'directors': directors
+    }
+
+
 def get_omdb_details(imdb_id: str) -> dict:
-    """
-    Запрашивает данные по imdb_id (tt1234567) у OMDB.
-    Возвращает dict с нужными полями или пустой dict при ошибке.
-    """
     if not imdb_id or not imdb_id.startswith("tt") or not OMDB_API_KEY:
         return {}
 
-    url = f"http://www.omdbapi.com/?i=tt{imdb_id}&apikey={OMDB_API_KEY}"
+    url = f"http://www.omdbapi.com/?i={imdb_id}&apikey={OMDB_API_KEY}"
     try:
         response = requests.get(url, timeout=7)
         data = response.json()
@@ -83,14 +195,13 @@ def get_omdb_details(imdb_id: str) -> dict:
                 "director": data.get("Director", "Не указано"),
                 "actors": data.get("Actors", "Не указано"),
                 "imdb_rating": data.get("imdbRating", "N/A"),
-                "poster_url": data.get("Poster", None),  # None или "N/A"
+                "poster_url": data.get("Poster", None),
                 "runtime": data.get("Runtime", ""),
                 "genre": data.get("Genre", ""),
                 "plot": data.get("Plot", ""),
             }
     except Exception as e:
-        logger.warning(f"OMDB ошибка для tt{imdb_id}: {e}")
-
+        logger.warning(f"OMDB ошибка для {imdb_id}: {e}")
     return {}
 
 
@@ -291,7 +402,6 @@ def build_tmdb_index():
         except Exception as e:
             logger.warning(f"Ошибка загрузки старого индекса: {e}, пересоздаем...")
 
-    # Скачиваем датасет, если CSV нет
     if not TMDB_CSV_PATH.exists():
         logger.info("TMDB CSV не найден — скачиваем через Kaggle API...")
         try:
@@ -388,7 +498,7 @@ def get_index_and_movies():
 def search_movies(query, top_k=5):
     """
     Основная функция поиска.
-    Теперь возвращает список словарей с обогащёнными данными из OMDB.
+    Теперь возвращает список словарей с данными из OMDB + IMDb (актёры/режиссёры)
     """
     try:
         query_en = translate_to_english(query)
@@ -399,7 +509,7 @@ def search_movies(query, top_k=5):
         model = get_model()
         query_emb = model.encode([query_en])[0].astype('float32').reshape(1, -1)
         
-        D, I = index.search(query_emb, k=top_k * 2)  # берём побольше, вдруг у кого-то нет imdb_id
+        D, I = index.search(query_emb, k=top_k * 2)
         
         results = []
         for idx in I[0]:
@@ -412,19 +522,22 @@ def search_movies(query, top_k=5):
             imdb_id_raw = row['imdb_id']
             if pd.isna(imdb_id_raw) or imdb_id_raw == 'nan':
                 continue
-            imdb_id = f"tt{str(imdb_id_raw).zfill(7)}"  # на всякий случай приводим к ttXXXXXXX
+            imdb_id = f"tt{str(imdb_id_raw).zfill(7)}"
             
-            # Дёргаем OMDB
-            omdb = get_omdb_details(imdb_id.replace('tt', ''))
+            # OMDB
+            omdb = get_omdb_details(imdb_id)
+            
+            # IMDb (актёры/режиссёры)
+            imdb_enrich = get_imdb_enrich(imdb_id.replace('tt', ''))
             
             result = {
-                'imdb_id': imdb_id.replace('tt', ''),  # оставляем без tt для удобства
+                'imdb_id': imdb_id.replace('tt', ''),
                 'title': omdb.get('title') or row['title'],
                 'year': omdb.get('year') or (int(row['year']) if pd.notna(row['year']) else None),
                 'description': row['description'][:500],
-                'director': omdb.get('director', ''),
-                'actors': omdb.get('actors', ''),
-                'imdb_rating': omdb.get('imdb_rating', ''),
+                'director': omdb.get('director', imdb_enrich.get('directors', '')),
+                'actors': omdb.get('actors', imdb_enrich.get('actors', '')),
+                'imdb_rating': omdb.get('imdb_rating', 'N/A'),
                 'poster_url': omdb.get('poster_url') if omdb.get('poster_url') not in ("N/A", None) else None,
                 'runtime': omdb.get('runtime', ''),
                 'genre': omdb.get('genre', ''),

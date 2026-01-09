@@ -1,17 +1,34 @@
 """
 Модуль для задач планировщика
 """
+# 1. Стандартная библиотека Python
 import logging
-from datetime import datetime, timedelta, date
-import pytz
-import json
 import random
-from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.config import PLANS_TZ
-from moviebot.states import plan_notification_messages
-from moviebot.bot.handlers.seasons import get_series_airing_status, get_seasons_data
-from moviebot.database.db_operations import print_daily_stats, get_user_timezone_or_default, get_notification_settings
+import time
+import pytz
+
+from datetime import datetime, timedelta, date
+
+# 2. Сторонние библиотеки (в алфавитном порядке)
+import telebot
 from telebot.apihelper import ApiTelegramException
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+# 3. APScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
+# 4. Твои локальные импорты (отсортируй по алфавиту внутри группы)
+from moviebot.bot.bot_init import bot, BOT_ID
+from moviebot.config import PLANS_TZ
+from moviebot.database import conn, cursor, db_lock
+from moviebot.utils.helpers import (
+    get_random_events_enabled,
+    mark_event_sent,
+    was_event_sent_today,
+)
+
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
@@ -41,11 +58,6 @@ def hourly_stats():
 def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None, user_id=None):
     """Отправляет уведомление о запланированном просмотре"""
     try:
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-        from moviebot.api.kinopoisk_api import get_external_sources
-        from moviebot.utils.helpers import has_notifications_access
-        import json
-
         plan_type_text = "дома" if plan_type == 'home' else "в кино"
         text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
         text += f"<b>{title}</b>\n{link}"
@@ -237,7 +249,6 @@ def send_ticket_notification(chat_id, plan_id):
             return
         
         # Парсим билеты (может быть JSON массив или один file_id)
-        import json
         ticket_files = []
         try:
             ticket_files = json.loads(ticket_file_id)
@@ -1018,7 +1029,6 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
         text += f"• <a href='https://www.megogo.ru/ru/series/{kp_id}'>Megogo</a>"
         
         # Создаем клавиатуру с кнопкой "Отметить просмотренные серии"
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
         
@@ -1046,7 +1056,6 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
         seasons = get_seasons_data(kp_id)
         
         if seasons:
-            import pytz
             now = datetime.now()
             next_episode_date = None
             next_episode = None
@@ -1186,8 +1195,6 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
         
         if next_episode_date and next_episode:
             # Есть ближайшая дата - ставим уведомление и отправляем сообщение
-            from datetime import timedelta
-            import pytz
             
             # Получаем часовой пояс пользователя
             user_tz = pytz.timezone('Europe/Moscow')
@@ -1326,11 +1333,7 @@ def check_subscription_payments():
         return
     
     try:
-        from datetime import datetime, timedelta
-        import pytz
-        from moviebot.database.db_operations import get_active_subscription
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-        
+        from moviebot.database.db_operations import get_active_subscription        
         now = datetime.now(pytz.UTC)
         tomorrow = now + timedelta(days=1)
         
@@ -1412,7 +1415,6 @@ def send_successful_payment_notification(chat_id, subscription_id, subscription_
         return
     
     try:
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
         from moviebot.database.db_operations import get_subscription_by_id
         
         # Получаем информацию о подписке
@@ -1668,7 +1670,6 @@ def process_recurring_payments():
                     update_subscription_next_payment(subscription_id, next_attempt)
                     
                     # Отправляем уведомление об ошибке с кнопками
-                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                     text = "🚨 <b>Оплата не прошла!</b>\n\n"
                     text += "Пожалуйста, обеспечьте наличие средств на карте для проведения списания, следующее списание будет завтра. Также, вы можете инициировать списание по кнопке ниже."
                     
@@ -1833,7 +1834,6 @@ def check_weekend_schedule():
                 
                 if should_send:
                     try:
-                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                         markup = InlineKeyboardMarkup(row_width=1)
                         markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
                         markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
@@ -1969,7 +1969,6 @@ def check_premiere_reminder():
                 
                 if should_send:
                     try:
-                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
                         from moviebot.api.kinopoisk_api import get_premieres_for_period
                         
                         # Получаем премьеры текущего месяца
@@ -2021,8 +2020,8 @@ def choose_random_participant():
     """Раз в две недели выбирает случайного участника для выбора фильма"""
     if not bot:
         return
+    
     try:
-        import random
         now = datetime.now(PLANS_TZ)
         
         # Получаем все групповые чаты
@@ -2033,162 +2032,193 @@ def choose_random_participant():
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
             
-            # Проверяем, что это групповой чат (не личный)
+            # Проверяем, что это групповой чат
             try:
                 chat_info = bot.get_chat(chat_id)
                 if chat_info.type == 'private':
-                    continue  # Пропускаем личные чаты
+                    continue
             except Exception as e:
                 logger.warning(f"[RANDOM PARTICIPANT] Не удалось получить информацию о чате {chat_id}: {e}")
                 continue
             
-            # Проверяем, включены ли случайные события
             if not get_random_events_enabled(chat_id):
                 continue
             
-            # Проверяем, было ли уже отправлено какое-то событие/уведомление сегодня
-            if was_event_sent_today(chat_id, 'random_event') or was_event_sent_today(chat_id, 'weekend_reminder') or was_event_sent_today(chat_id, 'premiere_reminder'):
+            # Пропускаем, если сегодня уже было какое-то событие
+            if was_event_sent_today(chat_id, 'random_event') or \
+               was_event_sent_today(chat_id, 'weekend_reminder') or \
+               was_event_sent_today(chat_id, 'premiere_reminder'):
                 logger.info(f"[RANDOM PARTICIPANT] Пропуск чата {chat_id} - уже было отправлено событие сегодня")
                 continue
             
             # Проверяем, когда последний раз выбирали участника
-            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_random_participant_date'", (chat_id,))
+            cursor.execute(
+                "SELECT value FROM settings WHERE chat_id = %s AND key = 'last_random_participant_date'",
+                (chat_id,)
+            )
             last_date_row = cursor.fetchone()
             
             if last_date_row:
                 last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
                 try:
                     last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
-                    days_passed = (now.date() - last_date).days
-                    if days_passed < 14:
+                    if (now.date() - last_date).days < 14:
                         continue
                 except:
                     pass
             
-            # Получаем список активных участников из stats (исключая бота)
+            # Получаем участников
             from moviebot.bot.bot_init import BOT_ID
-            # Получаем BOT_ID, если он не определен
-            if BOT_ID is None:
+            current_bot_id = BOT_ID
+            if current_bot_id is None:
                 try:
-                    bot_info = bot.get_me()
-                    current_bot_id = bot_info.id
+                    current_bot_id = bot.get_me().id
                 except:
                     current_bot_id = None
-            else:
-                current_bot_id = BOT_ID
+            
+            query = '''
+                SELECT DISTINCT user_id, username 
+                FROM stats 
+                WHERE chat_id = %s 
+                AND timestamp >= %s
+            '''
+            params = (chat_id, (now - timedelta(days=30)).isoformat())
             
             if current_bot_id:
-                cursor.execute('''
-                    SELECT DISTINCT user_id, username 
-                    FROM stats 
-                    WHERE chat_id = %s 
-                    AND timestamp >= %s
-                    AND user_id != %s
-                ''', (chat_id, (now - timedelta(days=30)).isoformat(), current_bot_id))
-            else:
-                # Если BOT_ID не определен, получаем всех и фильтруем вручную
-                cursor.execute('''
-                    SELECT DISTINCT user_id, username 
-                    FROM stats 
-                    WHERE chat_id = %s 
-                    AND timestamp >= %s
-                ''', (chat_id, (now - timedelta(days=30)).isoformat()))
+                query += " AND user_id != %s"
+                params += (current_bot_id,)
+                
+            cursor.execute(query, params)
             participants = cursor.fetchall()
-            
-            # Дополнительная фильтрация: исключаем бота из списка участников
-            if current_bot_id:
-                filtered_participants = []
-                for p in participants:
-                    p_user_id = p.get('user_id') if isinstance(p, dict) else p[0]
-                    if p_user_id != current_bot_id:
-                        filtered_participants.append(p)
-                participants = filtered_participants
             
             if not participants:
                 continue
             
-            # Проверяем, что прошла неделя с начала участия для всех участников
+            # Проверка недели участия
             cursor.execute('''
                 SELECT user_id, MIN(timestamp) as first_participation
                 FROM stats
                 WHERE chat_id = %s
                 GROUP BY user_id
             ''', (chat_id,))
-            first_participations = {row.get('user_id') if isinstance(row, dict) else row[0]: 
-                                   (row.get('first_participation') if isinstance(row, dict) else row[1])
-                                   for row in cursor.fetchall()}
+            first_participations = {
+                row.get('user_id') if isinstance(row, dict) else row[0]:
+                row.get('first_participation') if isinstance(row, dict) else row[1]
+                for row in cursor.fetchall()
+            }
             
-            # Проверяем, что для всех участников прошла неделя
             week_ago = now - timedelta(days=7)
             all_participated_week_ago = True
             for participant in participants:
                 user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
-                first_participation = first_participations.get(user_id)
-                if first_participation:
-                    if isinstance(first_participation, str):
-                        first_participation = datetime.fromisoformat(first_participation.replace('Z', '+00:00'))
-                    elif isinstance(first_participation, date) and not isinstance(first_participation, datetime):
-                        first_participation = datetime.combine(first_participation, datetime.min.time())
-                        if first_participation.tzinfo is None:
-                            first_participation = PLANS_TZ.localize(first_participation)
-                    
-                    if first_participation > week_ago:
+                fp = first_participations.get(user_id)
+                if fp:
+                    if isinstance(fp, str):
+                        fp = datetime.fromisoformat(fp.replace('Z', '+00:00'))
+                    if fp > week_ago:
                         all_participated_week_ago = False
                         break
             
             if not all_participated_week_ago:
-                logger.info(f"[RANDOM PARTICIPANT] Пропуск чата {chat_id} - не прошла неделя с начала участия всех участников")
+                logger.info(f"[RANDOM PARTICIPANT] Пропуск чата {chat_id} - не прошла неделя с начала участия всех")
                 continue
             
-            # Выбираем случайного участника
+            # Выбираем участника
             participant = random.choice(participants)
             user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
             username = participant.get('username') if isinstance(participant, dict) else participant[1]
             
-            # Формируем имя пользователя для отображения
+            # Формируем имя
             if username:
                 user_name = f"@{username}"
             else:
                 try:
-                    user_info = bot.get_chat_member(chat_id, user_id)
-                    user_name = user_info.user.first_name or "участник"
+                    member = bot.get_chat_member(chat_id, user_id)
+                    user_name = member.user.first_name or "участник"
                 except:
                     user_name = "участник"
             
-            # Отправляем сообщение
-            try:
-                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
-                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
-                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+            # Готовим сообщение
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+            markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+            markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+            
+            text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+            text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
+            
+            # Пытаемся отправить
+            original_chat_id = chat_id
+            sent = False
+            
+            for attempt in range(2):  # максимум 2 попытки
+                try:
+                    bot.send_message(
+                        chat_id=chat_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    sent = True
+                    break
                 
-                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
-                text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
+                except ApiTelegramException as api_err:
+                    if "group chat was upgraded to a supergroup chat" in str(api_err):
+                        try:
+                            new_chat_id = api_err.result_json['parameters']['migrate_to_chat_id']
+                            logger.warning(f"[RANDOM PARTICIPANT] Миграция чата! {original_chat_id} → {new_chat_id}")
+                            
+                            # Обновляем chat_id во всех нужных местах
+                            with db_lock:
+                                tables_to_update = ['movies', 'stats', 'settings', 'events', 'reminders']
+                                for table in tables_to_update:
+                                    cursor.execute(f"""
+                                        UPDATE {table}
+                                        SET chat_id = %s
+                                        WHERE chat_id = %s
+                                    """, (new_chat_id, original_chat_id))
+                                
+                                # Также можно обновить другие таблицы, если они есть
+                                conn.commit()
+                            
+                            logger.info(f"[RANDOM PARTICIPANT] Обновлено {cursor.rowcount} записей chat_id")
+                            
+                            # Меняем chat_id для повторной попытки
+                            chat_id = new_chat_id
+                            
+                            # Даём Telegram секунду на обработку миграции
+                            import time
+                            time.sleep(1.5)
+                            
+                        except Exception as update_err:
+                            logger.error(f"Ошибка при обновлении chat_id после миграции: {update_err}", exc_info=True)
+                            break
+                    else:
+                        raise
                 
-                bot.send_message(
-                    chat_id,
-                    text,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                
-                # Отмечаем, что событие отправлено
+                except Exception as e:
+                    logger.error(f"[RANDOM PARTICIPANT] Ошибка отправки в {chat_id}: {e}", exc_info=True)
+                    break
+            
+            if sent:
+                # Отмечаем события
                 mark_event_sent(chat_id, 'random_event')
                 
-                # Сохраняем дату последнего выбора
-                cursor.execute('''
-                    INSERT INTO settings (chat_id, key, value)
-                    VALUES (%s, 'last_random_participant_date', %s)
-                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-                ''', (chat_id, now.date().isoformat()))
-                conn.commit()
+                # Сохраняем дату
+                with db_lock:
+                    cursor.execute('''
+                        INSERT INTO settings (chat_id, key, value)
+                        VALUES (%s, 'last_random_participant_date', %s)
+                        ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                    ''', (chat_id, now.date().isoformat()))
+                    conn.commit()
                 
-                logger.info(f"[RANDOM PARTICIPANT] Выбран случайный участник {user_id} для чата {chat_id}")
-            except Exception as e:
-                logger.error(f"[RANDOM PARTICIPANT] Ошибка при отправке сообщения: {e}", exc_info=True)
+                logger.info(f"[RANDOM PARTICIPANT] Успешно выбран участник {user_id} для чата {chat_id}")
+            else:
+                logger.warning(f"[RANDOM PARTICIPANT] Не удалось отправить сообщение в чат {original_chat_id}")
+                
     except Exception as e:
-        logger.error(f"[RANDOM PARTICIPANT] Ошибка в choose_random_participant: {e}", exc_info=True)
+        logger.error(f"[RANDOM PARTICIPANT] Глобальная ошибка в choose_random_participant: {e}", exc_info=True)
 
 
 def start_dice_game():
@@ -2255,10 +2285,7 @@ def start_dice_game():
                 continue
             
             # ===== Отправка сообщения с кнопкой =====
-            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             from moviebot.states import dice_game_state
-            from telebot.apihelper import ApiTelegramException
-
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
             markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))

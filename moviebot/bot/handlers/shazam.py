@@ -57,32 +57,32 @@ def process_shazam_text_query(message, query, reply_to_message=None):
         query_lower = query.lower()
         
         def actor_score(result):
-            actors_str = result.get('actors', '')
-            if not actors_str or actors_str == "Не указано":
-                return 0
+            score = 0
+            query_lower = query.lower()  # или text.lower()
             
-            actors_lower = actors_str.lower()
-            query_words = set(query_lower.split())
-            
-            # Разбиваем актёров по запятой
-            actor_list = [a.strip() for a in actors_str.split(',')]
-            actor_words = set()
-            for actor in actor_list:
-                actor_words.update(actor.lower().split())
-            
-            # Сколько слов из запроса совпало с актёрами
-            common = query_words.intersection(actor_words)
-            score = len(common) * 10  # за каждое слово +10 (фамилия/имя хватит)
-            
-            # Дополнительный буст, если полное имя совпало
-            for actor in actor_list:
-                actor_clean = actor.lower()
-                if actor_clean in query_lower or actor_clean.split()[-1] in query_lower:
-                    score += 20
+            for field in ['actors', 'director']:  # добавили director
+                names_str = result.get(field, '')
+                if not names_str or names_str == "Не указано":
+                    continue
+                
+                names_lower = names_str.lower()
+                query_words = set(query_lower.split())
+                
+                name_list = [n.strip() for n in names_str.split(',')]
+                name_words = set()
+                for name in name_list:
+                    name_words.update(name.lower().split())
+                
+                common = query_words.intersection(name_words)
+                score += len(common) * 10
+                
+                for name in name_list:
+                    name_clean = name.lower()
+                    if name_clean in query_lower or name_clean.split()[-1] in query_lower:
+                        score += 20
             
             return score
         
-        # Сортируем: сначала по совпадению актёров, потом как было
         results = sorted(results, key=actor_score, reverse=True)
         # === КОНЕЦ RERANKING ===
 
@@ -291,25 +291,29 @@ def process_shazam_voice_async(message, loading_msg):
         query_lower = text.lower()
         
         def actor_score(result):
-            actors_str = result.get('actors', '')
-            if not actors_str or actors_str == "Не указано":
-                return 0
+            score = 0
+            query_lower = query.lower()  # или text.lower()
             
-            actors_lower = actors_str.lower()
-            query_words = set(query_lower.split())
-            
-            actor_list = [a.strip() for a in actors_str.split(',')]
-            actor_words = set()
-            for actor in actor_list:
-                actor_words.update(actor.lower().split())
-            
-            common = query_words.intersection(actor_words)
-            score = len(common) * 10
-            
-            for actor in actor_list:
-                actor_clean = actor.lower()
-                if actor_clean in query_lower or actor_clean.split()[-1] in query_lower:
-                    score += 20
+            for field in ['actors', 'director']:  # добавили director
+                names_str = result.get(field, '')
+                if not names_str or names_str == "Не указано":
+                    continue
+                
+                names_lower = names_str.lower()
+                query_words = set(query_lower.split())
+                
+                name_list = [n.strip() for n in names_str.split(',')]
+                name_words = set()
+                for name in name_list:
+                    name_words.update(name.lower().split())
+                
+                common = query_words.intersection(name_words)
+                score += len(common) * 10
+                
+                for name in name_list:
+                    name_clean = name.lower()
+                    if name_clean in query_lower or name_clean.split()[-1] in query_lower:
+                        score += 20
             
             return score
         
