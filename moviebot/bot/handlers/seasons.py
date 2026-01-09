@@ -393,16 +393,6 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
     except Exception as e:
         logger.error(f"[SHOW_SEASONS_LIST] Ошибка отправки: {e}", exc_info=True)
 
-    # Пагинация (в стиле show_episodes_page)
-    if series_data['total_pages'] > 1:
-        nav_buttons = []
-        if page > 1:
-            nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_page:{page-1}"))
-        if page < series_data['total_pages']:
-            nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"seasons_page:{page+1}"))
-        nav_buttons.append(InlineKeyboardButton("🔄 Обновить", callback_data=f"seasons_refresh:{page}"))
-        markup.row(*nav_buttons)
-
     try:
         common_kwargs = {
             'text': text,
