@@ -1034,22 +1034,20 @@ def rate_film_callback(call):
 
         if not film_id:
             # Фильма нет в базе — получаем инфу с Кинопоиска
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/" if not title.startswith('Баффи') else f"https://www.kinopoisk.ru/series/{kp_id}/"
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/" if not is_series else f"https://www.kinopoisk.ru/series/{kp_id}/"
+            
             info = extract_movie_info(link)
-            title = info.get('title', 'Фильм') if info else 'Фильм'
+            title = info.get('title', f'Фильм {kp_id}') if info else f'Фильм {kp_id}'
 
-            # Отправляем сообщение с просьбой оценить
+            # Отправляем сообщение с просьбой оценить — теперь название всегда будет!
             msg = bot.reply_to(
                 call.message,
                 f"💬 Чтобы оценить *{title}*, ответьте на это сообщение числом от 1 до 10.\n\nФильм будет добавлен в базу при оценке.",
                 parse_mode='Markdown'
             )
 
-            # Добавляем в базу заранее
-            if info:
-                film_id, _ = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-            else:
-                film_id, _ = ensure_movie_in_database(chat_id, kp_id, link, {}, user_id)
+            # Добавляем в базу заранее (если info есть — используем его, иначе пустой dict)
+            film_id, _ = ensure_movie_in_database(chat_id, kp_id, link, info or {}, user_id)
 
             if film_id:
                 rating_messages[msg.message_id] = film_id
