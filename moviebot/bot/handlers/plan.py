@@ -493,7 +493,7 @@ def show_schedule(message):
                 
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
+                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"film_desc:{int(kp_id)}"))
             
             if not home_plans:
                 cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
@@ -513,7 +513,7 @@ def show_schedule(message):
                 button_text = f"{title} | {date_str}"
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
+                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"film_desc:{int(kp_id)}"))
             
             home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
             
@@ -1000,7 +1000,62 @@ def plan_type_callback(call):
     # - remove_from_calendar
     # - edit_plan handlers
     # и другие из moviebot.py
+    
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("film_desc:"))
+    def film_desc_from_schedule(call):
+        try:
+            bot.answer_callback_query(call.id)
 
+            kp_id = int(call.data.split(":", 1)[1])
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            message_id = call.message.message_id
+
+            # Получаем инфу (из БД, без API)
+            with db_lock:
+                cursor.execute("""
+                    SELECT title, year, description, director, genres, actors, is_series, link
+                    FROM movies 
+                    WHERE kp_id = %s AND chat_id = %s
+                """, (str(kp_id), chat_id))
+                row = cursor.fetchone()
+
+            if not row:
+                bot.edit_message_text(
+                    f"🎬 Фильм/сериал не найден в базе\n\n<a href='https://www.kinopoisk.ru/film/{kp_id}/'>Открыть на Кинопоиске</a>",
+                    chat_id,
+                    message_id,
+                    parse_mode='HTML'
+                )
+                return
+
+            # Безопасно формируем info
+            info = {
+                'title': row[0] if len(row) > 0 else None,
+                'year': row[1] if len(row) > 1 else None,
+                'description': row[2] if len(row) > 2 else None,
+                'director': row[3] if len(row) > 3 else None,
+                'genres': row[4] if len(row) > 4 else None,
+                'actors': row[5] if len(row) > 5 else None,
+                'is_series': bool(row[6]) if len(row) > 6 else False
+            }
+
+            link = row[7] if len(row) > 7 else f"https://www.kinopoisk.ru/{'series' if info['is_series'] else 'film'}/{kp_id}/"
+
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                message_id=message_id,
+                existing=None
+            )
+
+        except Exception as e:
+            logger.error(f"[FILM DESC FROM SCHEDULE] Ошибка: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
 
 def get_plan_link_internal(message, state):
     """Внутренняя функция для получения ссылки на фильм в /plan"""
