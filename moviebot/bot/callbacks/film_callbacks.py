@@ -4,8 +4,7 @@ Callback handlers для карточки фильма (add_to_database, plan_fr
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-
+from psycopg2.extras import RealDictCursor
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 
 from moviebot.api.kinopoisk_api import get_facts
