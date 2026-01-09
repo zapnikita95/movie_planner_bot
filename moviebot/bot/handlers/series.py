@@ -3559,19 +3559,6 @@ def register_series_handlers(bot_param):
                 bot_messages[film_message_id] = link
                 logger.info(f"[RANDOM] Saved film message_id={film_message_id} with link={link}")
 
-            try:
-                instruction_text = (
-                    "💬 <b>Что дальше?</b>\n\n"
-                    "• Ответьте на сообщение с фильмом: <code>дома 20.01</code>, <code>в кино завтра</code> и т.д.\n"
-                    "• Или нажмите кнопку «📅 Запланировать просмотр» под карточкой"
-                )
-                sent_instr = bot.send_message(chat_id, instruction_text, parse_mode='HTML')
-                instruction_message_id = sent_instr.message_id
-                bot_messages[instruction_message_id] = link
-                logger.info(f"[RANDOM] Instruction sent, message_id={instruction_message_id}")
-            except Exception as e:
-                logger.error(f"[RANDOM] Error sending instruction: {e}")
-
             # === УЛУЧШЕННЫЙ ПАРСЕР МЕСТА И ДАТЫ ===
             def parse_plan_input(text: str):
                 """Парсит ввод: 'дома 20.01', 'в кино, завтра в 20:00', 'Дома — 15 января' и т.д.
