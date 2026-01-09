@@ -2682,7 +2682,7 @@ def register_series_handlers(bot_param):
             
             if not candidates:
                 # Ищем похожие фильмы из запланированных
-                similar_query = """SELECT m.title, m.year, m.link 
+                similar_query = """SELECT m.title, m.year, m.link, m.kp_id
                                    FROM movies m 
                                    JOIN plans p ON m.id = p.film_id 
                                    WHERE m.chat_id = %s AND m.watched = 0"""
@@ -2750,12 +2750,12 @@ def register_series_handlers(bot_param):
                             title = movie.get('title')
                             year = movie.get('year') or '—'
                             link = movie.get('link')
-                            kp_id = movie.get('kp_id') if 'kp_id' in movie else None
+                            kp_id = movie.get("kp_id")
                         else:
                             title = movie[0] if len(movie) > 0 else None
                             year = movie[1] if len(movie) > 1 else '—'
                             link = movie[2] if len(movie) > 2 else None
-                            kp_id = movie[8] if len(movie) > 8 else None
+                            kp_id = movie[3] if len(movie) > 3 else None
                         
                         if title and link:
                             similar_list.append(f"• <a href='{link}'>{title}</a> ({year})")
@@ -2799,7 +2799,7 @@ def register_series_handlers(bot_param):
                 title = movie[1] if len(movie) > 1 else 'Без названия'
                 year = movie[2] if len(movie) > 2 else '—'
                 link = movie[7] if len(movie) > 7 else None
-                kp_id = movie[8] if len(movie) > 8 else None
+                kp_id = movie[3] if len(movie) > 3 else None
 
             if not link or not kp_id:
                 text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})"
