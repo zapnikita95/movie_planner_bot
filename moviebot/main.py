@@ -268,20 +268,20 @@ logger.info("=" * 80)
 
 # Предзагрузка модели Whisper
 import platform
-if platform.system() == "Darwin":  # Только на Mac (локально у тебя)
+if platform.system() == "Darwin":
     logger.info("⚠️ Предзагрузка Whisper отключена на Mac (из-за segfault) — ленивая загрузка при первом использовании")
 else:
     # На Railway и Linux — предзагружаем нормально
     try:
-        logger.info("Предзагрузка модели Whisper...")
-        from moviebot.services.shazam_service import get_whisper
-        whisper = get_whisper()
-        if whisper and whisper is not False:
-            logger.info("✅ Модель Whisper предзагружена и готова к использованию")
-        else:
-            logger.warning("⚠️ Модель Whisper недоступна, будет использован Vosk как fallback")
+        logger.info("Предзагрузка модели Whisper отключена на Railway (OOM risk) — ленивая загрузка при первом использовании")
+        # from moviebot.services.shazam_service import get_whisper
+        # whisper = get_whisper()
+        # if whisper and whisper is not False:
+        #     logger.info("✅ Модель Whisper предзагружена и готова к использованию")
+        # else:
+        #     logger.warning("⚠️ Модель Whisper недоступна, будет использован Vosk как fallback")
     except Exception as e:
-        logger.warning(f"⚠️ Не удалось предзагрузить Whisper: {e}. Будет загружена при первом использовании.")
+        logger.warning(f"⚠️ Whisper предзагрузка пропущена: {e}")
 
 # Debug-хэндлер для settings
 @bot.callback_query_handler(func=lambda call: 'settings' in call.data.lower())
@@ -301,10 +301,10 @@ scheduler.add_job(
     replace_existing=True
 )
 
-# Грузим базу imdb
-from moviebot.services.shazam_service import build_imdb_database
-# При старте
-build_imdb_database()
+# Грузим базу imdb — отключено на Railway
+logger.info("База IMDB не загружается при старте на Railway — ленивая загрузка при необходимости")
+# from moviebot.services.shazam_service import build_imdb_database
+# build_imdb_database()
 
 # Устанавливаем команды бота
 setup_bot_commands(bot)
