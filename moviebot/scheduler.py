@@ -1027,35 +1027,37 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
         text += f"📺 <b>{title}</b>\n"
         text += f"📅 Сезон {season}, Эпизод {episode}\n\n"
         text += f"<a href='https://www.kinopoisk.ru/series/{kp_id}/'>Кинопоиск</a>\n\n"
-        text += "🎬 <b>Смотреть онлайн:</b>\n"
-        text += f"• <a href='https://www.kinopoisk.ru/series/{kp_id}/watch/'>Кинопоиск HD</a>\n"
-        text += f"• <a href='https://okko.tv/series/{kp_id}'>Okko</a>\n"
-        text += f"• <a href='https://www.ivi.ru/watch/{kp_id}'>IVI</a>\n"
-        text += f"• <a href='https://www.megogo.ru/ru/series/{kp_id}'>Megogo</a>"
-        
-        # Создаем клавиатуру с кнопкой "Отметить просмотренные серии"
+
+        # ← Динамика вместо хардкода
+        from moviebot.api.kinopoisk_api import get_external_sources
+
+        sources = get_external_sources(kp_id)
+        if sources:
+            text += "🎬 <b>Смотреть онлайн:</b>\n"
+            for platform, url in sources[:4]:  # лимит, чтобы не раздувать сообщение
+                text += f"• <a href='{url}'>{platform}</a>\n"
+        else:
+            # Минимум: только Кинопоиск HD (самый надёжный вариант)
+            text += "🎬 <b>Смотреть онлайн:</b>\n"
+            text += f"• <a href='https://www.kinopoisk.ru/series/{kp_id}/watch/'>Кинопоиск HD (попробовать)</a>\n"
+
+        # Клавиатура остаётся
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
         
-        # Отправляем уведомление всем подписанным пользователям
-        with db_lock:
-            cursor.execute('''
-                SELECT DISTINCT user_id 
-                FROM series_subscriptions 
-                WHERE chat_id = %s AND film_id = %s AND subscribed = TRUE
-            ''', (chat_id, film_id))
-            subscribers = cursor.fetchall()
+        # Отправка (твой остальной код)
+        bot.send_message(
+            chat_id,
+            text,
+            parse_mode='HTML',
+            reply_markup=markup,
+            disable_web_page_preview=False
+        )
         
-        subscribers_list = []
-        for sub_row in subscribers:
-            user_id = sub_row.get('user_id') if isinstance(sub_row, dict) else sub_row[0]
-            subscribers_list.append(user_id)
-            try:
-                bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
-                logger.info(f"[SERIES NOTIFICATION] Уведомление отправлено для сериала {title} (kp_id={kp_id})")
-            except Exception as e:
-                logger.error(f"[SERIES NOTIFICATION] Ошибка отправки уведомления: {e}")
+        logger.info(f"[SERIES NOTIFICATION] Уведомление отправлено chat_id={chat_id}, kp_id={kp_id}, s{season}e{episode}")
         
+    except Exception as e:
+        logger.error(f"[SERIES NOTIFICATION] Ошибка отправки: {e}", exc_info=True)
         seasons = get_seasons_data(kp_id)
         
         if seasons:
@@ -2425,4 +2427,4 @@ def update_series_status_cache():
         except Exception as e:
             logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id} (chat_id={chat_id}): {e}", exc_info=True)
 
-    logger.info("[CACHE] Обновление кэша сериалов завершено")
+    logger.info("[CACHE] Обновление кэша сериалов завершено")from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
