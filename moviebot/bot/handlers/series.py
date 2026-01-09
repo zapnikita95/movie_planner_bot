@@ -75,6 +75,15 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
     logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
 
     try:
+        # ← ФИКС: приводим kp_id к int сразу здесь (самое важное место!)
+        try:
+            kp_id = int(kp_id)  # если строка — делаем число
+            logger.info(f"[SHOW FILM INFO] kp_id успешно приведён к int: {kp_id}")
+        except (ValueError, TypeError) as conv_e:
+            logger.error(f"[SHOW FILM INFO] Не удалось привести kp_id к int: {kp_id}, ошибка: {conv_e}")
+            bot.send_message(chat_id, "❌ Ошибка с ID фильма. Попробуйте заново.")
+            return
+
         logger.info(f"[SHOW FILM INFO] info keys: {list(info.keys()) if info else 'None'}")
         if not info:
             logger.error(f"[SHOW FILM INFO] info is None или пустой!")
@@ -481,10 +490,14 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
 
         # Если уже запланирован — не добавляем кнопку планирования
         if has_plan:
-            logger.info(f"[BUTTONS] План уже существует → только онлайн если home")
+            # Уже запланирован → показываем кнопку "Изменить план" + онлайн если home
+            if plan_info and 'id' in plan_info:
+                markup.add(InlineKeyboardButton("✏️ Изменить в расписании", callback_data=f"edit_plan:{plan_info['id']}"))
+            else:
+                markup.add(InlineKeyboardButton("✏️ Изменить в расписании", callback_data="edit:plan"))  # фоллбек на общее меню
+
             if plan_info and plan_info.get('type') == 'home' and not watched and has_sources:
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
-
         else:
             # Нет плана → всегда показываем кнопку "Запланировать просмотр"
             logger.info(f"[BUTTONS] Нет плана → добавляем 'Запланировать просмотр'")
