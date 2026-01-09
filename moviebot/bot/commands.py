@@ -75,10 +75,10 @@ def register_all_handlers(bot):
     register_film_callbacks(bot)  # Пустая функция, но импорт модуля уже зарегистрировал handlers
     logger.info("✅ Callback handlers для карточки фильма зарегистрированы")
     
-    import moviebot.bot.callbacks.series_callbacks  # noqa: F401 - импорт для регистрации декораторов
-    from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
-    register_series_callbacks(bot)
-    logger.info("✅ Callback handlers для сериалов зарегистрированы")
+    #import moviebot.bot.callbacks.series_callbacks  # noqa: F401 - импорт для регистрации декораторов
+    #from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
+    #register_series_callbacks(bot)
+    #logger.info("✅ Callback handlers для сериалов зарегистрированы")
     
     import moviebot.bot.callbacks.payment_callbacks  # noqa: F401 - импорт для регистрации декораторов
     from moviebot.bot.callbacks.payment_callbacks import register_payment_callbacks
