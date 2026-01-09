@@ -231,7 +231,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         if not all_watched:
             markup.add(InlineKeyboardButton("Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
         
-        markup.add(InlineKeyboardButton("К сезонам", callback_data=f"series_track:{kp_id}"))
+        markup.add(InlineKeyboardButton("К сезонам", callback_data=f"series_track:{int(kp_id)}"))
         
         user_episodes_state[user_id] = {
             'kp_id': kp_id,
@@ -365,7 +365,7 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
             short_title = title[:available_len] + "..."
             button_text = f"{emojis} {short_title} ({year})"
 
-        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{int(kp_id)}"))
 
     # Пагинация
     if series_data['total_pages'] > 1:
@@ -488,7 +488,7 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
         text = f"✅ Просмотренные сериалы ({len(completed_series)})"
         markup = InlineKeyboardMarkup(row_width=1)
         for kp_id, button_text in completed_series:
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{kp_id}"))
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{int(kp_id)}"))
         markup.add(InlineKeyboardButton("◀️ К активным сериалам", callback_data="back_to_seasons_list"))
 
     try:

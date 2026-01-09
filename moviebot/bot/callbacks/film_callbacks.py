@@ -328,8 +328,8 @@ def plan_from_added_callback(call):
         # Запускаем планирование
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("Дома 🏠", callback_data=f"plan_type:home:{kp_id}"),
-            InlineKeyboardButton("В кино 🎥", callback_data=f"plan_type:cinema:{kp_id}")
+            InlineKeyboardButton("Дома 🏠", callback_data=f"plan_type:home:{int(kp_id)}"),
+            InlineKeyboardButton("В кино 🎥", callback_data=f"plan_type:cinema:{int(kp_id)}")
         )
         
         # Убираем старые кнопки (опционально, если хочешь)
@@ -618,7 +618,7 @@ def show_film_description_callback(call):
 
         # Кнопки — минимальные, можно добавить больше позже
         markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(InlineKeyboardButton("🔙 Назад к карточке", callback_data=f"back_to_film:{kp_id}"))
+        markup.add(InlineKeyboardButton("🔙 Назад к карточке", callback_data=f"back_to_film:{int(kp_id)}"))
         # Если нужно — добавь другие кнопки
 
         # Отправляем или редактируем сообщение
@@ -868,7 +868,7 @@ def streaming_select_callback(call):
                 chat_id,
                 message_id,
                 reply_markup=InlineKeyboardMarkup().add(
-                    InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}")
+                    InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{int(kp_id)}")
                 )
             )
 
@@ -878,7 +878,7 @@ def streaming_select_callback(call):
             encoded_url = urlsafe_b64encode(url.encode()).decode().strip("=")  # на всякий укоротим
             markup.add(InlineKeyboardButton(platform, callback_data=f"select_platform:{kp_id}:{platform}:{encoded_url}"))
 
-        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}"))
+        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{int(kp_id)}"))
 
         bot.edit_message_text(
             "Выберите онлайн-кинотеатр:",
@@ -930,7 +930,7 @@ def select_platform_callback(call):
                     chat_id,
                     message_id,
                     reply_markup=InlineKeyboardMarkup().add(
-                        InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}")
+                        InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{int(kp_id)}")
                     )
                 )
             else:
@@ -1216,7 +1216,7 @@ def remove_from_database_prompt(call):
         # Клавиатура подтверждения
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("✅ Да, удалить", callback_data=f"confirm_delete:{kp_id}"),
+            InlineKeyboardButton("✅ Да, удалить", callback_data=f"confirm_delete:{int(kp_id)}"),
             InlineKeyboardButton("❌ Нет", callback_data="delete_cancel")
         )
 

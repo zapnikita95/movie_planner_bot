@@ -162,7 +162,7 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     if kp_id:
         if not markup.keyboard:
             markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
+        markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{int(kp_id)}"))
     
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
     if plan_type == 'home' and markup.keyboard and any(btn.callback_data.startswith("streaming_select:") for row in markup.keyboard for btn in row):
@@ -493,7 +493,7 @@ def show_schedule(message):
                 
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
+                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
             
             if not home_plans:
                 cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
@@ -513,7 +513,7 @@ def show_schedule(message):
                 button_text = f"{title} | {date_str}"
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
+                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
             
             home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
             
@@ -1085,8 +1085,8 @@ def get_plan_link_internal(message, state):
 
     markup = InlineKeyboardMarkup()
     markup.add(
-        InlineKeyboardButton("Дома 🏠", callback_data=f"plan_type:home:{kp_id}"),
-        InlineKeyboardButton("В кино 🎥", callback_data=f"plan_type:cinema:{kp_id}")
+        InlineKeyboardButton("Дома 🏠", callback_data=f"plan_type:home:{int(kp_id)}"),
+        InlineKeyboardButton("В кино 🎥", callback_data=f"plan_type:cinema:{int(kp_id)}")
     )
     
     prompt_msg = bot.send_message(message.chat.id, "Где планируете смотреть?", reply_markup=markup)
@@ -1733,7 +1733,7 @@ def streaming_done_callback(call):
         # Создаем кнопку "Перейти к описанию"
         markup = InlineKeyboardMarkup()
         if kp_id:
-            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{int(kp_id)}"))
         
         # Обновляем сообщение вместо удаления
         try:

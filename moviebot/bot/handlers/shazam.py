@@ -149,7 +149,7 @@ def process_shazam_text_query(message, query, reply_to_message=None):
             # Кнопка с русским названием (если есть)
             button_text = f"Подробнее о {i}. {display_title}{display_year}"
             if kp_id:
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{kp_id}"))
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{int(kp_id)}"))
             else:
                 markup.add(InlineKeyboardButton(button_text, callback_data="shazam:no_kp"))
             
@@ -381,7 +381,7 @@ def process_shazam_voice_async(message, loading_msg):
             
             button_text = f"Подробнее о {i}. {display_title}{display_year}"
             if kp_id:
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{kp_id}"))
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{int(kp_id)}"))
             else:
                 markup.add(InlineKeyboardButton(button_text, callback_data="shazam:no_kp"))
             

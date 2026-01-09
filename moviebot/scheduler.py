@@ -1039,7 +1039,7 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
 
         # Клавиатура остаётся
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+        markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{int(kp_id)}"))
         
         # Отправка (твой остальной код)
         bot.send_message(

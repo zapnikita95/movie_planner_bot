@@ -369,7 +369,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 reminder = cursor.fetchone()
                 
                 if reminder and reminder[0]:
-                    markup.add(InlineKeyboardButton("🔕 Отменить уведомление", callback_data=f"premiere_cancel:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔕 Отменить уведомление", callback_data=f"premiere_cancel:{int(kp_id)}"))
                 else:
                     markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{premiere_date_str}"))
 
@@ -484,7 +484,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     markup.add(InlineKeyboardButton("👁️ Просмотрено", callback_data=f"mark_watched_from_description:{film_id}"))
             else:
                 # Фильм не в базе - всегда показываем кнопку "Просмотрено"
-                markup.add(InlineKeyboardButton("👁️ Просмотрено", callback_data=f"mark_watched_from_description_kp:{kp_id}"))
+                markup.add(InlineKeyboardButton("👁️ Просмотрено", callback_data=f"mark_watched_from_description_kp:{int(kp_id)}"))
         
         logger.info(f"[BUTTONS] film_id={film_id}, has_plan={has_plan}, watched={watched}, has_sources={has_sources}")
 
@@ -497,25 +497,25 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 markup.add(InlineKeyboardButton("✏️ Изменить в расписании", callback_data="edit:plan"))  # фоллбек на общее меню
 
             if plan_info and plan_info.get('type') == 'home' and not watched and has_sources:
-                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{int(kp_id)}"))
         else:
             # Нет плана → всегда показываем кнопку "Запланировать просмотр"
             logger.info(f"[BUTTONS] Нет плана → добавляем 'Запланировать просмотр'")
             
             if film_id is None:
-                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
-                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{int(kp_id)}"))
+                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{int(kp_id)}"))
             else:
                 # Фильм в базе, но без плана — только "Запланировать"
-                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{int(kp_id)}"))
 
             # Онлайн-кнопка отдельно, только если условия
             if not watched and has_sources:
-                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{int(kp_id)}"))
 
         # Кнопка удаления — если фильм в базе
         if film_id:
-            markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
+            markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{int(kp_id)}"))
             
         # Добавляем кнопки "Интересные факты" и "Оценить" всегда (для фильмов в базе и не в базе)
         logger.info(f"[SHOW FILM INFO] Добавление кнопок оценок для film_id={film_id}...")
@@ -579,16 +579,16 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             
             if not facts_and_rate_added:
                 markup.row(
-                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-                    InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}")
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{int(kp_id)}"),
+                    InlineKeyboardButton(rating_text, callback_data=f"rate_film:{int(kp_id)}")
                 )
                 facts_and_rate_added = True
         else:
             # Фильм не в базе - добавляем кнопки "Интересные факты" и "Оценить"
             if not facts_and_rate_added:
                 markup.row(
-                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-                    InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{int(kp_id)}"),
+                    InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{int(kp_id)}")
                 )
                 facts_and_rate_added = True
         logger.info(f"[SHOW FILM INFO] Кнопки оценок добавлены, facts_and_rate_added={facts_and_rate_added}")
@@ -604,9 +604,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
 
             # Отметка серий
             if has_access:
-                markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{int(kp_id)}"))
             else:
-                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
+                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{int(kp_id)}"))
 
             # Подписка/отписка — ТОЛЬКО внутри if is_series
             is_subscribed = False
@@ -636,11 +636,11 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
 
             if has_access:
                 if is_subscribed:
-                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{int(kp_id)}"))
                 else:
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{int(kp_id)}"))
             else:
-                markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+                markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{int(kp_id)}"))
 
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
@@ -3832,7 +3832,7 @@ def register_series_handlers(bot_param):
                 markup.add(InlineKeyboardButton("🗑️ Удалить из расписания", callback_data=f"remove_from_calendar:{plan_id}"))
             elif kp_id:
                 # Если это фильм, добавляем кнопку "📖 Перейти к описанию"
-                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
+                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{int(kp_id)}"))
             
             if file_id:
                 # Если есть file_id, значит пользователь хочет добавить билеты к этому сеансу

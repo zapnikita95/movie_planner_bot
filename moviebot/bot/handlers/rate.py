@@ -158,7 +158,7 @@ def register_rate_handlers(bot):
             button_text = f"{title} ({year})"
             if len(button_text) > 50:
                 button_text = button_text[:47] + "..."
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"rate_from_list:{kp_id}"))
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"rate_from_list:{int(kp_id)}"))
         
         text += "\n<i>Нажмите на фильм, чтобы открыть его описание и оценить</i>"
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
@@ -411,7 +411,7 @@ def handle_rating_internal(message, rating):
                     # Кнопка "Вернуться к описанию"
                     markup = InlineKeyboardMarkup()
                     if kp_id:
-                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{kp_id}"))
+                        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{int(kp_id)}"))
                     
                     reply_msg = bot.reply_to(
                         message,

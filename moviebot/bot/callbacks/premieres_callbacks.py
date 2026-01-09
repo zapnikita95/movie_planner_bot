@@ -392,9 +392,9 @@ def premiere_detail_handler(call):
         
         # Кнопки добавить / удалить
         if in_database:
-            markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
+            markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{int(kp_id)}"))
         else:
-            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{int(kp_id)}"))
         
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{period}"))
         
@@ -759,7 +759,7 @@ def premiere_notify_handler(call):
         confirm_text += f"Если это ошибка, нажмите кнопку ниже для отмены."
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔗 Перейти к описанию", callback_data=f"premiere_description:{kp_id}"))
+        markup.add(InlineKeyboardButton("🔗 Перейти к описанию", callback_data=f"premiere_description:{int(kp_id)}"))
         markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"premiere_cancel:{kp_id}:{plan_id}"))
         
         bot.send_message(chat_id, confirm_text, parse_mode='HTML', reply_markup=markup)

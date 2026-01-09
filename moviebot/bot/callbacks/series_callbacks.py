@@ -255,9 +255,9 @@ def register_series_callbacks(bot):
                         else:
                             rating_text = "💬 Оценить"
                     
-                    markup.add(InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}"))
+                    markup.add(InlineKeyboardButton(rating_text, callback_data=f"rate_film:{int(kp_id)}"))
                 
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{kp_id}"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{int(kp_id)}"))
                 
                 message_thread_id = getattr(call.message, 'message_thread_id', None)
                 
@@ -520,7 +520,7 @@ def register_series_callbacks(bot):
                                 # Заменяем на кнопку отписки
                                 new_row.append(InlineKeyboardButton(
                                     "🔕 Убрать подписку на новые серии",
-                                    callback_data=f"series_unsubscribe:{kp_id}"
+                                    callback_data=f"series_unsubscribe:{int(kp_id)}"
                                 ))
                             else:
                                 # Копируем остальные кнопки как есть
@@ -531,7 +531,7 @@ def register_series_callbacks(bot):
                     # Если клавиатуры нет, создаем только кнопку подписки
                     new_markup.add(InlineKeyboardButton(
                         "🔕 Убрать подписку на новые серии",
-                        callback_data=f"series_unsubscribe:{kp_id}"
+                        callback_data=f"series_unsubscribe:{int(kp_id)}"
                     ))
                 
                 # Обновляем текст и клавиатуру
@@ -679,7 +679,7 @@ def register_series_callbacks(bot):
                                 # Заменяем на кнопку подписки
                                 new_row.append(InlineKeyboardButton(
                                     "🔔 Подписаться на новые серии",
-                                    callback_data=f"series_subscribe:{kp_id}"
+                                    callback_data=f"series_subscribe:{int(kp_id)}"
                                 ))
                             else:
                                 # Копируем остальные кнопки как есть
@@ -690,7 +690,7 @@ def register_series_callbacks(bot):
                     # Если клавиатуры нет, создаем только кнопку подписки
                     new_markup.add(InlineKeyboardButton(
                         "🔔 Подписаться на новые серии",
-                        callback_data=f"series_subscribe:{kp_id}"
+                        callback_data=f"series_subscribe:{int(kp_id)}"
                     ))
                 
                 # Обновляем текст и клавиатуру
