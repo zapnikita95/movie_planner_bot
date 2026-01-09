@@ -2250,10 +2250,114 @@ def cancel_add_emoji_callback(call):
     except Exception as e:
         logger.error(f"[CANCEL ADD EMOJI] Ошибка: {e}", exc_info=True)
 
+def is_random_instruction_reply(message):
+    """Реплай на инструкцию рандома 'Что дальше?'"""
+    if not message.reply_to_message:
+        return False
+    reply_id = message.reply_to_message.message_id
+    if reply_id not in bot_messages:
+        return False
+    link = bot_messages.get(reply_id)
+    if not link or 'kinopoisk.ru/film/' not in link:
+        return False
+    text = (message.reply_to_message.text or "").lower()
+    if "что дальше?" not in text:
+        return False
+    if not message.text or message.text.startswith('/'):
+        return False
+    return True
 
-def register_text_message_handlers(bot):
-    """Регистрирует обработчики текстовых сообщений"""
-    # Обработчики уже зарегистрированы через декораторы при импорте модуля
-    # Эта функция нужна только для явного вызова в commands.py
-    logger.info("✅ Обработчики текстовых сообщений зарегистрированы (декораторы выполнены при импорте)")
+def is_random_film_reply(message):
+    if not message.reply_to_message:
+        return False
+    reply_id = message.reply_to_message.message_id
+    if reply_id not in bot_messages:
+        return False
+    link = bot_messages.get(reply_id)
+    if not link or 'kinopoisk.ru/film/' not in link:
+        return False
+    if not message.text or message.text.startswith('/'):
+        return False
+    return True
+
+@bot.message_handler(func=is_random_film_reply)
+def handle_random_film_plan_reply(message):
+    reply_id = message.reply_to_message.message_id
+    link = bot_messages.get(reply_id)
+    if not link:
+        bot.reply_to(message, "Ссылка потерялась :(")
+        return
+
+    text = message.text.strip().lower()
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    # Определяем plan_type по тексту
+    plan_type = 'home' if 'дома' in text else 'cinema' if 'кино' in text else None
+    if not plan_type:
+        bot.reply_to(message, "Не понял место: напиши 'дома' или 'в кино'")
+        return
+
+    # Убираем место из текста, оставляем дату/время
+    day_or_date = text.replace('дома', '').replace('в кино', '').replace('кино', '').strip()
+    if not day_or_date:
+        day_or_date = None  # если только "дома" — без даты
+
+    logger.info(f"[RANDOM FILM REPLY] Планирование: {plan_type}, дата='{day_or_date}', link={link}")
+
+    from moviebot.bot.handlers.plan import process_plan
+
+    try:
+        process_plan(bot, user_id, chat_id, link, plan_type, day_or_date)
+    except Exception as e:
+        logger.error(f"[RANDOM FILM REPLY] Ошибка process_plan: {e}")
+        bot.reply_to(message, "Не смог добавить в план :(")
+
+# ======== ОТВЕТЫ НА РАНДОМ И НА ИНСТРУКЦИЮ К РАНДОМУ ========
+def is_random_instruction_reply(message):
+    if not message.reply_to_message:
+        return False
+    reply_id = message.reply_to_message.message_id
+    if reply_id not in bot_messages:
+        return False
+    link = bot_messages.get(reply_id)
+    if not link or 'kinopoisk.ru/film/' not in link:
+        return False
+    reply_text = (message.reply_to_message.text or "").lower()
+    if "что дальше?" not in reply_text:
+        return False
+    if not message.text or message.text.startswith('/'):
+        return False
+    return True
+
+@bot.message_handler(func=is_random_instruction_reply)
+def handle_random_instruction_plan_reply(message):
+    reply_id = message.reply_to_message.message_id
+    link = bot_messages.get(reply_id)
+    if not link:
+        bot.reply_to(message, "Ссылка потерялась :(")
+        return
+
+    text = message.text.strip().lower()
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+
+    plan_type = 'home' if 'дома' in text else 'cinema' if 'кино' in text else None
+    if not plan_type:
+        bot.reply_to(message, "Не понял место: напиши 'дома' или 'в кино'")
+        return
+
+    day_or_date = text.replace('дома', '').replace('в кино', '').replace('кино', '').strip()
+    if not day_or_date:
+        day_or_date = None
+
+    logger.info(f"[RANDOM INSTR REPLY] Планирование: {plan_type}, дата='{day_or_date}', link={link}")
+
+    from moviebot.bot.handlers.plan import process_plan
+
+    try:
+        process_plan(bot, user_id, chat_id, link, plan_type, day_or_date)
+    except Exception as e:
+        logger.error(f"[RANDOM INSTR REPLY] Ошибка process_plan: {e}")
+        bot.reply_to(message, "Не смог добавить в план :(")
 
