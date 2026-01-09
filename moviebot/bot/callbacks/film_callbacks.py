@@ -8,7 +8,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 from moviebot.api.kinopoisk_api import get_facts
 from moviebot.api.kinopoisk_api import get_external_sources  # Добавил это для фикса NameError
-
+from psycopg2.extras import RealDictCursor
 from moviebot.states import user_plan_state
 
 logger = logging.getLogger(__name__)
@@ -543,47 +543,111 @@ def handle_plan_type(call):
             bot.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
         except Exception as e:
             logger.warning(f"[CALLBACK] Не удалось ответить на callback: {e}")
-
+            
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
 def show_film_description_callback(call):
     """Обработчик кнопки '◀️ Вернуться к описанию' - показывает описание фильма из БД без API запроса"""
     logger.info("=" * 80)
     logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] ===== START: callback_id={call.id}, callback_data={call.data}")
+
     try:
+        # Отвечаем на callback сразу (чтобы убрать крутилку)
+        bot.answer_callback_query(call.id, text="⏳ Загружаю описание...")
+
+        # Парсим kp_id и сразу приводим к int
+        kp_id_str = call.data.split(":")[1]
         try:
-            try:
-                bot.answer_callback_query(call.id, text="⏳ Загружаю описание...")
-            except Exception as e:
-                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-        except Exception as e:
-            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-        logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] answer_callback_query вызван, callback_id={call.id}")
-        
-        kp_id = call.data.split(":")[1]
+            kp_id = int(kp_id_str)
+            logger.info(f"[SHOW FILM DESCRIPTION] kp_id успешно приведён к int: {kp_id}")
+        except ValueError:
+            logger.error(f"[SHOW FILM DESCRIPTION] Некорректный kp_id в callback: {kp_id_str}")
+            bot.answer_callback_query(call.id, "❌ Ошибка с ID фильма", show_alert=True)
+            return
+
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         message_thread_id = getattr(call.message, 'message_thread_id', None)
-        
-        logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
-        
-        # Получаем информацию о фильме из БД (без API запроса)
+
+        logger.info(f"[SHOW FILM DESCRIPTION] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
+
+        # Получаем информацию о фильме из БД
         with db_lock:
             cursor.execute('''
                 SELECT id, title, watched, link, year, genres, description, director, actors, is_series
-                FROM movies WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, str(str(kp_id))))
+                FROM movies 
+                WHERE chat_id = %s AND kp_id = %s
+            ''', (chat_id, str(kp_id)))  # kp_id в БД как text → str(kp_id)
             row = cursor.fetchone()
-        
+
         if not row:
-            logger.error(f"[SHOW FILM DESCRIPTION FROM RATE] Фильм не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
-            try:
-                try:
-                    bot.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
-                except Exception as e:
-                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-            except Exception as e:
-                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            logger.warning(f"[SHOW FILM DESCRIPTION] Фильм не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
+            bot.send_message(chat_id, "❌ Фильм не найден в твоей базе. Попробуй добавить заново.")
             return
+
+        # row — это tuple, преобразуем в dict для удобства
+        film_info = {
+            'id': row[0],
+            'title': row[1],
+            'watched': row[2],
+            'link': row[3],
+            'year': row[4],
+            'genres': row[5],
+            'description': row[6],
+            'director': row[7],
+            'actors': row[8],
+            'is_series': bool(row[9])
+        }
+
+        # Формируем текст описания (аналогично show_film_info_with_buttons)
+        type_emoji = "📺" if film_info['is_series'] else "🎬"
+        text = f"{type_emoji} <b>{film_info['title']}</b> ({film_info['year'] or '—'})\n\n"
+
+        if film_info['director']:
+            text += f"<i>Режиссёр:</i> {film_info['director']}\n"
+        if film_info['genres']:
+            text += f"<i>Жанры:</i> {film_info['genres']}\n"
+        if film_info['actors']:
+            text += f"<i>В ролях:</i> {film_info['actors']}\n"
+        if film_info['description']:
+            text += f"\n<i>Кратко:</i> {film_info['description']}\n"
+
+        text += f"\n<a href='{film_info['link']}'>Кинопоиск</a>"
+
+        if film_info['watched']:
+            text += "\n\n✅ <b>Просмотрено</b>"
+
+        # Кнопки — минимальные, можно добавить больше позже
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(InlineKeyboardButton("🔙 Назад к карточке", callback_data=f"back_to_film:{kp_id}"))
+        # Если нужно — добавь другие кнопки
+
+        # Отправляем или редактируем сообщение
+        if call.message:
+            bot.edit_message_text(
+                text,
+                chat_id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML',
+                disable_web_page_preview=False
+            )
+        else:
+            bot.send_message(
+                chat_id,
+                text,
+                reply_markup=markup,
+                parse_mode='HTML',
+                disable_web_page_preview=False
+            )
+
+        logger.info(f"[SHOW FILM DESCRIPTION] Описание успешно отправлено для kp_id={kp_id}")
+
+    except Exception as e:
+        logger.error(f"[SHOW FILM DESCRIPTION] Критическая ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка загрузки описания", show_alert=True)
+        except:
+            pass  # если callback уже старый
         
         # Извлекаем данные
         if isinstance(row, dict):
