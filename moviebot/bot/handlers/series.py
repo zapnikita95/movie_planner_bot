@@ -4788,46 +4788,55 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 facts_and_rate_added = True
         logger.info(f"[SHOW FILM INFO] Кнопки оценок добавлены, facts_and_rate_added={facts_and_rate_added}")
         
-        # === КНОПКИ ДЛЯ СЕРИАЛОВ (единая логика для всех случаев) ===
+        # === КНОПКИ ДЛЯ СЕРИАЛОВ ===
         logger.info(f"[SHOW FILM INFO] Обработка кнопок сериала: is_series={is_series}, user_id={user_id}, film_id={film_id}")
-        if is_series and user_id:
-            has_access = has_notifications_access(chat_id, user_id)
-            logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям: has_access={has_access}")
 
-            # 1. Кнопка отметки серий — всегда показываем, если есть доступ
+        if is_series:
+            # Проверяем доступ — функция теперь умеет работать с user_id=None
+            has_access = has_notifications_access(chat_id, user_id)
+            logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям (группа/личка): has_access={has_access}")
+
+            # Отметка серий
             if has_access:
                 markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
 
-            # 2. Кнопка подписки/отписки — всегда показываем, если есть доступ
+        # Подписка/отписка
             is_subscribed = False
-            if film_id:  # Проверяем подписку только если в базе
+            if film_id:
                 try:
                     lock_acquired = db_lock.acquire(timeout=3.0)
                     if lock_acquired:
                         try:
+                            # В группе подписка привязана к chat_id, user_id=NULL
+                            query_user = user_id if user_id is not None else None
                             cursor.execute(
-                                'SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s LIMIT 1',
-                                (chat_id, film_id, user_id)
+                                """
+                                SELECT subscribed 
+                                FROM series_subscriptions 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                                LIMIT 1
+                                """,
+                                (chat_id, film_id, query_user)
                             )
                             sub_row = cursor.fetchone()
                             if sub_row:
-                                is_subscribed = sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0]
+                                is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
                         finally:
                             db_lock.release()
                 except Exception as e:
                     logger.warning(f"[SHOW FILM INFO] Ошибка проверки подписки: {e}")
 
             if has_access:
-                if is_subscribed:
-                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                    if is_subscribed:
+                        markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
                 else:
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
 
-        logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
+            logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
         # Проверяем длину текста перед отправкой
         logger.info(f"[SHOW FILM INFO] Текст сформирован, длина={len(text)}, message_id={message_id}")
