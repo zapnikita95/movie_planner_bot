@@ -356,121 +356,26 @@ logger.info("=" * 80)
 # ============================================================================
 
 if __name__ == "__main__":
-    logger.info("=== ЗАПУСК СКРИПТА ===")
+    import os
+    import logging
+    import sys
 
-    PORT = os.getenv('PORT')
-    IS_RAILWAY = PORT is not None and PORT.strip() != ''
-    USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
-    IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False').lower() == 'true'
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    logger.info("=== МИНИМАЛЬНЫЙ ТЕСТОВЫЙ ЗАПУСК ДЛЯ RAILWAY ===")
 
-    # На Railway почти всегда нужен Flask → создаём его один раз
-    from moviebot.web.web_app import create_web_app
+    from flask import Flask
 
-    # Защита: создаём app только если его ещё нет
-    if 'app' not in globals():
-        app = create_web_app(bot)
-        logger.info("Flask app создан")
-    else:
-        logger.warning("Попытка повторного создания app — пропускаем")
+    app = Flask(__name__)
 
-    # ========================================================================
-    # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Фоновая загрузка IMDb баз и эмбеддингов
-    # ========================================================================
-    # Загружаем ПОСЛЕ успешного деплоя, чтобы не перегрузить память при старте
-    # Запускаем в отдельном потоке, чтобы не блокировать Flask
-    # ========================================================================
-    def load_databases_in_background():
-        """Загружает IMDb базы и строит эмбеддинги в фоне после деплоя"""
-        import time
-        import threading
-        
-        # Ждем 10 секунд после старта, чтобы убедиться, что деплой успешен
-        logger.info("[BACKGROUND] Ожидание 10 секунд перед загрузкой баз...")
-        time.sleep(10)
-        
-        try:
-            logger.info("[BACKGROUND] ===== НАЧАЛО ЗАГРУЗКИ IMDb БАЗ И ЭМБЕДДИНГОВ =====")
-            
-            # 1. Загружаем IMDb базу — ВРЕМЕННО ОТКЛЮЧЕНО для деплоя
-            # from moviebot.services.shazam_service import build_imdb_database
-            logger.info("[BACKGROUND] Шаг 1: Загрузка IMDb базы — пропущена (временно отключено)")
-            # build_imdb_database()
-            logger.info("[BACKGROUND] ✅ IMDb база НЕ загружалась (пропуск)")
-            
-            # 2. Строим эмбеддинги (TMDB индекс)
-            from moviebot.services.shazam_service import build_tmdb_index
-            logger.info("[BACKGROUND] Шаг 2: Построение эмбеддингов (TMDB индекс)...")
-            build_tmdb_index()
-            logger.info("[BACKGROUND] ✅ Эмбеддинги построены")
-            
-            logger.info("[BACKGROUND] ===== ЗАГРУЗКА БАЗ И ЭМБЕДДИНГОВ ЗАВЕРШЕНА =====")
-            
-        except Exception as e:
-            logger.error(f"[BACKGROUND] ❌ Ошибка при загрузке баз: {e}", exc_info=True)
-            logger.warning("[BACKGROUND] Будет использована ленивая загрузка при первом использовании")
-            # НЕ поднимаем исключение - это не критично для работы бота
-            # Бот продолжит работать, базы загрузятся при первом использовании
-    
-    # ========================================================================
-    # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Запуск фоновой задачи загрузки баз
-    # ========================================================================
-    # Запускаем ТОЛЬКО на Railway/Production, чтобы не перегрузить память при старте
-    # Задача выполняется в отдельном daemon-потоке и не блокирует Flask
-    # Если загрузка не удастся, будет использована ленивая загрузка при первом использовании
-    # ========================================================================
-    if IS_RAILWAY or IS_PRODUCTION:
-        import threading
-        background_thread = threading.Thread(target=load_databases_in_background, daemon=True)
-        background_thread.start()
-        logger.info("[MAIN] ✅ Фоновая задача загрузки баз запущена (IMDb + эмбеддинги)")
+    @app.route('/health')
+    def health():
+        return "OK - test mode", 200
 
-    if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
-        logger.info("Railway/Production/Webhook режим")
+    @app.route('/')
+    def root():
+        return "Bot alive (minimal test mode)"
 
-        # Пытаемся установить webhook
-        WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-        if not WEBHOOK_URL:
-            railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN') or os.getenv('RAILWAY_STATIC_URL')
-            if railway_domain:
-                WEBHOOK_URL = f"https://{railway_domain.rstrip('/')}"
-            else:
-                logger.warning("Не удалось определить WEBHOOK_URL — webhook не будет установлен")
-                WEBHOOK_URL = None
-
-        if USE_WEBHOOK and WEBHOOK_URL:
-            try:
-                bot.remove_webhook()
-                webhook_path = "/webhook"
-                full_url = f"{WEBHOOK_URL}{webhook_path}"
-                bot.set_webhook(url=full_url)
-                logger.info(f"Webhook установлен → {full_url}")
-            except Exception as e:
-                logger.error("Ошибка установки webhook", exc_info=True)
-                # НЕ выходим — Flask всё равно нужен
-        else:
-            logger.info("Webhook НЕ используется (или URL не найден) → polling в фоне")
-
-            def run_polling():
-                try:
-                    logger.info("Polling запущен в фоновом потоке")
-                    bot.infinity_polling(none_stop=True, interval=0, timeout=20)
-                except Exception as e:
-                    logger.critical("Polling упал", exc_info=True)
-
-            import threading
-            polling_thread = threading.Thread(target=run_polling, daemon=True)
-            polling_thread.start()
-
-        # Flask в главном потоке — обязателен для Railway health checks и webhook
-        port = int(PORT or 8080)
-        logger.info(f"Запуск Flask на порту {port}")
-        app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
-
-    else:
-        # Локальный запуск (почти никогда не используется на Railway)
-        logger.info("Локальный режим — чистый polling")
-        try:
-            bot.remove_webhook()
-        except:
-            pass
-        bot.infinity_polling(none_stop=True, interval=0, timeout=20)
+    PORT = int(os.getenv('PORT', 8080))
+    logger.info(f"Запускаю тестовый Flask на 0.0.0.0:{PORT}")
+    app.run(host="0.0.0.0", port=PORT, threaded=True, debug=False)
