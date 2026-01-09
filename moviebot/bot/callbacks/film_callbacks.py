@@ -248,19 +248,20 @@ def plan_from_added_callback(call):
         
         # 1. Пробуем взять из базы (самое быстрое)
         try:
-            conn = get_db_connection()  # берём свежее каждый раз
-            cursor = conn.cursor(cursor_factory=RealDictCursor)  # если используешь RealDictCursor
-            cursor.execute(
+            conn_check = get_db_connection()                    # ← новое имя
+            cur_check = conn_check.cursor(cursor_factory=RealDictCursor)
+            cur_check.execute(
                 'SELECT title, link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s',
                 (chat_id, str(kp_id))
             )
-            row = cursor.fetchone()
+            row = cur_check.fetchone()
             if row:
                 title = row['title']
                 link = row['link']
                 is_series = bool(row['is_series'])
                 logger.info(f"[PLAN FROM ADDED] Название взято из базы: {title}")
-            cursor.close()  # обязательно закрываем
+            cur_check.close()
+            conn_check.close()
         except Exception as db_e:
             logger.error(f"[PLAN FROM ADDED] Ошибка чтения из БД: {db_e}", exc_info=True)
             title = None
@@ -293,23 +294,26 @@ def plan_from_added_callback(call):
         try:
             with db_semaphore:
                 with db_lock:
-                    cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                    row = cursor.fetchone()
+                    cur_add = conn.cursor(cursor_factory=RealDictCursor)  # ← новое имя + берём глобальный conn
+                    cur_add.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                    row = cur_add.fetchone()
                     if row:
                         film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row.get('id')
                     
                     if not film_id:
                         is_series_int = 1 if is_series else 0
-                        cursor.execute('''
+                        cur_add.execute('''
                             INSERT INTO movies (chat_id, kp_id, title, link, is_series, added_by, added_at, source)
                             VALUES (%s, %s, %s, %s, %s, %s, NOW(), 'plan_button')
                             ON CONFLICT (chat_id, kp_id) DO NOTHING
                             RETURNING id
                         ''', (chat_id, str(kp_id), title, link, is_series_int, user_id))
-                        result = cursor.fetchone()
+                        esult = cur_add.fetchone()
                         if result:
-                            film_id = result[0] if not isinstance(result, dict) else result.get('id')
+                            film_id = result.get('id') if isinstance(result, dict) else result[0]
                         conn.commit()
+                    
+                    cur_add.close()
         except Exception as db_e:
             conn.rollback()
             logger.error(f"[PLAN FROM ADDED] Ошибка БД при добавлении фильма: {db_e}", exc_info=True)
