@@ -363,7 +363,13 @@ if __name__ == "__main__":
 
     # На Railway почти всегда нужен Flask → создаём его один раз
     from moviebot.web.web_app import create_web_app
-    app = create_web_app(bot)  # ← ТОЛЬКО ОДИН РАЗ ВО ВСЁМ СКРИПТЕ
+
+    # Защита: создаём app только если его ещё нет
+    if 'app' not in globals():
+        app = create_web_app(bot)
+        logger.info("Flask app создан")
+    else:
+        logger.warning("Попытка повторного создания app — пропускаем")
 
     if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
         logger.info("Railway/Production/Webhook режим")
