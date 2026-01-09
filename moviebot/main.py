@@ -353,135 +353,65 @@ logger.info("=" * 80)
 # ИЗМЕНЕНИЯ В ЭТОМ БЛОКЕ МОГУТ СЛОМАТЬ ДЕПЛОЙ НА RAILWAY!
 # ============================================================================
 
-# === ЗАПУСК БОТА ===
 if __name__ == "__main__":
     logger.info("=== ЗАПУСК СКРИПТА ===")
 
-    # ========================================================================
-    # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Определение режима работы
-    # ========================================================================
-    # IS_RAILWAY определяется по наличию переменной PORT
-    # На Railway PORT всегда установлен автоматически
-    # НЕ МЕНЯТЬ логику определения IS_RAILWAY - это сломает деплой!
-    # ========================================================================
-    IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False').lower() == 'true'
-    USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
     PORT = os.getenv('PORT')
-    
-    # Определяем, находимся ли мы на Railway (если PORT установлен, значит на Railway)
     IS_RAILWAY = PORT is not None and PORT.strip() != ''
+    USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
+    IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False').lower() == 'true'
 
-    logger.info(f"[MAIN] IS_PRODUCTION: {IS_PRODUCTION}")
-    logger.info(f"[MAIN] USE_WEBHOOK: {USE_WEBHOOK}")
-    logger.info(f"[MAIN] IS_RAILWAY: {IS_RAILWAY}")
-    logger.info(f"[MAIN] PORT: {PORT}")
+    # На Railway почти всегда нужен Flask → создаём его один раз
+    from moviebot.web.web_app import create_web_app
+    app = create_web_app(bot)  # ← ТОЛЬКО ОДИН РАЗ ВО ВСЁМ СКРИПТЕ
 
-    # ========================================================================
-    # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: ЛОГИКА ЗАПУСКА ВЕБ-СЕРВЕРА И БОТА
-    # ========================================================================
-    # На Railway ОБЯЗАТЕЛЬНО должен работать Flask веб-сервер для health checks
-    # Даже если используется polling, веб-сервер должен быть запущен
-    # ========================================================================
-    
-    if IS_RAILWAY or USE_WEBHOOK or IS_PRODUCTION:
-        logger.info("=== ЗАПУСК В ПРОДАКШЕН-РЕЖИМЕ (RAILWAY/PRODUCTION) ===")
+    if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
+        logger.info("Railway/Production/Webhook режим")
 
-        # Определяем WEBHOOK_URL
+        # Пытаемся установить webhook
         WEBHOOK_URL = os.getenv('WEBHOOK_URL')
-        if not WEBHOOK_URL or not WEBHOOK_URL.strip():
+        if not WEBHOOK_URL:
             railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN') or os.getenv('RAILWAY_STATIC_URL')
-            if railway_domain and railway_domain.strip():
-                WEBHOOK_URL = f"https://{railway_domain.strip()}"
-                logger.info(f"[MAIN] Автоопределён WEBHOOK_URL из Railway: {WEBHOOK_URL}")
+            if railway_domain:
+                WEBHOOK_URL = f"https://{railway_domain.rstrip('/')}"
+            else:
+                logger.warning("Не удалось определить WEBHOOK_URL — webhook не будет установлен")
+                WEBHOOK_URL = None
 
-        # Если используем webhook - устанавливаем его
-        if USE_WEBHOOK or IS_PRODUCTION:
-            if not WEBHOOK_URL or not WEBHOOK_URL.strip():
-                logger.critical("❌ WEBHOOK_URL не задан и не определён автоматически!")
-                raise ValueError("WEBHOOK_URL required when USE_WEBHOOK or IS_PRODUCTION is true")
-
-            # Удаляем старый webhook
+        if USE_WEBHOOK and WEBHOOK_URL:
             try:
                 bot.remove_webhook()
-                logger.info("✅ Старый webhook удалён")
+                webhook_path = "/webhook"
+                full_url = f"{WEBHOOK_URL}{webhook_path}"
+                bot.set_webhook(url=full_url)
+                logger.info(f"Webhook установлен → {full_url}")
             except Exception as e:
-                logger.warning(f"⚠️ Не удалось удалить старый webhook: {e}")
-
-            # Устанавливаем новый
-            webhook_url = f"{WEBHOOK_URL.rstrip('/')}/webhook"
-            try:
-                bot.set_webhook(url=webhook_url)
-                logger.info(f"✅ Webhook установлен: {webhook_url}")
-                logger.info("=== БОТ РАБОТАЕТ ПО WEBHOOK ===")
-            except Exception as e:
-                logger.critical(f"❌ Ошибка установки webhook: {e}", exc_info=True)
-                raise
-
-            # ================================================================
-            # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Запуск Flask ПОСЛЕ настройки webhook
-            # ================================================================
-            # Flask должен быть запущен с правильным ботом через create_web_app
-            # ================================================================            
-            port = int(PORT if PORT else 8080)
-            logger.info(f"🚀 Запуск Flask на порту {port} для webhook и health checks")
-            logger.info(f"🌐 Публичный URL: {WEBHOOK_URL}")
-            
-            # Запускаем Flask в главном потоке (блокирующий вызов)
-            app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
-
+                logger.error("Ошибка установки webhook", exc_info=True)
+                # НЕ выходим — Flask всё равно нужен
         else:
-            # На Railway без webhook - используем polling + Flask в отдельных потоках
-            logger.info("=== БОТ РАБОТАЕТ В РЕЖИМЕ POLLING + FLASK ===")
-            try:
-                bot.remove_webhook()
-                logger.info("✅ Webhook удалён (используем polling)")
-            except Exception as e:
-                logger.warning(f"⚠️ Не удалось удалить webhook: {e}")
+            logger.info("Webhook НЕ используется (или URL не найден) → polling в фоне")
 
-            # ================================================================
-            # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Запуск Flask и polling в разных потоках
-            # ================================================================
-            # Flask нужен для health checks Railway
-            # Polling работает в отдельном потоке, чтобы не блокировать Flask
-            # ================================================================
-            from moviebot.web.web_app import create_web_app
-            import threading
-            
-            # Создаем Flask app с ботом
-            app = create_web_app(bot)
-            
-            # Запускаем polling в отдельном потоке
             def run_polling():
                 try:
-                    logger.info("🚀 Запуск polling в отдельном потоке...")
+                    logger.info("Polling запущен в фоновом потоке")
                     bot.infinity_polling(none_stop=True, interval=0, timeout=20)
                 except Exception as e:
-                    logger.critical(f"❌ Критическая ошибка в polling потоке: {e}", exc_info=True)
-            
+                    logger.critical("Polling упал", exc_info=True)
+
+            import threading
             polling_thread = threading.Thread(target=run_polling, daemon=True)
             polling_thread.start()
-            logger.info("✅ Polling запущен в фоновом потоке")
-            
-            # Запускаем Flask в главном потоке (для Railway health checks)
-            port = int(PORT if PORT else 8080)
-            logger.info(f"🚀 Запуск Flask на порту {port} для health checks")
-            logger.info("=== ВЕБ-СЕРВЕР ЗАПУЩЕН ДЛЯ RAILWAY HEALTH CHECKS ===")
-            
-            app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
-    else:
-        # ----------------- ЛОКАЛЬНЫЙ ЗАПУСК: ТОЛЬКО POLLING -----------------
-        logger.info("=== ЛОКАЛЬНЫЙ ЗАПУСК В РЕЖИМЕ POLLING ===")
-        logger.info("🌐 Webhook отключён — используем polling для разработки")
 
+        # Flask в главном потоке — обязателен для Railway health checks и webhook
+        port = int(PORT or 8080)
+        logger.info(f"Запуск Flask на порту {port}")
+        app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
+
+    else:
+        # Локальный запуск (почти никогда не используется на Railway)
+        logger.info("Локальный режим — чистый polling")
         try:
             bot.remove_webhook()
-            logger.info("Webhook удалён (переходим на polling)")
-        except Exception as e:
-            logger.warning(f"Не удалось удалить webhook: {e}")
-
-        setup_bot_commands(bot)
-
-        logger.info("🚀 Запуск polling...")
-        logger.info("Бот готов — пиши ему в Telegram!")
-
+        except:
+            pass
         bot.infinity_polling(none_stop=True, interval=0, timeout=20)
