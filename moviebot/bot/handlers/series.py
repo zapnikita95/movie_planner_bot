@@ -4682,15 +4682,19 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             if plan_info and plan_info.get('type') == 'home' and not watched:
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
         else:
-            # Фильм НЕ в базе — добавляем "Добавить в базу" + "Запланировать" (добавит автоматически)
-            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
-            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-            if not watched:
-                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
-            
-            # Добавляем кнопку "Выбрать онлайн-кинотеатр" только для непросмотренных фильмов
-            if not watched:
-                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+            # Фильм НЕ запланирован
+            if film_id is None:
+                # Фильм НЕ в базе — добавляем "Добавить в базу" + "Запланировать" (добавит автоматически)
+                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
+                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+                if not watched:
+                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+            else:
+                # Фильм в базе, но не запланирован — добавляем "Запланировать" и "Выбрать онлайн-кинотеатр"
+                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+                if not watched:
+                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+        
         # Кнопка "Удалить из базы" — только если фильм в базе (film_id есть)
         if film_id:
             markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
@@ -4777,37 +4781,37 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             has_access = has_notifications_access(chat_id, user_id)
             logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям: has_access={has_access}")
 
+            # 1. Кнопка отметки серий — всегда показываем, если есть доступ
             if has_access:
-                # Кнопка отметки серий (всегда активна при доступе)
                 markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
 
-                # Проверяем подписку на новые серии
-                is_subscribed = False
-                if film_id:  # Только если сериал в базе
-                    try:
-                        lock_acquired = db_lock.acquire(timeout=3.0)
-                        if lock_acquired:
-                            try:
-                                cursor.execute(
-                                    'SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s LIMIT 1',
-                                    (chat_id, film_id, user_id)
-                                )
-                                sub_row = cursor.fetchone()
-                                if sub_row:
-                                    is_subscribed = sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0]
-                            finally:
-                                db_lock.release()
-                    except Exception as e:
-                        logger.warning(f"[SHOW FILM INFO] Ошибка проверки подписки: {e}")
+            # 2. Кнопка подписки/отписки — всегда показываем, если есть доступ
+            is_subscribed = False
+            if film_id:  # Проверяем подписку только если в базе
+                try:
+                    lock_acquired = db_lock.acquire(timeout=3.0)
+                    if lock_acquired:
+                        try:
+                            cursor.execute(
+                                'SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s LIMIT 1',
+                                (chat_id, film_id, user_id)
+                            )
+                            sub_row = cursor.fetchone()
+                            if sub_row:
+                                is_subscribed = sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0]
+                        finally:
+                            db_lock.release()
+                except Exception as e:
+                    logger.warning(f"[SHOW FILM INFO] Ошибка проверки подписки: {e}")
 
-                # Кнопка подписки/отписки
+            if has_access:
                 if is_subscribed:
                     markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
                 else:
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
             else:
-                # Нет доступа — заблокированные кнопки
-                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
                 markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
 
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
