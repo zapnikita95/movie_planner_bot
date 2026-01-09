@@ -32,7 +32,7 @@ from moviebot.database.db_connection import get_db_connection
 logger = logging.getLogger(__name__)
 
 conn = get_db_connection()
-cursor = get_db_cursor()
+cursor = conn.cursor()
 plans_tz = PLANS_TZ  # Для обратной совместимости
 
 # bot и scheduler будут установлены из main.py
