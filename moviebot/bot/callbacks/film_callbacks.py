@@ -855,7 +855,7 @@ def select_platform_callback(call):
     except Exception as e:
         logger.error(f"[SELECT PLATFORM] Ошибка: {e}", exc_info=True)
         bot.answer_callback_query(call.id, "Ошибка сохранения", show_alert=True)
-        
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_done:"))
 def streaming_done_callback(call):
     """Завершение выбора онлайн-кинотеатров"""
@@ -1164,7 +1164,6 @@ def delete_cancel(call):
     except:
         pass
 
-
 @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_delete:"))
 def confirm_remove_from_database(call):
     """Финальное удаление после подтверждения"""
@@ -1183,7 +1182,7 @@ def confirm_remove_from_database(call):
 
         with db_lock:
             # Получаем film_id и название
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
             film = cursor.fetchone()
 
             if not film:
@@ -1193,8 +1192,9 @@ def confirm_remove_from_database(call):
                 )
                 return
 
-            film_id = film[0] if isinstance(film, dict) else film[0]
-            title = film[1] if isinstance(film, dict) else film[1]
+            # Безопасное извлечение независимо от dict или tuple
+            film_id = film.get('id') if isinstance(film, dict) else film[0]
+            title = film.get('title') if isinstance(film, dict) else film[1]
 
             # Удаляем всё связанное
             cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
@@ -1217,7 +1217,7 @@ def confirm_remove_from_database(call):
             bot.edit_message_text("Произошла ошибка при удалении фильма.", chat_id, message_id)
         except:
             pass
-
+        
 @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_remove:"))
 def confirm_remove(call):
     try:

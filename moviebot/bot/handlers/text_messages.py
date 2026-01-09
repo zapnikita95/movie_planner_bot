@@ -1681,11 +1681,9 @@ def main_file_handler(message):
         state = user_plan_state[user_id]
         if state.get('step') == 3:
             logger.info(f"[MAIN FILE HANDLER] Игнорируем файл — пользователь на step=3 планирования (ввод даты)")
-            return  # Не обрабатываем файл, пусть текст уйдёт в handle_plan_datetime_reply
+            return
     
     logger.info(f"[MAIN FILE HANDLER] Получено фото/документ от {user_id}")
-    
-    user_id = message.from_user.id
     
     # Обработка билетов
     if user_id in user_ticket_state:
@@ -1705,10 +1703,12 @@ def main_file_handler(message):
                         del user_ticket_state[user_id]
                     return
                 
-                # Получаем file_id
                 file_id = message.photo[-1].file_id if message.photo else message.document.file_id
                 
-                # Сохраняем билет на мероприятие в БД (film_id = NULL)
+                # ФИКС: создаём conn и cursor
+                conn = get_db_connection()
+                cursor = get_db_cursor()
+                
                 with db_lock:
                     cursor.execute('''
                         INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id, ticket_file_id)
@@ -1717,10 +1717,8 @@ def main_file_handler(message):
                     conn.commit()
                 
                 logger.info(f"[EVENT TICKET] Билет на мероприятие сохранен: event_name={event_name}, chat_id={chat_id}, user_id={user_id}")
-                
                 bot.reply_to(message, f"✅ Билет на мероприятие <b>{event_name}</b> сохранён! 🎟️", parse_mode='HTML')
                 
-                # Очищаем состояние
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
                 return
@@ -1741,11 +1739,11 @@ def main_file_handler(message):
 
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
 
+            conn = get_db_connection()  # ФИКС: создаём в начале блока
+            cursor = get_db_cursor()    # ФИКС: создаём в начале блока
             import json
+            
             with db_lock:
-                cursor = get_db_cursor()
-                conn = get_db_connection()
-
                 cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))
                 ticket_row = cursor.fetchone()
                 existing_tickets = []
@@ -1780,38 +1778,13 @@ def main_file_handler(message):
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
-
                 state['step'] = 'add_more_tickets'
             else:
                 bot.reply_to(message, f"✅ Билет добавлен! (Всего: {total_tickets})")
 
             logger.info(f"[TICKET UPLOAD] Билет добавлен к plan_id={plan_id}, всего: {total_tickets}")
             return
-            # Определяем, был ли это первый билет
-            was_first = len(existing_tickets) == 1
-
-            if was_first:
-                # Первый билет — показываем кнопки
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("➕ Добавить ещё билет", callback_data=f"add_more_tickets:{plan_id}"))
-                markup.add(InlineKeyboardButton("⬅️ К списку мероприятий", callback_data="ticket_new"))
-
-                bot.reply_to(
-                    message,
-                    f"✅ Билет добавлен! (Всего: {len(existing_tickets)})\n\n"
-                    f"Можете добавить ещё или вернуться к списку.",
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-
-                # Переходим в режим ожидания дополнительных (чтобы не показывать кнопки снова)
-                state['step'] = 'add_more_tickets'
-            else:
-                # Не первый — просто подтверждаем
-                bot.reply_to(message, f"✅ Билет добавлен! (Всего: {len(existing_tickets)})")
-
-            return
-        
+                
         if step == 'waiting_ticket_file':
             # Пользователь выбрал сеанс и загружает билет
             plan_id = state.get('plan_id')
@@ -1819,6 +1792,9 @@ def main_file_handler(message):
                 file_id = message.photo[-1].file_id if message.photo else message.document.file_id
                 # Сохраняем билет в БД как массив
                 import json
+
+                conn = get_db_connection()   
+                cursor = get_db_cursor()    
                 with db_lock:
                     # Получаем существующие билеты
                     cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))
@@ -1865,6 +1841,9 @@ def main_file_handler(message):
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
             
             # Получаем существующие билеты и добавляем новый
+            conn = get_db_connection()   # ← добавь
+            cursor = get_db_cursor()     # ← добавь
+
             import json
             with db_lock:
                 cursor.execute("SELECT ticket_file_id FROM plans WHERE id = %s", (plan_id,))

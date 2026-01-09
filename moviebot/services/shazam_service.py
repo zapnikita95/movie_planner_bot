@@ -39,17 +39,16 @@ DATA_DIR = BASE_DIR / 'data' / 'shazam'
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Локально — кэш в корне проекта, на Railway — /app/cache
-CACHE_DIR = Path('cache')  # относительный путь — создаст папку cache в текущей рабочей директории
+CACHE_DIR = Path('cache')
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
 # Настраиваем кэш для HuggingFace моделей
 os.environ['HF_HOME'] = str(CACHE_DIR / 'huggingface')
 os.environ['TRANSFORMERS_CACHE'] = str(CACHE_DIR / 'huggingface' / 'transformers')
 os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sentence_transformers')
 
-# Путь к TMDB датасету
-TMDB_PARQUET_PATH = CACHE_DIR / 'tmdb_movies.parquet'
+# Путь к TMDB файлу (теперь CSV, а не parquet)
+TMDB_CSV_PATH = CACHE_DIR / 'TMDB_movie_dataset_v11.csv'
 
 # Индексы и обработанные данные
 INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'
@@ -80,7 +79,7 @@ def get_translator():
                 "translation",
                 model="Helsinki-NLP/opus-mt-ru-en",
                 device=-1,
-                torch_dtype=torch.float32
+                dtype=torch.float32  # Исправил deprecated torch_dtype → dtype
             )
             test_result = _translator("тест", max_length=512)
             logger.info(f"Транслятор загружен успешно (тест: 'тест' → '{test_result[0]['translation_text']}')")
@@ -116,7 +115,6 @@ def get_whisper():
 
 
 def get_vosk():
-    """Ленивая загрузка модели Vosk для распознавания речи (fallback)"""
     global _vosk
     if _vosk is None:
         logger.info("Загрузка модели Vosk...")
@@ -126,7 +124,6 @@ def get_vosk():
             
             if not vosk_model_path.exists():
                 logger.warning(f"Модель Vosk не найдена по пути {vosk_model_path}")
-                logger.info("Скачайте модель с https://alphacephei.com/vosk/models и положите в data/shazam/")
                 _vosk = False
                 return _vosk
             
@@ -175,25 +172,21 @@ def transcribe_with_whisper(audio_path):
 
 
 def transcribe_with_vosk(audio_path):
-    """Распознает речь с помощью Vosk (fallback)"""
     vosk_recognizer = get_vosk()
     if not vosk_recognizer:
         return None
     
     try:
         data, sample_rate = sf.read(audio_path)
-        
         if len(data.shape) > 1:
             data = np.mean(data, axis=1)
-        
         if sample_rate != 16000:
             data = librosa.resample(data, orig_sr=sample_rate, target_sr=16000)
-        
         data_int16 = (data * 32768).astype(np.int16)
         
         text_parts = []
         chunk_size = 4000
-        recognizer = get_vosk()  # На всякий случай свежий
+        recognizer = get_vosk()
         
         for i in range(0, len(data_int16), chunk_size):
             chunk = data_int16[i:i+chunk_size].tobytes()
@@ -217,20 +210,15 @@ def transcribe_with_vosk(audio_path):
 
 
 def transcribe_voice(audio_path):
-    """Распознает речь из аудио файла (Whisper → Vosk)"""
     logger.info(f"[TRANSCRIBE] Начинаем распознавание: {audio_path}")
-    
-    # Сначала Whisper
     text = transcribe_with_whisper(audio_path)
     if text:
         return text
-    
     logger.info(f"[TRANSCRIBE] Whisper не распознал, пробуем Vosk...")
     text = transcribe_with_vosk(audio_path)
     if text:
         return text
-    
-    logger.warning(f"[TRANSCRIBE] Ни Whisper, ни Vosk не смогли распознать речь")
+    logger.warning(f"[TRANSCRIBE] Ни один метод не распознал речь")
     return None
 
 
@@ -266,15 +254,13 @@ def build_tmdb_index():
             logger.info(f"Загружен существующий индекс: {len(_movies_df)} фильмов")
             return _index, _movies_df
         except Exception as e:
-            logger.warning(f"Ошибка загрузки индекса: {e}, пересоздаем...")
-    
-    if not TMDB_PARQUET_PATH.exists():
-        logger.info("TMDB parquet не найден — скачиваем через Kaggle API...")
+            logger.warning(f"Ошибка загрузки старого индекса: {e}, пересоздаем...")
+
+    # Скачиваем датасет, если CSV нет
+    if not TMDB_CSV_PATH.exists():
+        logger.info("TMDB CSV не найден — скачиваем через Kaggle API...")
         try:
             import subprocess
-            import glob
-            import shutil
-            import os
             
             # Настройка kaggle.json
             kaggle_dir = Path("/root/.kaggle")
@@ -284,74 +270,42 @@ def build_tmdb_index():
                 f.write(f'{{"username":"{os.getenv("KAGGLE_USERNAME")}","key":"{os.getenv("KAGGLE_KEY")}"}}')
             os.chmod(kaggle_json, 0o600)
             
-            # Скачиваем и распаковываем
+            # Скачиваем и сразу распаковываем
             subprocess.check_call([
                 "kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies",
                 "-p", str(CACHE_DIR), "--unzip"
             ])
             
-            # ДЕБАГ: печатаем, что лежит в CACHE_DIR
-            logger.info(f"[DEBUG] Содержимое CACHE_DIR после распаковки: {os.listdir(CACHE_DIR)}")
-            for root, dirs, files in os.walk(CACHE_DIR):
-                logger.info(f"[DEBUG] Папка {root}: dirs={dirs}, files={files[:10]}")  # Первые 10 файлов
+            # После --unzip файл должен лежать прямо в CACHE_DIR
+            downloaded_files = list(CACHE_DIR.glob("TMDB_movie_dataset_v11.csv"))
+            if not downloaded_files:
+                raise Exception("CSV файл не найден после распаковки")
             
-            # Ищем parquet по имени (часто tmdb_movies.parquet или movies.parquet)
-            parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*.parquet"), recursive=True)
-            if not parquet_files:
-                # Fallback на csv, если parquet нет (иногда датасет меняется)
-                parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*movies*.csv"), recursive=True)
-                if not parquet_files:
-                    raise Exception("Ни parquet, ни csv не найден после распаковки")
-                logger.info("[DEBUG] Parquet не найден, используем CSV как fallback")
-            
-            # Берём самый большой файл
-            main_file = max(parquet_files, key=os.path.getsize)
-            logger.info(f"Найден главный файл базы: {main_file} (размер: {os.path.getsize(main_file)/1e6:.1f} MB)")
-            
-            # Копируем/перемещаем в наш путь
-            shutil.move(main_file, TMDB_PARQUET_PATH)
-            logger.info(f"База готова: {TMDB_PARQUET_PATH}")
+            # Если имя чуть отличается — переименуем для надёжности
+            actual_csv = downloaded_files[0]
+            if actual_csv != TMDB_CSV_PATH:
+                actual_csv.rename(TMDB_CSV_PATH)
+            logger.info(f"TMDB CSV готов: {TMDB_CSV_PATH}")
             
         except Exception as e:
             logger.error(f"Ошибка скачивания TMDB: {e}", exc_info=True)
-            return None, None
-    
-    
-    # Vosk модель (опционально, если используешь fallback)
-    vosk_model_dir = DATA_DIR / 'vosk-model-small-ru-0.22'
-    if not vosk_model_dir.exists():
-        logger.info("Vosk модель не найдена — скачиваем...")
-        try:
-            import requests
-            from io import BytesIO
-            from zipfile import ZipFile
-            
-            url = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
-            r = requests.get(url)
-            r.raise_for_status()
-            
-            with ZipFile(BytesIO(r.content)) as z:
-                z.extractall(DATA_DIR)
-            
-            logger.info(f"Vosk модель готова: {vosk_model_dir}")
-        except Exception as e:
-            logger.warning(f"Не удалось скачать Vosk: {e} — fallback не будет работать")
-            
-    logger.info("Загружаем TMDB датасет...")
-    df = pd.read_parquet(TMDB_PARQUET_PATH)
+            raise
+
+    logger.info("Загружаем TMDB датасет из CSV...")
+    df = pd.read_csv(TMDB_CSV_PATH)
     logger.info(f"Загружено {len(df)} записей")
-    
+
     df['year'] = pd.to_datetime(df['release_date'], errors='coerce').dt.year
     current_year = datetime.now().year
     df = df[(df['year'] >= current_year - 50) & (df['vote_count'] >= MIN_VOTE_COUNT)]
     df = df.dropna(subset=['overview', 'title'])
     df = df.sort_values('vote_count', ascending=False).head(MAX_MOVIES * 2)
-    
+
     df['genres_str'] = df['genres'].apply(lambda x: parse_json_list(x, 'name'))
     df['keywords_str'] = df['keywords'].apply(lambda x: parse_json_list(x, 'name', top_n=15))
     df['actors_str'] = df['cast'].apply(lambda x: parse_json_list(x, 'name', top_n=10))
     df['director_str'] = df['crew'].apply(lambda x: parse_json_list(x, 'name', top_n=3) if pd.notna(x) else '')
-    
+
     df['description'] = df.apply(
         lambda row: f"{row['title']} ({row['year']}) {row['genres_str']}. "
                     f"Plot: {row['overview']}. "
@@ -360,36 +314,35 @@ def build_tmdb_index():
                     f"Director: {row['director_str']}",
         axis=1
     )
-    
+
     df['imdb_id'] = df['imdb_id'].astype(str).str.replace('tt', '', regex=False)
     processed = df[['imdb_id', 'title', 'year', 'description']].copy()
     processed = processed.head(MAX_MOVIES)
-    
-    logger.info(f"Создаём индекс для {len(processed)} фильмов...")
-    
+
+    logger.info(f"Создаём эмбеддинги для {len(processed)} фильмов...")
     model = get_model()
     descriptions = processed['description'].tolist()
-    
+
     embeddings = []
     batch_size = 32
-    for i in tqdm(range(0, len(descriptions), batch_size), desc="Embeddings"):
+    for i in tqdm(range(0, len(descriptions), batch_size), desc="Генерация эмбеддингов"):
         batch = descriptions[i:i+batch_size]
         batch_emb = model.encode(batch, show_progress_bar=False)
         embeddings.extend(batch_emb)
-    
+
     embeddings = np.array(embeddings).astype('float32')
     dimension = embeddings.shape[1]
-    
+
     index = faiss.IndexFlatL2(dimension)
     index.add(embeddings)
-    
+
     faiss.write_index(index, str(INDEX_PATH))
     processed.to_csv(DATA_PATH, index=False)
-    
+
     _index = index
     _movies_df = processed
-    
-    logger.info(f"Индекс TMDB создан: {len(processed)} фильмов")
+
+    logger.info(f"Индекс TMDB успешно создан: {len(processed)} фильмов")
     return index, processed
 
 
@@ -419,7 +372,7 @@ def search_movies(query, top_k=5):
                 results.append({
                     'imdb_id': row['imdb_id'],
                     'title': row['title'],
-                    'year': row['year'] if pd.notna(row['year']) else None,
+                    'year': int(row['year']) if pd.notna(row['year']) else None,
                     'description': row['description'][:500]
                 })
         return results
