@@ -2,6 +2,7 @@
 Вспомогательные функции для проверки доступа к функциям
 """
 import logging
+logger = logging.getLogger(__name__)
 from moviebot.database.db_operations import (
     get_user_personal_subscriptions, 
     get_active_group_subscription_by_chat_id,
