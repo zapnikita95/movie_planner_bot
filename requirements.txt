@@ -9,7 +9,6 @@ gunicorn
 psycopg2-binary
 python-dotenv
 yookassa
-# Зависимости для КиноШазам
 sentence-transformers
 faiss-cpu
 pandas
@@ -21,8 +20,3 @@ tqdm
 sentencepiece
 sacremoses
 vosk
-sqlite3
-librosa
-soundfile
-openai-whisper
-kaggle
