@@ -4,13 +4,12 @@ Callback handlers для карточки фильма (add_to_database, plan_fr
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from psycopg2.extras import RealDictCursor
-from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 
+from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 from moviebot.api.kinopoisk_api import get_facts
+from moviebot.api.kinopoisk_api import get_external_sources  # Добавил это для фикса NameError
 
 from moviebot.states import user_plan_state
-
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
