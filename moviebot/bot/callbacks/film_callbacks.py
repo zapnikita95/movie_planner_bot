@@ -571,12 +571,13 @@ def show_film_description_callback(call):
         logger.info(f"[SHOW FILM DESCRIPTION] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
 
         # Получаем информацию о фильме из БД
+        # Получаем информацию о фильме из БД
         with db_lock:
             cursor.execute('''
                 SELECT id, title, watched, link, year, genres, description, director, actors, is_series
                 FROM movies 
                 WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, str(kp_id)))  # kp_id в БД как text → str(kp_id)
+            ''', (chat_id, str(kp_id)))
             row = cursor.fetchone()
 
         if not row:
@@ -584,7 +585,7 @@ def show_film_description_callback(call):
             bot.send_message(chat_id, "❌ Фильм не найден в твоей базе. Попробуй добавить заново.")
             return
 
-        # row — это tuple, преобразуем в dict для удобства
+        # row — tuple, преобразуем в dict для удобства (самый простой способ)
         film_info = {
             'id': row[0],
             'title': row[1],
@@ -598,7 +599,7 @@ def show_film_description_callback(call):
             'is_series': bool(row[9])
         }
 
-        # Формируем текст описания (аналогично show_film_info_with_buttons)
+        # Теперь используй film_info вместо row
         type_emoji = "📺" if film_info['is_series'] else "🎬"
         text = f"{type_emoji} <b>{film_info['title']}</b> ({film_info['year'] or '—'})\n\n"
 
@@ -616,10 +617,9 @@ def show_film_description_callback(call):
         if film_info['watched']:
             text += "\n\n✅ <b>Просмотрено</b>"
 
-        # Кнопки — минимальные, можно добавить больше позже
+        # Кнопки (добавь свои)
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(InlineKeyboardButton("🔙 Назад к карточке", callback_data=f"back_to_film:{int(kp_id)}"))
-        # Если нужно — добавь другие кнопки
 
         # Отправляем или редактируем сообщение
         if call.message:

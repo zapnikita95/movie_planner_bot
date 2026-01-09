@@ -119,11 +119,6 @@ def create_web_app(bot):
             return '', 200
 
         return '', 200
-
-    # Запуск приложения — критично для Railway
-    port = int(os.environ.get("PORT", 8080))  # Railway подставит свой PORT
-    logger.info(f"[WEB APP] Запуск на host=0.0.0.0, port={port}")
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
     
     def process_yookassa_notification(event_json, is_test=False):
         """Обрабатывает уведомление от ЮKassa (можно вызывать из webhook или теста)"""
@@ -1227,3 +1222,9 @@ def create_web_app(bot):
     # Без этого Railway не сможет запустить веб-сервер
     # ========================================================================
     return app
+
+# Запуск приложения (критично для Railway — запускаем здесь)
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 8080))  # Railway сам подставит PORT
+    logger.info(f"[WEB APP] Запуск Flask на host=0.0.0.0, port={port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
