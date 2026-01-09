@@ -1651,8 +1651,8 @@ def main_text_handler(message):
         if reply_msg_id in bot_messages:
             link = bot_messages.get(reply_msg_id)
             if link:
-                from moviebot.bot.handlers.series import handle_random_plan_reply_internal
-                handle_random_plan_reply_internal(message, link)
+                # Вместо старого вызова
+                bot.reply_to(message, "Используй кнопку «📅 Запланировать просмотр» под карточкой фильма — там дата, время, дома/в кино всё нормально парсится.")
                 return
     
     # Реплай на сообщение с ошибкой планирования
