@@ -3,11 +3,6 @@
 """
 import logging
 logger = logging.getLogger(__name__)
-from moviebot.database.db_operations import (
-    get_user_personal_subscriptions, 
-    get_active_group_subscription_by_chat_id,
-    get_active_subscription
-)
 
 
 def has_notifications_access(chat_id, user_id=None):
@@ -142,3 +137,23 @@ def has_recommendations_access(chat_id, user_id):
     
     return False
 
+def extract_film_info_from_existing(existing):
+    """
+    Безопасно извлекает film_id и watched из existing (tuple, dict или None)
+    Возвращает: (film_id: int|None, watched: bool)
+    """
+    if not existing:
+        return None, False
+
+    logger.debug(f"[EXTRACT EXISTING] Тип: {type(existing)}, значение: {existing}")
+
+    if isinstance(existing, dict):
+        return existing.get('id'), existing.get('watched', False)
+
+    if isinstance(existing, tuple):
+        film_id = existing[0] if len(existing) > 0 else None
+        watched = existing[2] if len(existing) > 2 else False
+        return film_id, watched
+
+    logger.warning(f"[EXTRACT EXISTING] Неизвестный тип existing: {type(existing)}")
+    return None, False
