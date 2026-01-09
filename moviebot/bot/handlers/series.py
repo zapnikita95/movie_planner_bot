@@ -2363,60 +2363,42 @@ def register_series_handlers(bot_param):
                         continue
                 
                 if filtered_similars:
-                    # Выбираем случайный из отфильтрованных похожих
                     selected_similar = random.choice(filtered_similars)
-                    title = selected_similar['title']
-                    year = selected_similar['year']
-                    link = selected_similar['link']
                     kp_id_result = str(selected_similar['kp_id'])
-                    logger.info(f"[RANDOM] Selected similar film: {title} ({year})")
-                    
-                    # Получаем полную информацию о фильме
-                    from moviebot.api.kinopoisk_api import extract_movie_info
+                    link = f"https://www.kinopoisk.ru/film/{kp_id_result}/"
+
                     movie_info = extract_movie_info(link)
-                    
+
                     if movie_info:
-                        genres_str = movie_info.get('genres', '—')
-                        description = movie_info.get('description', '—')
-                        director = movie_info.get('director', 'Не указан')
-                        actors = movie_info.get('actors', '—')
-                        
-                        text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n"
-                        if description and description != '—':
-                            text += f"{description[:300]}...\n\n"
-                        text += f"🎭 <b>Жанры:</b> {genres_str}\n"
-                        text += f"🎬 <b>Режиссёр:</b> {director}\n"
-                        if actors and actors != '—':
-                            text += f"👥 <b>Актёры:</b> {actors[:100]}...\n"
-                        text += f"\n<a href='{link}'>Кинопоиск</a>"
-                        
-                        markup = InlineKeyboardMarkup()
-                        markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id_result}"))
-                        markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id_result}"))
-                        markup.add(InlineKeyboardButton("🔗 Перейти к карточке", callback_data=f"add_to_database:{kp_id_result}"))
-                        
-                        try:
-                            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                        except:
-                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                        bot.answer_callback_query(call.id)
-                        del user_random_state[user_id]
-                        return
+                        # Полная карточка — как при ссылке
+                        from moviebot.bot.handlers.series import show_film_info_with_buttons
+                        show_film_info_with_buttons(
+                            chat_id=chat_id,
+                            user_id=user_id,
+                            info=movie_info,
+                            link=link,
+                            kp_id=kp_id_result,
+                            existing=None,
+                            message_id=call.message.message_id
+                        )
                     else:
-                        # Если не удалось получить полную информацию, показываем базовую
+                        # Фолбэк на простой текст, если API упал
+                        title = selected_similar['title']
+                        year = selected_similar.get('year', '—')
                         text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
                         markup = InlineKeyboardMarkup()
                         markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id_result}"))
                         markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id_result}"))
-                        markup.add(InlineKeyboardButton("🔗 Перейти к карточке", callback_data=f"add_to_database:{kp_id_result}"))
-                        
+                        markup.add(InlineKeyboardButton("🔗 Добавить в базу", callback_data=f"add_to_database:{kp_id_result}"))
                         try:
-                            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                         except:
-                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                        bot.answer_callback_query(call.id)
-                        del user_random_state[user_id]
-                        return
+                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+                    bot.answer_callback_query(call.id)
+                    del user_random_state[user_id]
+                    return
+                
                 else:
                     bot.edit_message_text("😔 Не найдено похожих фильмов по заданным фильтрам.", chat_id, call.message.message_id)
                     bot.answer_callback_query(call.id)
@@ -2781,55 +2763,94 @@ def register_series_handlers(bot_param):
             
             movie = random.choice(candidates)
             if isinstance(movie, dict):
-                film_id = movie.get('id')
                 title = movie.get('title')
                 year = movie.get('year') or '—'
                 link = movie.get('link')
-                kp_id = movie.get('kp_id') if 'kp_id' in movie else None
+                kp_id = movie.get('kp_id')
             else:
-                film_id = movie[0] if len(movie) > 0 else None
-                title = movie[1] if len(movie) > 1 else None
+                title = movie[1] if len(movie) > 1 else 'Без названия'
                 year = movie[2] if len(movie) > 2 else '—'
                 link = movie[7] if len(movie) > 7 else None
                 kp_id = movie[8] if len(movie) > 8 else None
-            
-            text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})\n\n<a href='{link}'>Кинопоиск</a>"
-            
-            markup = InlineKeyboardMarkup()
-            if kp_id:
-                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
-            markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
-            
-            film_message_id = None
+
+            if not link or not kp_id:
+                text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})"
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
+                try:
+                    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                bot.answer_callback_query(call.id)
+                del user_random_state[user_id]
+                return
+
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+
+            movie_info = extract_movie_info(link)
+
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            existing = None
+            if row:
+                existing = (row[0], row[1], row[2] if len(row) > 2 else False)
+
+            fallback_info = {
+                'title': title,
+                'year': year,
+                'description': '',
+                'director': '',
+                'actors': '',
+                'genres': '',
+                'is_series': False
+            }
+
             try:
-                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
+                show_film_info_with_buttons(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    info=movie_info or fallback_info,
+                    link=link,
+                    kp_id=kp_id,
+                    existing=existing,
+                    message_id=call.message.message_id
+                )
                 film_message_id = call.message.message_id
-                bot.answer_callback_query(call.id)
             except Exception as e:
-                logger.error(f"[RANDOM] Error editing message: {e}", exc_info=True)
-                sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=False)
-                film_message_id = sent_msg.message_id
-                bot.answer_callback_query(call.id)
-            
+                logger.error(f"[RANDOM] Ошибка edit в show_film_info: {e}")
+                sent = show_film_info_with_buttons(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    info=movie_info or fallback_info,
+                    link=link,
+                    kp_id=kp_id,
+                    existing=existing
+                )
+                film_message_id = sent.message_id if hasattr(sent, 'message_id') else None
+
+            bot.answer_callback_query(call.id)
+
             if film_message_id:
                 bot_messages[film_message_id] = link
                 logger.info(f"[RANDOM] Saved film message_id={film_message_id} with link={link}")
-            
-            # === Инструкция ===
+
             try:
                 instruction_text = (
                     "💬 <b>Что дальше?</b>\n\n"
-                    "• Ответьте на это сообщение в формате <code>дома 20.01</code>, <code>в кино, завтра</code> или <code>дома — 15 января в 20:00</code>,\n"
-                    "чтобы запланировать просмотр\n"
-                    "• Поставьте реакцию ✅ или ❤️ на сообщение с фильмом, чтобы отметить как просмотренный"
+                    "• Ответьте на сообщение с фильмом: <code>дома 20.01</code>, <code>в кино завтра</code> и т.д.\n"
+                    "• Или нажмите кнопку «📅 Запланировать просмотр» под карточкой"
                 )
-                sent = bot.send_message(chat_id, instruction_text, parse_mode='HTML')
-                instruction_message_id = sent.message_id
+                sent_instr = bot.send_message(chat_id, instruction_text, parse_mode='HTML')
+                instruction_message_id = sent_instr.message_id
                 bot_messages[instruction_message_id] = link
                 logger.info(f"[RANDOM] Instruction sent, message_id={instruction_message_id}")
             except Exception as e:
-                logger.error(f"[RANDOM] Error sending instruction: {e}", exc_info=True)
-                instruction_message_id = None
+                logger.error(f"[RANDOM] Error sending instruction: {e}")
 
             # === УЛУЧШЕННЫЙ ПАРСЕР МЕСТА И ДАТЫ ===
             def parse_plan_input(text: str):
