@@ -776,62 +776,69 @@ def premiere_notify_handler(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_cancel:"))
 def premiere_cancel_handler(call):
-    """Обработчик отмены уведомления о премьере - удаляет из базы и расписания"""
+    logger.info(f"[PREMIERE CANCEL] Кнопка нажата! callback_data={call.data}, user={call.from_user.id}")
+    """Отмена уведомления о премьере"""
     try:
         bot.answer_callback_query(call.id)
+        
         parts = call.data.split(":")
         kp_id = parts[1]
         plan_id = int(parts[2]) if len(parts) > 2 else None
+        
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
+        deleted_text = "❌ <b>Отменено</b>"
+        title = "фильм"
+        
         with db_lock:
-            # Удаляем из расписания
             if plan_id:
-                cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s AND user_id = %s', (plan_id, chat_id, user_id))
+                cursor.execute(
+                    'DELETE FROM plans WHERE id = %s AND chat_id = %s AND user_id = %s',
+                    (plan_id, chat_id, user_id)
+                )
+                if cursor.rowcount == 0:
+                    bot.answer_callback_query(call.id, "❌ План не найден или уже удалён", show_alert=True)
+                    return
             
-            # Получаем film_id
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+            cursor.execute(
+                'SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s',
+                (chat_id, kp_id)
+            )
             film_row = cursor.fetchone()
             
             if film_row:
-                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
+                film_id = film_row[0] if not isinstance(film_row, dict) else film_row['id']
+                title = film_row[1] if not isinstance(film_row, dict) else film_row['title']
                 
-                # Проверяем, есть ли другие планы или оценки для этого фильма
                 cursor.execute('SELECT COUNT(*) FROM plans WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
-                plans_count = cursor.fetchone()
-                plans_count = plans_count.get('COUNT(*)') if isinstance(plans_count, dict) else plans_count[0]
+                plans_count = cursor.fetchone()[0]
                 
                 cursor.execute('SELECT COUNT(*) FROM ratings WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
-                ratings_count = cursor.fetchone()
-                ratings_count = ratings_count.get('COUNT(*)') if isinstance(ratings_count, dict) else ratings_count[0]
+                ratings_count = cursor.fetchone()[0]
                 
-                # Удаляем фильм из базы только если нет других планов и оценок
                 if plans_count == 0 and ratings_count == 0:
                     cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                    deleted_text = f"❌ <b>Отменено</b>\n\nФильм <b>{title}</b> удалён из базы и расписания."
+                    deleted_text += f"\n\nФильм <b>{title}</b> удалён из базы."
                 else:
-                    deleted_text = f"❌ <b>Отменено</b>\n\nПлан просмотра фильма <b>{title}</b> удалён из расписания."
+                    deleted_text += f"\n\nПлан фильма <b>{title}</b> удалён."
                 
                 conn.commit()
                 
-                # Обновляем сообщение
-                try:
-                    bot.edit_message_text(deleted_text, chat_id, call.message.message_id, parse_mode='HTML')
-                except:
-                    bot.send_message(chat_id, deleted_text, parse_mode='HTML')
-                
-                logger.info(f"[PREMIERE CANCEL] Отменено уведомление для фильма {title} (kp_id={kp_id}) пользователем {user_id}")
+                bot.edit_message_text(
+                    deleted_text,
+                    chat_id=chat_id,
+                    message_id=call.message.message_id,
+                    parse_mode='HTML'
+                )
             else:
                 bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                
     except Exception as e:
+        if 'conn' in locals():
+            conn.rollback()
         logger.error(f"[PREMIERE CANCEL] Ошибка: {e}", exc_info=True)
-        try:
-            bot.answer_callback_query(call.id, "❌ Ошибка при отмене", show_alert=True)
-        except:
-            pass
-
+        bot.answer_callback_query(call.id, "❌ Ошибка отмены", show_alert=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_back:"))
 def premieres_back_handler(call):
@@ -876,6 +883,38 @@ def premieres_back_handler(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_film_description:"))
+def handle_premiere_description(call):
+    try:
+        bot.answer_callback_query(call.id)
+        
+        kp_id = call.data.split(":", 1)[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot.answer_callback_query(call.id, "❌ Не удалось загрузить фильм", show_alert=True)
+            return
+        
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=None,
+            message_id=call.message.message_id,
+            message_thread_id=getattr(call.message, 'message_thread_id', None)
+        )
+        
+        logger.info(f"[PREMIERE DESC] Показал описание kp_id={kp_id}")
+        
+    except Exception as e:
+        logger.error(f"[PREMIERE DESC] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
 
 def register_premieres_callbacks(bot):
     """Регистрирует обработчики премьер (уже зарегистрированы через декораторы)"""
