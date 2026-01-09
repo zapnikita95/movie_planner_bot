@@ -1375,7 +1375,6 @@ def confirm_remove(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("back_to_film:"))
 def back_to_film_description(call):
-    """Возврат к описанию фильма после оценки"""
     try:
         bot.answer_callback_query(call.id)
 
@@ -1384,13 +1383,61 @@ def back_to_film_description(call):
         user_id = call.from_user.id
         message_id = call.message.message_id
 
-        # Получаем инфу и показываем описание
-        link = f"https://www.kinopoisk.ru/film/{kp_id}/" if not is_series else f"https://www.kinopoisk.ru/series/{kp_id}/"
-        info = extract_movie_info(link)
+        # Получаем is_series из БД
+        is_series = False
+        try:
+            with db_lock:
+                cursor.execute("SELECT is_series FROM movies WHERE kp_id = %s", (kp_id,))
+                row = cursor.fetchone()
+                if row:
+                    is_series = bool(row[0] if isinstance(row, tuple) else row.get('is_series'))
+        except Exception as e:
+            logger.warning(f"[BACK TO FILM] Не удалось получить is_series: {e}")
+
+        # Ссылка на Кинопоиск (для текста, но не для парсинга)
+        link = f"https://www.kinopoisk.ru/{'series' if is_series else 'film'}/{kp_id}/"
+
+        # Пытаемся взять info из кэша или БД (если у тебя есть кэш — используй его)
+        info = None
+        try:
+            # Если есть кэш в глобальной переменной (рекомендую добавить в будущем)
+            if 'film_info_cache' in globals():
+                info = film_info_cache.get(str(kp_id))
+            
+            # Если кэша нет — берём базовую инфу из БД
+            if not info:
+                with db_lock:
+                    cursor.execute("""
+                        SELECT title, year, description, director, genres, actors 
+                        FROM movies 
+                        WHERE kp_id = %s
+                    """, (kp_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        info = {
+                            'title': row[0] if isinstance(row, tuple) else row.get('title'),
+                            'year': row[1] if isinstance(row, tuple) else row.get('year'),
+                            'description': row[2] if isinstance(row, tuple) else row.get('description'),
+                            'director': row[3] if isinstance(row, tuple) else row.get('director'),
+                            'genres': row[4] if isinstance(row, tuple) else row.get('genres'),
+                            'actors': row[5] if isinstance(row, tuple) else row.get('actors'),
+                            'is_series': is_series
+                        }
+        except Exception as e:
+            logger.warning(f"[BACK TO FILM] Не удалось взять info из БД: {e}")
+
+        # Если info всё равно нет — показываем минимальное сообщение
         if not info:
-            bot.edit_message_text("❌ Не удалось загрузить описание", chat_id, message_id)
+            bot.edit_message_text(
+                f"🎬 Фильм/сериал на Кинопоиске\n\n<a href='{link}'>Открыть на Кинопоиске</a>",
+                chat_id,
+                message_id,
+                parse_mode='HTML',
+                disable_web_page_preview=False
+            )
             return
 
+        # Вызываем твою основную функцию отображения
         from moviebot.bot.handlers.series import show_film_info_with_buttons
         show_film_info_with_buttons(
             chat_id=chat_id,
@@ -1398,11 +1445,14 @@ def back_to_film_description(call):
             info=info,
             link=link,
             kp_id=kp_id,
-            message_id=message_id  # обновляем то же сообщение
+            message_id=message_id,
+            existing=None  # или передай, если знаешь, что фильм уже в базе
         )
 
+        logger.info(f"[BACK TO FILM] Успешный возврат к описанию kp_id={kp_id}")
+
     except Exception as e:
-        logger.error(f"[BACK TO FILM] Ошибка: {e}")
+        logger.error(f"[BACK TO FILM] Ошибка: {e}", exc_info=True)
         bot.answer_callback_query(call.id, "Ошибка возврата", show_alert=True)
 
 @bot.callback_query_handler(func=lambda call: call.data == "delete_this_message")
