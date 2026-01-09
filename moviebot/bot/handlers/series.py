@@ -8,9 +8,10 @@ import random
 import threading
 import requests
 import pytz
-import telebot.types
 from datetime import datetime
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton  
+from telebot.apihelper import ApiTelegramException 
 from moviebot.bot.handlers.text_messages import is_expected_text_in_private
 from moviebot.database.db_operations import (
 
@@ -4768,12 +4769,11 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             if plan_info and plan_info.get('type') == 'home' and not watched:
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
         else:
-            # Если фильм не запланирован, показываем стандартные кнопки
-            # НЕ показываем кнопку "➕ Добавить в базу" для фильмов, уже добавленных в базу
-            # (кнопка показывается только если film_id отсутствует)
-            
-            # Добавляем кнопку "Запланировать просмотр"
+            # Фильм НЕ в базе — добавляем "Добавить в базу" + "Запланировать" (добавит автоматически)
+            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+            if not watched:
+                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
             
             # Добавляем кнопку "Выбрать онлайн-кинотеатр" только для непросмотренных фильмов
             if not watched:
@@ -4951,26 +4951,41 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             'disable_web_page_preview': False,
             'reply_markup': markup if markup else None
         }
+
+        # message_thread_id только для send_message, НЕ для edit
         if message_thread_id is not None:
-            send_kwargs['message_thread_id'] = message_thread_id
+            send_kwargs_for_send = send_kwargs.copy()
+            send_kwargs_for_send['message_thread_id'] = message_thread_id
+        else:
+            send_kwargs_for_send = send_kwargs
 
         sent_new = False
         if message_id:
-            send_kwargs['message_id'] = message_id
+            edit_kwargs = {
+                'chat_id': chat_id,
+                'message_id': message_id,
+                'text': text,
+                'parse_mode': 'HTML',
+                'disable_web_page_preview': False,
+                'reply_markup': markup if markup else None
+            }
             try:
-                bot.edit_message_text(**send_kwargs)
+                bot.edit_message_text(**edit_kwargs)
                 logger.info(f"[SHOW FILM INFO] Обновлено успешно, message_id={message_id}")
-            except ApiTelegramException as e:
+            except Exception as e:  # ловим все ошибки, т.к. ApiTelegramException может быть не импортирован
                 if "message is not modified" in str(e).lower():
                     if "exactly the same" in str(e):
                         logger.info("[SHOW FILM INFO] Ничего не изменилось — пропускаем")
-                        sent_new = False
                     else:
-                        # Пробуем только markup
+                        # Пробуем обновить только markup
                         try:
-                            bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=markup)
+                            bot.edit_message_reply_markup(
+                                chat_id=chat_id,
+                                message_id=message_id,
+                                reply_markup=markup
+                            )
                             logger.info("[SHOW FILM INFO] Только markup обновлён")
-                        except ApiTelegramException as e2:
+                        except Exception as e2:
                             if "message is not modified" in str(e2):
                                 logger.info("[SHOW FILM INFO] Markup одинаковый — пропускаем")
                             else:
@@ -4979,18 +4994,16 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 else:
                     logger.error(f"[SHOW FILM INFO] Ошибка edit: {e}")
                     sent_new = True
-            except Exception as e:
-                logger.error(f"[SHOW FILM INFO] Неизвестная ошибка edit: {e}")
-                sent_new = True
         else:
             sent_new = True
 
         if sent_new:
             try:
-                sent = bot.send_message(**send_kwargs)
+                sent = bot.send_message(**send_kwargs_for_send)
                 logger.info(f"[SHOW FILM INFO] Отправлено новое, message_id={sent.message_id}, title={info.get('title')}")
             except Exception as e:
                 logger.error(f"[SHOW FILM INFO] Не отправилось даже новое: {e}")
+                # Fallback: минимальное сообщение
                 bot.send_message(chat_id, f"🎬 {info.get('title','Фильм')}\n\n<a href='{link}'>Кинопоиск</a>", parse_mode='HTML')
 
         logger.info("[SHOW FILM INFO] ===== END (успешно) =====")

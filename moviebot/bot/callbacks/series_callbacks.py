@@ -11,7 +11,7 @@ import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.scheduler import scheduler
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
+from moviebot.bot.handlers.series import ensure_movie_in_database
 from moviebot.database.db_operations import get_watched_emojis, get_watched_custom_emoji_ids
 
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
@@ -62,7 +62,6 @@ def register_series_callbacks(bot):
                 return
             
             # Получаем film_id (добавляем в базу, если нет)
-            from moviebot.bot.handlers.series import ensure_movie_in_database
             link = f"https://www.kinopoisk.ru/series/{kp_id}/"
             info = extract_movie_info(link)
             if not info:
@@ -366,7 +365,6 @@ def register_series_callbacks(bot):
                 else:
                     # Сериал не в базе - добавляем через API
                     logger.info(f"[SERIES SUBSCRIBE] Сериал не найден в БД, добавляем через API")
-                    from moviebot.bot.handlers.series import ensure_movie_in_database
                     link = f"https://www.kinopoisk.ru/series/{kp_id}/"
                     
                     logger.info(f"[SERIES SUBSCRIBE] Вызываю extract_movie_info для kp_id={kp_id}, link={link}")
@@ -768,7 +766,6 @@ def register_series_callbacks(bot):
                 
             # Если сериала нет в базе, добавляем его
             if not film_id:
-                from moviebot.bot.handlers.series import ensure_movie_in_database
                 link = f"https://www.kinopoisk.ru/series/{kp_id}/"
                 info = extract_movie_info(link)
                 if info:

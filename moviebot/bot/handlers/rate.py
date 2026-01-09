@@ -5,12 +5,11 @@ from moviebot.bot.bot_init import bot
 import logging
 import re
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-
+from moviebot.states import rating_messages, bot_messages
+from moviebot.bot.handlers.series import ensure_movie_in_database
+from moviebot.api.kinopoisk_api import extract_movie_info
 from moviebot.database.db_operations import log_request
-
 from moviebot.utils.parsing import extract_kp_id_from_text
-
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
 
@@ -236,12 +235,6 @@ def register_rate_handlers(bot):
 
 def handle_rating_internal(message, rating):
     """Внутренняя функция для обработки оценки - добавляет фильм в базу при успешной оценке"""
-    from moviebot.states import rating_messages, bot_messages
-    from moviebot.bot.handlers.series import ensure_movie_in_database
-    from moviebot.api.kinopoisk_api import extract_movie_info
-    from moviebot.utils.parsing import extract_kp_id_from_text
-    import re
-    
     user_id = message.from_user.id
     chat_id = message.chat.id
     
