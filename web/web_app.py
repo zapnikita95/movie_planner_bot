@@ -39,102 +39,52 @@ def check_environment_variables():
 check_environment_variables()
 
 def create_web_app(bot_instance):
-    """Создает Flask приложение с webhook обработчиками"""
-    
+    """Создаёт Flask-приложение с webhook для Telegram"""
+    app = Flask(__name__)
+
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
-        # Логируем ВСЕ запросы, включая GET
         logger.info("=" * 80)
         logger.info(f"[WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС ({request.method}) =====")
         logger.info(f"[WEBHOOK] Headers: {dict(request.headers)}")
         logger.info(f"[WEBHOOK] Content-Type: {request.headers.get('content-type')}")
-        
+
         if request.method == 'GET':
-            logger.info("[WEBHOOK] GET запрос - возвращаем 200")
+            logger.info("[WEBHOOK] GET-запрос — возвращаем 200 для проверки")
             return '', 200
-        
+
         if request.headers.get('content-type') == 'application/json':
             json_string = request.get_data().decode('utf-8')
-            logger.info(f"[WEBHOOK] Размер JSON: {len(json_string)} байт")
-            # Проверяем, есть ли web_app_data в сыром JSON
-            if 'web_app_data' in json_string.lower():
-                logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ В JSON ЕСТЬ 'web_app_data'! ⚠️⚠️⚠️")
-            # Логируем первые 2000 символов JSON для отладки
+            logger.info(f"[WEBHOOK] JSON размер: {len(json_string)} байт")
             logger.info(f"[WEBHOOK] JSON (первые 2000 символов): {json_string[:2000]}")
-            logger.info(f"[WEBHOOK] Полный JSON размер: {len(json_string)} байт")
-            
-            # Проверяем наличие web_app_data в сыром JSON ДО парсинга
-            if 'web_app_data' in json_string:
-                logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ В СЫРОМ JSON ЕСТЬ 'web_app_data'! ⚠️⚠️⚠️")
-            
-            update = telebot.types.Update.de_json(json_string)
-            logger.info(f"[WEBHOOK] Тип update: {type(update)}")
-            logger.info(f"[WEBHOOK] Update имеет message: {hasattr(update, 'message') and update.message is not None}")
-            
-            # КРИТИЧНО: Проверяем наличие successful_payment на уровне update
-            if hasattr(update, 'message') and update.message and hasattr(update.message, 'successful_payment') and update.message.successful_payment:
-                logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment НА УРОВНЕ UPDATE! ⭐⭐⭐")
-                logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
-                logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
-                logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
-            
-            # Проверяем наличие pre_checkout_query (хотя для Stars не должен прийти)
-            if hasattr(update, 'pre_checkout_query') and update.pre_checkout_query:
-                logger.info(f"[WEBHOOK] ⚠️ PRE CHECKOUT QUERY пришел! (хотя для Stars не должен)")
-                logger.info(f"[WEBHOOK] pre_checkout_query.currency={update.pre_checkout_query.currency}")
-                logger.info(f"[WEBHOOK] pre_checkout_query.invoice_payload={update.pre_checkout_query.invoice_payload}")
-            
-            # Логируем информацию о реплае для отладки
-            if update.message:
-                logger.info(f"[WEBHOOK] Update.message.content_type={update.message.content_type if hasattr(update.message, 'content_type') else 'НЕТ'}")
-                logger.info(f"[WEBHOOK] Update.message.text='{update.message.text[:200] if update.message.text else None}'")
-                logger.info(f"[WEBHOOK] Update.message.from_user.id={update.message.from_user.id if update.message.from_user else None}")
-                
-                # КРИТИЧНО: Логируем successful_payment если есть
-                if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
-                    logger.info(f"[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment! ⭐⭐⭐")
-                    logger.info(f"[WEBHOOK] successful_payment.currency={update.message.successful_payment.currency}")
-                    logger.info(f"[WEBHOOK] successful_payment.total_amount={update.message.successful_payment.total_amount}")
-                    logger.info(f"[WEBHOOK] successful_payment.invoice_payload={update.message.successful_payment.invoice_payload}")
-                    logger.info(f"[WEBHOOK] successful_payment.telegram_payment_charge_id={getattr(update.message.successful_payment, 'telegram_payment_charge_id', 'N/A')}")
-                
-                # Проверяем наличие web_app_data
-                if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
-                    logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
-                    logger.info(f"[WEBHOOK] web_app_data.data={update.message.web_app_data.data if hasattr(update.message.web_app_data, 'data') else 'НЕТ'}")
-                    logger.info(f"[WEBHOOK] web_app_data.button_text={update.message.web_app_data.button_text if hasattr(update.message.web_app_data, 'button_text') else 'НЕТ'}")
-                
-                # Проверяем, является ли сообщение командой
-                if update.message.text and update.message.text.startswith('/'):
-                    logger.info(f"[WEBHOOK] ⚠️ Обнаружена команда: '{update.message.text}'")
-                    # Проверяем entities для команд
-                    if hasattr(update.message, 'entities') and update.message.entities:
-                        for entity in update.message.entities:
-                            logger.info(f"[WEBHOOK] Entity: type={entity.type}, offset={entity.offset}, length={entity.length}")
-            
-            # Обрабатываем обновление с обработкой ошибок
+
             try:
-                logger.info(f"[WEBHOOK] Вызываем bot.process_new_updates для обработки обновления")
-                logger.info(f"[WEBHOOK] Update ID: {update.update_id}, type: {type(update)}")
-                if hasattr(update, 'message') and update.message:
-                    logger.info(f"[WEBHOOK] Message type: {update.message.content_type if hasattr(update.message, 'content_type') else 'unknown'}")
-                if hasattr(update, 'callback_query') and update.callback_query:
-                    logger.info(f"[WEBHOOK] Callback query data: {update.callback_query.data[:100] if update.callback_query.data else 'None'}")
-                
+                update = telebot.types.Update.de_json(json_string)
+                logger.info(f"[WEBHOOK] Update обработан, ID: {update.update_id if update else 'None'}")
+
+                # Обработка обновления
                 bot_instance.process_new_updates([update])
-                logger.info(f"[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
+                logger.info("[WEBHOOK] ✅ Обновление успешно обработано")
             except Exception as e:
-                logger.error(f"[WEBHOOK] ❌ Ошибка в bot.process_new_updates: {e}", exc_info=True)
-                import traceback
-                logger.error(f"[WEBHOOK] Traceback: {traceback.format_exc()}")
-                # Возвращаем 200, чтобы Telegram не повторял запрос
+                logger.error(f"[WEBHOOK] Ошибка обработки обновления: {e}", exc_info=True)
+                # Telegram требует 200 даже при ошибке, иначе будет повторять запрос
                 return '', 200
-            
+
             return '', 200
         else:
-            logger.warning("[WEBHOOK] Неверный content-type")
+            logger.warning("[WEBHOOK] Неверный Content-Type")
             abort(400)
-    
+
+    @app.route('/')
+    def health():
+        """Простой health-check для Railway"""
+        return "Bot is alive!", 200
+
+    # Запуск приложения
+    port = int(os.environ.get("PORT", 5000))  # Railway подставит свой PORT
+    logger.info(f"[WEB APP] Запуск Flask на host=0.0.0.0, port={port}")
+    app.run(host='0.0.0.0', port=port, debug=False)
+
     def process_yookassa_notification(event_json, is_test=False):
         """Обрабатывает уведомление от ЮKassa (можно вызывать из webhook или теста)"""
         try:

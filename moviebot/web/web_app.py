@@ -80,12 +80,6 @@ def create_web_app(bot):
 
     logger.info("[WEB APP] Flask app создан внутри create_web_app")
 
-    # Обязательный health-check для Railway — отвечает на любой пинг по /
-    @app.route('/', methods=['GET', 'HEAD'])
-    def health():
-        logger.info("[HEALTH] Railway health-check пинганул / — отвечаем 200")
-        return "Bot webhook is alive on Railway!", 200
-
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
         logger.info("=" * 80)
