@@ -295,7 +295,16 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
     text = f"<b>📺 Твои сериалы</b> ({series_data['total_count']} шт.)\n\n"
     if series_data['total_pages'] > 1:
         text += f"<i>Страница {page}/{series_data['total_pages']}</i>\n\n"
-    text += "Нажми на сериал → описание и сезоны"
+    
+    # Добавляем легенду эмодзи — коротко и понятно
+    text += (
+        "<b>Что означают значки:</b>\n"
+        "🟢 — сериал продолжается\n"
+        "🔴 — сериал завершён\n"
+        "🔔 — на него есть твоя подписка\n"
+        "⏳ — ещё не все сезоны просмотрены\n\n"
+        "Нажми на сериал → описание и сезоны"
+    )
 
     markup = InlineKeyboardMarkup(row_width=1)
 
@@ -596,35 +605,6 @@ def handle_seasons_kp(call):
             bot.answer_callback_query(call.id, "❌ Ошибка загрузки", show_alert=True)
         except:
             pass
-
-
-@bot.callback_query_handler(func=lambda c: c.data.startswith('seasons_page:') or c.data.startswith('seasons_refresh:'))
-def handle_seasons_pagination(call):
-    chat_id = call.message.chat.id
-    
-    if call.data.startswith('seasons_refresh:'):
-        page = int(call.data.split(':')[1])
-        # Force update: для текущей страницы обнови все API
-        current_items = get_user_series_page(chat_id, page)['items']
-        for item in current_items:
-            # Обнови кэш forcibly
-            is_ongoing, next_episode = get_series_airing_status(item['kp_id'])
-            seasons_count = len(get_seasons(item['kp_id']))
-            with db_lock:
-                cursor.execute("""
-                    UPDATE movies SET 
-                        is_ongoing = %s, seasons_count = %s, next_episode = %s, last_api_update = NOW()
-                    WHERE chat_id = %s AND kp_id = %s
-                """, (is_ongoing, seasons_count, next_episode, chat_id, item['kp_id']))
-                conn.commit()
-    else:
-        page = int(call.data.split(':')[1])
-    
-    series_page = get_user_series_page(chat_id, page=page)
-    text, markup = build_series_page_message(series_page['items'], page=page, total_pages=series_page['total_pages'], chat_id=chat_id)
-    
-    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, disable_web_page_preview=True, parse_mode='HTML')
-    bot.answer_callback_query(call.id)
 
 @bot.callback_query_handler(func=lambda call: call.data == "show_completed_series")
 def handle_show_completed_series(call):
