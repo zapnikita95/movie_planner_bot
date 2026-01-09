@@ -319,14 +319,23 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             except Exception as e:
                 logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
         
-        # Если премьера еще не состоялась, добавляем кнопку
+        # 2. Кнопка уведомления о премьере — всегда для премьер
+        premiere_date = info.get('premiere_date') or info.get('premiereRu') or info.get('premiereWorld')
         if premiere_date:
-            from datetime import date as date_class
-            today = date_class.today()
-            if premiere_date > today:
-                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
-        
+            with db_lock:
+                cursor.execute("""
+                    SELECT reminder_sent 
+                    FROM premiere_reminders 
+                    WHERE chat_id = %s AND kp_id = %s
+                """, (chat_id, kp_id))
+                reminder = cursor.fetchone()
+                
+                if reminder and reminder[0]:
+                    markup.add(InlineKeyboardButton("🔕 Отменить уведомление", callback_data=f"premiere_cancel:{kp_id}"))
+                else:
+                    date_str = premiere_date if isinstance(premiere_date, str) else premiere_date.strftime('%Y-%m-%d')
+                    markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_str}"))
+
         # Получаем film_id для проверки оценок и планов
         logger.info(f"[SHOW FILM INFO] Получение film_id...")
         film_id = None
