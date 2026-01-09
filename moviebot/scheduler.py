@@ -29,6 +29,8 @@ from moviebot.database.db_connection import get_db_connection
 
 # Импорт helpers отключён полностью — все нужные функции определены в этом же файле (scheduler.py)
 # from moviebot.utils.helpers import (...)
+from moviebot.database.db_operations import get_user_timezone_or_default
+from moviebot.bot.handlers.seasons import get_series_airing_status
 
 logger = logging.getLogger(__name__)
 
