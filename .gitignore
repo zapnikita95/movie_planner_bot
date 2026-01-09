@@ -17,3 +17,6 @@ cache/
 *.bin
 cache/
 *.pt
+text# Игнорируем тяжёлые IMDB файлы
+data/imdb_raw/*.tsv.gz
+data/imdb_raw/*.tsv

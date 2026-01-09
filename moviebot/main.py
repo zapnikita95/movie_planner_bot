@@ -341,6 +341,19 @@ logger.info(f"[MAIN] RAILWAY_PUBLIC_DOMAIN: '{os.getenv('RAILWAY_PUBLIC_DOMAIN',
 logger.info(f"[MAIN] RAILWAY_STATIC_URL: '{os.getenv('RAILWAY_STATIC_URL', 'НЕ УСТАНОВЛЕН')}'")
 logger.info("=" * 80)
 
+
+# Минимальный Flask ТОЛЬКО для webhook и healthcheck Railway
+from moviebot.web.web_app import app  # ← твой существующий Flask из web_app.py
+import threading
+
+def run_flask():
+    port = int(os.getenv('PORT', 8080))
+    app.run(host='0.0.0.0', port=port, threaded=True, debug=False)
+
+flask_thread = threading.Thread(target=run_flask, daemon=True)
+flask_thread.start()
+logger.info(f"Flask запущен на порту {os.getenv('PORT', 8080)} для webhook и healthcheck")
+
 # === ЗАПУСК БОТА ===
 if __name__ == "__main__":
     logger.info("=== ЗАПУСК СКРИПТА ===")
@@ -404,7 +417,6 @@ if __name__ == "__main__":
             # Запускаем polling прямо здесь (без отдельного потока — проще и надёжнее)
             logger.info("🚀 Запуск polling...")
             bot.infinity_polling(none_stop=True, interval=0, timeout=20)
-
     else:
         # ----------------- ЛОКАЛЬНЫЙ ЗАПУСК: ТОЛЬКО POLLING -----------------
         logger.info("=== ЛОКАЛЬНЫЙ ЗАПУСК В РЕЖИМЕ POLLING ===")

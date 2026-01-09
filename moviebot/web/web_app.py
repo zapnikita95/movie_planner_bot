@@ -1290,6 +1290,17 @@ def create_web_app(bot):
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
     logger.info(f"[WEB APP] Возвращаем app: {app}")
     
+    @app.route('/health', methods=['GET'])
+    def health():
+        try:
+            logger.info("[HEALTH] Healthcheck запрос получен")
+            return "OK", 200
+        except Exception as e:
+            logger.error(f"[HEALTH] Ошибка в healthcheck: {e}", exc_info=True)
+            return "ERROR", 500
+
+    logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
+    logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
+    logger.info(f"[WEB APP] Возвращаем app: {app}")
+
     return app
-
-
