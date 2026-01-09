@@ -1061,6 +1061,13 @@ def create_web_app(bot):
             logger.error(f"[YOOKASSA] Ошибка обработки webhook: {e}", exc_info=True)
             return jsonify({'error': str(e)}), 500
     
+    @app.route('/', methods=['GET'])
+    def root():
+        logger.info("[ROOT] Root запрос получен")
+        return jsonify({'status': 'ok', 'service': 'moviebot'}), 200
+
+    # ← Здесь был старый health — УДАЛИТЬ полностью (включая try... весь блок ниже)
+
     @app.route('/health', methods=['GET'])
     def health():
         """Улучшенный health check endpoint с проверкой всех компонентов"""
