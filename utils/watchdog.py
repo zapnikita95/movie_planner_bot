@@ -38,10 +38,10 @@ class BotWatchdog:
         self.scheduler_instance = scheduler
         logger.info("[WATCHDOG] Scheduler зарегистрирован для мониторинга")
         
-    def register_database(self, db_connection):
-        """Регистрирует подключение к БД для мониторинга"""
-        self.db_connection = db_connection
-        logger.info("[WATCHDOG] База данных зарегистрирована для мониторинга")
+#     def register_database(self, db_connection):
+#        """Регистрирует подключение к БД для мониторинга"""
+#        self.db_connection = db_connection
+#        logger.info("[WATCHDOG] База данных зарегистрирована для мониторинга")
         
     def register_bot(self, bot):
         """Регистрирует бота для мониторинга"""
@@ -92,35 +92,24 @@ class BotWatchdog:
     def check_database(self) -> bool:
         """Проверяет состояние подключения к БД"""
         try:
-            if self.db_connection is None:
-                self.health_status['database'] = {
-                    'status': 'not_registered',
-                    'last_check': datetime.now().isoformat(),
-                    'error': 'БД не зарегистрирована'
-                }
-                return False
-                
-            # КРИТИЧЕСКИЙ ФИКС: Добавляем rollback при ошибках транзакции
+            # Каждый раз берём свежее соединение из thread-local механизма
+            from moviebot.database.db_connection import get_db_connection
+            
+            conn = get_db_connection()  # ← автоматически пересоздаст если закрыто
+            
+            # На всякий случай rollback от предыдущих операций
             try:
-                # Сначала делаем rollback на случай если предыдущая транзакция упала
-                self.db_connection.rollback()
+                conn.rollback()
             except:
                 pass
             
-            # Пытаемся выполнить простой запрос
-            cursor = self.db_connection.cursor()
+            cursor = conn.cursor()
             try:
                 cursor.execute("SELECT 1")
                 cursor.fetchone()
-            except Exception as db_e:
-                # Если ошибка транзакции - делаем rollback
-                try:
-                    self.db_connection.rollback()
-                except:
-                    pass
-                raise
             finally:
                 cursor.close()
+                # НЕ закрываем conn — пусть thread-local сам управляет
             
             self.health_status['database'] = {
                 'status': 'connected',
