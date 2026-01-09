@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
 
-
+# Глобальный кэш источников (должен быть один раз в начале файла, если нет — добавь)
+if 'streaming_sources_cache' not in globals():
+    streaming_sources_cache = {}
+    
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
 def add_to_database_callback(call):
     """Обработчик кнопки '➕ Добавить в базу'"""
@@ -934,53 +937,58 @@ def streaming_source_select(call):
         logger.error(f"[STREAMING SOURCE] Ошибка: {e}", exc_info=True)
         bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("select_platform:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("sel:"))
 def select_platform_callback(call):
     try:
-        bot.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id, "Открываем...")
 
+        # Разбираем: sel:kp_id:idx
         parts = call.data.split(":")
+        if len(parts) != 3:
+            raise ValueError("Неверный формат callback_data")
+
         kp_id = int(parts[1])
-        platform = parts[2]
-        encoded_url = parts[3] + "=="  # добавляем паддинг обратно, если стриппали
-        from base64 import urlsafe_b64decode
-        url = urlsafe_b64decode(encoded_url.encode()).decode()
+        idx = int(parts[2])
 
-        chat_id = call.message.chat.id
-        message_id = call.message.message_id
-
-        # Находим последний план дома для этого фильма
-        with db_lock:
-            cursor.execute('''
-                SELECT p.id FROM plans p
-                JOIN movies m ON p.film_id = m.id
-                WHERE m.kp_id = %s AND p.chat_id = %s AND p.plan_type = 'home'
-                ORDER BY p.plan_datetime DESC LIMIT 1
-            ''', (kp_id, chat_id))
-            row = cursor.fetchone()
-            if row:
-                plan_id = row[0]
-                cursor.execute('''
-                    UPDATE plans 
-                    SET streaming_service = %s, streaming_url = %s 
-                    WHERE id = %s AND chat_id = %s
-                ''', (platform, url, plan_id, chat_id))
-                conn.commit()
-
-                bot.edit_message_text(
-                    f"✅ Запомнили: {platform}\nСсылка будет в напоминании!",
-                    chat_id,
-                    message_id,
-                    reply_markup=InlineKeyboardMarkup().add(
-                        InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{int(kp_id)}")
-                    )
+        # Восстанавливаем источник из кэша
+        sources = streaming_sources_cache.get(str(kp_id), [])
+        if idx >= len(sources) or idx < 0:
+            bot.edit_message_text(
+                "Источник не найден. Попробуйте заново.",
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton("◀️ Назад к выбору", callback_data=f"streaming_select:{kp_id}")
                 )
-            else:
-                bot.edit_message_text("План не найден :(", chat_id, message_id)
+            )
+            return
+
+        platform, url = sources[idx]
+
+        # Показываем ссылку
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton(f"Открыть {platform}", url=url),
+            InlineKeyboardButton("◀️ Назад к выбору", callback_data=f"streaming_select:{kp_id}")
+        )
+
+        bot.edit_message_text(
+            f"Смотрите на **{platform}**:\n\n{url}",
+            call.message.chat.id,
+            call.message.message_id,
+            parse_mode='Markdown',
+            reply_markup=markup
+        )
+
+        logger.info(f"[SELECT PLATFORM] Открыт источник {platform} для kp_id={kp_id}")
+
+        # Опционально: очищаем кэш после использования
+        if str(kp_id) in streaming_sources_cache:
+            del streaming_sources_cache[str(kp_id)]
 
     except Exception as e:
         logger.error(f"[SELECT PLATFORM] Ошибка: {e}", exc_info=True)
-        bot.answer_callback_query(call.id, "Ошибка сохранения", show_alert=True)
+        bot.answer_callback_query(call.id, "Ошибка, попробуйте позже", show_alert=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_done:"))
 def streaming_done_callback(call):
