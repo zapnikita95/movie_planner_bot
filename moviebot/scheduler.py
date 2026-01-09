@@ -26,11 +26,8 @@ from moviebot.config import PLANS_TZ
 # Импортируем ТОЛЬКО функцию, а не глобальные conn/cursor/db_lock
 from moviebot.database.db_connection import get_db_connection
 
-from moviebot.utils.helpers import (
-    get_random_events_enabled,
-    mark_event_sent,
-    was_event_sent_today,
-)
+# Импорт helpers отключён полностью — все нужные функции определены в этом же файле (scheduler.py)
+# from moviebot.utils.helpers import (...)
 
 logger = logging.getLogger(__name__)
 
