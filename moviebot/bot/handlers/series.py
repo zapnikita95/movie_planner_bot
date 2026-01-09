@@ -278,10 +278,14 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         logger.warning(f"[SHOW FILM INFO] Ошибка при запросе средней оценки для запланированного фильма: {avg_e}")
             logger.info(f"[SHOW FILM INFO] Обработка existing завершена")
         
+        from moviebot.api.kinopoisk_api import get_external_sources
+
+        sources = get_external_sources(kp_id)
+        has_sources = bool(sources)  # ← это теперь используется
+
         # Создаем кнопки
         logger.info(f"[SHOW FILM INFO] Создание кнопок...")
-        markup = InlineKeyboardMarkup(row_width=1)
-        
+        markup = InlineKeyboardMarkup(row_width=2)
         # Флаг для отслеживания, добавлены ли уже кнопки "Интересные факты" и "Оценить"
         facts_and_rate_added = False
         
@@ -319,9 +323,34 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             except Exception as e:
                 logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
         
-        # 2. Кнопка уведомления о премьере — всегда для премьер
-        premiere_date = info.get('premiere_date') or info.get('premiereRu') or info.get('premiereWorld')
-        if premiere_date:
+        # 2. Кнопка уведомления о премьере — ТОЛЬКО если премьера в будущем
+        premiere_date_raw = info.get('premiere_date') or info.get('premiereRu') or info.get('premiereWorld')
+        show_premiere_button = False
+        premiere_date_str = None
+
+        if premiere_date_raw:
+            try:
+                # Пытаемся привести к datetime
+                if isinstance(premiere_date_raw, str):
+                    premiere_dt = datetime.strptime(premiere_date_raw.split('T')[0], '%Y-%m-%d')
+                elif isinstance(premiere_date_raw, datetime):
+                    premiere_dt = premiere_date_raw
+                else:
+                    premiere_dt = None
+
+                if premiere_dt:
+                    premiere_dt = premiere_dt.replace(tzinfo=None)  # убираем таймзону для сравнения
+                    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+                    
+                    if premiere_dt > today:  # строго в будущем
+                        show_premiere_button = True
+                        premiere_date_str = premiere_dt.strftime('%Y-%m-%d')
+                    else:
+                        logger.info(f"[SHOW FILM INFO] Премьера {kp_id} уже прошла ({premiere_dt.date()}), кнопку не показываем")
+            except Exception as e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка парсинга даты премьеры {kp_id}: {e}")
+
+        if show_premiere_button:
             with db_lock:
                 cursor.execute("""
                     SELECT reminder_sent 
@@ -333,9 +362,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 if reminder and reminder[0]:
                     markup.add(InlineKeyboardButton("🔕 Отменить уведомление", callback_data=f"premiere_cancel:{kp_id}"))
                 else:
-                    date_str = premiere_date if isinstance(premiere_date, str) else premiere_date.strftime('%Y-%m-%d')
-                    markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_str}"))
-
+                    markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{premiere_date_str}"))
+                    
         # Получаем film_id для проверки оценок и планов
         logger.info(f"[SHOW FILM INFO] Получение film_id...")
         film_id = None
@@ -451,23 +479,29 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         
         # Если фильм запланирован, показываем специальную логику кнопок
         if has_plan:
-            # Если фильм запланирован, не показываем кнопки "добавить в базу" и "запланировать просмотр"
-            
-            # Добавляем кнопку "Выбрать онлайн-кинотеатр" только для планов типа 'home' (дома) и непросмотренных фильмов
-            if plan_info and plan_info.get('type') == 'home' and not watched:
+            if plan_info and plan_info.get('type') == 'home' and not watched and has_sources:
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
         else:
             # Фильм НЕ запланирован
             if film_id is None:
-                # Фильм НЕ в базе — добавляем "Добавить в базу" + "Запланировать" (добавит автоматически)
                 markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
                 markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-                if not watched:
+                if not watched and has_sources:  # ← вот здесь добавили проверку!
                     markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
             else:
-                # Фильм в базе, но не запланирован — добавляем "Запланировать" и "Выбрать онлайн-кинотеатр"
                 markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-                if not watched:
+                if not watched and has_sources:  # ← и здесь тоже!
+                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+                    
+            # Фильм НЕ запланирован
+            if film_id is None:
+                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
+                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+                if not watched and has_sources:  # ← вот здесь добавили проверку!
+                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+            else:
+                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
+                if not watched and has_sources:  # ← и здесь тоже!
                     markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
         
         # Кнопка "Удалить из базы" — только если фильм в базе (film_id есть)
@@ -554,6 +588,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         logger.info(f"[SHOW FILM INFO] Обработка кнопок сериала: is_series={is_series}, user_id={user_id}, film_id={film_id}")
 
         if is_series:
+
             # Проверяем доступ — функция умеет работать с user_id=None
             has_access = has_notifications_access(chat_id, user_id)
             logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям (группа/личка): has_access={has_access}")

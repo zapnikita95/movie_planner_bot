@@ -798,14 +798,15 @@ def streaming_select_callback(call):
 
         if not sources:
             bot.edit_message_text(
-                "😔 Не найдено онлайн-кинотеатров для просмотра.\n\n◀️ Назад",
+                "😔 Для этого фильма/сериала нет доступных онлайн-платформ в России.\n"
+                "Можно поискать на торрентах или зарубежных сервисах (VPN).\n\n"
+                "◀️ Назад к описанию",
                 chat_id,
                 message_id,
                 reply_markup=InlineKeyboardMarkup().add(
                     InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}")
                 )
             )
-            return
 
         markup = InlineKeyboardMarkup(row_width=1)
         for platform, url in sources:

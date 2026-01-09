@@ -301,10 +301,12 @@ scheduler.add_job(
     replace_existing=True
 )
 
-# Грузим базу imdb (не блокирует, если база уже есть)
-from moviebot.services.shazam_service import build_imdb_database
-# При старте
-build_imdb_database()
+# ============================================================================
+# ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Загрузка IMDb баз и эмбеддингов
+# ============================================================================
+# НЕ ЗАГРУЖАЕМ при старте - это может перегрузить память и сломать деплой!
+# Загрузка будет выполнена в фоновой задаче ПОСЛЕ успешного запуска Flask
+# ============================================================================
 
 # Устанавливаем команды бота
 setup_bot_commands(bot)
@@ -370,6 +372,55 @@ if __name__ == "__main__":
         logger.info("Flask app создан")
     else:
         logger.warning("Попытка повторного создания app — пропускаем")
+
+    # ========================================================================
+    # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Фоновая загрузка IMDb баз и эмбеддингов
+    # ========================================================================
+    # Загружаем ПОСЛЕ успешного деплоя, чтобы не перегрузить память при старте
+    # Запускаем в отдельном потоке, чтобы не блокировать Flask
+    # ========================================================================
+    def load_databases_in_background():
+        """Загружает IMDb базы и строит эмбеддинги в фоне после деплоя"""
+        import time
+        import threading
+        
+        # Ждем 10 секунд после старта, чтобы убедиться, что деплой успешен
+        logger.info("[BACKGROUND] Ожидание 10 секунд перед загрузкой баз...")
+        time.sleep(10)
+        
+        try:
+            logger.info("[BACKGROUND] ===== НАЧАЛО ЗАГРУЗКИ IMDb БАЗ И ЭМБЕДДИНГОВ =====")
+            
+            # 1. Загружаем IMDb базу
+            from moviebot.services.shazam_service import build_imdb_database
+            logger.info("[BACKGROUND] Шаг 1: Загрузка IMDb базы...")
+            build_imdb_database()
+            logger.info("[BACKGROUND] ✅ IMDb база загружена")
+            
+            # 2. Строим эмбеддинги (TMDB индекс)
+            from moviebot.services.shazam_service import build_tmdb_index
+            logger.info("[BACKGROUND] Шаг 2: Построение эмбеддингов (TMDB индекс)...")
+            build_tmdb_index()
+            logger.info("[BACKGROUND] ✅ Эмбеддинги построены")
+            
+            logger.info("[BACKGROUND] ===== ЗАГРУЗКА БАЗ И ЭМБЕДДИНГОВ ЗАВЕРШЕНА =====")
+            
+        except Exception as e:
+            logger.error(f"[BACKGROUND] ❌ Ошибка при загрузке баз: {e}", exc_info=True)
+            logger.warning("[BACKGROUND] Будет использована ленивая загрузка при первом использовании")
+    
+    # ========================================================================
+    # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Запуск фоновой задачи загрузки баз
+    # ========================================================================
+    # Запускаем ТОЛЬКО на Railway/Production, чтобы не перегрузить память при старте
+    # Задача выполняется в отдельном daemon-потоке и не блокирует Flask
+    # Если загрузка не удастся, будет использована ленивая загрузка при первом использовании
+    # ========================================================================
+    if IS_RAILWAY or IS_PRODUCTION:
+        import threading
+        background_thread = threading.Thread(target=load_databases_in_background, daemon=True)
+        background_thread.start()
+        logger.info("[MAIN] ✅ Фоновая задача загрузки баз запущена (IMDb + эмбеддинги)")
 
     if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
         logger.info("Railway/Production/Webhook режим")
