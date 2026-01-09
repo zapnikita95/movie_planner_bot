@@ -2361,3 +2361,9 @@ def handle_random_instruction_plan_reply(message):
         logger.error(f"[RANDOM INSTR REPLY] Ошибка process_plan: {e}")
         bot.reply_to(message, "Не смог добавить в план :(")
 
+def register_text_message_handlers(bot):
+    """Регистрирует обработчики текстовых сообщений"""
+    # Обработчики уже зарегистрированы через декораторы при импорте модуля
+    # Эта функция нужна только для явного вызова в commands.py
+    logger.info("✅ Обработчики текстовых сообщений зарегистрированы (декораторы выполнены при импорте)")
+
