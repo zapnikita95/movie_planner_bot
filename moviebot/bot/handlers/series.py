@@ -2731,6 +2731,8 @@ def register_series_handlers(bot_param):
     # ========== ФУНКЦИЯ _random_final ==========
     
     def _random_final(call, chat_id, user_id):
+        global show_film_info_with_buttons  # ← ДОБАВЬ ЭТУ СТРОКУ СРАЗУ ПОСЛЕ def
+
         from moviebot.api.kinopoisk_api import extract_movie_info
         """Финальный шаг - поиск и показ фильма"""
         try:
