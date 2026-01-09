@@ -391,11 +391,11 @@ if __name__ == "__main__":
         try:
             logger.info("[BACKGROUND] ===== НАЧАЛО ЗАГРУЗКИ IMDb БАЗ И ЭМБЕДДИНГОВ =====")
             
-            # 1. Загружаем IMDb базу
-            from moviebot.services.shazam_service import build_imdb_database
-            logger.info("[BACKGROUND] Шаг 1: Загрузка IMDb базы...")
-            build_imdb_database()
-            logger.info("[BACKGROUND] ✅ IMDb база загружена")
+            # 1. Загружаем IMDb базу — ВРЕМЕННО ОТКЛЮЧЕНО для деплоя
+            # from moviebot.services.shazam_service import build_imdb_database
+            logger.info("[BACKGROUND] Шаг 1: Загрузка IMDb базы — пропущена (временно отключено)")
+            # build_imdb_database()
+            logger.info("[BACKGROUND] ✅ IMDb база НЕ загружалась (пропуск)")
             
             # 2. Строим эмбеддинги (TMDB индекс)
             from moviebot.services.shazam_service import build_tmdb_index
