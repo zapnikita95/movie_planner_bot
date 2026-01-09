@@ -358,10 +358,7 @@ if __name__ == "__main__":
     logger.info(f"[MAIN] IS_RAILWAY: {IS_RAILWAY}")
     logger.info(f"[MAIN] PORT: {PORT}")
 
-    # На Railway всегда запускаем веб-сервер (для health checks)
-    # Если не на Railway и не webhook - запускаем только polling
     if IS_RAILWAY or USE_WEBHOOK or IS_PRODUCTION:
-        # ----------------- PRODUCTION/RAILWAY: ВСЕГДА FLASK -----------------
         logger.info("=== ЗАПУСК В ПРОДАКШЕН-РЕЖИМЕ (RAILWAY/PRODUCTION) ===")
 
         # Определяем WEBHOOK_URL
@@ -394,60 +391,34 @@ if __name__ == "__main__":
             except Exception as e:
                 logger.critical(f"❌ Ошибка установки webhook: {e}", exc_info=True)
                 raise
+
         else:
-            # На Railway без webhook - используем polling
-            logger.info("=== БОТ РАБОТАЕТ В РЕЖИМЕ POLLING (но веб-сервер запущен для health checks) ===")
-            # Удаляем webhook, если был установлен
+            # На Railway без webhook - используем polling (в главном потоке, без лишних потоков)
+            logger.info("=== БОТ РАБОТАЕТ В РЕЖИМЕ POLLING ===")
             try:
                 bot.remove_webhook()
                 logger.info("✅ Webhook удалён (используем polling)")
             except Exception as e:
                 logger.warning(f"⚠️ Не удалось удалить webhook: {e}")
 
-            # Запускаем polling в отдельном потоке
-            import threading
-            def run_polling():
-                try:
-                    logger.info("🚀 Запуск polling в отдельном потоке...")
-                    bot.infinity_polling(none_stop=True, interval=0, timeout=20)
-                except Exception as e:
-                    logger.critical(f"❌ Критическая ошибка в polling потоке: {e}", exc_info=True)
-                    # В случае критической ошибки, даем возможность перезапустить
-                    raise
-            
-            polling_thread = threading.Thread(target=run_polling, daemon=True)
-            polling_thread.start()
-            logger.info("✅ Polling запущен в фоновом потоке")
-
-        # ВСЕГДА запускаем Flask на Railway (даже при polling)
-        from moviebot.web.web_app import create_web_app
-        app = create_web_app(bot)
-
-        port = int(PORT if PORT else 8080)
-        logger.info(f"🚀 Запуск Flask на порту {port}")
-        if WEBHOOK_URL:
-            logger.info(f"🌐 Публичный URL: {WEBHOOK_URL}")
-        logger.info("=== ВЕБ-СЕРВЕР ЗАПУЩЕН ===")
-
-        app.run(host="0.0.0.0", port=port, threaded=True)
+            # Запускаем polling прямо здесь (без отдельного потока — проще и надёжнее)
+            logger.info("🚀 Запуск polling...")
+            bot.infinity_polling(none_stop=True, interval=0, timeout=20)
 
     else:
         # ----------------- ЛОКАЛЬНЫЙ ЗАПУСК: ТОЛЬКО POLLING -----------------
         logger.info("=== ЛОКАЛЬНЫЙ ЗАПУСК В РЕЖИМЕ POLLING ===")
         logger.info("🌐 Webhook отключён — используем polling для разработки")
 
-        # На всякий случай чистим webhook
         try:
             bot.remove_webhook()
             logger.info("Webhook удалён (переходим на polling)")
         except Exception as e:
             logger.warning(f"Не удалось удалить webhook: {e}")
 
-        # Устанавливаем команды
         setup_bot_commands(bot)
 
         logger.info("🚀 Запуск polling...")
         logger.info("Бот готов — пиши ему в Telegram!")
 
-        # infinity_polling — чтобы переживать временные сбои
         bot.infinity_polling(none_stop=True, interval=0, timeout=20)
