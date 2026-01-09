@@ -50,38 +50,30 @@ logger.info(f"[SEARCH TYPE HANDLER] id(bot)={id(bot)}")
 logger.info("=" * 80)
 
 def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
-    """Показывает описание фильма с кнопками действий
-    
-    Args:
-        chat_id: ID чата
-        user_id: ID пользователя
-        info: Информация о фильме из API
-        link: Ссылка на Кинопоиск
-        kp_id: ID фильма на Кинопоиске
-        existing: Кортеж (film_id, title, watched) или None
-        message_id: ID сообщения для обновления (если None - отправляет новое)
-        message_thread_id: ID треда для групповых чатов
-    """
+    """Показывает описание фильма с кнопками действий"""
     import inspect
     
-    # Сначала обработаем message_id, чтобы он был определён
+    # Сначала обработаем message_id
     if message_id:
         try:
             bot.edit_message_text("⏳ Загружаю...", chat_id, message_id)
         except:
-            message_id = None  # если сообщение удалено или недоступно — отправим новое
+            message_id = None
 
-    # Теперь message_id гарантированно существует (либо None, либо значение)
+    # Лог с caller'ом (оставляем для дебага)
     logger.info(
-        "[SHOW FILM INFO] >>> ВХОД | caller = %s() | file = %s:%d | kp_id=%s | existing=%s | msg_id=%s",
+        "[SHOW FILM INFO] >>> ВХОД | caller = %s() | file = %s:%d | kp_id=%s | existing=%s | msg_id=%s | user_id=%s",
         inspect.stack()[1].function,
-        inspect.stack()[1].filename.split('/')[-1],  # только имя файла
+        inspect.stack()[1].filename.split('/')[-1],
         inspect.stack()[1].lineno,
         kp_id,
         existing,
-        message_id
+        message_id,
+        user_id
     )
+
     logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
+
     try:
         logger.info(f"[SHOW FILM INFO] info keys: {list(info.keys()) if info else 'None'}")
         if not info:
@@ -553,49 +545,48 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         logger.info(f"[SHOW FILM INFO] Обработка кнопок сериала: is_series={is_series}, user_id={user_id}, film_id={film_id}")
 
         if is_series:
-            # Проверяем доступ — функция умеет работать с user_id=None
-            has_access = has_notifications_access(chat_id, user_id)
-            logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям (группа/личка): has_access={has_access}")
-
-            # Отметка серий
-            if has_access:
-                markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
-            else:
+            if user_id is None:
+                # Группа + новая ссылка → показываем locked кнопки
+                logger.info("[SHOW FILM INFO] Группа + новая ссылка: user_id=None → показываем locked кнопки")
                 markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
-
-            # Подписка/отписка — ТОЛЬКО внутри if is_series
-            is_subscribed = False
-            if film_id:
-                try:
-                    lock_acquired = db_lock.acquire(timeout=3.0)
-                    if lock_acquired:
-                        try:
-                            # В группе подписка привязана к chat_id, user_id=NULL
-                            query_user = user_id if user_id is not None else None
-                            cursor.execute(
-                                """
-                                SELECT subscribed 
-                                FROM series_subscriptions 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                                LIMIT 1
-                                """,
-                                (chat_id, film_id, query_user)
-                            )
-                            sub_row = cursor.fetchone()
-                            if sub_row:
-                                is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
-                        finally:
-                            db_lock.release()
-                except Exception as e:
-                    logger.warning(f"[SHOW FILM INFO] Ошибка проверки подписки: {e}")
-
-            if has_access:
-                if is_subscribed:
-                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
-                else:
-                    markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
-            else:
                 markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
+            else:
+                # Личка или есть user_id → нормальная проверка
+                has_access = has_notifications_access(chat_id, user_id)
+                logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям: has_access={has_access}")
+
+                # Отметка серий
+                if has_access:
+                    markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{kp_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{kp_id}"))
+
+                # Подписка
+                is_subscribed = False
+                if film_id:
+                    try:
+                        lock_acquired = db_lock.acquire(timeout=3.0)
+                        if lock_acquired:
+                            try:
+                                cursor.execute(
+                                    'SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s LIMIT 1',
+                                    (chat_id, film_id, user_id)
+                                )
+                                sub_row = cursor.fetchone()
+                                if sub_row:
+                                    is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
+                            finally:
+                                db_lock.release()
+                    except Exception as e:
+                        logger.warning(f"[SHOW FILM INFO] Ошибка проверки подписки: {e}")
+
+                if has_access:
+                    if is_subscribed:
+                        markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{kp_id}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{kp_id}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{kp_id}"))
 
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
