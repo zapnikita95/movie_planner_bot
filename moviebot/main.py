@@ -318,7 +318,7 @@ try:
     watchdog = get_watchdog(check_interval=60)
     watchdog.register_scheduler(scheduler)
     from moviebot.database.db_connection import get_db_connection
-    watchdog.register_database(get_db_connection())
+    #watchdog.register_database(get_db_connection())
     watchdog.register_bot(bot)
     watchdog.start()
     logger.info("[INIT] ✅ Watchdog инициализирован и запущен")

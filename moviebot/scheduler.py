@@ -23,6 +23,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from moviebot.bot.bot_init import bot, BOT_ID
 from moviebot.database.db_connection import db_lock
 from moviebot.config import PLANS_TZ
+from moviebot.api.kinopoisk_api import get_seasons_data
 
 # Импортируем ТОЛЬКО функцию, а не глобальные conn/cursor/db_lock
 from moviebot.database.db_connection import get_db_connection
@@ -1055,8 +1056,6 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
             except Exception as e:
                 logger.error(f"[SERIES NOTIFICATION] Ошибка отправки уведомления: {e}")
         
-        # После отправки уведомления проверяем, есть ли следующая серия
-        from moviebot.api.kinopoisk_api import get_seasons_data
         seasons = get_seasons_data(kp_id)
         
         if seasons:
@@ -1150,7 +1149,6 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
             logger.error("[SERIES CHECK] bot или scheduler не установлен")
             return
         
-        from moviebot.api.kinopoisk_api import get_seasons_data
         seasons = get_seasons_data(kp_id)
         
         if not seasons:
