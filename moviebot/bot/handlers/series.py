@@ -20,7 +20,7 @@ from moviebot.database.db_operations import (
 )
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_user_timezone_or_default
-from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data
+from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
 from moviebot.utils.parsing import parse_plan_date_text
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
@@ -2042,6 +2042,7 @@ def register_series_handlers(bot_param):
     # ========== ФУНКЦИЯ _random_final ==========
     
     def _random_final(call, chat_id, user_id):
+        from moviebot.api.kinopoisk_api import extract_movie_info
         """Финальный шаг - поиск и показ фильма"""
         try:
             logger.info(f"[RANDOM] ===== FINAL: user_id={user_id}, chat_id={chat_id}")
@@ -2149,7 +2150,6 @@ def register_series_handlers(bot_param):
                         })
                 
                 # Выполняем поиск по всем запросам
-                from moviebot.api.kinopoisk_api import search_films_by_filters
                 all_films = []
                 
                 for query in search_queries:
