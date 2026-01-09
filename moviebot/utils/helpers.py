@@ -1,6 +1,7 @@
 """
 Вспомогательные функции для проверки доступа к функциям
 """
+import logging
 from moviebot.database.db_operations import (
     get_user_personal_subscriptions, 
     get_active_group_subscription_by_chat_id,
@@ -34,7 +35,7 @@ def has_notifications_access(chat_id, user_id=None):
                 cursor.execute(
                     """
                     SELECT 1 FROM subscriptions 
-                    WHERE chat_id = %s AND user_id IS NULL AND active = TRUE AND expires_at > NOW()
+                    WHERE chat_id = %s AND user_id IS NULL AND is_active = TRUE AND expires_at > NOW()
                     LIMIT 1
                     """,
                     (chat_id,)
