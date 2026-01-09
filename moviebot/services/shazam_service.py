@@ -64,83 +64,108 @@ MAX_MOVIES = 50000
 
 OMDB_API_KEY = os.getenv("OMDB_API_KEY")
 
-
 def build_imdb_database():
-    """Скачивает и строит минимальную IMDb-базу один раз, если её нет"""
+    """Скачивает и строит минимальную IMDb-базу один раз, если её нет.
+    Минимальный режим: только basics + crew (principals и names отключены)"""
     if IMDB_DB_PATH.exists():
         logger.info("IMDb-база уже существует, пропускаем построение")
         return
 
-    logger.info("IMDb-база отсутствует — начинаем скачивание и построение")
+    logger.info("IMDb-база отсутствует — начинаем минимальное построение")
 
     files = {
         'title.basics.tsv.gz': 'https://datasets.imdbws.com/title.basics.tsv.gz',
         'title.crew.tsv.gz': 'https://datasets.imdbws.com/title.crew.tsv.gz',
-        'title.principals.tsv.gz': 'https://datasets.imdbws.com/title.principals.tsv.gz',
-        'name.basics.tsv.gz': 'https://datasets.imdbws.com/name.basics.tsv.gz'
+        # principals и names отключены — они тяжёлые и часто битые
+        # 'title.principals.tsv.gz': 'https://datasets.imdbws.com/title.principals.tsv.gz',
+        # 'name.basics.tsv.gz': 'https://datasets.imdbws.com/name.basics.tsv.gz'
     }
 
+    # Скачиваем только нужные файлы
     for fname, url in files.items():
         path = IMDB_RAW_DIR / fname
-        if not path.exists():
-            logger.info(f"Скачиваем {fname}...")
-            try:
-                response = requests.get(url, stream=True)
-                response.raise_for_status()
-                with open(path, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                logger.info(f"{fname} скачан")
-            except Exception as e:
-                logger.error(f"Ошибка скачивания {fname}: {e}")
-                return
+        if path.exists():
+            logger.info(f"{fname} уже скачан, пропускаем")
+            continue
 
-    # Загрузка и фильтрация
+        logger.info(f"Скачиваем {fname}...")
+        try:
+            response = requests.get(url, stream=True, timeout=60)
+            response.raise_for_status()
+            with open(path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            logger.info(f"{fname} успешно скачан")
+        except Exception as e:
+            logger.error(f"Ошибка скачивания {fname}: {e}")
+            return  # Прерываем, если хотя бы один файл не скачался
+
+    # Загрузка с try/except и фильтрацией
     def load_tsv(file_name):
         path = IMDB_RAW_DIR / file_name
-        return pd.read_csv(path, sep='\t', low_memory=False, na_values='\\N')
+        if not path.exists():
+            logger.warning(f"Файл {file_name} не найден — возвращаем пустой DataFrame")
+            return pd.DataFrame()
+
+        try:
+            df = pd.read_csv(path, sep='\t', low_memory=False, na_values='\\N')
+            logger.info(f"Загружен {file_name}: {len(df)} строк")
+            return df
+        except Exception as e:
+            logger.error(f"Ошибка загрузки {file_name}: {e}")
+            return pd.DataFrame()
 
     logger.info("Загружаем basics...")
     basics = load_tsv('title.basics.tsv.gz')
+    if basics.empty:
+        logger.error("Не удалось загрузить title.basics — база не построена")
+        return
+
     movies = basics[basics['titleType'] == 'movie']
     movies_tconst = set(movies['tconst'])
-
     logger.info(f"Фильмов: {len(movies)}")
 
     logger.info("Загружаем crew...")
     crew = load_tsv('title.crew.tsv.gz')
-    crew = crew[crew['tconst'].isin(movies_tconst)]
+    if not crew.empty:
+        crew = crew[crew['tconst'].isin(movies_tconst)]
+        logger.info(f"Crew после фильтра: {len(crew)} строк")
+    else:
+        logger.warning("Crew не загружен — продолжаем без него")
 
-    logger.info("Загружаем principals...")
-    principals = load_tsv('title.principals.tsv.gz')
-    principals = principals[principals['tconst'].isin(movies_tconst)]
+    # principals и names отключены полностью — они не критичны и часто битые
+    # Если потом понадобятся — включай по одному и проверяй файлы вручную
 
-    logger.info("Загружаем names...")
-    used_nconst = set(principals['nconst'].dropna())
-    used_nconst.update(crew['directors'].str.cat(sep=',').split(','))
-    used_nconst.update(crew['writers'].str.cat(sep=',').split(','))
-    used_nconst = {x for x in used_nconst if pd.notna(x) and x}
-    names = load_tsv('name.basics.tsv.gz')
-    names = names[names['nconst'].isin(used_nconst)]
+    # Создаём базу SQLite
+    try:
+        conn = sqlite3.connect(IMDB_DB_PATH)
+        logger.info("Соединение с SQLite успешно")
 
-    # Создаём базу
-    conn = sqlite3.connect(IMDB_DB_PATH)
+        logger.info("Записываем таблицы...")
+        movies[['tconst', 'primaryTitle', 'originalTitle', 'startYear']].to_sql(
+            'movies', conn, if_exists='replace', index=False
+        )
+        if not crew.empty:
+            crew.to_sql('crew', conn, if_exists='replace', index=False)
 
-    logger.info("Записываем таблицы...")
-    movies[['tconst', 'primaryTitle', 'originalTitle', 'startYear']].to_sql('movies', conn, if_exists='replace', index=False)
-    crew.to_sql('crew', conn, if_exists='replace', index=False)
-    principals[['tconst', 'ordering', 'nconst', 'category']].to_sql('principals', conn, if_exists='replace', index=False)
-    names[['nconst', 'primaryName']].to_sql('names', conn, if_exists='replace', index=False)
+        conn.close()
+        logger.info(f"IMDb-база создана: {IMDB_DB_PATH} ({IMDB_DB_PATH.stat().st_size / 1e6:.2f} MB)")
 
-    conn.close()
-    logger.info(f"IMDb-база создана: {IMDB_DB_PATH} ({IMDB_DB_PATH.stat().st_size / 1e9:.2f} GB)")
+        # Удаляем временные gz-файлы, чтобы не жрали место
+        for f in IMDB_RAW_DIR.glob('*.gz'):
+            try:
+                f.unlink()
+                logger.info(f"Удалён временный файл: {f}")
+            except Exception as e:
+                logger.warning(f"Не удалось удалить {f}: {e}")
 
-    # Удаляем gz-файлы, чтобы освободить место
-    for f in IMDB_RAW_DIR.glob('*.gz'):
-        f.unlink()
-        logger.info(f"Удалён {f}")
+    except Exception as e:
+        logger.error(f"Критическая ошибка при создании базы: {e}", exc_info=True)
+        return
 
-
+    logger.info("=== Минимальная IMDB-база готова (basics + crew) ===")
+    
 def get_imdb_enrich(imdb_id):
     """Возвращает актёров и режиссёров из локальной IMDb-базы"""
     if not IMDB_DB_PATH.exists():
