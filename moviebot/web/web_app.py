@@ -55,161 +55,75 @@ def check_environment_variables():
 # ОБЯЗАТЕЛЬНО должна возвращать app для запуска на Railway
 # НЕ МЕНЯТЬ сигнатуру функции и логику возврата app!
 # ============================================================================
-def create_web_app(bot):
-    from flask import Flask, request, jsonify, abort
-    app = Flask(__name__)
+def check_environment_variables():
+    """Проверяет наличие необходимых переменных окружения"""
+    nalog_inn = os.getenv('NALOG_INN')
+    nalog_password = os.getenv('NALOG_PASSWORD')
+    
+    logger.info("=" * 80)
+    logger.info("[WEB APP] Проверка переменных окружения при старте:")
+    logger.info(f"[WEB APP] NALOG_INN: {'✅ установлен' if nalog_inn and nalog_inn.strip() else '❌ НЕ УСТАНОВЛЕН'}")
+    logger.info(f"[WEB APP] NALOG_PASSWORD: {'✅ установлен' if nalog_password and nalog_password.strip() else '❌ НЕ УСТАНОВЛЕН'}")
+    
+    if not nalog_inn or not nalog_password or not nalog_inn.strip() or not nalog_password.strip():
+        logger.warning("[WEB APP] ⚠️ NALOG_INN или NALOG_PASSWORD не настроены - создание чеков будет недоступно")
+    else:
+        logger.info("[WEB APP] ✅ Все переменные для создания чеков настроены")
+    logger.info("=" * 80)
 
-    app.logger.disabled = True
+# Вызываем проверку при импорте модуля
+check_environment_variables()
+
+def create_web_app(bot):
+    app = Flask(__name__)
+    app.logger.disabled = True  # отключаем дефолтный логгер Flask
+
     logger.info("[WEB APP] Flask app создан внутри create_web_app")
 
-    from moviebot.bot.bot_init import bot as bot_from_init
-    print(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}", flush=True)
-    logger.info(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}")
-    
-    # ВСЕГДА используем bot_from_init (тот, на котором зарегистрированы обработчики)
-    
-    # ПЕРЕПРИСВАИВАЕМ — это ключевой момент
-    
-    # Получаем ID бота
-    try:
-        bot_info = bot_from_init.get_me()
-        BOT_ID = bot_info.id
-        logger.info(f"[WEB APP] ID бота: {BOT_ID}")
-    except Exception as e:
-        logger.warning(f"[WEB APP] Не удалось получить ID бота: {e}")
-        BOT_ID = None
-    
-    # --- Хук логирования запросов (теперь на правильном месте) ---
-    @app.before_request
-    def log_all_requests():
-        print("=" * 80, flush=True)
-        print(f"[FLASK] {request.method} {request.path} от {request.remote_addr}", flush=True)
-        logger.info(f"[FLASK] {request.method} {request.path} от {request.remote_addr}")
-
-        logger.info("=" * 80)
-        logger.info("=== НОВЫЙ ЗАПРОС В FLASK ===")
-        if request.method == 'POST':
-            try:
-                data_length = len(request.get_data())
-                logger.info(f"Data length: {data_length} bytes")
-                if data_length > 0:
-                    data_preview = request.get_data(as_text=True)[:200]
-                    logger.info(f"Data preview: {data_preview}...")
-            except Exception as e:
-                logger.info(f"Data preview: (не удалось прочитать: {e})")
-        logger.info("=" * 80)
+    # Обязательный health-check для Railway — отвечает на любой пинг по /
+    @app.route('/', methods=['GET', 'HEAD'])
+    def health():
+        logger.info("[HEALTH] Railway health-check пинганул / — отвечаем 200")
+        return "Bot webhook is alive on Railway!", 200
 
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
-        # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ В САМОМ НАЧАЛЕ - И PRINT И LOGGER
-        import sys
-        print("=" * 80, file=sys.stdout, flush=True)
-        print("=== WEBHOOK РОУТ СРАБОТАЛ! Запрос получен ===", file=sys.stdout, flush=True)
-        print(f"Method: {request.method}", file=sys.stdout, flush=True)
-        print(f"IP: {request.remote_addr}", file=sys.stdout, flush=True)
-        
-        print("[WEBHOOK] Шаг 1: Логирование базовой информации", flush=True)
-        try:
-            logger.info("=" * 80)
-            logger.info("=== WEBHOOK РОУТ СРАБОТАЛ! Запрос получен ===")
-            logger.info(f"Method: {request.method}")
-            logger.info(f"IP: {request.remote_addr}")
-            logger.info(f"Path: {request.path}")
-            logger.info(f"Content-Type: {request.headers.get('content-type')}")
-            logger.info("=" * 80)
-        except Exception as e:
-            print(f"[WEBHOOK] ОШИБКА в logger: {e}", flush=True)
-        
-        print(f"[WEBHOOK] Шаг 2: Проверка метода: {request.method}", flush=True)
+        logger.info("=" * 80)
+        logger.info(f"[WEBHOOK] ===== ПОЛУЧЕН ЗАПРОС ({request.method}) =====")
+        logger.info(f"[WEBHOOK] IP: {request.remote_addr}")
+        logger.info(f"[WEBHOOK] Content-Type: {request.headers.get('content-type')}")
+
         if request.method == 'GET':
-            print("[WEBHOOK] GET запрос - возвращаем 200", flush=True)
-            try:
-                logger.info("[WEBHOOK] GET запрос - возвращаем 200")
-            except:
-                pass
-            return "OK", 200
-        
-        print("[WEBHOOK] Шаг 3: POST запрос получен - продолжаем обработку", flush=True)
+            logger.info("[WEBHOOK] GET-запрос — возвращаем 200 для проверки")
+            return '', 200
+
+        if request.headers.get('content-type') != 'application/json':
+            logger.warning("[WEBHOOK] Неверный Content-Type")
+            abort(400)
+
         try:
-            logger.info("[WEBHOOK] POST запрос получен")
-        except:
-            pass
-        
-        print("[WEBHOOK] Шаг 4: Получаем content-type", flush=True)
-        content_type = request.headers.get('content-type')
-        print(f"[WEBHOOK] Шаг 5: Content-Type проверка: '{content_type}'", flush=True)
-        try:
-            logger.info(f"[WEBHOOK] Content-Type: '{content_type}'")
-        except:
-            pass
-        
-        if content_type != 'application/json':
-            print(f"[WEBHOOK] Неверный content-type: {content_type}", flush=True)
-            logger.warning(f"[WEBHOOK] Неверный content-type: {content_type}")
-            return 'Forbidden', 403
-        
-        print("[WEBHOOK] Content-Type правильный, обрабатываем JSON", flush=True)
-        try:
-            json_string = request.get_data(as_text=True)
-            print(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт", flush=True)
+            json_string = request.get_data().decode('utf-8')
             logger.info(f"[WEBHOOK] JSON получен, размер: {len(json_string)} байт")
-            print(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...", flush=True)
-            logger.info(f"[WEBHOOK] JSON preview (первые 300 символов): {json_string[:300]}...")
-            
-            print("[WEBHOOK] Начинаем парсинг JSON в Update", flush=True)
+            logger.info(f"[WEBHOOK] JSON preview (первые 1000 символов): {json_string[:1000]}...")
+
             update = telebot.types.Update.de_json(json_string)
-            update_id = update.update_id if hasattr(update, 'update_id') else 'N/A'
-            print(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}", flush=True)
-            logger.info(f"[WEBHOOK] Update распарсен успешно: update_id={update_id}")
-            
-            # Логирование деталей update
-            if hasattr(update, 'message') and update.message:
-                logger.info(f"[WEBHOOK] Update.message.content_type={getattr(update.message, 'content_type', 'НЕТ')}")
-                
-                # Безопасное получение текста
-                message_text = getattr(update.message, 'text', None)
-                if message_text is not None:
-                    text_preview = message_text[:200]
-                else:
-                    text_preview = "None"
-                logger.info(f"[WEBHOOK] Update.message.text='{text_preview}'")
-                
-                logger.info(f"[WEBHOOK] Update.message.from_user.id={getattr(update.message.from_user, 'id', None) if update.message.from_user else None}")
-                
-                if hasattr(update.message, 'successful_payment') and update.message.successful_payment:
-                    sp = update.message.successful_payment
-                    logger.info("[WEBHOOK] ⭐⭐⭐ ОБНАРУЖЕН successful_payment! ⭐⭐⭐")
-                    logger.info(f"[WEBHOOK] successful_payment.currency={sp.currency}")
-                    logger.info(f"[WEBHOOK] successful_payment.total_amount={sp.total_amount}")
-                    logger.info(f"[WEBHOOK] successful_payment.invoice_payload={sp.invoice_payload}")
-                    logger.info(f"[WEBHOOK] successful_payment.telegram_payment_charge_id={getattr(sp, 'telegram_payment_charge_id', 'N/A')}")
-                
-                if hasattr(update.message, 'web_app_data') and update.message.web_app_data:
-                    logger.info("🔍 [WEBHOOK] ⚠️⚠️⚠️ ОБНАРУЖЕН web_app_data! ⚠️⚠️⚠️")
-                    logger.info(f"[WEBHOOK] web_app_data.data={getattr(update.message.web_app_data, 'data', 'НЕТ')}")
-                    logger.info(f"[WEBHOOK] web_app_data.button_text={getattr(update.message.web_app_data, 'button_text', 'НЕТ')}")
-                    
-            # Проверка обработчиков
-            print(f"[WEBHOOK] Проверка обработчиков перед process_new_updates", flush=True)
-            if hasattr(bot, 'message_handlers'):
-                print(f"[WEBHOOK] Первые 5 message handlers:", flush=True)
-                for i, handler in enumerate(bot.message_handlers[:5]):
-                    print(f"[WEBHOOK]   Handler {i}: {handler}", flush=True)
-            
-            # Основной вызов — теперь на правильном боте!
-            print(f"[WEBHOOK] Вызываем bot.process_new_updates([update])", flush=True)
-            bot.process_new_updates([update])
-            print(f"[WEBHOOK] process_new_updates завершен", flush=True)
-            logger.info("[WEBHOOK] ✅ bot.process_new_updates завершен успешно")
-            
-            return '', 200
-            
+            if update:
+                logger.info(f"[WEBHOOK] Update ID: {update.update_id}")
+                bot.process_new_updates([update])
+                logger.info("[WEBHOOK] ✅ Обновление успешно обработано")
+            else:
+                logger.warning("[WEBHOOK] Update не распарсился")
         except Exception as e:
-            print(f"[WEBHOOK] ❌ КРИТИЧЕСКАЯ ошибка при обработке webhook: {e}", flush=True)
-            import traceback
-            print(f"[WEBHOOK] Traceback: {traceback.format_exc()}", flush=True)
-            logger.error(f"[WEBHOOK] ❌ Ошибка при обработке webhook: {e}", exc_info=True)
+            logger.error(f"[WEBHOOK] Ошибка обработки обновления: {e}", exc_info=True)
+            # Telegram требует 200 даже при ошибке
             return '', 200
+
+        return '', 200
+
+    # Запуск приложения — критично для Railway
+    port = int(os.environ.get("PORT", 8080))  # Railway подставит свой PORT
+    logger.info(f"[WEB APP] Запуск на host=0.0.0.0, port={port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
     
     def process_yookassa_notification(event_json, is_test=False):
         """Обрабатывает уведомление от ЮKassa (можно вызывать из webhook или теста)"""
