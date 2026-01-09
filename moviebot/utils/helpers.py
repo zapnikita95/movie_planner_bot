@@ -14,7 +14,7 @@ def has_notifications_access(chat_id, user_id=None):
     - В личке (user_id есть) — проверяем подписку пользователя
     - В группе (user_id=None) — проверяем подписку группы
     """
-    from moviebot.bot.bot_init import db_lock, cursor, conn
+    from moviebot.database.db_connection import db_lock, cursor, conn
     
     try:
         with db_lock:
