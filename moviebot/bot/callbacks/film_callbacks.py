@@ -8,6 +8,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 from moviebot.api.kinopoisk_api import get_facts
 from moviebot.api.kinopoisk_api import get_external_sources  # Добавил это для фикса NameError
+from moviebot.utils.helpers import extract_film_info_from_existing
 from psycopg2.extras import RealDictCursor
 from moviebot.states import user_plan_state
 
@@ -68,7 +69,7 @@ def add_to_database_callback(call):
         
         if row:
             # Фильм уже в базе
-            film_id = row.get('id') if isinstance(row, dict) else row[0]
+            film_id, watched = extract_film_info_from_existing(existing)
             title_db = row.get('title') if isinstance(row, dict) else row[1]
             link = row.get('link') if isinstance(row, dict) else row[2]
             watched = row.get('watched') if isinstance(row, dict) else row[3]
@@ -300,7 +301,7 @@ def plan_from_added_callback(call):
                     cur_add.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                     row = cur_add.fetchone()
                     if row:
-                        film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row.get('id')
+                        film_id, watched = extract_film_info_from_existing(existing)
                     
                     if not film_id:
                         is_series_int = 1 if is_series else 0
@@ -516,7 +517,7 @@ def handle_plan_type(call):
                 if not row:
                     bot.send_message(chat_id, "❌ Фильм не найден в базе. Попробуйте заново.")
                     return
-                film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row['id']
+                film_id, watched = extract_film_info_from_existing(existing)
                 link = row[1] if not isinstance(row, dict) else row['link']
 
         # Сохраняем состояние с step=3 (число!)
@@ -588,19 +589,21 @@ def show_film_description_callback(call):
             bot.send_message(chat_id, "❌ Фильм не найден в твоей базе. Попробуй добавить заново.")
             return
 
-        # row — tuple, преобразуем в dict для удобства (самый простой способ)
+        # row — tuple от cursor.fetchone(), безопасно берём значения по индексам
         film_info = {
-            'id': row[0],
-            'title': row[1],
-            'watched': row[2],
-            'link': row[3],
-            'year': row[4],
-            'genres': row[5],
-            'description': row[6],
-            'director': row[7],
-            'actors': row[8],
-            'is_series': bool(row[9])
+            'title': row[1] if len(row) > 1 else None,
+            'link': row[3] if len(row) > 3 else None,
+            'year': row[4] if len(row) > 4 else None,
+            'genres': row[5] if len(row) > 5 else None,
+            'description': row[6] if len(row) > 6 else None,
+            'director': row[7] if len(row) > 7 else None,
+            'actors': row[8] if len(row) > 8 else None,
+            'is_series': bool(row[9]) if len(row) > 9 else False
         }
+
+        # Если что-то критично отсутствует — логируем
+        if not film_info['title']:
+            logger.error(f"[SHOW FILM DESCRIPTION] Нет title в row для kp_id={kp_id}")
 
         # Теперь используй film_info вместо row
         type_emoji = "📺" if film_info['is_series'] else "🎬"
@@ -665,7 +668,7 @@ def show_film_description_callback(call):
             actors = row.get('actors')
             is_series = bool(row.get('is_series', 0))
         else:
-            film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
+            film_id, watched = extract_film_info_from_existing(existing)
             title = row[1]
             watched = row[2]
             link = row[3]
