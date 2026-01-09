@@ -4299,14 +4299,27 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         kp_id: ID фильма на Кинопоиске
         existing: Кортеж (film_id, title, watched) или None
         message_id: ID сообщения для обновления (если None - отправляет новое)
-        thread_id: ID треда для групповых чатов
+        message_thread_id: ID треда для групповых чатов
     """
+    import inspect
+    
+    # Сначала обработаем message_id, чтобы он был определён
     if message_id:
         try:
             bot.edit_message_text("⏳ Загружаю...", chat_id, message_id)
         except:
             message_id = None  # если сообщение удалено или недоступно — отправим новое
-            
+
+    # Теперь message_id гарантированно существует (либо None, либо значение)
+    logger.info(
+        "[SHOW FILM INFO] >>> ВХОД | caller = %s() | file = %s:%d | kp_id=%s | existing=%s | msg_id=%s",
+        inspect.stack()[1].function,
+        inspect.stack()[1].filename.split('/')[-1],  # только имя файла
+        inspect.stack()[1].lineno,
+        kp_id,
+        existing,
+        message_id
+    )
     logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
     try:
         logger.info(f"[SHOW FILM INFO] info keys: {list(info.keys()) if info else 'None'}")
