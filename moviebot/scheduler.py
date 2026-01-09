@@ -22,7 +22,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 # 4. Твои локальные импорты (отсортируй по алфавиту внутри группы)
 from moviebot.bot.bot_init import bot, BOT_ID
 from moviebot.config import PLANS_TZ
-from moviebot.database.db_connection import conn, cursor, db_lock
+
+# Импортируем ТОЛЬКО функцию, а не глобальные conn/cursor/db_lock
+from moviebot.database.db_connection import get_db_connection
+
 from moviebot.utils.helpers import (
     get_random_events_enabled,
     mark_event_sent,
@@ -30,6 +33,7 @@ from moviebot.utils.helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
 conn = get_db_connection()
 cursor = get_db_cursor()
 plans_tz = PLANS_TZ  # Для обратной совместимости
