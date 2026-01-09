@@ -849,15 +849,21 @@ def mark_watched_from_description_callback(call):
     finally:
         logger.info(f"[MARK WATCHED] ===== END: callback_id={call.id}")
 
+# Глобальный кэш источников (в памяти, живёт пока бот запущен)
+if 'streaming_sources_cache' not in globals():
+    streaming_sources_cache = {}
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("streaming_select:"))
 def streaming_select_callback(call):
     try:
         bot.answer_callback_query(call.id)
 
+        # Извлекаем kp_id
         kp_id = int(call.data.split(":")[1])
         chat_id = call.message.chat.id
         message_id = call.message.message_id
 
+        # Получаем источники
         sources = get_external_sources(kp_id)
 
         if not sources:
@@ -868,17 +874,22 @@ def streaming_select_callback(call):
                 chat_id,
                 message_id,
                 reply_markup=InlineKeyboardMarkup().add(
-                    InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{int(kp_id)}")
+                    InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}")
                 )
             )
+            return
 
+        # Сохраняем источники в кэш по kp_id (ключ — строка!)
+        streaming_sources_cache[str(kp_id)] = sources
+
+        # Создаём клавиатуру с КОРОТКИМИ callback_data
         markup = InlineKeyboardMarkup(row_width=1)
-        for platform, url in sources:
-            from base64 import urlsafe_b64encode
-            encoded_url = urlsafe_b64encode(url.encode()).decode().strip("=")  # на всякий укоротим
-            markup.add(InlineKeyboardButton(platform, callback_data=f"select_platform:{kp_id}:{platform}:{encoded_url}"))
+        for idx, (platform, url) in enumerate(sources):
+            # Короткий callback: sel:kp_id:индекс
+            callback_data = f"sel:{kp_id}:{idx}"
+            markup.add(InlineKeyboardButton(platform, callback_data=callback_data))
 
-        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{int(kp_id)}"))
+        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}"))
 
         bot.edit_message_text(
             "Выберите онлайн-кинотеатр:",
@@ -889,8 +900,39 @@ def streaming_select_callback(call):
 
     except Exception as e:
         logger.error(f"[STREAMING SELECT] Ошибка: {e}", exc_info=True)
-        bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+        bot.answer_callback_query(call.id, "Ошибка, попробуйте позже", show_alert=True)
 
+# Добавь новый обработчик (или в существующий callback-хэндлер)
+@bot.callback_query_handler(func=lambda call: call.data.startswith('s:'))
+def streaming_source_select(call):
+    try:
+        _, kp_id_str, idx_str = call.data.split(':')
+        kp_id = int(kp_id_str)
+        idx = int(idx_str)
+        
+        sources = streaming_sources_cache.get(str(kp_id), [])
+        if idx >= len(sources):
+            bot.answer_callback_query(call.id, "Источник не найден", show_alert=True)
+            return
+        
+        source = sources[idx]
+        url = source.get('url', '#')
+        platform = source.get('platform', 'Платформа')
+        
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"Смотрите на {platform}:\n{url}",
+            reply_markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("Открыть", url=url),
+                InlineKeyboardButton("← Назад", callback_data=f"stream_sel:{kp_id}")
+            )
+        )
+        bot.answer_callback_query(call.id, f"Открываем {platform}")
+        
+    except Exception as e:
+        logger.error(f"[STREAMING SOURCE] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("select_platform:"))
 def select_platform_callback(call):
