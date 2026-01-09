@@ -507,27 +507,54 @@ def get_sequels(kp_id):
         logger.error(f"Ошибка get_sequels: {e}", exc_info=True)
         return {'sequels': [], 'remakes': []}
 
+def get_external_sources(kp_id: int):
+    """Получает внешние источники для просмотра фильма/сериала"""
+    if not isinstance(kp_id, int) or kp_id <= 0:
+        logger.warning(f"Некорректный kp_id: {kp_id}")
+        return []
 
-def get_external_sources(kp_id):
-    """Получает внешние источники для просмотра фильма"""
-    headers = {'X-API-KEY': KP_TOKEN}
+    headers = {
+        'X-API-KEY': KP_TOKEN,
+        'Content-Type': 'application/json'
+    }
     url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/external_sources"
+
     try:
         response = requests.get(url, headers=headers, timeout=15)
+        
+        logger.info(f"[external_sources] kp_id={kp_id} | status={response.status_code}")
+        
         if response.status_code == 200:
             data = response.json()
-            sources = data.get('items', [])
+            items = data.get('items', [])
+            
+            logger.info(f"[external_sources] kp_id={kp_id} | найдено items: {len(items)}")
+            if items:
+                # Логируем первые 2 для примера
+                logger.info(f"Первые 2 источника: {items[:2]}")
+            else:
+                logger.info(f"[external_sources] kp_id={kp_id} → пустой список items")
+            
             links = []
-            for s in sources:
-                if s.get('url'):
-                    platform = s.get('platform', 'Смотреть')
-                    links.append((platform, s['url']))
+            for s in items:
+                platform = s.get('platform', 'Смотреть онлайн')
+                url = s.get('url')
+                if url:
+                    links.append((platform, url))
+            
             return links
+        
+        else:
+            logger.warning(f"[external_sources] kp_id={kp_id} | неожиданный статус: {response.status_code}")
+            logger.debug(f"Ответ сервера: {response.text[:300]}...")  # первые 300 символов
+            return []
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"[external_sources] kp_id={kp_id} | сетевая ошибка: {e}", exc_info=True)
         return []
     except Exception as e:
-        logger.error(f"Ошибка get_external_sources: {e}", exc_info=True)
+        logger.error(f"[external_sources] kp_id={kp_id} | непредвиденная ошибка: {e}", exc_info=True)
         return []
-
 
 def get_film_filters():
     """Получает список жанров из API Кинопоиска"""
