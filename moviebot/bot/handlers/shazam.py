@@ -50,12 +50,42 @@ def process_shazam_text_query(message, query, reply_to_message=None):
         loading_msg = bot.send_message(chat_id, "🔍 Мы уже ищем что-то похожее...")
     
     try:
-        # Ищем фильмы — теперь results уже с данными OMDB
+        # Ищем фильмы (results уже с OMDB данными)
         results = search_movies(query, top_k=5)
         
+                # === RERANKING по актёрам ===
+        query_lower = query.lower()  # или text.lower() в голосовой
+        
+        def actor_score(result):
+            actors = result.get('actors', '').lower()
+            if not actors or actors == "не указано":
+                return 0
+            # Список популярных написаний Джима Керри и других частых
+            common_names = [
+                "джим керри", "jim carrey", "jim kerry", "джим кэрри",
+                "леонардо дикаприо", "leonardo dicaprio",
+                "том хэнкс", "tom hanks",
+                "роберт дауни", "robert downey",
+                # добавь ещё частых, если хочешь
+            ]
+            # Проверяем, есть ли в запросе имя актёра
+            for name in common_names:
+                if name in query_lower:
+                    if name.replace(" ", "") in actors.replace(" ", "") or name.split()[0] in actors:
+                        return 10  # большой буст
+            # Если имя не из списка, но есть совпадение по словам
+            query_words = set(query_lower.split())
+            actor_words = set(actors.split(', '))
+            common = query_words.intersection(actor_words)
+            return len(common) * 3  # за каждое совпавшее слово +3
+        
+        # Сортируем с бустом за актёров
+        results = sorted(results, key=lambda x: actor_score(x), reverse=True)
+        # === КОНЕЦ RERANKING ===
+
         if not results:
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
             
             bot.edit_message_text(
                 "❌ Не удалось найти подходящие фильмы.\nПопробуйте описать по-другому.",
@@ -72,19 +102,40 @@ def process_shazam_text_query(message, query, reply_to_message=None):
         except:
             pass
         
-        # Кнопки соберём отдельно
+        # Собираем кнопки отдельно
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Отправляем каждый фильм карточкой с постером
+        # Отправляем каждый фильм карточкой
         for i, result in enumerate(results[:5], 1):
-            title = result['title']
-            year = f" ({result['year']})" if result.get('year') else ""
+            # Данные из OMDB по умолчанию
+            omdb_title = result['title']
+            omdb_year = result.get('year', '')
             director = result.get('director', '')
             actors = result.get('actors', '')
             rating = result.get('imdb_rating', '')
             poster_url = result.get('poster_url')
             
-            card_text = f"<b>{i}. {title}{year}</b>\n"
+            # Пробуем взять русское название и kp_id из Кинопоиска
+            kp_title = None
+            kp_year = None
+            kp_id = None
+            imdb_id_raw = result.get('imdb_id')
+            if imdb_id_raw:
+                full_imdb_id = f"tt{str(imdb_id_raw).zfill(7)}"
+                try:
+                    film_info = get_film_by_imdb_id(full_imdb_id)
+                    if film_info:
+                        kp_id = film_info.get('kp_id')
+                        kp_title = film_info.get('title')
+                        kp_year = film_info.get('year')
+                except Exception as e:
+                    logger.warning(f"Kinopoisk не дал данные для {full_imdb_id}: {e}")
+            
+            # Что показываем
+            display_title = kp_title or omdb_title
+            display_year = f" ({kp_year or omdb_year})" if (kp_year or omdb_year) else ""
+            
+            card_text = f"<b>{i}. {display_title}{display_year}</b>\n"
             if director and director != "Не указано":
                 card_text += f"🎬 Режиссёр: {director}\n"
             if actors and actors != "Не указано":
@@ -92,24 +143,14 @@ def process_shazam_text_query(message, query, reply_to_message=None):
             if rating and rating != "N/A":
                 card_text += f"⭐ IMDb: {rating}\n"
             
-            # Пробуем взять kp_id для кнопки "Подробнее"
-            kp_id = None
-            imdb_id = result['imdb_id']
-            try:
-                film_info = get_film_by_imdb_id(imdb_id)
-                if film_info and film_info.get('kp_id'):
-                    kp_id = film_info['kp_id']
-            except Exception as e:
-                logger.warning(f"Kinopoisk не дал kp_id для {imdb_id}: {e}")
-            
-            # Кнопка
-            button_text = f"Подробнее о {i}. {title}{year}"
+            # Кнопка с русским названием (если есть)
+            button_text = f"Подробнее о {i}. {display_title}{display_year}"
             if kp_id:
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{kp_id}"))
             else:
                 markup.add(InlineKeyboardButton(button_text, callback_data="shazam:no_kp"))
             
-            # Отправляем с постером или без
+            # Отправляем фото или текст
             if poster_url:
                 try:
                     bot.send_photo(
@@ -124,8 +165,8 @@ def process_shazam_text_query(message, query, reply_to_message=None):
             else:
                 bot.send_message(chat_id=chat_id, text=card_text, parse_mode='HTML')
         
-        # Кнопка возврата
-        markup.add(InlineKeyboardButton("⬅️ Вернуться к Шазаму", callback_data="shazam:start"))
+        # Кнопка назад
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
         
         # Финальное сообщение с кнопками
         bot.send_message(
@@ -140,7 +181,7 @@ def process_shazam_text_query(message, query, reply_to_message=None):
         logger.error(f"Ошибка в process_shazam_text_query: {e}", exc_info=True)
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
         
         try:
             bot.edit_message_text(
@@ -150,7 +191,7 @@ def process_shazam_text_query(message, query, reply_to_message=None):
                 reply_markup=markup
             )
         except:
-            pass
+            bot.send_message(chat_id, "❌ Произошла ошибка при поиске. Попробуйте еще раз.", reply_markup=markup)
         shazam_state.pop(user_id, None)
 
 
@@ -162,19 +203,122 @@ def process_shazam_voice_async(message, loading_msg):
     logger.info(f"[SHAZAM VOICE ASYNC] ===== START: user_id={user_id}, chat_id={chat_id}")
     
     try:
-        # ... (всё до поиска фильмов остаётся без изменений) ...
-        # (скачивание, конвертация, распознавание — не трогаем)
+        # Скачиваем голосовое сообщение
+        logger.info(f"[SHAZAM VOICE ASYNC] Скачиваем голосовое сообщение...")
+        file_info = bot.get_file(message.voice.file_id)
+        logger.info(f"[SHAZAM VOICE ASYNC] file_info получен: file_path={file_info.file_path}, file_size={file_info.file_size}")
         
-        # После успешного распознавания текста и до поиска — всё как было
+        ogg_path = os.path.join(tempfile.gettempdir(), f"voice_{user_id}_{message.voice.file_id}.ogg")
+        logger.info(f"[SHAZAM VOICE ASYNC] Сохраняем в {ogg_path}")
+        
+        downloaded_file = bot.download_file(file_info.file_path)
+        with open(ogg_path, 'wb') as f:
+            f.write(downloaded_file)
+        logger.info(f"[SHAZAM VOICE ASYNC] Файл скачан, размер: {os.path.getsize(ogg_path)} байт")
+        
+        # Конвертируем в WAV
+        logger.info(f"[SHAZAM VOICE ASYNC] Конвертируем OGG в WAV...")
+        wav_path = os.path.join(tempfile.gettempdir(), f"voice_{user_id}_{message.voice.file_id}.wav")
+        if not convert_ogg_to_wav(ogg_path, wav_path):
+            logger.error(f"[SHAZAM VOICE ASYNC] Ошибка конвертации OGG в WAV")
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
+            
+            bot.edit_message_text(
+                "❌ Ошибка конвертации аудио. Попробуйте записать еще раз.",
+                loading_msg.chat.id,
+                loading_msg.message_id,
+                reply_markup=markup
+            )
+            shazam_state.pop(user_id, None)
+            try:
+                os.remove(ogg_path)
+            except:
+                pass
+            return
+        
+        logger.info(f"[SHAZAM VOICE ASYNC] Конвертация завершена, размер WAV: {os.path.getsize(wav_path)} байт")
+        
+        # Распознаем речь
+        logger.info(f"[SHAZAM VOICE ASYNC] Начинаем распознавание речи...")
+        text = transcribe_voice(wav_path)
+        logger.info(f"[SHAZAM VOICE ASYNC] Распознавание завершено, результат: '{text}'")
+        
+        # Удаляем временные файлы
+        try:
+            os.remove(ogg_path)
+            os.remove(wav_path)
+        except:
+            pass
+        
+        if not text:
+            logger.warning(f"[SHAZAM VOICE ASYNC] Не удалось распознать речь")
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
+            
+            bot.edit_message_text(
+                "❌ Не удалось распознать речь.\nПопробуйте записать еще раз или опишите фильм текстом.",
+                loading_msg.chat.id,
+                loading_msg.message_id,
+                reply_markup=markup
+            )
+            shazam_state.pop(user_id, None)
+            return
+        
+        # Обновляем сообщение с распознанным текстом
+        logger.info(f"[SHAZAM VOICE ASYNC] Обновляем сообщение с распознанным текстом...")
+        try:
+            bot.edit_message_text(
+                f"🎤 Распознано: <i>{text}</i>\n\n🔍 Ищем фильмы...",
+                loading_msg.chat.id,
+                loading_msg.message_id,
+                parse_mode='HTML'
+            )
+            logger.info(f"[SHAZAM VOICE ASYNC] Сообщение обновлено")
+        except Exception as e:
+            logger.warning(f"[SHAZAM VOICE ASYNC] Не удалось обновить сообщение: {e}, продолжаем...")
         
         # Ищем фильмы
         logger.info(f"[SHAZAM VOICE ASYNC] Начинаем поиск фильмов по запросу: '{text}'")
         results = search_movies(text, top_k=5)
+
+                # === RERANKING по актёрам ===
+        query_lower = query.lower()
+        
+        def actor_score(result):
+            actors = result.get('actors', '').lower()
+            if not actors or actors == "не указано":
+                return 0
+            # Список популярных написаний Джима Керри и других частых
+            common_names = [
+                "джим керри", "jim carrey", "jim kerry", "джим кэрри",
+                "леонардо дикаприо", "leonardo dicaprio",
+                "том хэнкс", "tom hanks",
+                "роберт дауни", "robert downey",
+                # добавь ещё частых, если хочешь
+            ]
+            # Проверяем, есть ли в запросе имя актёра
+            for name in common_names:
+                if name in query_lower:
+                    if name.replace(" ", "") in actors.replace(" ", "") or name.split()[0] in actors:
+                        return 10  # большой буст
+            # Если имя не из списка, но есть совпадение по словам
+            query_words = set(query_lower.split())
+            actor_words = set(actors.split(', '))
+            common = query_words.intersection(actor_words)
+            return len(common) * 3  # за каждое совпавшее слово +3
+        
+        # Сортируем с бустом за актёров
+        results = sorted(results, key=lambda x: actor_score(x), reverse=True)
+        # === КОНЕЦ RERANKING ===
+
         logger.info(f"[SHAZAM VOICE ASYNC] Поиск завершен, найдено результатов: {len(results)}")
         
         if not results:
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
             
             bot.edit_message_text(
                 "❌ Не удалось найти подходящие фильмы.\nПопробуйте описать по-другому.",
@@ -196,14 +340,32 @@ def process_shazam_voice_async(message, loading_msg):
         
         # Отправляем карточки
         for i, result in enumerate(results[:5], 1):
-            title = result['title']
-            year = f" ({result['year']})" if result.get('year') else ""
+            omdb_title = result['title']
+            omdb_year = result.get('year', '')
             director = result.get('director', '')
             actors = result.get('actors', '')
             rating = result.get('imdb_rating', '')
             poster_url = result.get('poster_url')
             
-            card_text = f"<b>{i}. {title}{year}</b>\n"
+            kp_title = None
+            kp_year = None
+            kp_id = None
+            imdb_id_raw = result.get('imdb_id')
+            if imdb_id_raw:
+                full_imdb_id = f"tt{str(imdb_id_raw).zfill(7)}"
+                try:
+                    film_info = get_film_by_imdb_id(full_imdb_id)
+                    if film_info:
+                        kp_id = film_info.get('kp_id')
+                        kp_title = film_info.get('title')
+                        kp_year = film_info.get('year')
+                except Exception as e:
+                    logger.warning(f"Kinopoisk не дал данные для {full_imdb_id}: {e}")
+            
+            display_title = kp_title or omdb_title
+            display_year = f" ({kp_year or omdb_year})" if (kp_year or omdb_year) else ""
+            
+            card_text = f"<b>{i}. {display_title}{display_year}</b>\n"
             if director and director != "Не указано":
                 card_text += f"🎬 Режиссёр: {director}\n"
             if actors and actors != "Не указано":
@@ -211,23 +373,12 @@ def process_shazam_voice_async(message, loading_msg):
             if rating and rating != "N/A":
                 card_text += f"⭐ IMDb: {rating}\n"
             
-            # kp_id для кнопки
-            kp_id = None
-            imdb_id = result['imdb_id']
-            try:
-                film_info = get_film_by_imdb_id(imdb_id)
-                if film_info and film_info.get('kp_id'):
-                    kp_id = film_info['kp_id']
-            except Exception as e:
-                logger.warning(f"Kinopoisk не дал kp_id для {imdb_id}: {e}")
-            
-            button_text = f"Подробнее о {i}. {title}{year}"
+            button_text = f"Подробнее о {i}. {display_title}{display_year}"
             if kp_id:
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{kp_id}"))
             else:
                 markup.add(InlineKeyboardButton(button_text, callback_data="shazam:no_kp"))
             
-            # Постер или текст
             if poster_url:
                 try:
                     bot.send_photo(
@@ -242,7 +393,7 @@ def process_shazam_voice_async(message, loading_msg):
             else:
                 bot.send_message(chat_id=chat_id, text=card_text, parse_mode='HTML')
         
-        markup.add(InlineKeyboardButton("⬅️ Вернуться к Шазаму", callback_data="shazam:start"))
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
         
         bot.send_message(
             chat_id=chat_id,
@@ -257,7 +408,7 @@ def process_shazam_voice_async(message, loading_msg):
         logger.error(f"[SHAZAM VOICE ASYNC] ===== ERROR: {e}", exc_info=True)
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔮 Вернуться к КиноШазаму", callback_data="shazam:start"))
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
         
         try:
             bot.edit_message_text(
@@ -268,7 +419,7 @@ def process_shazam_voice_async(message, loading_msg):
             )
         except:
             try:
-                bot.reply_to(message, "❌ Произошла ошибка при обработке голосового.")
+                bot.reply_to(message, "❌ Произошла ошибка при обработке голосового.", reply_markup=markup)
             except:
                 pass
         shazam_state.pop(user_id, None)
