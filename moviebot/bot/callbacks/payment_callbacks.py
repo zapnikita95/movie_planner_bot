@@ -2691,11 +2691,11 @@ def register_payment_callbacks(bot_instance):
                 subscription_id_str = parts[1] if len(parts) > 1 else None
                 logger.info(f"[PAYMENT MODIFY] subscription_id_str={subscription_id_str}")
                 
-                # Общая логика: определяем тип чата
+                # Определяем тип подписки по контексту чата
                 is_private = call.message.chat.type == 'private'
                 subscription_type = 'personal' if is_private else 'group'
                 
-                # Если modify:all (только для personal в личном чате)
+                # ─── modify:all ─── только для personal в личке (добавление новых планов)
                 if subscription_id_str == "all" and subscription_type == 'personal':
                     logger.info(f"[PAYMENT MODIFY] Обработка modify:all для user_id={user_id}")
                     from moviebot.database.db_operations import get_user_personal_subscriptions
@@ -2752,7 +2752,6 @@ def register_payment_callbacks(bot_instance):
                     
                     markup = InlineKeyboardMarkup(row_width=1)
                     
-                    # Предлагаем только те, которых нет
                     if 'notifications' not in existing_plan_types:
                         markup.add(InlineKeyboardButton("🔔 Уведомления о сериалах", callback_data="payment:subscribe:personal:notifications:month"))
                     if 'recommendations' not in existing_plan_types:
@@ -2779,77 +2778,71 @@ def register_payment_callbacks(bot_instance):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                     return
                 
-                # Для конкретной подписки (personal или group)
+                # ─── modify:<id> ─── конкретная подписка (personal или group)
                 if subscription_id_str and subscription_id_str.isdigit():
                     subscription_id = int(subscription_id_str)
                     
                     from moviebot.database.db_operations import get_subscription_by_id
                     sub = get_subscription_by_id(subscription_id)
                     
-                    if not sub or sub.get('user_id') != user_id:
-                        bot_instance.answer_callback_query(call.id, "Подписка не найдена или не ваша", show_alert=True)
+                    if not sub or sub.get('user_id') != user_id or not sub.get('is_active', True):
+                        bot_instance.answer_callback_query(call.id, "Подписка не найдена или не активна", show_alert=True)
                         return
                     
-                    # Получаем текущие данные
                     plan_type = sub.get('plan_type', 'all')
                     period_type = sub.get('period_type', 'month')
                     group_size = sub.get('group_size') if subscription_type == 'group' else None
-                    chat_id_sub = sub.get('chat_id') if subscription_type == 'group' else None
                     
-                    # Получаем существующие планы для этого типа (personal или group)
-                    if subscription_type == 'personal':
-                        existing_plans = [s['plan_type'] for s in get_user_personal_subscriptions(user_id) if s.get('is_active')]
-                    else:
-                        existing_plans = [s['plan_type'] for s in get_user_group_subscriptions(user_id) if s.get('is_active') and s.get('chat_id') == call.message.chat.id]
+                    # Если максимальная — ничего не предлагаем
+                    if plan_type == 'all' and period_type == 'lifetime':
+                        text = "✅ <b>У вас куплен весь функционал бота</b>\n\n"
+                        text += "📦 Пакетная подписка - Все режимы\n"
+                        text += "⏰ Период: навсегда\n\n"
+                        text += "Дополнительные опции недоступны."
+                        
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        back_callback = "payment:active:personal" if subscription_type == 'personal' else "payment:active:group:current"
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
+                        
+                        try:
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT MODIFY] Ошибка: {e}")
+                        return
                     
-                    plan_names = {
-                        'notifications': '🔔 Уведомления о сериалах',
-                        'recommendations': '🎯 Персональные рекомендации',
-                        'tickets': '🎫 Билеты в кино',
-                        'all': '📦 Все режимы'
-                    }
-                    
+                    # Обычная подписка — предлагаем изменить
                     text = f"✏️ <b>Изменить { 'личную' if subscription_type == 'personal' else 'групповую' } подписку</b>\n\n"
-                    text += "Выберите новый план (только те, которых нет):\n\n"
+                    text += f"Текущий тариф: {plan_type}\n"
+                    text += f"Период: {period_type}\n"
+                    if group_size:
+                        text += f"Размер: {group_size} человек\n"
+                    text += "\nВыберите действие:\n"
                     
                     markup = InlineKeyboardMarkup(row_width=1)
                     
-                    # Предлагаем планы, которых нет
-                    available_plans = ['notifications', 'recommendations', 'tickets', 'all']
-                    for p in available_plans:
-                        if p not in existing_plans:
-                            button_text = plan_names.get(p, p)
-                            if subscription_type == 'personal':
-                                callback = f"payment:subscribe:personal:{p}:month"
-                            else:
-                                gs_str = str(group_size) if group_size else '2'
-                                callback = f"payment:subscribe:group:{gs_str}:{p}:month:{chat_id_sub}"
-                            markup.add(InlineKeyboardButton(button_text, callback_data=callback))
+                    # Главная кнопка — перейти к тарифам/периодам
+                    tariffs_callback = f"payment:tariffs:{subscription_type}:{subscription_id}"
+                    markup.add(InlineKeyboardButton("💰 Изменить тариф/период", callback_data=tariffs_callback))
                     
-                    # Если все планы есть — сообщение
-                    if len(available_plans) == len(existing_plans) or 'all' in existing_plans:
-                        text += "Все планы уже подключены. Отмените существующий, чтобы добавить другой.\n"
+                    # Для группы — расширение размера (expand)
+                    if subscription_type == 'group' and group_size and group_size < 10:
+                        next_size = 5 if group_size == 2 else 10
+                        markup.add(InlineKeyboardButton(f"🔼 Расширить до {next_size}", callback_data=f"payment:expand:{next_size}:{subscription_id}"))
                     
-                    # Для group добавляем upgrade size (как в expand flow)
-                    if subscription_type == 'group' and group_size:
-                        if group_size < 10:
-                            next_size = 5 if group_size == 2 else 10
-                            markup.add(InlineKeyboardButton(f"🔼 Увеличить до {next_size} человек", callback_data=f"payment:expand:{next_size}:{subscription_id}"))
-                    
-                    # Кнопки отмены и назад
                     markup.add(InlineKeyboardButton("❌ Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
-                    back_data = "payment:active:personal" if subscription_type == 'personal' else "payment:active:group"
-                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_data))
+                    back_callback = "payment:active:personal" if subscription_type == 'personal' else "payment:active:group"
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
                     
                     try:
                         bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                     except Exception as e:
                         if "message is not modified" not in str(e):
-                            logger.error(f"[PAYMENT MODIFY] Ошибка: {e}")
+                            logger.error(f"[PAYMENT MODIFY] Ошибка редактирования: {e}")
                     return
                 
-                # Если непонятный modify
-                bot_instance.answer_callback_query(call.id, "Неизвестный формат изменения", show_alert=True)
+                # Если дошли сюда — неизвестный формат
+                bot_instance.answer_callback_query(call.id, "Неизвестный формат изменения подписки", show_alert=True)
 
 
             if action.startswith("subscribe:"):
