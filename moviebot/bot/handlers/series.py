@@ -2183,7 +2183,6 @@ def register_series_handlers(bot_param):
                 if kp_id_result:
                     # Получаем полную информацию о фильме
                     link = f"https://www.kinopoisk.ru/film/{kp_id_result}/"
-                    from moviebot.api.kinopoisk_api import extract_movie_info
                     movie_info = extract_movie_info(link)
                     
                     if movie_info:
@@ -4049,7 +4048,6 @@ def ensure_movie_in_database(kp_id, title=None):
         
         if not existing:
             # Фильма нет в базе, добавляем его
-            from moviebot.api.kinopoisk_api import extract_movie_info
             link = f"https://kinopoisk.ru/film/{kp_id}"
             info = extract_movie_info(link)
             
@@ -4216,7 +4214,6 @@ def add_film_from_search_callback(call):
                 link = f"https://www.kinopoisk.ru/film/{kp_id}/"
             
             # Получаем информацию о фильме через API
-            from moviebot.api.kinopoisk_api import extract_movie_info
             info = extract_movie_info(link)
             
             if not info:
