@@ -214,6 +214,35 @@ def search_films_with_type(query, page=1, search_type='mixed'):
     
     return films, total_pages
 
+# Обработчик поиска
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
+def search_film_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+        data = call.data[len("add_film_"):]
+        parts = data.split(":")
+        kp_id = parts[0]
+        film_type = parts[1] if len(parts) > 1 else "FILM"
+
+        link = f"https://www.kinopoisk.ru/series/{kp_id}/" if film_type == "TV_SERIES" else f"https://www.kinopoisk.ru/film/{kp_id}/"
+
+        info = extract_movie_info(link)
+        if not info:
+            bot.edit_message_text("Не смог загрузить карточку :(", call.message.chat.id, call.message.message_id)
+            return
+
+        show_film_info_with_buttons(
+            chat_id=call.message.chat.id,
+            user_id=call.from_user.id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=None,
+            message_id=call.message.message_id
+        )
+    except Exception as e:
+        logger.error(f"[SEARCH FILM CALLBACK] Ошибка: {e}")
+        bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
 
 def handle_search(message):
     """Команда /search - поиск фильмов и сериалов"""
@@ -4027,9 +4056,17 @@ def handle_kinopoisk_link(message):
                 message_id=None
             )
         else:
-            # НЕ в базе — показываем без добавления
-            logger.info(f"[KINOPOISK LINK] Фильм НЕ в базе — показываем without_adding")
-            show_film_info_without_adding(chat_id, user_id, info, link, kp_id)
+            # НЕ в базе — показываем обычную карточку как для нового фильма
+            logger.info(f"[KINOPOISK LINK] Фильм НЕ в базе — показываем with_buttons с existing=None")
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=None,  # важно — чтобы показало "Добавить в базу"
+                message_id=None
+            )
         
     except Exception as e:
         logger.error(f"[KINOPOISK LINK] Критическая ошибка: {e}", exc_info=True)
@@ -5040,142 +5077,6 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
             logger.error(f"[ENSURE MOVIE] Ошибка при rollback: {rollback_e}")
         logger.info(f"[ENSURE MOVIE] ===== END (ошибка) =====")
         return None, False
-
-
-def show_film_info_without_adding(chat_id, user_id, info, link, kp_id):
-    """
-    Показывает описание фильма/сериала с ВСЕМИ кнопками БЕЗ добавления в базу.
-    Используется когда пользователь отправляет ссылку на сериал.
-    """
-    logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, link={link}")
-    try:
-        if not info:
-            logger.error(f"[SHOW FILM INFO WITHOUT ADDING] info is None или пустой!")
-            bot.send_message(chat_id, "❌ Произошла ошибка: информация о фильме не получена.")
-            return
-        
-        is_series = info.get('is_series', False)
-        type_emoji = "📺" if is_series else "🎬"
-        logger.info(f"[SHOW FILM INFO WITHOUT ADDING] is_series={is_series}, type_emoji={type_emoji}, title={info.get('title')}")
-        
-        # Формируем текст описания
-        text = f"{type_emoji} <b>{info['title']}</b> ({info['year'] or '—'})\n"
-        logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Текст начала формироваться")
-        if info.get('director'):
-            text += f"<i>Режиссёр:</i> {info['director']}\n"
-        if info.get('genres'):
-            text += f"<i>Жанры:</i> {info['genres']}\n"
-        if info.get('actors'):
-            text += f"<i>В ролях:</i> {info['actors']}\n"
-        if info.get('description'):
-            text += f"\n<i>Кратко:</i> {info['description']}\n"
-        
-        # Если это сериал, добавляем информацию о статусе выхода серий
-        if is_series:
-            is_airing, next_episode = get_series_airing_status(kp_id)
-            if is_airing and next_episode:
-                text += f"\n🟢 <b>Сериал выходит сейчас</b>\n"
-                text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
-            else:
-                text += f"\n🔴 <b>Сериал не выходит</b>\n"
-        
-        text += f"\n<a href='{link}'>Кинопоиск</a>"
-        text += f"\n\n⏳ <b>Ещё не просмотрено</b>"
-        
-        # Создаем кнопки
-        markup = InlineKeyboardMarkup(row_width=1)
-        
-        # Проверяем премьеру
-        russia_release = info.get('russia_release')
-        premiere_date = None
-        premiere_date_str = ""
-        
-        if russia_release and russia_release.get('date'):
-            premiere_date = russia_release['date']
-            premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
-        else:
-            try:
-                headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-                url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-                response_main = requests.get(url_main, headers=headers, timeout=15)
-                if response_main.status_code == 200:
-                    data_main = response_main.json()
-                    from datetime import date as date_class
-                    today = date_class.today()
-                    
-                    for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-                        date_value = data_main.get(date_field)
-                        if date_value:
-                            try:
-                                if 'T' in str(date_value):
-                                    premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                                else:
-                                    premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                                premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                                break
-                            except:
-                                continue
-            except Exception as e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
-        
-        # Проверяем, есть ли фильм в базе
-        in_database = False
-        film_id = None
-        has_plan = False
-        with db_lock:
-            cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(str(kp_id))))
-            film_row = cursor.fetchone()
-            if film_row:
-                in_database = True
-                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                # Проверяем наличие планов
-                cursor.execute('SELECT id FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1', (film_id, chat_id))
-                plan_row = cursor.fetchone()
-                has_plan = plan_row is not None
-        
-        # Если премьера еще не состоялась, добавляем кнопку
-        if premiere_date:
-            from datetime import date as date_class
-            today = date_class.today()
-            if premiere_date > today:
-                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-                markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:current_month"))
-        
-        # Кнопка "Добавить в базу" — только если фильма нет в базе
-        if in_database:
-            markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
-        else:
-            markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
-        
-        # Кнопка "Запланировать просмотр" — только если фильм УЖЕ в базе и ещё не запланирован
-        if film_id and not has_plan:
-            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-        
-        # Общие кнопки
-        markup.row(
-            InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
-            InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
-        )
-        
-        # Отправляем сообщение
-        logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Отправка сообщения: chat_id={chat_id}, text_length={len(text)}, has_markup={markup is not None}")
-        try:
-            msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
-            logger.info(f"[SHOW FILM INFO WITHOUT ADDING] Описание фильма отправлено БЕЗ добавления в базу: {info.get('title')}, kp_id={kp_id}, message_id={msg.message_id if msg else 'None'}")
-            return msg
-        except Exception as send_e:
-            logger.error(f"[SHOW FILM INFO WITHOUT ADDING] Ошибка отправки сообщения: {send_e}", exc_info=True)
-            raise
-        
-    except Exception as e:
-        logger.error(f"[SHOW FILM INFO WITHOUT ADDING] Ошибка: {e}", exc_info=True)
-        try:
-            bot.send_message(chat_id, "❌ Произошла ошибка при показе описания фильма.")
-        except:
-            pass
-        logger.info(f"[SHOW FILM INFO WITHOUT ADDING] ===== КОНЕЦ =====")
-        return None
-
 
 def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
     """Импортирует оценки из Кинопоиска"""

@@ -581,7 +581,7 @@ def register_shazam_handlers(bot):
             
             # Получаем информацию о фильме
             from moviebot.api.kinopoisk_api import extract_movie_info
-            from moviebot.bot.handlers.series import show_film_info_without_adding
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
             
             link = f"https://kinopoisk.ru/film/{kp_id}"
             info = extract_movie_info(link)
@@ -591,8 +591,14 @@ def register_shazam_handlers(bot):
                 return
             
             # Показываем информацию о фильме
-            show_film_info_without_adding(chat_id, user_id, info, link, kp_id)
-            
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=None
+            )            
         except Exception as e:
             logger.error(f"Ошибка в shazam_film_callback: {e}", exc_info=True)
             try:
