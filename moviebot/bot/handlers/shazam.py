@@ -53,34 +53,37 @@ def process_shazam_text_query(message, query, reply_to_message=None):
         # Ищем фильмы (results уже с OMDB данными)
         results = search_movies(query, top_k=5)
         
-                # === RERANKING по актёрам ===
-        query_lower = query.lower()  # или text.lower() в голосовой
+        # === RERANKING по актёрам из OMDB ===
+        query_lower = query.lower()
         
         def actor_score(result):
-            actors = result.get('actors', '').lower()
-            if not actors or actors == "не указано":
+            actors_str = result.get('actors', '')
+            if not actors_str or actors_str == "Не указано":
                 return 0
-            # Список популярных написаний Джима Керри и других частых
-            common_names = [
-                "джим керри", "jim carrey", "jim kerry", "джим кэрри",
-                "леонардо дикаприо", "leonardo dicaprio",
-                "том хэнкс", "tom hanks",
-                "роберт дауни", "robert downey",
-                # добавь ещё частых, если хочешь
-            ]
-            # Проверяем, есть ли в запросе имя актёра
-            for name in common_names:
-                if name in query_lower:
-                    if name.replace(" ", "") in actors.replace(" ", "") or name.split()[0] in actors:
-                        return 10  # большой буст
-            # Если имя не из списка, но есть совпадение по словам
+            
+            actors_lower = actors_str.lower()
             query_words = set(query_lower.split())
-            actor_words = set(actors.split(', '))
+            
+            # Разбиваем актёров по запятой
+            actor_list = [a.strip() for a in actors_str.split(',')]
+            actor_words = set()
+            for actor in actor_list:
+                actor_words.update(actor.lower().split())
+            
+            # Сколько слов из запроса совпало с актёрами
             common = query_words.intersection(actor_words)
-            return len(common) * 3  # за каждое совпавшее слово +3
+            score = len(common) * 10  # за каждое слово +10 (фамилия/имя хватит)
+            
+            # Дополнительный буст, если полное имя совпало
+            for actor in actor_list:
+                actor_clean = actor.lower()
+                if actor_clean in query_lower or actor_clean.split()[-1] in query_lower:
+                    score += 20
+            
+            return score
         
-        # Сортируем с бустом за актёров
-        results = sorted(results, key=lambda x: actor_score(x), reverse=True)
+        # Сортируем: сначала по совпадению актёров, потом как было
+        results = sorted(results, key=actor_score, reverse=True)
         # === КОНЕЦ RERANKING ===
 
         if not results:
@@ -284,34 +287,33 @@ def process_shazam_voice_async(message, loading_msg):
         logger.info(f"[SHAZAM VOICE ASYNC] Начинаем поиск фильмов по запросу: '{text}'")
         results = search_movies(text, top_k=5)
 
-                # === RERANKING по актёрам ===
-        query_lower = query.lower()
+        # === RERANKING по актёрам из OMDB ===
+        query_lower = text.lower()
         
         def actor_score(result):
-            actors = result.get('actors', '').lower()
-            if not actors or actors == "не указано":
+            actors_str = result.get('actors', '')
+            if not actors_str or actors_str == "Не указано":
                 return 0
-            # Список популярных написаний Джима Керри и других частых
-            common_names = [
-                "джим керри", "jim carrey", "jim kerry", "джим кэрри",
-                "леонардо дикаприо", "leonardo dicaprio",
-                "том хэнкс", "tom hanks",
-                "роберт дауни", "robert downey",
-                # добавь ещё частых, если хочешь
-            ]
-            # Проверяем, есть ли в запросе имя актёра
-            for name in common_names:
-                if name in query_lower:
-                    if name.replace(" ", "") in actors.replace(" ", "") or name.split()[0] in actors:
-                        return 10  # большой буст
-            # Если имя не из списка, но есть совпадение по словам
+            
+            actors_lower = actors_str.lower()
             query_words = set(query_lower.split())
-            actor_words = set(actors.split(', '))
+            
+            actor_list = [a.strip() for a in actors_str.split(',')]
+            actor_words = set()
+            for actor in actor_list:
+                actor_words.update(actor.lower().split())
+            
             common = query_words.intersection(actor_words)
-            return len(common) * 3  # за каждое совпавшее слово +3
+            score = len(common) * 10
+            
+            for actor in actor_list:
+                actor_clean = actor.lower()
+                if actor_clean in query_lower or actor_clean.split()[-1] in query_lower:
+                    score += 20
+            
+            return score
         
-        # Сортируем с бустом за актёров
-        results = sorted(results, key=lambda x: actor_score(x), reverse=True)
+        results = sorted(results, key=actor_score, reverse=True)
         # === КОНЕЦ RERANKING ===
 
         logger.info(f"[SHAZAM VOICE ASYNC] Поиск завершен, найдено результатов: {len(results)}")
