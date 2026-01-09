@@ -86,20 +86,18 @@ def create_web_app(bot):
         print(f"[FLASK] {request.method} {request.path} от {request.remote_addr}", flush=True)
         logger.info(f"[FLASK] {request.method} {request.path} от {request.remote_addr}")
 
-    logger.info("=" * 80)
-    logger.info("=== НОВЫЙ ЗАПРОС В FLASK ===")
-    logger.info(f"Path: {request.path}, Method: {request.method}, IP: {request.remote_addr}")
-    logger.info(f"Content-Type: {request.headers.get('content-type')}")
-    if request.method == 'POST':
-        try:
-            data_length = len(request.get_data())
-            logger.info(f"Data length: {data_length} bytes")
-            if data_length > 0:
-                data_preview = request.get_data(as_text=True)[:200]
-                logger.info(f"Data preview: {data_preview}...")
-        except Exception as e:
-            logger.info(f"Data preview: (не удалось прочитать: {e})")
-    logger.info("=" * 80)
+        logger.info("=" * 80)
+        logger.info("=== НОВЫЙ ЗАПРОС В FLASK ===")
+        if request.method == 'POST':
+            try:
+                data_length = len(request.get_data())
+                logger.info(f"Data length: {data_length} bytes")
+                if data_length > 0:
+                    data_preview = request.get_data(as_text=True)[:200]
+                    logger.info(f"Data preview: {data_preview}...")
+            except Exception as e:
+                logger.info(f"Data preview: (не удалось прочитать: {e})")
+        logger.info("=" * 80)
 
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
