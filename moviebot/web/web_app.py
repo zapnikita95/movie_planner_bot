@@ -14,50 +14,22 @@ from dotenv import load_dotenv
 # В Railway переменные окружения уже доступны через os.getenv()
 load_dotenv()
 
-# КРИТИЧНО: Настраиваем логирование Flask так, чтобы оно не конфликтовало с основным
-# Используем тот же root logger, что и в main.py
 logger = logging.getLogger(__name__)
 
-# Отключаем логирование Werkzeug (Flask по умолчанию), чтобы не перехватывало stdout
 werkzeug_logger = logging.getLogger('werkzeug')
-werkzeug_logger.setLevel(logging.WARNING)  # Только WARNING и выше, чтобы не засорять логи
+werkzeug_logger.setLevel(logging.WARNING)
 
-# Отключаем логирование Flask
 flask_logger = logging.getLogger('flask')
 flask_logger.setLevel(logging.WARNING)
 
-app = Flask(__name__)
-
 # Отключаем логирование Flask встроенным способом
-app.logger.disabled = True
+#app.logger.disabled = True
 
 # Добавляем логирование при создании приложения
-logger.info("[WEB APP] Flask приложение создано")
+#logger.info("[WEB APP] Flask приложение создано")
 
 # Глобальное логирование всех запросов - ПРИНУДИТЕЛЬНОЕ
 # Глобальное логирование всех запросов - ПРИНУДИТЕЛЬНОЕ
-@app.before_request
-def log_all_requests():
-    # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ - ДОЛЖНО СРАБАТЫВАТЬ ВСЕГДА
-    import sys
-    print("=" * 80, file=sys.stdout, flush=True)
-    print("=== НОВЫЙ ЗАПРОС В FLASK ===", file=sys.stdout, flush=True)
-    print(f"Path: {request.path}, Method: {request.method}, IP: {request.remote_addr}", file=sys.stdout, flush=True)
-    
-    logger.info("=" * 80)
-    logger.info("=== НОВЫЙ ЗАПРОС В FLASK ===")
-    logger.info(f"Path: {request.path}, Method: {request.method}, IP: {request.remote_addr}")
-    logger.info(f"Content-Type: {request.headers.get('content-type')}")
-    if request.method == 'POST':
-        try:
-            data_length = len(request.get_data())
-            logger.info(f"Data length: {data_length} bytes")
-            if data_length > 0:
-                data_preview = request.get_data(as_text=True)[:200]
-                logger.info(f"Data preview: {data_preview}...")
-        except Exception as e:
-            logger.info(f"Data preview: (не удалось прочитать: {e})")
-    logger.info("=" * 80)
 
 # Проверяем переменные окружения при старте приложения
 def check_environment_variables():
@@ -76,9 +48,6 @@ def check_environment_variables():
         logger.info("[WEB APP] ✅ Все переменные для создания чеков настроены")
     logger.info("=" * 80)
 
-# Вызываем проверку при импорте модуля
-check_environment_variables()
-
 # ============================================================================
 # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: ФУНКЦИЯ create_web_app
 # ============================================================================
@@ -87,10 +56,13 @@ check_environment_variables()
 # НЕ МЕНЯТЬ сигнатуру функции и логику возврата app!
 # ============================================================================
 def create_web_app(bot):
-    """Создает Flask приложение с webhook обработчиками"""
-    # КРИТИЧЕСКИ ВАЖНО: Проверяем, что это тот же экземпляр бота, что используется в обработчиках
+    from flask import Flask, request, jsonify, abort
+    app = Flask(__name__)
+
+    app.logger.disabled = True
+    logger.info("[WEB APP] Flask app создан внутри create_web_app")
+
     from moviebot.bot.bot_init import bot as bot_from_init
-    
     print(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}", flush=True)
     logger.info(f"[WEB APP] bot_from_init: {bot_from_init}, id: {id(bot_from_init)}")
     
@@ -100,14 +72,35 @@ def create_web_app(bot):
     
     # Получаем ID бота
     try:
-        bot_info = bot.get_me()
+        bot_info = bot_from_init.get_me()
         BOT_ID = bot_info.id
         logger.info(f"[WEB APP] ID бота: {BOT_ID}")
     except Exception as e:
         logger.warning(f"[WEB APP] Не удалось получить ID бота: {e}")
         BOT_ID = None
     
-    
+    # --- Хук логирования запросов (теперь на правильном месте) ---
+    @app.before_request
+    def log_all_requests():
+        print("=" * 80, flush=True)
+        print(f"[FLASK] {request.method} {request.path} от {request.remote_addr}", flush=True)
+        logger.info(f"[FLASK] {request.method} {request.path} от {request.remote_addr}")
+
+    logger.info("=" * 80)
+    logger.info("=== НОВЫЙ ЗАПРОС В FLASK ===")
+    logger.info(f"Path: {request.path}, Method: {request.method}, IP: {request.remote_addr}")
+    logger.info(f"Content-Type: {request.headers.get('content-type')}")
+    if request.method == 'POST':
+        try:
+            data_length = len(request.get_data())
+            logger.info(f"Data length: {data_length} bytes")
+            if data_length > 0:
+                data_preview = request.get_data(as_text=True)[:200]
+                logger.info(f"Data preview: {data_preview}...")
+        except Exception as e:
+            logger.info(f"Data preview: (не удалось прочитать: {e})")
+    logger.info("=" * 80)
+
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
         # ПРИНУДИТЕЛЬНОЕ ЛОГИРОВАНИЕ В САМОМ НАЧАЛЕ - И PRINT И LOGGER
@@ -1302,14 +1295,14 @@ def create_web_app(bot):
     # Этот endpoint ОБЯЗАТЕЛЬНО должен возвращать 200 OK
     # НЕ УДАЛЯТЬ и НЕ МЕНЯТЬ логику!
     # ========================================================================
-    @app.route('/health', methods=['GET'])
-    def health():
-        try:
-            logger.info("[HEALTH] Healthcheck запрос получен")
-            return "OK", 200
-        except Exception as e:
-            logger.error(f"[HEALTH] Ошибка в healthcheck: {e}", exc_info=True)
-            return "ERROR", 500
+    #@app.route('/health', methods=['GET'])
+    #def health():
+    #    try:
+    #        logger.info("[HEALTH] Healthcheck запрос получен")
+    #        return "OK", 200
+    ##    except Exception as e:
+    #        logger.error(f"[HEALTH] Ошибка в healthcheck: {e}", exc_info=True)
+    #        return "ERROR", 500
 
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")

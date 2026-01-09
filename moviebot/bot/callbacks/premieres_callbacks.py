@@ -759,7 +759,7 @@ def premiere_notify_handler(call):
         confirm_text += f"Если это ошибка, нажмите кнопку ниже для отмены."
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("🔗 Перейти к описанию", callback_data=f"show_film_description:{kp_id}"))
+        markup.add(InlineKeyboardButton("🔗 Перейти к описанию", callback_data=f"premiere_description:{kp_id}"))
         markup.add(InlineKeyboardButton("❌ Отменить", callback_data=f"premiere_cancel:{kp_id}:{plan_id}"))
         
         bot.send_message(chat_id, confirm_text, parse_mode='HTML', reply_markup=markup)
@@ -773,11 +773,51 @@ def premiere_notify_handler(call):
         except:
             pass
 
+# Обработчик "Перейти к описанию" — используем существующую функцию
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_film_description:"))
+def premiere_show_description(call):
+    try:
+        bot.answer_callback_query(call.id, "Загружаю описание...")
+        
+        kp_id = call.data.split(":", 1)[1]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot.answer_callback_query(call.id, "❌ Не удалось загрузить", show_alert=True)
+            return
+        
+        # Проверяем наличие в базе
+        cursor.execute(
+            'SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s',
+            (chat_id, kp_id)
+        )
+        existing = cursor.fetchone()
+        
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=existing,
+            message_id=call.message.message_id,
+            message_thread_id=getattr(call.message, 'message_thread_id', None)
+        )
+        
+        logger.info(f"[PREMIERE DESC] Описание показано: kp_id={kp_id}")
+        
+    except Exception as e:
+        logger.error(f"[PREMIERE DESC] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
 
+
+# Обработчик "Отменить" (если ещё не работает — замени полностью)
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_cancel:"))
 def premiere_cancel_handler(call):
-    logger.info(f"[PREMIERE CANCEL] Кнопка нажата! callback_data={call.data}, user={call.from_user.id}")
-    """Отмена уведомления о премьере"""
     try:
         bot.answer_callback_query(call.id)
         
@@ -788,8 +828,7 @@ def premiere_cancel_handler(call):
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         
-        deleted_text = "❌ <b>Отменено</b>"
-        title = "фильм"
+        deleted_text = "❌ <b>Уведомление отменено</b>"
         
         with db_lock:
             if plan_id:
@@ -797,46 +836,24 @@ def premiere_cancel_handler(call):
                     'DELETE FROM plans WHERE id = %s AND chat_id = %s AND user_id = %s',
                     (plan_id, chat_id, user_id)
                 )
-                if cursor.rowcount == 0:
-                    bot.answer_callback_query(call.id, "❌ План не найден или уже удалён", show_alert=True)
-                    return
+                cursor.rowcount  # проверяем, удалили ли
             
             cursor.execute(
                 'SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s',
                 (chat_id, kp_id)
             )
-            film_row = cursor.fetchone()
+            film = cursor.fetchone()
             
-            if film_row:
-                film_id = film_row[0] if not isinstance(film_row, dict) else film_row['id']
-                title = film_row[1] if not isinstance(film_row, dict) else film_row['title']
-                
-                cursor.execute('SELECT COUNT(*) FROM plans WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
-                plans_count = cursor.fetchone()[0]
-                
-                cursor.execute('SELECT COUNT(*) FROM ratings WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
-                ratings_count = cursor.fetchone()[0]
-                
-                if plans_count == 0 and ratings_count == 0:
-                    cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                    deleted_text += f"\n\nФильм <b>{title}</b> удалён из базы."
-                else:
-                    deleted_text += f"\n\nПлан фильма <b>{title}</b> удалён."
-                
-                conn.commit()
-                
-                bot.edit_message_text(
-                    deleted_text,
-                    chat_id=chat_id,
-                    message_id=call.message.message_id,
-                    parse_mode='HTML'
-                )
-            else:
-                bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
-                
+            if film:
+                film_id, title = film
+                deleted_text += f"\n\nФильм <b>{title}</b> остаётся в базе."
+            
+            conn.commit()
+        
+        bot.edit_message_text(deleted_text, chat_id, call.message.message_id, parse_mode='HTML')
+        logger.info(f"[PREMIERE CANCEL] Отменено: kp_id={kp_id}, plan_id={plan_id}")
+        
     except Exception as e:
-        if 'conn' in locals():
-            conn.rollback()
         logger.error(f"[PREMIERE CANCEL] Ошибка: {e}", exc_info=True)
         bot.answer_callback_query(call.id, "❌ Ошибка отмены", show_alert=True)
 

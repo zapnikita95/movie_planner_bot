@@ -248,15 +248,32 @@ def plan_from_added_callback(call):
         is_series = False
         
         # 1. Пробуем взять из базы (самое быстрое)
-        with db_lock:
-            cursor.execute('SELECT title, link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+        try:
+            conn = get_db_connection()  # берём свежее каждый раз
+            cursor = conn.cursor(cursor_factory=RealDictCursor)  # если используешь RealDictCursor
+            cursor.execute(
+                'SELECT title, link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s',
+                (chat_id, str(kp_id))
+            )
             row = cursor.fetchone()
             if row:
-                title = row[0] if not isinstance(row, dict) else row.get('title')
-                link = row[1] if not isinstance(row, dict) else row.get('link')
-                is_series = bool(row[2] if not isinstance(row, dict) else row.get('is_series'))
+                title = row['title']
+                link = row['link']
+                is_series = bool(row['is_series'])
                 logger.info(f"[PLAN FROM ADDED] Название взято из базы: {title}")
-        
+            cursor.close()  # обязательно закрываем
+        except Exception as db_e:
+            logger.error(f"[PLAN FROM ADDED] Ошибка чтения из БД: {db_e}", exc_info=True)
+            title = None
+            link = None
+            is_series = False
+        finally:
+            if 'cursor' in locals():
+                try:
+                    cursor.close()
+                except:
+                    pass
+                
         # 2. Если в базе нет — берём из API (надёжно)
         if not title:
             from moviebot.api.kinopoisk_api import extract_movie_info
