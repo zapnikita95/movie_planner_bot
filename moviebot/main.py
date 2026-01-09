@@ -239,9 +239,9 @@ from moviebot.bot.callbacks.film_callbacks import register_film_callbacks
 register_film_callbacks(bot)
 logger.info("✅ film_callbacks зарегистрированы")
 
-#from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
-#register_series_callbacks(bot)
-#logger.info("✅ series_callbacks зарегистрированы")
+from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
+register_series_callbacks(bot)
+logger.info("✅ series_callbacks зарегистрированы")
 
 from moviebot.bot.callbacks.payment_callbacks import register_payment_callbacks
 register_payment_callbacks(bot)
@@ -408,6 +408,8 @@ if __name__ == "__main__":
         except Exception as e:
             logger.error(f"[BACKGROUND] ❌ Ошибка при загрузке баз: {e}", exc_info=True)
             logger.warning("[BACKGROUND] Будет использована ленивая загрузка при первом использовании")
+            # НЕ поднимаем исключение - это не критично для работы бота
+            # Бот продолжит работать, базы загрузятся при первом использовании
     
     # ========================================================================
     # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Запуск фоновой задачи загрузки баз

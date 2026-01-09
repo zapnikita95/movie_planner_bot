@@ -363,7 +363,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     markup.add(InlineKeyboardButton("🔕 Отменить уведомление", callback_data=f"premiere_cancel:{kp_id}"))
                 else:
                     markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{premiere_date_str}"))
-                    
+
         # Получаем film_id для проверки оценок и планов
         logger.info(f"[SHOW FILM INFO] Получение film_id...")
         film_id = None
@@ -477,34 +477,30 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 # Фильм не в базе - всегда показываем кнопку "Просмотрено"
                 markup.add(InlineKeyboardButton("👁️ Просмотрено", callback_data=f"mark_watched_from_description_kp:{kp_id}"))
         
-        # Если фильм запланирован, показываем специальную логику кнопок
+        logger.info(f"[BUTTONS] film_id={film_id}, has_plan={has_plan}, watched={watched}, has_sources={has_sources}")
+
+        # Если уже запланирован — не добавляем кнопку планирования
         if has_plan:
+            logger.info(f"[BUTTONS] План уже существует → только онлайн если home")
             if plan_info and plan_info.get('type') == 'home' and not watched and has_sources:
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+
         else:
-            # Фильм НЕ запланирован
+            # Нет плана → всегда показываем кнопку "Запланировать просмотр"
+            logger.info(f"[BUTTONS] Нет плана → добавляем 'Запланировать просмотр'")
+            
             if film_id is None:
                 markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
                 markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-                if not watched and has_sources:  # ← вот здесь добавили проверку!
-                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
             else:
+                # Фильм в базе, но без плана — только "Запланировать"
                 markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-                if not watched and has_sources:  # ← и здесь тоже!
-                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
-                    
-            # Фильм НЕ запланирован
-            if film_id is None:
-                markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"))
-                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-                if not watched and has_sources:  # ← вот здесь добавили проверку!
-                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
-            else:
-                markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{kp_id}"))
-                if not watched and has_sources:  # ← и здесь тоже!
-                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
-        
-        # Кнопка "Удалить из базы" — только если фильм в базе (film_id есть)
+
+            # Онлайн-кнопка отдельно, только если условия
+            if not watched and has_sources:
+                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{kp_id}"))
+
+        # Кнопка удаления — если фильм в базе
         if film_id:
             markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{kp_id}"))
             

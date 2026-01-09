@@ -30,138 +30,84 @@ logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
 
-
-@bot.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
-def series_track_callback(call):
-    """Обработчик для отметки сезонов/серий как просмотренных"""
-    try:
-        # Пытаемся сразу ответить на callback (убираем "часики")
+def register_series_callbacks(bot):
+    """Регистрирует callback handlers для сериалов"""
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
+    def series_track_callback(call):
+        """Обработчик для отметки сезонов/серий как просмотренных"""
         try:
-            bot.answer_callback_query(call.id)
-        except Exception as e:
-            logger.warning(f"[SERIES TRACK] Не удалось ответить на callback query (возможно, истек): {e}")
+            # Пытаемся сразу ответить на callback (убираем "часики")
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception as e:
+                logger.warning(f"[SERIES TRACK] Не удалось ответить на callback query (возможно, истек): {e}")
 
-        # ── Безопасный парсинг kp_id ─────────────────────────────────────────────
-        parts = call.data.split(":")
-        if len(parts) < 2:
-            logger.error(f"[SERIES TRACK] Некорректный callback_data (нет kp_id): {call.data}")
-            bot.answer_callback_query(call.id, "Ошибка формата кнопки", show_alert=True)
-            return
+            # ── Безопасный парсинг kp_id ─────────────────────────────────────────────
+            parts = call.data.split(":")
+            if len(parts) < 2:
+                logger.error(f"[SERIES TRACK] Некорректный callback_data (нет kp_id): {call.data}")
+                bot.answer_callback_query(call.id, "Ошибка формата кнопки", show_alert=True)
+                return
 
-        kp_id_raw = parts[1].strip()
-        try:
-            kp_id = str(int(kp_id_raw))  # приводим к чистой строке-числу
-        except ValueError:
-            logger.error(f"[SERIES TRACK] kp_id не является числом: '{kp_id_raw}' в {call.data}")
-            bot.answer_callback_query(call.id, "Неверный ID сериала", show_alert=True)
-            return
+            kp_id_raw = parts[1].strip()
+            try:
+                kp_id = str(int(kp_id_raw))  # приводим к чистой строке-числу
+            except ValueError:
+                logger.error(f"[SERIES TRACK] kp_id не является числом: '{kp_id_raw}' в {call.data}")
+                bot.answer_callback_query(call.id, "Неверный ID сериала", show_alert=True)
+                return
 
-        chat_id = call.message.chat.id
-        user_id = call.from_user.id
-        message_id = call.message.message_id
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            message_id = call.message.message_id
 
-        logger.info(f"[SERIES TRACK] Начало: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}")
+            logger.info(f"[SERIES TRACK] Начало: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}")
 
-        # Проверяем доступ к функциям уведомлений
-        if not has_notifications_access(chat_id, user_id):
-            logger.warning(f"[SERIES TRACK] Нет доступа: user_id={user_id}, chat_id={chat_id}")
-            bot.answer_callback_query(
-                call.id,
-                "🔒 Функционал можно подключить через /payment",
-                show_alert=True
-            )
-            return
+            # Проверяем доступ к функциям уведомлений
+            if not has_notifications_access(chat_id, user_id):
+                logger.warning(f"[SERIES TRACK] Нет доступа: user_id={user_id}, chat_id={chat_id}")
+                bot.answer_callback_query(
+                    call.id,
+                    "🔒 Функционал можно подключить через /payment",
+                    show_alert=True
+                )
+                return
 
-        # Получаем film_id (добавляем в базу, если нет)
-        link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-        info = extract_movie_info(link)
-        if not info:
-            logger.error(f"[SERIES TRACK] Не удалось получить информацию о сериале для kp_id={kp_id}")
-            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
-            return
+            # Получаем film_id (добавляем в базу, если нет)
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            info = extract_movie_info(link)
+            if not info:
+                logger.error(f"[SERIES TRACK] Не удалось получить информацию о сериале для kp_id={kp_id}")
+                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                return
 
-        film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-        if not film_id:
-            logger.error(f"[SERIES TRACK] Не удалось добавить сериал в базу для kp_id={kp_id}")
-            bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
-            return
+            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            if not film_id:
+                logger.error(f"[SERIES TRACK] Не удалось добавить сериал в базу для kp_id={kp_id}")
+                bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                return
 
-        title = info.get('title', 'Сериал')
+            title = info.get('title', 'Сериал')
 
-        if was_inserted:
-            bot.send_message(chat_id, f"✅ Сериал добавлен в базу!")
-            logger.info(f"[SERIES TRACK] Сериал добавлен в базу: film_id={film_id}, title={title}")
+            if was_inserted:
+                bot.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                logger.info(f"[SERIES TRACK] Сериал добавлен в базу: film_id={film_id}, title={title}")
 
-        # Получаем сезоны из API
-        seasons_data = get_seasons_data(kp_id)
-        if not seasons_data:
-            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сезонах", show_alert=True)
-            return
+            # Получаем сезоны из API
+            seasons_data = get_seasons_data(kp_id)
+            if not seasons_data:
+                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сезонах", show_alert=True)
+                return
 
-        # ── Дальше идёт твой оригинальный код построения клавиатуры ─────────────
-        now = datetime.now()
+            # ── Дальше идёт твой оригинальный код построения клавиатуры ─────────────
+            now = datetime.now()
 
-        markup = InlineKeyboardMarkup(row_width=1)
-        for season in seasons_data:
-            season_num = season.get('number', '')
-            episodes = season.get('episodes', [])
-            episodes_count = len(episodes)
-
-            # Проверяем, вышел ли сезон
-            season_released = True
-            if episodes:
-                for ep in episodes:
-                    release_str = ep.get('releaseDate', '')
-                    if release_str and release_str != '—':
-                        try:
-                            release_date = None
-                            for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                try:
-                                    release_date = dt.strptime(release_str.split('T')[0], fmt)
-                                    break
-                                except:
-                                    continue
-                            if release_date and release_date > now:
-                                season_released = False
-                                break
-                        except:
-                            pass
-
-            if not season_released:
-                continue
-
-            watched_count = 0
-            with db_lock:
-                for ep in episodes:
-                    ep_num = ep.get('episodeNumber', '')
-                    cursor.execute('''
-                        SELECT watched FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                        AND season_number = %s AND episode_number = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id, season_num, ep_num))
-                    watched_row = cursor.fetchone()
-                    if watched_row:
-                        watched_count += 1
-
-            if watched_count == episodes_count and episodes_count > 0:
-                status_emoji = "✅"
-            elif watched_count > 0:
-                status_emoji = "⏳"
-            else:
-                status_emoji = "⬜"
-
-            button_text = f"{status_emoji} Сезон {season_num} ({episodes_count} эп.)"
-            if watched_count > 0 and watched_count < episodes_count:
-                button_text += f" [{watched_count}/{episodes_count}]"
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_season:{kp_id}:{season_num}"))
-            
-            # Проверяем, все ли сезоны просмотрены
-            all_seasons_watched = True
+            markup = InlineKeyboardMarkup(row_width=1)
             for season in seasons_data:
                 season_num = season.get('number', '')
                 episodes = season.get('episodes', [])
                 episodes_count = len(episodes)
-                
+
                 # Проверяем, вышел ли сезон
                 season_released = True
                 if episodes:
@@ -181,12 +127,10 @@ def series_track_callback(call):
                                     break
                             except:
                                 pass
-                
-                # Если сезон не вышел, пропускаем
+
                 if not season_released:
                     continue
-                
-                # Проверяем, все ли эпизоды сезона просмотрены
+
                 watched_count = 0
                 with db_lock:
                     for ep in episodes:
@@ -199,106 +143,163 @@ def series_track_callback(call):
                         watched_row = cursor.fetchone()
                         if watched_row:
                             watched_count += 1
-                
-                if watched_count < episodes_count or episodes_count == 0:
-                    all_seasons_watched = False
-                    break
-            
-            # Если все сезоны просмотрены, отмечаем сериал как просмотренный в БД
-            if all_seasons_watched:
-                with db_lock:
-                    cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                    conn.commit()
-            
-            # Добавляем кнопку "Оценить" если все сезоны просмотрены
-            if all_seasons_watched:
-                # Получаем информацию об оценках
-                with db_lock:
-                    # Получаем среднюю оценку
-                    cursor.execute('''
-                        SELECT AVG(rating) as avg FROM ratings 
-                        WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                    ''', (chat_id, film_id))
-                    avg_result = cursor.fetchone()
-                    avg_rating = None
-                    if avg_result:
-                        avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                        avg_rating = float(avg) if avg is not None else None
-                    
-                    # Получаем активных пользователей
-                    cursor.execute('''
-                        SELECT DISTINCT user_id
-                        FROM stats
-                        WHERE chat_id = %s AND user_id IS NOT NULL
-                    ''', (chat_id,))
-                    active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
-                    
-                    # Получаем всех, кто оценил этот фильм
-                    cursor.execute('''
-                        SELECT DISTINCT user_id FROM ratings
-                        WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                    ''', (chat_id, film_id))
-                    rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
-                    
-                    # Определяем текст и эмодзи кнопки
-                    if active_users and active_users.issubset(rated_users) and avg_rating is not None:
-                        # Все активные пользователи оценили - показываем среднюю оценку
-                        rating_int = int(round(avg_rating))
-                        if 1 <= rating_int <= 4:
-                            emoji = "💩"
-                        elif 5 <= rating_int <= 7:
-                            emoji = "💬"
-                        else:  # 8-10
-                            emoji = "🏆"
-                        rating_text = f"{emoji} {avg_rating:.0f}/10"
-                    else:
-                        rating_text = "💬 Оценить"
-                
-                markup.add(InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}"))
-            
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{kp_id}"))
-            
-            message_thread_id = getattr(call.message, 'message_thread_id', None)
-            
-            logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
-            try:
-                kwargs = {
-                    'chat_id': chat_id,
-                    'message_id': message_id,
-                    'text': text_msg,
-                    'reply_markup': markup,
-                    'parse_mode': 'HTML'
-                }
-                if message_thread_id is not None:
-                    kwargs['message_thread_id'] = message_thread_id
 
-                bot.edit_message_text(**kwargs)
-                logger.info(f"[SERIES TRACK] Сообщение обновлено успешно")
-            except Exception as e:
-                logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
-                # фолбэк — новое сообщение
+                if watched_count == episodes_count and episodes_count > 0:
+                    status_emoji = "✅"
+                elif watched_count > 0:
+                    status_emoji = "⏳"
+                else:
+                    status_emoji = "⬜"
+
+                button_text = f"{status_emoji} Сезон {season_num} ({episodes_count} эп.)"
+                if watched_count > 0 and watched_count < episodes_count:
+                    button_text += f" [{watched_count}/{episodes_count}]"
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"series_season:{kp_id}:{season_num}"))
+                
+                # Проверяем, все ли сезоны просмотрены
+                all_seasons_watched = True
+                for season in seasons_data:
+                    season_num = season.get('number', '')
+                    episodes = season.get('episodes', [])
+                    episodes_count = len(episodes)
+                    
+                    # Проверяем, вышел ли сезон
+                    season_released = True
+                    if episodes:
+                        for ep in episodes:
+                            release_str = ep.get('releaseDate', '')
+                            if release_str and release_str != '—':
+                                try:
+                                    release_date = None
+                                    for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                        try:
+                                            release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                            break
+                                        except:
+                                            continue
+                                    if release_date and release_date > now:
+                                        season_released = False
+                                        break
+                                except:
+                                    pass
+                    
+                    # Если сезон не вышел, пропускаем
+                    if not season_released:
+                        continue
+                    
+                    # Проверяем, все ли эпизоды сезона просмотрены
+                    watched_count = 0
+                    with db_lock:
+                        for ep in episodes:
+                            ep_num = ep.get('episodeNumber', '')
+                            cursor.execute('''
+                                SELECT watched FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                                AND season_number = %s AND episode_number = %s AND watched = TRUE
+                            ''', (chat_id, film_id, user_id, season_num, ep_num))
+                            watched_row = cursor.fetchone()
+                            if watched_row:
+                                watched_count += 1
+                    
+                    if watched_count < episodes_count or episodes_count == 0:
+                        all_seasons_watched = False
+                        break
+                
+                # Если все сезоны просмотрены, отмечаем сериал как просмотренный в БД
+                if all_seasons_watched:
+                    with db_lock:
+                        cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                        conn.commit()
+                
+                # Добавляем кнопку "Оценить" если все сезоны просмотрены
+                if all_seasons_watched:
+                    # Получаем информацию об оценках
+                    with db_lock:
+                        # Получаем среднюю оценку
+                        cursor.execute('''
+                            SELECT AVG(rating) as avg FROM ratings 
+                            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                        ''', (chat_id, film_id))
+                        avg_result = cursor.fetchone()
+                        avg_rating = None
+                        if avg_result:
+                            avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                            avg_rating = float(avg) if avg is not None else None
+                        
+                        # Получаем активных пользователей
+                        cursor.execute('''
+                            SELECT DISTINCT user_id
+                            FROM stats
+                            WHERE chat_id = %s AND user_id IS NOT NULL
+                        ''', (chat_id,))
+                        active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                        
+                        # Получаем всех, кто оценил этот фильм
+                        cursor.execute('''
+                            SELECT DISTINCT user_id FROM ratings
+                            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                        ''', (chat_id, film_id))
+                        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                        
+                        # Определяем текст и эмодзи кнопки
+                        if active_users and active_users.issubset(rated_users) and avg_rating is not None:
+                            # Все активные пользователи оценили - показываем среднюю оценку
+                            rating_int = int(round(avg_rating))
+                            if 1 <= rating_int <= 4:
+                                emoji = "💩"
+                            elif 5 <= rating_int <= 7:
+                                emoji = "💬"
+                            else:  # 8-10
+                                emoji = "🏆"
+                            rating_text = f"{emoji} {avg_rating:.0f}/10"
+                        else:
+                            rating_text = "💬 Оценить"
+                    
+                    markup.add(InlineKeyboardButton(rating_text, callback_data=f"rate_film:{kp_id}"))
+                
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{kp_id}"))
+                
+                message_thread_id = getattr(call.message, 'message_thread_id', None)
+                
+                logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
                 try:
-                    send_kwargs = {
+                    kwargs = {
                         'chat_id': chat_id,
+                        'message_id': message_id,
                         'text': text_msg,
                         'reply_markup': markup,
                         'parse_mode': 'HTML'
                     }
                     if message_thread_id is not None:
+                        kwargs['message_thread_id'] = message_thread_id
+
+                    bot.edit_message_text(**kwargs)
+                    logger.info(f"[SERIES TRACK] Сообщение обновлено успешно")
+                except Exception as e:
+                    logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
+                    # фолбэк — новое сообщение
+                    try:
+                        send_kwargs = {
+                            'chat_id': chat_id,
+                            'text': text_msg,
+                            'reply_markup': markup,
+                            'parse_mode': 'HTML'
+                        }
+                        if message_thread_id is not None:
+                            send_kwargs['message_thread_id'] = message_thread_id
+                        bot.send_message(**send_kwargs)
+                    except Exception as send_e:
+                        logger.error(f"[SERIES TRACK] Фейл отправки: {send_e}")
+                    if message_thread_id is not None:
                         send_kwargs['message_thread_id'] = message_thread_id
                     bot.send_message(**send_kwargs)
-                except Exception as send_e:
-                    logger.error(f"[SERIES TRACK] Фейл отправки: {send_e}")
-                if message_thread_id is not None:
-                    send_kwargs['message_thread_id'] = message_thread_id
-                bot.send_message(**send_kwargs)
-            bot.answer_callback_query(call.id)
-    except Exception as e:
-        logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
-        try:
-            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except:
-            pass
+                bot.answer_callback_query(call.id)
+        except Exception as e:
+            logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
     
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season:"))
     def series_season_callback(call):

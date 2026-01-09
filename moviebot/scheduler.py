@@ -24,6 +24,7 @@ from moviebot.bot.bot_init import bot, BOT_ID
 from moviebot.database.db_connection import db_lock
 from moviebot.config import PLANS_TZ
 from moviebot.api.kinopoisk_api import get_seasons_data
+from moviebot.api.kinopoisk_api import get_external_sources
 
 # Импортируем ТОЛЬКО функцию, а не глобальные conn/cursor/db_lock
 from moviebot.database.db_connection import get_db_connection
@@ -153,7 +154,6 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                                 pass
                        
                         if not sources_dict and kp_id:
-                            sources = get_external_sources(kp_id)
                             if sources:
                                 sources_dict = {platform: url for platform, url in sources[:6]}
                                 sources_json = json.dumps(sources_dict, ensure_ascii=False)
@@ -1028,10 +1028,6 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
         text += f"📅 Сезон {season}, Эпизод {episode}\n\n"
         text += f"<a href='https://www.kinopoisk.ru/series/{kp_id}/'>Кинопоиск</a>\n\n"
 
-        # ← Динамика вместо хардкода
-        from moviebot.api.kinopoisk_api import get_external_sources
-
-        sources = get_external_sources(kp_id)
         if sources:
             text += "🎬 <b>Смотреть онлайн:</b>\n"
             for platform, url in sources[:4]:  # лимит, чтобы не раздувать сообщение
@@ -2427,4 +2423,4 @@ def update_series_status_cache():
         except Exception as e:
             logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id} (chat_id={chat_id}): {e}", exc_info=True)
 
-    logger.info("[CACHE] Обновление кэша сериалов завершено")from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    logger.info("[CACHE] Обновление кэша сериалов завершено")

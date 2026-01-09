@@ -1,7 +1,6 @@
 """
 Сервис для поиска фильмов по описанию (КиноШазам)
 Использует TMDB датасет (оффлайн), semantic search, переводчик и распознавание речи
-+ OMDB для постеров/рейтинга + IMDb-база для актёров/режиссёров
 """
 import os
 import logging
@@ -11,9 +10,6 @@ import faiss
 import json
 import soundfile as sf
 import librosa
-import sqlite3
-import requests
-import subprocess
 from pathlib import Path
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
@@ -37,197 +33,31 @@ _vosk = None
 _index = None
 _movies_df = None
 
-# Пути
+# Путь к данным
 BASE_DIR = Path(__file__).parent.parent.parent
 DATA_DIR = BASE_DIR / 'data' / 'shazam'
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-CACHE_DIR = Path('cache')
+# Локально — кэш в корне проекта, на Railway — /app/cache
+CACHE_DIR = Path('cache')  # относительный путь — создаст папку cache в текущей рабочей директории
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+# Настраиваем кэш для HuggingFace моделей
 os.environ['HF_HOME'] = str(CACHE_DIR / 'huggingface')
 os.environ['TRANSFORMERS_CACHE'] = str(CACHE_DIR / 'huggingface' / 'transformers')
 os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sentence_transformers')
 
-TMDB_CSV_PATH = CACHE_DIR / 'TMDB_movie_dataset_v11.csv'
+# Путь к TMDB датасету
+TMDB_PARQUET_PATH = CACHE_DIR / 'tmdb_movies.parquet'
+
+# Индексы и обработанные данные
 INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'
 DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'
 
-# IMDb пути
-IMDB_RAW_DIR = BASE_DIR / 'data' / 'imdb_raw'
-IMDB_RAW_DIR.mkdir(parents=True, exist_ok=True)
-IMDB_DB_PATH = BASE_DIR / 'data' / 'imdb_minimal.db'
-
-# Настройки TMDB
+# Настройки фильтрации
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 50000
-
-OMDB_API_KEY = os.getenv("OMDB_API_KEY")
-
-def build_imdb_database():
-    """Скачивает и строит минимальную IMDb-базу один раз, если её нет.
-    Минимальный режим: только basics + crew (principals и names отключены)"""
-    if IMDB_DB_PATH.exists():
-        logger.info("IMDb-база уже существует, пропускаем построение")
-        return
-
-    logger.info("IMDb-база отсутствует — начинаем минимальное построение")
-
-    files = {
-        'title.basics.tsv.gz': 'https://datasets.imdbws.com/title.basics.tsv.gz',
-        'title.crew.tsv.gz': 'https://datasets.imdbws.com/title.crew.tsv.gz',
-        # principals и names отключены — они тяжёлые и часто битые
-        # 'title.principals.tsv.gz': 'https://datasets.imdbws.com/title.principals.tsv.gz',
-        # 'name.basics.tsv.gz': 'https://datasets.imdbws.com/name.basics.tsv.gz'
-    }
-
-    # Скачиваем только нужные файлы
-    for fname, url in files.items():
-        path = IMDB_RAW_DIR / fname
-        if path.exists():
-            logger.info(f"{fname} уже скачан, пропускаем")
-            continue
-
-        logger.info(f"Скачиваем {fname}...")
-        try:
-            response = requests.get(url, stream=True, timeout=60)
-            response.raise_for_status()
-            with open(path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-            logger.info(f"{fname} успешно скачан")
-        except Exception as e:
-            logger.error(f"Ошибка скачивания {fname}: {e}")
-            return  # Прерываем, если хотя бы один файл не скачался
-
-    # Загрузка с try/except и фильтрацией
-    def load_tsv(file_name):
-        path = IMDB_RAW_DIR / file_name
-        if not path.exists():
-            logger.warning(f"Файл {file_name} не найден — возвращаем пустой DataFrame")
-            return pd.DataFrame()
-
-        try:
-            df = pd.read_csv(path, sep='\t', low_memory=False, na_values='\\N')
-            logger.info(f"Загружен {file_name}: {len(df)} строк")
-            return df
-        except Exception as e:
-            logger.error(f"Ошибка загрузки {file_name}: {e}")
-            return pd.DataFrame()
-
-    logger.info("Загружаем basics...")
-    basics = load_tsv('title.basics.tsv.gz')
-    if basics.empty:
-        logger.error("Не удалось загрузить title.basics — база не построена")
-        return
-
-    movies = basics[basics['titleType'] == 'movie']
-    movies_tconst = set(movies['tconst'])
-    logger.info(f"Фильмов: {len(movies)}")
-
-    logger.info("Загружаем crew...")
-    crew = load_tsv('title.crew.tsv.gz')
-    if not crew.empty:
-        crew = crew[crew['tconst'].isin(movies_tconst)]
-        logger.info(f"Crew после фильтра: {len(crew)} строк")
-    else:
-        logger.warning("Crew не загружен — продолжаем без него")
-
-    # principals и names отключены полностью — они не критичны и часто битые
-    # Если потом понадобятся — включай по одному и проверяй файлы вручную
-
-    # Создаём базу SQLite
-    try:
-        conn = sqlite3.connect(IMDB_DB_PATH)
-        logger.info("Соединение с SQLite успешно")
-
-        logger.info("Записываем таблицы...")
-        movies[['tconst', 'primaryTitle', 'originalTitle', 'startYear']].to_sql(
-            'movies', conn, if_exists='replace', index=False
-        )
-        if not crew.empty:
-            crew.to_sql('crew', conn, if_exists='replace', index=False)
-
-        conn.close()
-        logger.info(f"IMDb-база создана: {IMDB_DB_PATH} ({IMDB_DB_PATH.stat().st_size / 1e6:.2f} MB)")
-
-        # Удаляем временные gz-файлы, чтобы не жрали место
-        for f in IMDB_RAW_DIR.glob('*.gz'):
-            try:
-                f.unlink()
-                logger.info(f"Удалён временный файл: {f}")
-            except Exception as e:
-                logger.warning(f"Не удалось удалить {f}: {e}")
-
-    except Exception as e:
-        logger.error(f"Критическая ошибка при создании базы: {e}", exc_info=True)
-        return
-
-    logger.info("=== Минимальная IMDB-база готова (basics + crew) ===")
-    
-def get_imdb_enrich(imdb_id):
-    """Возвращает актёров и режиссёров из локальной IMDb-базы"""
-    if not IMDB_DB_PATH.exists():
-        logger.warning("IMDb-база не найдена, пропускаем enrich")
-        return {}
-
-    if not imdb_id.startswith('tt'):
-        imdb_id = f"tt{imdb_id.zfill(7)}"
-
-    conn = sqlite3.connect(IMDB_DB_PATH)
-    cur = conn.cursor()
-
-    # Топ-10 актёров
-    cur.execute("""
-        SELECT GROUP_CONCAT(n.primaryName, ', ')
-        FROM principals p
-        JOIN names n ON p.nconst = n.nconst
-        WHERE p.tconst = ? AND p.category IN ('actor', 'actress')
-        ORDER BY p.ordering LIMIT 10
-    """, (imdb_id,))
-    actors = cur.fetchone()[0] or ''
-
-    # Режиссёры (может быть несколько)
-    cur.execute("""
-        SELECT GROUP_CONCAT(DISTINCT n.primaryName, ', ')
-        FROM crew c
-        JOIN names n ON ',' || c.directors || ',' LIKE '%,' || n.nconst || ',%'
-        WHERE c.tconst = ?
-    """, (imdb_id,))
-    directors = cur.fetchone()[0] or ''
-
-    conn.close()
-
-    return {
-        'actors': actors,
-        'directors': directors
-    }
-
-
-def get_omdb_details(imdb_id: str) -> dict:
-    if not imdb_id or not imdb_id.startswith("tt") or not OMDB_API_KEY:
-        return {}
-
-    url = f"http://www.omdbapi.com/?i={imdb_id}&apikey={OMDB_API_KEY}"
-    try:
-        response = requests.get(url, timeout=7)
-        data = response.json()
-        if data.get("Response") == "True":
-            return {
-                "title": data.get("Title", ""),
-                "year": data.get("Year", ""),
-                "director": data.get("Director", "Не указано"),
-                "actors": data.get("Actors", "Не указано"),
-                "imdb_rating": data.get("imdbRating", "N/A"),
-                "poster_url": data.get("Poster", None),
-                "runtime": data.get("Runtime", ""),
-                "genre": data.get("Genre", ""),
-                "plot": data.get("Plot", ""),
-            }
-    except Exception as e:
-        logger.warning(f"OMDB ошибка для {imdb_id}: {e}")
-    return {}
 
 
 def get_model():
@@ -250,7 +80,7 @@ def get_translator():
                 "translation",
                 model="Helsinki-NLP/opus-mt-ru-en",
                 device=-1,
-                dtype=torch.float32
+                torch_dtype=torch.float32
             )
             test_result = _translator("тест", max_length=512)
             logger.info(f"Транслятор загружен успешно (тест: 'тест' → '{test_result[0]['translation_text']}')")
@@ -286,6 +116,7 @@ def get_whisper():
 
 
 def get_vosk():
+    """Ленивая загрузка модели Vosk для распознавания речи (fallback)"""
     global _vosk
     if _vosk is None:
         logger.info("Загрузка модели Vosk...")
@@ -295,6 +126,7 @@ def get_vosk():
             
             if not vosk_model_path.exists():
                 logger.warning(f"Модель Vosk не найдена по пути {vosk_model_path}")
+                logger.info("Скачайте модель с https://alphacephei.com/vosk/models и положите в data/shazam/")
                 _vosk = False
                 return _vosk
             
@@ -343,21 +175,25 @@ def transcribe_with_whisper(audio_path):
 
 
 def transcribe_with_vosk(audio_path):
+    """Распознает речь с помощью Vosk (fallback)"""
     vosk_recognizer = get_vosk()
     if not vosk_recognizer:
         return None
     
     try:
         data, sample_rate = sf.read(audio_path)
+        
         if len(data.shape) > 1:
             data = np.mean(data, axis=1)
+        
         if sample_rate != 16000:
             data = librosa.resample(data, orig_sr=sample_rate, target_sr=16000)
+        
         data_int16 = (data * 32768).astype(np.int16)
         
         text_parts = []
         chunk_size = 4000
-        recognizer = get_vosk()
+        recognizer = get_vosk()  # На всякий случай свежий
         
         for i in range(0, len(data_int16), chunk_size):
             chunk = data_int16[i:i+chunk_size].tobytes()
@@ -381,15 +217,20 @@ def transcribe_with_vosk(audio_path):
 
 
 def transcribe_voice(audio_path):
+    """Распознает речь из аудио файла (Whisper → Vosk)"""
     logger.info(f"[TRANSCRIBE] Начинаем распознавание: {audio_path}")
+    
+    # Сначала Whisper
     text = transcribe_with_whisper(audio_path)
     if text:
         return text
+    
     logger.info(f"[TRANSCRIBE] Whisper не распознал, пробуем Vosk...")
     text = transcribe_with_vosk(audio_path)
     if text:
         return text
-    logger.warning(f"[TRANSCRIBE] Ни один метод не распознал речь")
+    
+    logger.warning(f"[TRANSCRIBE] Ни Whisper, ни Vosk не смогли распознать речь")
     return None
 
 
@@ -425,91 +266,129 @@ def build_tmdb_index():
             logger.info(f"Загружен существующий индекс: {len(_movies_df)} фильмов")
             return _index, _movies_df
         except Exception as e:
-            logger.warning(f"Ошибка загрузки старого индекса: {e}, пересоздаем...")
-
-    if not TMDB_CSV_PATH.exists():
-        logger.info("TMDB CSV не найден — скачиваем через Kaggle API...")
+            logger.warning(f"Ошибка загрузки индекса: {e}, пересоздаем...")
+    
+    # Автоматическое скачивание TMDB если нет
+    if not TMDB_PARQUET_PATH.exists():
+        logger.info("TMDB parquet не найден — скачиваем через Kaggle API...")
         try:
             import subprocess
+            import glob
+            import shutil
+            import os
             
-            kaggle_dir = Path("/root/.kaggle")
+            # ========================================================================
+            # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Используем /tmp вместо /root
+            # ========================================================================
+            # На Railway /root доступен только для чтения, используем /tmp
+            # Также устанавливаем переменную окружения KAGGLE_CONFIG_DIR
+            # ========================================================================
+            kaggle_dir = Path("/tmp/.kaggle")
             kaggle_dir.mkdir(parents=True, exist_ok=True)
             kaggle_json = kaggle_dir / "kaggle.json"
-            if not kaggle_json.exists():
-                with open(kaggle_json, "w") as f:
-                    f.write(f'{{"username":"{os.getenv("KAGGLE_USERNAME")}","key":"{os.getenv("KAGGLE_KEY")}"}}')
-                os.chmod(kaggle_json, 0o600)
             
-            subprocess.check_call([
-                "kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies",
-                "-p", str(CACHE_DIR), "--unzip"
-            ])
+            kaggle_username = os.getenv("KAGGLE_USERNAME")
+            kaggle_key = os.getenv("KAGGLE_KEY")
+            if not kaggle_username or not kaggle_key:
+                raise ValueError("KAGGLE_USERNAME и KAGGLE_KEY должны быть установлены в переменных окружения")
             
-            possible_files = list(CACHE_DIR.glob("TMDB_movie_dataset_v*.csv"))
-            if not possible_files:
-                raise Exception("CSV файл TMDB_movie_dataset_v*.csv не найден после распаковки")
+            with open(kaggle_json, "w") as f:
+                f.write(f'{{"username":"{kaggle_username}","key":"{kaggle_key}"}}')
+            os.chmod(kaggle_json, 0o600)
             
-            actual_csv = possible_files[0]
-            if actual_csv != TMDB_CSV_PATH:
-                actual_csv.rename(TMDB_CSV_PATH)
+            # Устанавливаем переменную окружения для Kaggle CLI
+            os.environ['KAGGLE_CONFIG_DIR'] = str(kaggle_dir)
+            logger.info(f"[KAGGLE] Используем конфиг: {kaggle_dir}")
             
-            logger.info(f"TMDB CSV готов: {TMDB_CSV_PATH}")
+            # Скачиваем датасет
+            subprocess.check_call(["kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies", "-p", str(CACHE_DIR), "--unzip"])
+            
+            # Ищем parquet
+            parquet_files = glob.glob(os.path.join(CACHE_DIR, "**/*.parquet"), recursive=True)
+            if not parquet_files:
+                raise Exception("Parquet не найден после скачивания")
+            
+            main_parquet = max(parquet_files, key=os.path.getsize)  # Самый большой
+            shutil.move(main_parquet, TMDB_PARQUET_PATH)
+            logger.info(f"TMDB parquet готов: {TMDB_PARQUET_PATH}")
             
         except Exception as e:
-            logger.error(f"Ошибка скачивания TMDB: {e}", exc_info=True)
-            raise
-
-    logger.info("Загружаем TMDB датасет из CSV...")
-    df = pd.read_csv(TMDB_CSV_PATH)
+            logger.error(f"Ошибка скачивания TMDB через Kaggle API: {e}", exc_info=True)
+            return None, None
+    
+    # Vosk модель (опционально, если используешь fallback)
+    vosk_model_dir = DATA_DIR / 'vosk-model-small-ru-0.22'
+    if not vosk_model_dir.exists():
+        logger.info("Vosk модель не найдена — скачиваем...")
+        try:
+            import requests
+            from io import BytesIO
+            from zipfile import ZipFile
+            
+            url = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+            r = requests.get(url)
+            r.raise_for_status()
+            
+            with ZipFile(BytesIO(r.content)) as z:
+                z.extractall(DATA_DIR)
+            
+            logger.info(f"Vosk модель готова: {vosk_model_dir}")
+        except Exception as e:
+            logger.warning(f"Не удалось скачать Vosk: {e} — fallback не будет работать")
+            
+    logger.info("Загружаем TMDB датасет...")
+    df = pd.read_parquet(TMDB_PARQUET_PATH)
     logger.info(f"Загружено {len(df)} записей")
-
+    
     df['year'] = pd.to_datetime(df['release_date'], errors='coerce').dt.year
     current_year = datetime.now().year
     df = df[(df['year'] >= current_year - 50) & (df['vote_count'] >= MIN_VOTE_COUNT)]
     df = df.dropna(subset=['overview', 'title'])
     df = df.sort_values('vote_count', ascending=False).head(MAX_MOVIES * 2)
-
+    
     df['genres_str'] = df['genres'].apply(lambda x: parse_json_list(x, 'name'))
     df['keywords_str'] = df['keywords'].apply(lambda x: parse_json_list(x, 'name', top_n=15))
-
+    df['actors_str'] = df['cast'].apply(lambda x: parse_json_list(x, 'name', top_n=10))
+    df['director_str'] = df['crew'].apply(lambda x: parse_json_list(x, 'name', top_n=3) if pd.notna(x) else '')
+    
     df['description'] = df.apply(
-        lambda row: f"{row['title']} ({row['year']}). "
-                    f"Original title: {row.get('original_title', '')}. "
-                    f"Tagline: {row.get('tagline', '')}. "
-                    f"Genres: {row['genres_str']}. "
+        lambda row: f"{row['title']} ({row['year']}) {row['genres_str']}. "
                     f"Plot: {row['overview']}. "
-                    f"Keywords: {row['keywords_str']}.",
+                    f"Keywords: {row['keywords_str']}. "
+                    f"Actors: {row['actors_str']}. "
+                    f"Director: {row['director_str']}",
         axis=1
     )
-
+    
     df['imdb_id'] = df['imdb_id'].astype(str).str.replace('tt', '', regex=False)
     processed = df[['imdb_id', 'title', 'year', 'description']].copy()
     processed = processed.head(MAX_MOVIES)
-
-    logger.info(f"Создаём эмбеддинги для {len(processed)} фильмов...")
+    
+    logger.info(f"Создаём индекс для {len(processed)} фильмов...")
+    
     model = get_model()
     descriptions = processed['description'].tolist()
-
+    
     embeddings = []
     batch_size = 32
-    for i in tqdm(range(0, len(descriptions), batch_size), desc="Генерация эмбеддингов"):
+    for i in tqdm(range(0, len(descriptions), batch_size), desc="Embeddings"):
         batch = descriptions[i:i+batch_size]
         batch_emb = model.encode(batch, show_progress_bar=False)
         embeddings.extend(batch_emb)
-
+    
     embeddings = np.array(embeddings).astype('float32')
     dimension = embeddings.shape[1]
-
+    
     index = faiss.IndexFlatL2(dimension)
     index.add(embeddings)
-
+    
     faiss.write_index(index, str(INDEX_PATH))
     processed.to_csv(DATA_PATH, index=False)
-
+    
     _index = index
     _movies_df = processed
-
-    logger.info(f"Индекс TMDB успешно создан: {len(processed)} фильмов")
+    
+    logger.info(f"Индекс TMDB создан: {len(processed)} фильмов")
     return index, processed
 
 
@@ -521,10 +400,6 @@ def get_index_and_movies():
 
 
 def search_movies(query, top_k=5):
-    """
-    Основная функция поиска.
-    Теперь возвращает список словарей с данными из OMDB + IMDb (актёры/режиссёры)
-    """
     try:
         query_en = translate_to_english(query)
         index, movies = get_index_and_movies()
@@ -534,43 +409,62 @@ def search_movies(query, top_k=5):
         model = get_model()
         query_emb = model.encode([query_en])[0].astype('float32').reshape(1, -1)
         
-        D, I = index.search(query_emb, k=top_k * 2)
+        D, I = index.search(query_emb, k=top_k)
         
         results = []
         for idx in I[0]:
-            if len(results) >= top_k:
-                break
-            if idx >= len(movies):
-                continue
-                
-            row = movies.iloc[idx]
-            imdb_id_raw = row['imdb_id']
-            if pd.isna(imdb_id_raw) or imdb_id_raw == 'nan':
-                continue
-            imdb_id = f"tt{str(imdb_id_raw).zfill(7)}"
-            
-            # OMDB
-            omdb = get_omdb_details(imdb_id)
-            
-            # IMDb (актёры/режиссёры)
-            imdb_enrich = get_imdb_enrich(imdb_id.replace('tt', ''))
-            
-            result = {
-                'imdb_id': imdb_id.replace('tt', ''),
-                'title': omdb.get('title') or row['title'],
-                'year': omdb.get('year') or (int(row['year']) if pd.notna(row['year']) else None),
-                'description': row['description'][:500],
-                'director': omdb.get('director', imdb_enrich.get('directors', '')),
-                'actors': omdb.get('actors', imdb_enrich.get('actors', '')),
-                'imdb_rating': omdb.get('imdb_rating', 'N/A'),
-                'poster_url': omdb.get('poster_url') if omdb.get('poster_url') not in ("N/A", None) else None,
-                'runtime': omdb.get('runtime', ''),
-                'genre': omdb.get('genre', ''),
-            }
-            results.append(result)
-        
+            if idx < len(movies):
+                row = movies.iloc[idx]
+                results.append({
+                    'imdb_id': row['imdb_id'],
+                    'title': row['title'],
+                    'year': row['year'] if pd.notna(row['year']) else None,
+                    'description': row['description'][:500]
+                })
         return results
-    
     except Exception as e:
         logger.error(f"Ошибка поиска: {e}", exc_info=True)
         return []
+
+def transcribe_voice(audio_path):
+    """Распознает речь из аудио файла (Whisper → Vosk)"""
+    logger.info(f"[TRANSCRIBE] Начинаем распознавание: {audio_path}")
+    
+    # Пробуем Whisper сначала
+    logger.info(f"[TRANSCRIBE] Пробуем Whisper...")
+    try:
+        text = transcribe_with_whisper(audio_path)
+        if text:
+            logger.info(f"[TRANSCRIBE] Whisper успешно распознал: '{text}'")
+            return text
+        logger.warning(f"[TRANSCRIBE] Whisper вернул пустой результат")
+    except Exception as e:
+        logger.error(f"[TRANSCRIBE] Ошибка при распознавании Whisper: {e}", exc_info=True)
+    
+    # Если Whisper не сработал, пробуем Vosk
+    logger.info(f"[TRANSCRIBE] Whisper не распознал, пробуем Vosk...")
+    try:
+        text = transcribe_with_vosk(audio_path)
+        if text:
+            logger.info(f"[TRANSCRIBE] Vosk успешно распознал: '{text}'")
+            return text
+        logger.warning(f"[TRANSCRIBE] Vosk вернул пустой результат")
+    except Exception as e:
+        logger.error(f"[TRANSCRIBE] Ошибка при распознавании Vosk: {e}", exc_info=True)
+    
+    logger.warning(f"[TRANSCRIBE] Не удалось распознать речь ни Whisper, ни Vosk")
+    return None
+
+
+def convert_ogg_to_wav(ogg_path, wav_path, sample_rate=16000):
+    """Конвертирует OGG в WAV (16kHz, mono)"""
+    try:
+        audio = AudioSegment.from_ogg(ogg_path)
+        audio = audio.set_frame_rate(sample_rate)
+        audio = audio.set_channels(1)  # Mono
+        audio.export(wav_path, format="wav")
+        return True
+    except Exception as e:
+        logger.error(f"Ошибка конвертации OGG в WAV: {e}", exc_info=True)
+        return False
+
