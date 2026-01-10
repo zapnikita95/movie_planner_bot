@@ -131,17 +131,30 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if info.get('description'):
             text += f"\n<i>Кратко:</i> {info['description']}\n"
 
-        # Статус выхода серий только для сериалов
+        # Статус выхода серий только для сериалов — с тотальной защитой и логами
         if info.get('is_series'):
+            logger.info(f"[SHOW_FILM] Сериал! kp_id={kp_id} | info имеет title? {bool(info.get('title'))} | title='{info.get('title')}'")
+            
+            text += "\n\n"  # отступ для красоты
+            
             try:
+                logger.debug(f"[SERIES_STATUS] >>> Запрос статуса серий kp_id={kp_id}")
                 is_airing, next_episode = get_series_airing_status(kp_id)
+                logger.debug(f"[SERIES_STATUS] <<< Получено: is_airing={is_airing}, next_episode={next_episode}")
+                
                 if is_airing and next_episode:
-                    text += f"\n🟢 <b>Сериал выходит сейчас</b>\n"
-                    text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
+                    text += f"🟢 <b>Сериал выходит</b>\n"
+                    text += f"📅 След. серия: S{next_episode['season']} E{next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
                 else:
-                    text += f"\n🔴 <b>Сериал не выходит</b>\n"
+                    text += f"🔴 <b>Новых серий нет</b>\n"
+                    
             except Exception as e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка статуса серий: {e}")
+                logger.error(
+                    f"[SERIES_STATUS_CRASH] kp_id={kp_id} | {type(e).__name__}: {str(e)} | "
+                    f"traceback: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}",
+                    exc_info=True
+                )
+                text += f"ℹ️ Не удалось загрузить статус новых серий\n"
 
         text += f"\n<a href='{link}'>Кинопоиск</a>"
 
@@ -694,33 +707,61 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         
         
     except Exception as e:
-        error_type = type(e).__name__
-        error_str = str(e)
-        import sys
         import traceback
-        print(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", file=sys.stdout, flush=True)
-        print(f"[SHOW FILM INFO] Traceback: {traceback.format_exc()}", file=sys.stdout, flush=True)
-        logger.error(f"[SHOW FILM INFO] ❌ КРИТИЧЕСКАЯ ОШИБКА в show_film_info_with_buttons: {e}", exc_info=True)
-        logger.error(f"[SHOW FILM INFO] Тип ошибки: {error_type}, args: {e.args}")
-        logger.error(f"[SHOW FILM INFO] chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, existing={existing}")
-        
-        # Пытаемся отправить сообщение об ошибке
+        logger.critical(
+            f"[SHOW_FILM_CRASH] kp_id={kp_id} | chat_id={chat_id} | user_id={user_id} | "
+            f"ОШИБКА: {type(e).__name__}: {str(e)}\n"
+            f"Полный traceback:\n{''.join(traceback.format_exception(type(e), e, e.__traceback__))}\n"
+            f"info на момент краша: {info}",
+            exc_info=True
+        )
+
+        # Берём название из info или existing или хотя бы ID
+        safe_title = info.get('title') if info else None
+        if not safe_title and existing:
+            _, title_from_db, _ = existing
+            safe_title = title_from_db
+        safe_title = safe_title or f"ID {kp_id}"
+
+        error_text = f"🎬 <b>{safe_title}</b>\n"
+        if link:
+            error_text += f"<a href='{link}'>Кинопоиск</a>\n\n"
+        error_text += "❌ Не удалось полностью загрузить информацию.\n"
+        error_text += "Но вы всё равно можете добавить/запланировать 👇"
+
+        # Самые безопасные кнопки
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"),
+            InlineKeyboardButton("📅 Запланировать", callback_data=f"plan_from_added:{kp_id}")
+        )
+        markup.add(
+            InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+            InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
+        )
+
         try:
-            error_text = f"🎬 <b>{info.get('title', 'Фильм') if info else 'Фильм'}</b>\n\n"
-            if link:
-                error_text += f"<a href='{link}'>Кинопоиск</a>\n\n"
-            error_text += "❌ Произошла ошибка при формировании описания."
-            bot.send_message(chat_id, error_text, parse_mode='HTML', disable_web_page_preview=False)
-            logger.info(f"[SHOW FILM INFO] ✅ Сообщение об ошибке отправлено")
-        except Exception as send_error_e:
-            logger.error(f"[SHOW FILM INFO] ❌ Не удалось отправить даже сообщение об ошибке: {send_error_e}", exc_info=True)
-        # НЕ пробрасываем ошибку дальше - бот должен продолжать работать
-        logger.info(f"[SHOW FILM INFO] ===== END (с ошибкой) =====")
-        print(f"[SHOW FILM INFO] ===== END (с ошибкой) =====", file=sys.stdout, flush=True)
-    else:
-        logger.info(f"[SHOW FILM INFO] ===== END (успешно) =====")
-        import sys
-        print(f"[SHOW FILM INFO] ===== END (успешно) =====", file=sys.stdout, flush=True)
+            if message_id:
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=error_text,
+                    parse_mode='HTML',
+                    reply_markup=markup,
+                    disable_web_page_preview=False
+                )
+            else:
+                bot.send_message(
+                    chat_id=chat_id,
+                    text=error_text,
+                    parse_mode='HTML',
+                    reply_markup=markup,
+                    disable_web_page_preview=False,
+                    message_thread_id=message_thread_id
+                )
+        except Exception as send_err:
+            logger.error("Не удалось отправить fallback", exc_info=True)
+            bot.send_message(chat_id, f"🎬 {safe_title}\n{link}", parse_mode='HTML')
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
 def search_type_callback(call):
