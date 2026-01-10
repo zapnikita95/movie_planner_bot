@@ -98,29 +98,43 @@ def add_to_database_callback(call):
             # Новый сериал/фильм — парсим из сообщения
             logger.info("[ADD TO DATABASE] Не найден → парсим из сообщения")
 
-            message_text = call.message.text or ""
+            # Новый фильм/сериал — берём данные из API в первую очередь
+            logger.info("[ADD TO DATABASE] Не найден в базе → запрашиваем из Kinopoisk API")
 
-            import re
-            from html import unescape
+            from moviebot.api.kinopoisk_api import extract_movie_info
 
-            # Название + год
-            title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>\s*\((\d{4})\)', message_text)
-            if title_match:
-                title = unescape(title_match.group(1))
-                year = int(title_match.group(2))
+            api_info = extract_movie_info(kp_id)  # ← основной источник правды
+
+            if api_info and api_info.get('title'):
+                title = api_info['title']
+                year = api_info.get('year')
+                genres = api_info.get('genres')
+                description = api_info.get('description')
+                director = api_info.get('director')
+                actors = api_info.get('actors')
+                is_series = api_info.get('is_series', False)
+                logger.info(f"[ADD TO DATABASE] Данные успешно взяты из API: {title}")
             else:
+                # Fallback — парсим из сообщения (как было раньше)
+                logger.warning(f"[ADD TO DATABASE] API не дал название для kp_id={kp_id} → парсим сообщение")
+
+                message_text = call.message.text or ""
+                import re
+                from html import unescape
+
                 title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
                 title = unescape(title_match.group(1)) if title_match else f"Фильм {kp_id}"
+
                 year_match = re.search(r'\((\d{4})\)', message_text)
                 year = int(year_match.group(1)) if year_match else None
 
-            director = unescape(re.search(r'<i>Режиссёр:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>Режиссёр:</i>', message_text) else None
-            genres = unescape(re.search(r'<i>Жанры:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>Жанры:</i>', message_text) else None
-            actors = unescape(re.search(r'<i>В ролях:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>В ролях:</i>', message_text) else None
-            desc_match = re.search(r'<i>Кратко:</i>\s*(.+?)(?:\n|🟢|🔴|Кинопоиск|$)', message_text, re.DOTALL)
-            description = unescape(desc_match.group(1).strip()) if desc_match else None
+                director = unescape(re.search(r'<i>Режиссёр:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>Режиссёр:</i>', message_text) else None
+                genres = unescape(re.search(r'<i>Жанры:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>Жанры:</i>', message_text) else None
+                actors = unescape(re.search(r'<i>В ролях:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>В ролях:</i>', message_text) else None
+                desc_match = re.search(r'<i>Кратко:</i>\s*(.+?)(?:\n|🟢|🔴|Кинопоиск|$)', message_text, re.DOTALL)
+                description = unescape(desc_match.group(1).strip()) if desc_match else None
+                is_series = '📺' in message_text
 
-            is_series = '📺' in message_text
             link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
 
             info = {
@@ -459,7 +473,6 @@ def plan_type_callback_fallback(call):
     finally:
         logger.info(f"[PLAN TYPE FALLBACK] ===== END: callback_id={call.id}")
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith('plan_type:'))
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
 def handle_plan_type(call):
     try:
