@@ -13,6 +13,9 @@ import logging
 from datetime import datetime, timedelta
 from moviebot.web.web_app import create_web_app
 
+# Добавляем родительскую директорию в sys.path, чтобы moviebot стал видимым пакетом
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 # Простая настройка — работает на Railway 100%
 logging.basicConfig(
     level=logging.INFO,
