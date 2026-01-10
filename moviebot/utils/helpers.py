@@ -3,7 +3,7 @@
 """
 import logging
 logger = logging.getLogger(__name__)
-
+from moviebot.database.db_operations import get_user_personal_subscriptions
 
 def has_notifications_access(chat_id, user_id=None):
     """
