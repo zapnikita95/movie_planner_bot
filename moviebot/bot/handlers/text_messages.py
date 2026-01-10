@@ -339,40 +339,62 @@ def check_plan_datetime_reply(message):
 
 @bot.message_handler(func=check_plan_datetime_reply)
 def handle_plan_datetime_reply(message):
-    """Обработчик ответа на промпт даты/времени планирования (step=3)"""
+    """Обработчик ответа на промпт даты/времени (создание ИЛИ редактирование плана)"""
     user_id = message.from_user.id
     text = message.text or ""
 
     logger.info(f"[PLAN DATETIME REPLY] ===== START: message_id={message.message_id}, user_id={user_id}, text='{text}'")
+
     try:
         from moviebot.bot.handlers.plan import get_plan_day_or_date_internal
-        from moviebot.states import user_plan_state
-        
-        state = user_plan_state[user_id]
-        logger.info(f"[PLAN DATETIME REPLY] Текст ответного сообщения: '{text}'")
+        from moviebot.states import user_plan_state, user_edit_state
+
+        state = None
+        is_edit = False
+
+        # 1. Проверяем состояние редактирования (приоритет выше)
+        if user_id in user_edit_state:
+            state = user_edit_state[user_id]
+            is_edit = True
+            logger.info(f"[PLAN DATETIME REPLY] Режим РЕДАКТИРОВАНИЯ: {state}")
+
+        # 2. Если нет редактирования — смотрим обычное планирование
+        elif user_id in user_plan_state:
+            state = user_plan_state[user_id]
+            logger.info(f"[PLAN DATETIME REPLY] Обычное планирование: {state}")
+
+        # Если вообще нет состояния — выходим тихо
+        else:
+            logger.info(f"[PLAN DATETIME REPLY] Нет активного состояния планирования/редактирования для user_id={user_id}")
+            return
+
+        # Проверяем, что ответ именно на наш промпт (по message_id)
+        prompt_message_id = state.get('prompt_message_id')
+        is_reply_to_prompt = (
+            message.reply_to_message and 
+            message.reply_to_message.message_id == prompt_message_id
+        )
+
+        if not is_reply_to_prompt:
+            logger.info(f"[PLAN DATETIME REPLY] Не ответ на промпт (ожидаемый id={prompt_message_id}), игнорируем")
+            return
+
+        # Вызываем общую функцию обработки даты/времени
         result = get_plan_day_or_date_internal(message, state)
-        
-        # ФИКС: Очищаем состояние после обработки
-        if user_id in user_plan_state:
+
+        # Очищаем правильное состояние
+        if is_edit and user_id in user_edit_state:
+            del user_edit_state[user_id]
+            logger.info(f"[PLAN DATETIME REPLY] Состояние редактирования очищено для user_id={user_id}")
+        elif user_id in user_plan_state:
             del user_plan_state[user_id]
-            logger.info(f"[PLAN DATETIME REPLY] Состояние планирования очищено для user_id={user_id}")
-        
+            logger.info(f"[PLAN DATETIME REPLY] Обычное состояние планирования очищено для user_id={user_id}")
+
         logger.info(f"[PLAN DATETIME REPLY] ✅ Завершено")
+
     except Exception as e:
         logger.error(f"[PLAN DATETIME REPLY] ❌ Ошибка: {e}", exc_info=True)
-
-    # Убрали универсальную ошибку — она больше не нужна, обработка в try-except полная
-    # Если краш — логи покажут, а пользователю ничего не отправляем лишнего
-    #try:
-    #    bot.reply_to(message, "❌ Произошла ошибка при обработке даты/времени")
-    #except:
-    #    pass
-
-    # Очищаем состояние на всякий случай (если оно зависло)
-    from moviebot.states import user_plan_state
-    if user_id in user_plan_state:
-        del user_plan_state[user_id]
-        # logger.info(f"[PLAN DATETIME REPLY] Состояние очищено принудительно для user_id={user_id}")
+        # Не спамим пользователю лишними сообщениями — только лог
 
 def check_plan_link_reply(message):
     """Проверка для handler ответа на промпт ссылки/ID планирования (step=1)"""
