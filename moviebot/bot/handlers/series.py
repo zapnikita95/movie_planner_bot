@@ -20,6 +20,7 @@ from moviebot.database.db_operations import (
 )
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_user_timezone_or_default
+from moviebot.utils.helpers import extract_film_info_from_existing
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
 from moviebot.utils.parsing import parse_plan_date_text
@@ -145,7 +146,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     watched = existing.get('watched')
                 else:
                     logger.info(f"[SHOW FILM INFO] existing - не словарь, извлекаю через индексы, len={len(existing) if hasattr(existing, '__len__') else 'N/A'}")
-                    film_id = existing[0] if len(existing) > 0 else None
+                    film_id, watched = extract_film_info_from_existing(existing)
                     watched = existing[2] if len(existing) > 2 else None
                 logger.info(f"[SHOW FILM INFO] Извлечены film_id={film_id}, watched={watched}")
             except Exception as extract_e:
@@ -378,8 +379,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         film_id = None
         watched = False  # Инициализируем watched по умолчанию
         if existing:
-            film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
-            watched = existing.get('watched') if isinstance(existing, dict) else (existing[2] if len(existing) > 2 else False)
+            film_id, watched = extract_film_info_from_existing(existing)
             logger.info(f"[SHOW FILM INFO] film_id из existing: {film_id}, watched: {watched}")
         else:
             logger.info(f"[SHOW FILM INFO] Запрос film_id из БД...")
@@ -407,66 +407,60 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 watched = False
             logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}, watched: {watched}")
         
-        # Проверяем, есть ли уже план для этого фильма (чтение безопасно без lock)
+        # Проверяем, есть ли уже план для этого фильма (БЕЗ lock — read-only, безопасно)
         logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
         has_plan = False
         plan_info = None
         if film_id:
             try:
-                # КРИТИЧЕСКИЙ ФИКС: Обернуто в try-except с таймаутом для предотвращения зависания
-                
-                # Пробуем получить lock с таймаутом
-                lock_acquired = db_lock.acquire(timeout=3.0)
-                if lock_acquired:
-                    try:
-                        cursor.execute('''
-                            SELECT id, plan_type, plan_datetime 
-                            FROM plans 
-                            WHERE film_id = %s AND chat_id = %s 
-                            LIMIT 1
-                        ''', (film_id, chat_id))
-                        plan_row = cursor.fetchone()
-                        has_plan = plan_row is not None
-                        if has_plan:
-                            if isinstance(plan_row, dict):
-                                plan_id = plan_row.get('id')
-                                plan_type = plan_row.get('plan_type')
-                                plan_dt_value = plan_row.get('plan_datetime')
-                            else:
-                                plan_id = plan_row.get("id") if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
-                                plan_type = plan_row[1]
-                                plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
-                            
-                            # Форматируем дату
-                            if plan_dt_value and user_id:
-                                user_tz = get_user_timezone_or_default(user_id)
-                                try:
-                                    if isinstance(plan_dt_value, datetime):
-                                        if plan_dt_value.tzinfo is None:
-                                            dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
-                                        else:
-                                            dt = plan_dt_value.astimezone(user_tz)
+                cursor = get_db_cursor()  # берём курсор без lock
+                try:
+                    cursor.execute('''
+                        SELECT id, plan_type, plan_datetime 
+                        FROM plans 
+                        WHERE film_id = %s AND chat_id = %s 
+                        LIMIT 1
+                    ''', (film_id, chat_id))
+                    plan_row = cursor.fetchone()
+                    
+                    has_plan = plan_row is not None
+                    if has_plan:
+                        # Обработка результата (RealDictCursor или tuple)
+                        if isinstance(plan_row, dict):
+                            plan_id = plan_row.get('id')
+                            plan_type = plan_row.get('plan_type')
+                            plan_dt_value = plan_row.get('plan_datetime')
+                        else:  # tuple
+                            plan_id = plan_row[0]
+                            plan_type = plan_row[1]
+                            plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
+                        
+                        # Форматируем дату
+                        if plan_dt_value and user_id:
+                            user_tz = get_user_timezone_or_default(user_id)
+                            try:
+                                if isinstance(plan_dt_value, datetime):
+                                    if plan_dt_value.tzinfo is None:
+                                        dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
                                     else:
-                                        dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
-                                    date_str = dt.strftime('%d.%m.%Y %H:%M')
-                                except Exception as e:
-                                    logger.warning(f"[SHOW FILM INFO] Ошибка парсинга plan_datetime: {e}")
-                                    date_str = str(plan_dt_value)[:16]
-                            else:
-                                date_str = "не указана"
-                            
-                            plan_info = {
-                                'id': plan_id,
-                                'type': plan_type,
-                                'date': date_str
-                            }
-                        logger.info(f"[SHOW FILM INFO] Запрос планов выполнен (с lock), has_plan={has_plan}")
-                    finally:
-                        db_lock.release()
-                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после проверки планов")
-                else:
-                    logger.warning(f"[SHOW FILM INFO] db_lock timeout (5 сек) - пропускаем проверку планов (не критично)")
-                    has_plan = False
+                                        dt = plan_dt_value.astimezone(user_tz)
+                                else:
+                                    dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                                date_str = dt.strftime('%d.%m.%Y %H:%M')
+                            except Exception as e:
+                                logger.warning(f"[SHOW FILM INFO] Ошибка парсинга plan_datetime: {e}")
+                                date_str = str(plan_dt_value)[:16]
+                        else:
+                            date_str = "не указана"
+                        
+                        plan_info = {
+                            'id': plan_id,
+                            'type': plan_type,
+                            'date': date_str
+                        }
+                    logger.info(f"[SHOW FILM INFO] Запрос планов выполнен, has_plan={has_plan}")
+                finally:
+                    cursor.close()  # всегда закрываем курсор
             except Exception as plan_e:
                 logger.error(f"[SHOW FILM INFO] ❌ Ошибка при проверке планов (пропускаем): {plan_e}", exc_info=True)
                 has_plan = False
@@ -509,9 +503,22 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 # Фильм в базе, но без плана — только "Запланировать"
                 markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{int(kp_id)}"))
 
-            # Онлайн-кнопка отдельно, только если условия
+            # === КНОПКИ ОНЛАЙН-КИНОТЕАТРОВ ===
             if not watched and has_sources:
-                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{int(kp_id)}"))
+                logger.info(f"[SHOW FILM INFO] Добавляем кнопку 'Выбрать онлайн-кинотеатр' для kp_id={kp_id}")
+                
+                # Глобальный кэш источников (в памяти, живёт пока бот работает)
+                if 'streaming_sources_cache' not in globals():
+                    streaming_sources_cache = {}
+                
+                # Сохраняем источники по kp_id
+                streaming_sources_cache[str(kp_id)] = sources
+                
+                # Кнопка, которая откроет выбор
+                markup.add(InlineKeyboardButton(
+                    "🎬 Выбрать онлайн-кинотеатр",
+                    callback_data=f"stream_sel:{int(kp_id)}"  # короткий: stream_sel:767379
+                ))
 
         # Кнопка удаления — если фильм в базе
         if film_id:
