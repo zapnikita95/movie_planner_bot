@@ -488,61 +488,57 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Добавляем кнопки "Интересные факты" и "Оценить" всегда (для фильмов в базе и не в базе)
         logger.info(f"[SHOW FILM INFO] Добавление кнопок оценок для film_id={film_id}...")
         if film_id:
-            # Получаем информацию об оценках
+            # Получаем информацию об оценках — каждый раз новый курсор
             logger.info(f"[SHOW FILM INFO] Запрос оценок из БД...")
             avg_rating = None
             rating_text = "💬 Оценить"
+
             try:
-                # КРИТИЧЕСКИЙ ФИКС: Увеличен таймаут до 5 секунд и добавлена обработка ошибок
-                lock_acquired = db_lock.acquire(timeout=3.0)
-                if lock_acquired:
-                    try:
-                        # Получаем среднюю оценку
-                        cursor.execute('''
+                # Используем свежий курсор через get_db_connection (или адаптируй под свой conn)
+                from moviebot.database.db_connection import get_db_connection  # добавь в начало файла, если ещё нет
+
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        # 1. Средняя оценка
+                        cur.execute('''
                             SELECT AVG(rating) as avg FROM ratings 
-                            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                            WHERE chat_id = %s AND film_id = %s 
+                            AND (is_imported = FALSE OR is_imported IS NULL)
                         ''', (chat_id, film_id))
-                        avg_result = cursor.fetchone()
+                        avg_result = cur.fetchone()
                         if avg_result:
-                            avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                            avg_rating = float(avg) if avg is not None else None
-                        
-                        # Получаем активных пользователей
-                        cursor.execute('''
+                            avg = avg_result[0] if isinstance(avg_result, tuple) else avg_result.get('avg')
+                            if avg is not None:
+                                avg_rating = float(avg)
+
+                        # 2. Активные пользователи
+                        cur.execute('''
                             SELECT DISTINCT user_id
                             FROM stats
                             WHERE chat_id = %s AND user_id IS NOT NULL
                         ''', (chat_id,))
-                        active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
-                        
-                        # Получаем всех, кто оценил этот фильм
-                        cursor.execute('''
+                        active_users = {row[0] for row in cur.fetchall()}
+
+                        # 3. Кто оценил этот фильм
+                        cur.execute('''
                             SELECT DISTINCT user_id FROM ratings
-                            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                            WHERE chat_id = %s AND film_id = %s 
+                            AND (is_imported = FALSE OR is_imported IS NULL)
                         ''', (chat_id, film_id))
-                        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
-                        
-                        # Определяем текст и эмодзи кнопки
-                        # Показываем среднюю оценку, если есть хотя бы одна оценка
+                        rated_users = {row[0] for row in cur.fetchall()}
+
+                        # Формируем текст кнопки
                         if avg_rating is not None:
                             rating_int = int(round(avg_rating))
-                            if 1 <= rating_int <= 4:
-                                emoji = "💩"
-                            elif 5 <= rating_int <= 7:
-                                emoji = "💬"
-                            else:  # 8-10
-                                emoji = "🏆"
+                            emoji = "💩" if rating_int <= 4 else "💬" if rating_int <= 7 else "🏆"
                             rating_text = f"{emoji} {avg_rating:.0f}/10"
+
                         logger.info(f"[SHOW FILM INFO] Запрос оценок выполнен, avg_rating={avg_rating}, rating_text={rating_text}")
-                    finally:
-                        db_lock.release()
-                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после запроса оценок")
-                else:
-                    logger.warning(f"[SHOW FILM INFO] db_lock timeout (5 сек) - пропускаем запрос оценок (не критично)")
-                    rating_text = "💬 Оценить"
-            except Exception as rating_e:
-                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при запросе оценок (пропускаем): {rating_e}", exc_info=True)
+
+            except Exception as e:
+                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при запросе оценок: {e}", exc_info=True)
                 rating_text = "💬 Оценить"
+
             logger.info(f"[SHOW FILM INFO] Оценки получены, rating_text={rating_text}")
             
             if not facts_and_rate_added:
