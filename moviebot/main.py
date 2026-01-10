@@ -69,6 +69,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # Импортируем бота из bot_init (он уже создан там)
 from moviebot.bot.bot_init import bot, init_bot_id
 
+# Очистка старых webhook + drop pending updates — КРИТИЧНО для избежания 409
+try:
+    bot.delete_webhook(drop_pending_updates=True)
+    logger.info("[BOT] Старый webhook успешно удалён + pending updates сброшены")
+except Exception as e:
+    logger.debug(f"[BOT] Webhook уже не был установлен или ошибка очистки: {e}")
+
 # Получаем ID бота и инициализируем его в bot_init
 BOT_ID = init_bot_id()  # Использует глобальный bot из bot_init
 
@@ -423,6 +430,17 @@ if __name__ == "__main__":
         background_thread = threading.Thread(target=load_databases_in_background, daemon=True)
         background_thread.start()
         logger.info("[MAIN] ✅ Фоновая задача загрузки баз запущена (IMDb + эмбеддинги)")
+    else:
+        logger.info("Локальный режим — polling с увеличенным таймаутом и retry")
+        bot.infinity_polling(
+            non_stop=True,
+            interval=0,
+            timeout=60,  # было 20, увеличим до 60 сек
+            long_polling_timeout=60,
+            retry_on_error=True,  # retry при ошибках
+            skip_pending=True,    # пропускать старые сообщения
+            allowed_updates=["message", "callback_query", "poll"]
+        )
 
     if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
         logger.info("Railway/Production/Webhook режим")
