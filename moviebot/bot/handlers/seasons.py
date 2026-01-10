@@ -315,9 +315,21 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         watched = item['watched_count']
 
         # Обновление кэша (оставляем как есть)
+        # Исправление: используем UTC для сравнения с last_api_update из БД
+        from moviebot.config import PLANS_TZ
+        import pytz
+        now_utc = datetime.now(pytz.utc)
+        last_update = item['last_api_update']
+        # Если last_api_update не имеет timezone, добавляем UTC
+        if last_update and last_update.tzinfo is None:
+            last_update = pytz.utc.localize(last_update)
+        elif last_update and last_update.tzinfo:
+            # Если уже с timezone, конвертируем в UTC для сравнения
+            last_update = last_update.astimezone(pytz.utc)
+        
         need_update = (
-            item['last_api_update'] is None or
-            (datetime.now() - item['last_api_update']) > timedelta(days=1)
+            last_update is None or
+            (now_utc - last_update) > timedelta(days=1)
         )
         if need_update:
             is_airing, next_ep = get_series_airing_status(kp_id)

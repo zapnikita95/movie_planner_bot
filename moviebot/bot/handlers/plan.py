@@ -1008,59 +1008,106 @@ def plan_type_callback(call):
     
     @bot.callback_query_handler(func=lambda call: call.data.startswith("film_desc:"))
     def film_desc_from_schedule(call):
+        """Обработчик кнопок фильмов из расписания - показывает описание фильма"""
         try:
-            bot.answer_callback_query(call.id)
+            bot.answer_callback_query(call.id, text="⏳ Загружаю описание...")
 
             kp_id = int(call.data.split(":", 1)[1])
             chat_id = call.message.chat.id
             user_id = call.from_user.id
             message_id = call.message.message_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
 
-            # Получаем инфу (из БД, без API)
-            with db_lock:
-                cursor.execute("""
-                    SELECT title, year, description, director, genres, actors, is_series, link
-                    FROM movies 
-                    WHERE kp_id = %s AND chat_id = %s
-                """, (str(kp_id), chat_id))
-                row = cursor.fetchone()
+            logger.info(f"[FILM DESC FROM SCHEDULE] kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
 
-            if not row:
-                bot.edit_message_text(
-                    f"🎬 Фильм/сериал не найден в базе\n\n<a href='https://www.kinopoisk.ru/film/{kp_id}/'>Открыть на Кинопоиске</a>",
-                    chat_id,
-                    message_id,
-                    parse_mode='HTML'
-                )
+            # Используем get_film_current_state для получения актуального состояния
+            from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            
+            current_state = get_film_current_state(chat_id, kp_id, user_id)
+            existing = current_state['existing']
+            
+            # Определяем ссылку
+            link = None
+            if existing:
+                # Если фильм в базе, получаем ссылку из БД
+                with db_lock:
+                    cursor.execute('SELECT link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                    row = cursor.fetchone()
+                    if row:
+                        link = row.get('link') if isinstance(row, dict) else row[0]
+                        is_series = bool(row.get('is_series') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0))
+                        if not link:
+                            link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            if not link:
+                # Фильм не в базе, пробуем API для определения типа
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            # Получаем информацию через API
+            info = extract_movie_info(link)
+            
+            if not info or not info.get('title'):
+                # Если API не сработал, пробуем получить из БД
+                if existing:
+                    with db_lock:
+                        cursor.execute('''
+                            SELECT title, year, genres, description, director, actors, is_series, link
+                            FROM movies WHERE id = %s AND chat_id = %s
+                        ''', (existing[0], chat_id))
+                        db_row = cursor.fetchone()
+                        if db_row:
+                            info = {
+                                'title': db_row[0] if len(db_row) > 0 else None,
+                                'year': db_row[1] if len(db_row) > 1 else None,
+                                'genres': db_row[2] if len(db_row) > 2 else None,
+                                'description': db_row[3] if len(db_row) > 3 else None,
+                                'director': db_row[4] if len(db_row) > 4 else None,
+                                'actors': db_row[5] if len(db_row) > 5 else None,
+                                'is_series': bool(db_row[6]) if len(db_row) > 6 else False
+                            }
+                            if not link:
+                                link = db_row[7] if len(db_row) > 7 else f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            if not info or not info.get('title'):
+                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
                 return
+            
+            # Убеждаемся, что is_series правильно установлен
+            if existing:
+                with db_lock:
+                    cursor.execute('SELECT is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                    row = cursor.fetchone()
+                    if row:
+                        info['is_series'] = bool(row.get('is_series') if isinstance(row, dict) else row[0])
+            
+            # Уточняем link для сериала
+            if info.get('is_series'):
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            elif not link or '/series/' in link:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
 
-            # Безопасно формируем info
-            info = {
-                'title': row[0] if len(row) > 0 else None,
-                'year': row[1] if len(row) > 1 else None,
-                'description': row[2] if len(row) > 2 else None,
-                'director': row[3] if len(row) > 3 else None,
-                'genres': row[4] if len(row) > 4 else None,
-                'actors': row[5] if len(row) > 5 else None,
-                'is_series': bool(row[6]) if len(row) > 6 else False
-            }
-
-            link = row[7] if len(row) > 7 else f"https://www.kinopoisk.ru/{'series' if info['is_series'] else 'film'}/{kp_id}/"
-
-            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            # Вызываем show_film_info_with_buttons с актуальным existing
+            # existing будет переопределен внутри функции через get_film_current_state, но передаем для оптимизации
             show_film_info_with_buttons(
                 chat_id=chat_id,
                 user_id=user_id,
                 info=info,
                 link=link,
                 kp_id=kp_id,
+                existing=existing,
                 message_id=message_id,
-                existing=None
+                message_thread_id=message_thread_id
             )
+            
+            logger.info(f"[FILM DESC FROM SCHEDULE] Описание показано успешно")
 
         except Exception as e:
             logger.error(f"[FILM DESC FROM SCHEDULE] Ошибка: {e}", exc_info=True)
-            bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+            except:
+                pass
 
 def get_plan_link_internal(message, state):
     """Внутренняя функция для получения ссылки на фильм в /plan"""

@@ -118,16 +118,19 @@ def add_to_database_callback(call):
             info['is_series'] = '/series/' in link
             logger.warning(f"[ADD TO DB] is_series отсутствовал в info → восстановили по ссылке: {info['is_series']}")
 
-        # 6. Финальная карточка — всегда с existing и правильной ссылкой
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
-
+        # 6. Финальная карточка — используем get_film_current_state для актуального состояния
+        from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
+        # Получаем актуальное состояние после добавления
+        current_state = get_film_current_state(chat_id, kp_id, user_id)
+        actual_existing = current_state['existing']
+        
         show_film_info_with_buttons(
             chat_id=chat_id,
             user_id=user_id,
             info=info,                  # теперь is_series точно есть
             link=link,
             kp_id=kp_id,
-            existing=existing,
+            existing=actual_existing,   # Используем актуальное состояние
             message_id=message_id,
             message_thread_id=thread_id
         )
@@ -531,13 +534,24 @@ def mark_watched_from_description_callback(call):
             'is_series': is_series
         }
         
-        # Обновляем existing (теперь watched=1)
-        existing = (film_id, title, True)
-        
-        # Обновляем сообщение с описанием фильма
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        # Обновляем сообщение с описанием фильма - используем get_film_current_state для актуального состояния
+        from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
+        # Получаем актуальное состояние после изменения
+        current_state = get_film_current_state(chat_id, int(kp_id), user_id)
+        actual_existing = current_state['existing']
+        # Если API не вернул info, используем данные из БД
+        if not info or not info.get('title'):
+            info = {
+                'title': title,
+                'year': year,
+                'genres': genres,
+                'description': description,
+                'director': director,
+                'actors': actors,
+                'is_series': is_series
+            }
         show_film_info_with_buttons(
-            chat_id, user_id, info, link, kp_id, existing=existing,
+            chat_id, user_id, info, link, kp_id, existing=actual_existing,
             message_id=message_id, message_thread_id=message_thread_id
         )
         
@@ -794,10 +808,13 @@ def mark_watched_from_description_kp_callback(call):
         # Обновляем existing (теперь watched=1)
         existing = (film_id, info.get('title'), True)
         
-        # Обновляем сообщение с описанием фильма
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        # Обновляем сообщение с описанием фильма - используем get_film_current_state для актуального состояния
+        from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
+        # Получаем актуальное состояние после изменения
+        current_state = get_film_current_state(chat_id, int(kp_id), user_id)
+        actual_existing = current_state['existing']
         show_film_info_with_buttons(
-            chat_id, user_id, info, link, kp_id, existing=existing,
+            chat_id, user_id, info, link, kp_id, existing=actual_existing,
             message_id=message_id, message_thread_id=message_thread_id
         )
         
@@ -911,10 +928,13 @@ def toggle_watched_from_description_callback(call):
         # Обновляем existing (теперь watched=0)
         existing = (film_id, title, False)
         
-        # Обновляем сообщение с описанием фильма
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        # Обновляем сообщение с описанием фильма - используем get_film_current_state для актуального состояния
+        from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
+        # Получаем актуальное состояние после изменения
+        current_state = get_film_current_state(chat_id, int(kp_id), user_id)
+        actual_existing = current_state['existing']
         show_film_info_with_buttons(
-            chat_id, user_id, info, link, kp_id, existing=existing,
+            chat_id, user_id, info, link, kp_id, existing=actual_existing,
             message_id=message_id, message_thread_id=message_thread_id
         )
         
@@ -1050,20 +1070,39 @@ def confirm_remove_from_database(call):
             cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
             conn.commit()
 
-        # Кнопка "Перейти к описанию"
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton(
-            "📖 Перейти к описанию",
-            callback_data=f"show_film_description:{kp_id}"
-        ))
-
-        bot.edit_message_text(
-            f"✅ <b>{title}</b> успешно удалён из базы!",
-            chat_id,
-            message_id,
-            reply_markup=markup,
-            parse_mode='HTML'
-        )
+        # Получаем информацию о фильме через API для показа описания
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        
+        if info:
+            # Обновляем описание - теперь фильм не в базе (existing=None)
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=None,  # Фильм удален из базы
+                message_id=message_id,
+                message_thread_id=message_thread_id
+            )
+        else:
+            # Если API не вернул данные, показываем простое сообщение
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton(
+                "📖 Перейти к описанию",
+                callback_data=f"show_film_description:{kp_id}"
+            ))
+            bot.edit_message_text(
+                f"✅ <b>{title}</b> успешно удалён из базы!",
+                chat_id,
+                message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
 
         logger.info(f"[REMOVE FROM DB] Успешно удалён: kp_id={kp_id}, title='{title}', user_id={user_id}")
 
