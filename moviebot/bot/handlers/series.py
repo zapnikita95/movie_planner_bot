@@ -91,27 +91,37 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if existing:
             film_id, title_from_db, watched = existing
 
-            # Запрашиваем все нужные поля из базы по id
-            with db_lock:
-                cursor.execute("""
-                    SELECT title, year, genres, description, director, actors, is_series
-                    FROM movies 
-                    WHERE id = %s AND chat_id = %s
-                """, (film_id, chat_id))
-                db_row = cursor.fetchone()
+            # Запрашиваем все нужные поля из базы по id — безопасный способ
+            try:
+                from moviebot.database.db_operations import get_db_connection  # если ещё не импортировано
 
-            if db_row:
-                info = {
-                    'title': db_row[0] or title_from_db,
-                    'year': db_row[1],
-                    'genres': db_row[2],
-                    'description': db_row[3],
-                    'director': db_row[4],
-                    'actors': db_row[5],
-                    'is_series': bool(db_row[6])
-                }
-            else:
-                # Если вдруг не нашли (крайне редко) — fallback на то, что было
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("""
+                            SELECT title, year, genres, description, director, actors, is_series
+                            FROM movies 
+                            WHERE id = %s AND chat_id = %s
+                        """, (film_id, chat_id))
+                        db_row = cur.fetchone()
+
+                if db_row:
+                    info = {
+                        'title': db_row[0] or title_from_db,
+                        'year': db_row[1],
+                        'genres': db_row[2],
+                        'description': db_row[3],
+                        'director': db_row[4],
+                        'actors': db_row[5],
+                        'is_series': bool(db_row[6])
+                    }
+                else:
+                    # Если вдруг не нашли — fallback
+                    info = info or {}
+                    info['title'] = title_from_db
+
+            except Exception as db_err:
+                logger.error(f"[DB_FETCH_ERROR] Не удалось получить данные из БД для film_id={film_id}: {db_err}")
+                # Продолжаем с тем, что есть в info
                 info = info or {}
                 info['title'] = title_from_db
 
@@ -719,8 +729,11 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Берём название из info или existing или хотя бы ID
         safe_title = info.get('title') if info else None
         if not safe_title and existing:
-            _, title_from_db, _ = existing
-            safe_title = title_from_db
+            try:
+                _, title_from_db, _ = existing
+                safe_title = title_from_db
+            except:
+                pass
         safe_title = safe_title or f"ID {kp_id}"
 
         error_text = f"🎬 <b>{safe_title}</b>\n"
@@ -729,13 +742,19 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         error_text += "❌ Не удалось полностью загрузить информацию.\n"
         error_text += "Но вы всё равно можете добавить/запланировать 👇"
 
-        # Самые безопасные кнопки
+        # Кнопки: две широкие по одной в строке + две узкие рядом
         markup = InlineKeyboardMarkup(row_width=2)
+
+        # Широкие кнопки — каждая на отдельной строке
         markup.add(
-            InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}"),
-            InlineKeyboardButton("📅 Запланировать", callback_data=f"plan_from_added:{kp_id}")
+            InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}")
         )
         markup.add(
+            InlineKeyboardButton("📅 Запланировать", callback_data=f"plan_from_added:{kp_id}")
+        )
+
+        # Узкие кнопки — в одной строке рядом
+        markup.row(
             InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
             InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
         )
