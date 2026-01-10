@@ -43,34 +43,43 @@ def add_to_database_callback(call):
 
         conn.rollback()  # чистим транзакцию на всякий
 
-        with db_lock:
-            cursor.execute("""
-                SELECT id, title, link, watched, is_series 
-                FROM movies 
-                WHERE chat_id = %s AND kp_id = %s
-            """, (chat_id, kp_id_str))
-            row = cursor.fetchone()
+        # Проверяем, есть ли фильм в базе — безопасно
+        row = None
+        try:
+            with db_lock:
+                cursor.execute("""
+                    SELECT id, title, link, watched, is_series 
+                    FROM movies 
+                    WHERE chat_id = %s AND kp_id = %s
+                """, (chat_id, kp_id_str))
+                row = cursor.fetchone()
+        except Exception as e:
+            logger.error(f"[ADD TO DATABASE] Ошибка проверки существования фильма: {e}")
 
-        if row:
-            # Уже в базе — берём ВСЁ из базы
+        if row and isinstance(row, (tuple, list)) and len(row) >= 2:
+            # Уже в базе — безопасная распаковка
             film_id = row[0]
             title_db = row[1]
             link = row[2] or f"https://www.kinopoisk.ru/film/{kp_id}/"
-            watched = row[3] or 0
-            is_series = bool(row[4])
+            watched = row[3] if len(row) > 3 else 0
+            is_series = bool(row[4]) if len(row) > 4 else False
 
             existing = (film_id, title_db, watched)
 
-            # Делаем второй запрос — берём полные данные (description и т.д.)
-            with db_lock:
-                cursor.execute("""
-                    SELECT title, year, genres, description, director, actors, is_series
-                    FROM movies 
-                    WHERE id = %s
-                """, (film_id,))
-                full_row = cursor.fetchone()
+            # Второй запрос — полные данные
+            full_row = None
+            try:
+                with db_lock:
+                    cursor.execute("""
+                        SELECT title, year, genres, description, director, actors, is_series
+                        FROM movies 
+                        WHERE id = %s
+                    """, (film_id,))
+                    full_row = cursor.fetchone()
+            except Exception as e:
+                logger.warning(f"[ADD TO DATABASE] Не удалось взять полные данные: {e}")
 
-            if full_row:
+            if full_row and isinstance(full_row, (tuple, list)) and len(full_row) >= 6:
                 info = {
                     'title': full_row[0],
                     'year': full_row[1],
