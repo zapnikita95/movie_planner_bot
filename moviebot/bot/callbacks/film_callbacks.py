@@ -594,7 +594,7 @@ def back_to_film_description(call):
         
         # Парсим kp_id как строку (PostgreSQL хранит как TEXT)
         kp_id_str = call.data.split(":")[1]
-        kp_id = int(kp_id_str)  # для логов и вызовов
+        kp_id = str(int(kp_id_str))  # для логов и вызовов
         kp_id_db = str(kp_id)   # для SQL-запросов в БД
         
         logger.info(f"[BACK TO FILM] kp_id={kp_id}, chat_id={chat_id}")
@@ -878,7 +878,7 @@ def streaming_select_callback(call):
 def streaming_source_select(call):
     try:
         _, kp_id_str, idx_str = call.data.split(':')
-        kp_id = int(kp_id_str)
+        kp_id = str(int(kp_id_str))
         idx = int(idx_str)
         
         sources = streaming_sources_cache.get(str(kp_id), [])
