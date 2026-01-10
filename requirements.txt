@@ -21,3 +21,4 @@ whisper
 emoji
 librosa
 soundfile
+gunicorn
