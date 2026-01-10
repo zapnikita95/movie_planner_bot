@@ -89,15 +89,14 @@ class BotWatchdog:
             logger.error(f"[WATCHDOG] ❌ Ошибка проверки scheduler: {e}", exc_info=True)
             return False
             
-    def check_database(self) -> bool:
-        """Проверяет состояние подключения к БД"""
+def check_database(self) -> bool:
+    """Проверяет состояние подключения к БД с retry"""
+    from moviebot.database.db_connection import get_db_connection
+    
+    max_retries = 3
+    for attempt in range(1, max_retries + 1):
         try:
-            # Каждый раз берём свежее соединение из thread-local механизма
-            from moviebot.database.db_connection import get_db_connection
-            
-            conn = get_db_connection()  # ← автоматически пересоздаст если закрыто
-            
-            # На всякий случай rollback от предыдущих операций
+            conn = get_db_connection()
             try:
                 conn.rollback()
             except:
@@ -109,24 +108,26 @@ class BotWatchdog:
                 cursor.fetchone()
             finally:
                 cursor.close()
-                # НЕ закрываем conn — пусть thread-local сам управляет
             
             self.health_status['database'] = {
-                'status': 'connected',
+                'status': 'healthy',
                 'last_check': datetime.now().isoformat(),
-                'error': None
+                'error': None,
+                'attempt': attempt
             }
+            logger.debug("[WATCHDOG] БД проверена успешно")
             return True
-            
+        
         except Exception as e:
-            error_msg = str(e)
-            self.health_status['database'] = {
-                'status': 'disconnected',
-                'last_check': datetime.now().isoformat(),
-                'error': error_msg
-            }
-            logger.error(f"[WATCHDOG] ❌ Ошибка подключения к БД: {e}", exc_info=True)
-            return False
+            logger.warning(f"[WATCHDOG] Проблема с БД (попытка {attempt}/{max_retries}): {e}")
+            time.sleep(1)  # пауза перед повтором
+    
+    self.health_status['database'] = {
+        'status': 'unhealthy',
+        'last_check': datetime.now().isoformat(),
+        'error': f"Не удалось после {max_retries} попыток"
+    }
+    return False
             
     def check_bot(self) -> bool:
         """Проверяет состояние бота"""
