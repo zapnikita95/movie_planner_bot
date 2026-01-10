@@ -397,7 +397,9 @@ if __name__ == "__main__":
         # Запускаем Flask — он будет принимать все запросы Telegram
         logger.info(f"Запуск Flask на 0.0.0.0:{PORT}")
         app.run(host="0.0.0.0", port=PORT, debug=False)
-
+        logger.info("=== BOT FULLY STARTED ON RAILWAY ===")
+        logger.info(f"Webhook URL: https://{os.getenv('RAILWAY_PUBLIC_DOMAIN')}/webhook")
+        logger.info("Готов принимать обновления от Telegram...")
     else:
         # Локально — polling
         logger.info("Локальный режим → polling")

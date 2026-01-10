@@ -6,7 +6,7 @@ import logging
 import json
 import math
 from datetime import datetime, date, timedelta
-
+import psycopg2
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -407,37 +407,43 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
             'text': text,
             'chat_id': chat_id,
             'reply_markup': markup,
-            'parse_mode': 'HTML'
+            'parse_mode': 'HTML',
+            'disable_web_page_preview': True
         }
+
         if message_thread_id is not None:
             common_kwargs['message_thread_id'] = message_thread_id
 
         if message_id:
             common_kwargs['message_id'] = message_id
-            edit_kwargs = common_kwargs.copy()
-            edit_kwargs.pop('message_thread_id', None)  # ← убираем то, что edit не жрёт
-            bot.edit_message_text(**edit_kwargs)
+            try:
+                bot.edit_message_text(**common_kwargs)
+            except telebot.apihelper.ApiTelegramException as api_exc:
+                if api_exc.error_code == 400 and "message is not modified" in str(api_exc).lower():
+                    logger.debug("[SHOW_SEASONS_LIST] Сообщение не изменилось — пропускаем")
+                    # Это нормальная ситуация при повторном вызове той же страницы
+                    pass
+                else:
+                    raise  # кидаем все остальные ошибки дальше
         else:
             bot.send_message(**common_kwargs)
 
     except Exception as e:
         logger.error(f"[SHOW_SEASONS_LIST] Ошибка редактирования/отправки: {e}", exc_info=True)
-        # Фолбэк без message_thread_id (на случай очень старой версии telebot)
+        # Фоллбек — отправляем новое сообщение, если редактирование совсем сломалось
         try:
-            fallback_kwargs = {
+            send_kwargs = {
                 'text': text,
                 'chat_id': chat_id,
                 'reply_markup': markup,
                 'parse_mode': 'HTML',
                 'disable_web_page_preview': True
             }
-            if message_id:
-                fallback_kwargs['message_id'] = message_id
-                bot.edit_message_text(**fallback_kwargs)
-            else:
-                bot.send_message(**fallback_kwargs)
-        except Exception as e2:
-            logger.error(f"[SHOW_SEASONS_LIST] Полный фейл отправки: {e2}")
+            if message_thread_id is not None:
+                send_kwargs['message_thread_id'] = message_thread_id
+            bot.send_message(**send_kwargs)
+        except Exception as send_e:
+            logger.error(f"[SHOW_SEASONS_LIST] Полный фейл отправки: {send_e}")
 
 def show_completed_series_list(chat_id: int, user_id: int, message_id: int = None, message_thread_id: int = None, bot=None):
     if bot is None:
@@ -681,20 +687,19 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
 
     try:
         with db_lock:
-            # Создаём курсор ЗДЕСЬ, внутри with db_lock
             cursor = conn.cursor()
 
-            # 1. Считаем общее количество
+            # Считаем количество
             cursor.execute("""
                 SELECT COUNT(DISTINCT m.id) AS total_count
                 FROM movies m
                 WHERE m.chat_id = %s AND m.is_series = 1
             """, (chat_id,))
             count_row = cursor.fetchone()
-            total_count = count_row['total_count'] if count_row else 0
+            total_count = count_row[0] if count_row else 0
             total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
 
-            # 2. Основной запрос
+            # Основной большой запрос
             cursor.execute("""
                 SELECT 
                     m.id AS film_id,
@@ -731,9 +736,8 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
 
             rows = cursor.fetchall()
 
-            # Всё, что нужно с данными — делаем внутри этого же блока
             for row in rows:
-                next_episode = row['next_episode']
+                next_episode = row[8]  # индекс 8 — next_episode
                 if isinstance(next_episode, str):
                     try:
                         next_episode = json.loads(next_episode)
@@ -741,33 +745,30 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                         next_episode = None
 
                 items.append({
-                    'film_id': row['film_id'],
-                    'kp_id': row['kp_id'],
-                    'title': row['title'],
-                    'year': row['year'],
-                    'poster_url': row['poster_url'],
-                    'link': row['link'] or f"https://www.kinopoisk.ru/series/{row['kp_id']}/",
-                    'is_ongoing': row['is_ongoing'],
-                    'seasons_count': row['seasons_count'],
+                    'film_id': row[0],
+                    'kp_id': row[1],
+                    'title': row[2],
+                    'year': row[3],
+                    'poster_url': row[4],
+                    'link': row[5] or f"https://www.kinopoisk.ru/series/{row[1]}/",
+                    'is_ongoing': row[6],
+                    'seasons_count': row[7],
                     'next_episode': next_episode,
-                    'last_api_update': row['last_api_update'],
-                    'watched_count': row['watched_episodes_count'],
-                    'has_subscription': row['has_subscription'],
+                    'last_api_update': row[9],
+                    'watched_count': row[10],
+                    'has_subscription': row[11],
                 })
 
-            # Закрываем курсор явно (хотя with db_lock и так закроет соединение)
             cursor.close()
 
-    except psycopg2.InterfaceError as cursor_err:
-        logger.error(f"[GET_USER_SERIES_PAGE] Курсор уже закрыт: {cursor_err}")
-        with db_lock:
-            conn.rollback()
+    except psycopg2.InterfaceError as e:
+        logger.error(f"[GET_USER_SERIES_PAGE] Cursor error: {e}")
+        conn.rollback()
         return {'items': [], 'total_pages': 1, 'total_count': 0, 'current_page': page}
 
     except Exception as e:
         logger.error(f"[GET_USER_SERIES_PAGE] Ошибка: {e}", exc_info=True)
-        with db_lock:
-            conn.rollback()
+        conn.rollback()
         return {'items': [], 'total_pages': 1, 'total_count': 0, 'current_page': page}
 
     return {
@@ -776,6 +777,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
         'total_count': total_count,
         'current_page': page
     }
+
 @bot.callback_query_handler(func=lambda c: c.data.startswith(('seasons_page:', 'seasons_refresh:')))
 def handle_seasons_pagination(call):
     try:

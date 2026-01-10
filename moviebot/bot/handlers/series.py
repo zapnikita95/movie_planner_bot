@@ -78,7 +78,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
     try:
         # ← ФИКС: приводим kp_id к int сразу здесь (самое важное место!)
         try:
-            kp_id = str(int(kp_id))  # если строка — делаем число
+            kp_id = int(kp_id)  # если строка — делаем число
             logger.info(f"[SHOW FILM INFO] kp_id успешно приведён к int: {kp_id}")
         except (ValueError, TypeError) as conv_e:
             logger.error(f"[SHOW FILM INFO] Не удалось привести kp_id к int: {kp_id}, ошибка: {conv_e}")
