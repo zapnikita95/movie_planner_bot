@@ -12,7 +12,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
+from moviebot.utils.helpers import extract_film_info_from_existing
 from moviebot.database.db_operations import get_notification_settings, log_request
 
 from moviebot.api.kinopoisk_api import get_premieres_for_period, extract_movie_info
@@ -470,10 +470,8 @@ def premiere_add_to_db(call):
             existing_row = cursor.fetchone()
         
         if existing_row:
-            # Фильм уже есть - получаем полную информацию из БД и показываем описание
-            film_id = existing_row.get('id') if isinstance(existing_row, dict) else existing_row[0]
-            title = existing_row.get('title') if isinstance(existing_row, dict) else existing_row[1]
-            watched = existing_row.get('watched') if isinstance(existing_row, dict) else existing_row[2]
+            film_id, watched = extract_film_info_from_existing(existing_row)
+            title = existing_row[1] if not isinstance(existing_row, dict) else existing_row.get('title')
             
             logger.info(f"[PREMIERE ADD] Фильм уже в базе: film_id={film_id}, title={title}")
             bot.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)

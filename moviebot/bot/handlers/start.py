@@ -4,10 +4,10 @@ from moviebot.bot.bot_init import bot
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 from moviebot.database.db_operations import (
     get_active_subscription,
     get_active_group_subscription_by_chat_id,
+    get_user_personal_subscriptions,
     log_request
 )
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access
@@ -111,7 +111,12 @@ def register_start_handlers(bot):
             markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
             markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
 
-            bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
+            bot.send_message(
+                message.chat.id,
+                welcome_text,
+                parse_mode='HTML',
+                reply_markup=markup
+            )
             logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
 
         except Exception as e:

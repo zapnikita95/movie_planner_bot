@@ -486,6 +486,7 @@ def plan_type_callback_fallback(call):
         logger.info(f"[PLAN TYPE FALLBACK] ===== END: callback_id={call.id}")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith('plan_type:'))
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
 def handle_plan_type(call):
     try:
         bot.answer_callback_query(call.id, "Выбрано!")
@@ -524,18 +525,33 @@ def handle_plan_type(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
 
-        # Ищем в БД link и film_id (твой код — ок)
+        # Ищем в БД film_id, link, title, watched (чтобы existing был готов)
         with db_semaphore:
             with db_lock:
-                cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                cursor.execute('''
+                    SELECT id, title, watched, link 
+                    FROM movies 
+                    WHERE chat_id = %s AND kp_id = %s
+                ''', (chat_id, str(kp_id)))
                 row = cursor.fetchone()
+                
                 if not row:
                     bot.send_message(chat_id, "❌ Фильм не найден в базе. Попробуйте заново.")
                     return
+                
+                # Создаём existing ДО вызова extract
+                existing = row  # row — это RealDictRow или tuple с id, title, watched, link
+                
+                # Извлекаем film_id и watched
                 film_id, watched = extract_film_info_from_existing(existing)
-                link = row[1] if not isinstance(row, dict) else row['link']
-
-        # Сохраняем состояние с step=3 (число!)
+                
+                # link берём из row
+                if isinstance(row, dict):
+                    link = row.get('link')
+                else:  # tuple
+                    link = row[3] if len(row) > 3 else None
+        
+        # Сохраняем состояние с step=3
         user_plan_state[user_id] = {
             'step': 3,
             'plan_type': plan_type,
@@ -562,194 +578,130 @@ def handle_plan_type(call):
             bot.answer_callback_query(call.id, "Ошибка, попробуйте заново.", show_alert=True)
         except Exception as e:
             logger.warning(f"[CALLBACK] Не удалось ответить на callback: {e}")
-            
-@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
-def show_film_description_callback(call):
-    """Обработчик кнопки '◀️ Вернуться к описанию' - показывает описание фильма из БД без API запроса"""
-    logger.info("=" * 80)
-    logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] ===== START: callback_id={call.id}, callback_data={call.data}")
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("back_to_film:"))
+def back_to_film_description(call):
+    """Кнопка '◀️ Вернуться к описанию' — показывает свежую карточку через show_film_info_with_buttons"""
+    logger.info(f"[BACK TO FILM] START: data={call.data}")
+    
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    message_id = call.message.message_id
+    message_thread_id = getattr(call.message, 'message_thread_id', None)
+    
     try:
-        # Отвечаем на callback сразу (чтобы убрать крутилку)
         bot.answer_callback_query(call.id, text="⏳ Загружаю описание...")
-
-        # Парсим kp_id и сразу приводим к int
+        
+        # Парсим kp_id как строку (PostgreSQL хранит как TEXT)
         kp_id_str = call.data.split(":")[1]
+        kp_id = int(kp_id_str)  # для логов и вызовов
+        kp_id_db = str(kp_id)   # для SQL-запросов в БД
+        
+        logger.info(f"[BACK TO FILM] kp_id={kp_id}, chat_id={chat_id}")
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        
+        # ─── 1. Пробуем свежие данные из API ───────────────────────────────
+        info = None
         try:
-            kp_id = int(kp_id_str)
-            logger.info(f"[SHOW FILM DESCRIPTION] kp_id успешно приведён к int: {kp_id}")
-        except ValueError:
-            logger.error(f"[SHOW FILM DESCRIPTION] Некорректный kp_id в callback: {kp_id_str}")
-            bot.answer_callback_query(call.id, "❌ Ошибка с ID фильма", show_alert=True)
-            return
-
-        user_id = call.from_user.id
-        chat_id = call.message.chat.id
-        message_thread_id = getattr(call.message, 'message_thread_id', None)
-
-        logger.info(f"[SHOW FILM DESCRIPTION] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
-
-        # Получаем информацию о фильме из БД
-        # Получаем информацию о фильме из БД
-        with db_lock:
-            cursor.execute('''
-                SELECT id, title, watched, link, year, genres, description, director, actors, is_series
-                FROM movies 
-                WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, str(kp_id)))
-            row = cursor.fetchone()
-
-        if not row:
-            logger.warning(f"[SHOW FILM DESCRIPTION] Фильм не найден в БД: kp_id={kp_id}, chat_id={chat_id}")
-            bot.send_message(chat_id, "❌ Фильм не найден в твоей базе. Попробуй добавить заново.")
-            return
-
-        # row — tuple от cursor.fetchone(), безопасно берём значения по индексам
-        film_info = {
-            'title': row[1] if len(row) > 1 else None,
-            'link': row[3] if len(row) > 3 else None,
-            'year': row[4] if len(row) > 4 else None,
-            'genres': row[5] if len(row) > 5 else None,
-            'description': row[6] if len(row) > 6 else None,
-            'director': row[7] if len(row) > 7 else None,
-            'actors': row[8] if len(row) > 8 else None,
-            'is_series': bool(row[9]) if len(row) > 9 else False
-        }
-
-        # Если что-то критично отсутствует — логируем
-        if not film_info['title']:
-            logger.error(f"[SHOW FILM DESCRIPTION] Нет title в row для kp_id={kp_id}")
-
-        # Теперь используй film_info вместо row
-        type_emoji = "📺" if film_info['is_series'] else "🎬"
-        text = f"{type_emoji} <b>{film_info['title']}</b> ({film_info['year'] or '—'})\n\n"
-
-        if film_info['director']:
-            text += f"<i>Режиссёр:</i> {film_info['director']}\n"
-        if film_info['genres']:
-            text += f"<i>Жанры:</i> {film_info['genres']}\n"
-        if film_info['actors']:
-            text += f"<i>В ролях:</i> {film_info['actors']}\n"
-        if film_info['description']:
-            text += f"\n<i>Кратко:</i> {film_info['description']}\n"
-
-        text += f"\n<a href='{film_info['link']}'>Кинопоиск</a>"
-
-        if film_info['watched']:
-            text += "\n\n✅ <b>Просмотрено</b>"
-
-        # Кнопки (добавь свои)
-        markup = InlineKeyboardMarkup(row_width=2)
-        markup.add(InlineKeyboardButton("🔙 Назад к карточке", callback_data=f"back_to_film:{int(kp_id)}"))
-
-        # Отправляем или редактируем сообщение
-        if call.message:
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            info = extract_movie_info(link)
+            if info and info.get('title'):
+                logger.info(f"[BACK TO FILM] Свежие данные из API: {info['title']}")
+        except Exception as api_e:
+            logger.warning(f"[BACK TO FILM] API ошибка: {api_e}")
+        
+        # ─── 2. Fallback на БД (с правильной обработкой транзакций) ────────
+        if not info:
+            logger.info("[BACK TO FILM] API не сработал → БД")
+            with db_lock:
+                # TRY-FINALLY для отката транзакции при ошибке
+                try:
+                    cursor.execute('''
+                        SELECT title, year, genres, description, director, actors, is_series, id, watched
+                        FROM movies 
+                        WHERE chat_id = %s AND kp_id = %s
+                    ''', (chat_id, kp_id_db))  # ← kp_id как STRING!
+                    row = cursor.fetchone()
+                    
+                    if row:
+                        info = {
+                            'title': row[0],
+                            'year': row[1],
+                            'genres': row[2],
+                            'description': row[3],
+                            'director': row[4],
+                            'actors': row[5],
+                            'is_series': bool(row[6])
+                        }
+                        logger.info(f"[BACK TO FILM] Данные из БД: {info['title']}")
+                    conn.commit()
+                    
+                except Exception as db_e:
+                    logger.error(f"[BACK TO FILM] SQL ошибка: {db_e}")
+                    conn.rollback()  # ← КРИТИЧНО: откатываем aborted transaction
+                    raise
+        
+        if not info or not info.get('title'):
             bot.edit_message_text(
-                text,
-                chat_id,
-                call.message.message_id,
-                reply_markup=markup,
-                parse_mode='HTML',
-                disable_web_page_preview=False
+                "❌ Не удалось загрузить информацию о фильме",
+                chat_id, message_id, message_thread_id=message_thread_id,
+                parse_mode='HTML'
             )
-        else:
-            bot.send_message(
-                chat_id,
-                text,
-                reply_markup=markup,
-                parse_mode='HTML',
-                disable_web_page_preview=False
-            )
-
-        logger.info(f"[SHOW FILM DESCRIPTION] Описание успешно отправлено для kp_id={kp_id}")
-
-    except Exception as e:
-        logger.error(f"[SHOW FILM DESCRIPTION] Критическая ошибка: {e}", exc_info=True)
-        try:
-            bot.answer_callback_query(call.id, "❌ Ошибка загрузки описания", show_alert=True)
-        except:
-            pass  # если callback уже старый
+            return
         
-        # Извлекаем данные
-        if isinstance(row, dict):
-            film_id = row.get('id')
-            title = row.get('title')
-            watched = row.get('watched')
-            link = row.get('link')
-            year = row.get('year')
-            genres = row.get('genres')
-            description = row.get('description')
-            director = row.get('director')
-            actors = row.get('actors')
-            is_series = bool(row.get('is_series', 0))
-        else:
-            film_id, watched = extract_film_info_from_existing(existing)
-            title = row[1]
-            watched = row[2]
-            link = row[3]
-            year = row[4] if len(row) > 4 else None
-            genres = row[5] if len(row) > 5 else None
-            description = row[6] if len(row) > 6 else None
-            director = row[7] if len(row) > 7 else None
-            actors = row[8] if len(row) > 8 else None
-            is_series = bool(row[9] if len(row) > 9 else 0)
+        # ─── 3. Определяем existing (с транзакционной защитой) ────────────
+        existing = None
+        with db_lock:
+            try:
+                cursor.execute(
+                    "SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s",
+                    (chat_id, kp_id_db)  # ← снова STRING!
+                )
+                row = cursor.fetchone()
+                
+                if row:
+                    film_id = row[0]
+                    title_db = row[1]
+                    watched = row[2]
+                    existing = (film_id, title_db, watched)
+                    logger.info(f"[BACK TO FILM] existing найден: {film_id}")
+                
+                conn.commit()
+            except Exception as db_e:
+                logger.error(f"[BACK TO FILM] Ошибка existing: {db_e}")
+                conn.rollback()
+                # existing=None — продолжаем без него
         
-        if not link:
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        
-        # Формируем словарь info из данных БД (без API запроса)
-        info = {
-            'title': title,
-            'year': year,
-            'genres': genres,
-            'description': description,
-            'director': director,
-            'actors': actors,
-            'is_series': is_series
-        }
-        
-        # Ищем существующее сообщение с описанием фильма в bot_messages
-        from moviebot.states import bot_messages
-        film_message_id = None
-        for msg_id, link_value in bot_messages.items():
-            if link_value and kp_id in str(link_value):
-                film_message_id = msg_id
-                logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] Найдено сообщение с описанием фильма: message_id={film_message_id}")
-                break
-        
-        # Обновляем или отправляем новое сообщение
+        # ─── 4. Показываем карточку (именно то, что ты хотел!) ───────────
         from moviebot.bot.handlers.series import show_film_info_with_buttons
+        
         show_film_info_with_buttons(
-            chat_id, user_id, info, link, kp_id, existing=existing,
-            message_id=film_message_id, message_thread_id=message_thread_id
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=existing,
+            message_id=message_id,
+            message_thread_id=message_thread_id
         )
         
-        # Удаляем сообщение с оценкой, если оно есть
-        if call.message:
-            try:
-                rating_message_id = call.message.message_id
-                bot.delete_message(chat_id, rating_message_id)
-                logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] Сообщение с оценкой удалено: message_id={rating_message_id}")
-            except Exception as del_e:
-                logger.warning(f"[SHOW FILM DESCRIPTION FROM RATE] Не удалось удалить сообщение с оценкой: {del_e}")
-        
-        logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] Описание фильма показано из БД: kp_id={kp_id}")
+        logger.info(f"[BACK TO FILM] Карточка показана kp_id={kp_id}")
         
     except Exception as e:
-        logger.error(f"[SHOW FILM DESCRIPTION FROM RATE] Ошибка: {e}", exc_info=True)
+        logger.error(f"[BACK TO FILM] Критическая ошибка: {e}", exc_info=True)
         try:
-            try:
-                try:
-                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-                except Exception as e:
-                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-            except Exception as e:
-                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
+            # Финальный откат на всякий случай
+            with db_lock:
+                conn.rollback()
+            bot.edit_message_text(
+                "❌ Ошибка загрузки описания",
+                chat_id, message_id, message_thread_id=message_thread_id
+            )
         except:
             pass
-    finally:
-        logger.info(f"[SHOW FILM DESCRIPTION FROM RATE] ===== END: callback_id={call.id}")
-
+    
+    logger.info(f"[BACK TO FILM] END")
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("mark_watched_from_description:"))
 def mark_watched_from_description_callback(call):
@@ -1403,7 +1355,7 @@ def back_to_film_description(call):
         is_series = False
         try:
             with db_lock:
-                cursor.execute("SELECT is_series FROM movies WHERE kp_id = %s", (kp_id,))
+                cursor.execute("SELECT is_series FROM movies WHERE kp_id = %s", (str(kp_id),))
                 row = cursor.fetchone()
                 if row:
                     is_series = bool(row[0] if isinstance(row, tuple) else row.get('is_series'))

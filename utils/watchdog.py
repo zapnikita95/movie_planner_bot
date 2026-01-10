@@ -38,11 +38,6 @@ class BotWatchdog:
         self.scheduler_instance = scheduler
         logger.info("[WATCHDOG] Scheduler зарегистрирован для мониторинга")
         
-#     def register_database(self, db_connection):
-#        """Регистрирует подключение к БД для мониторинга"""
-#        self.db_connection = db_connection
-#        logger.info("[WATCHDOG] База данных зарегистрирована для мониторинга")
-        
     def register_bot(self, bot):
         """Регистрирует бота для мониторинга"""
         self.bot_instance = bot
@@ -89,45 +84,45 @@ class BotWatchdog:
             logger.error(f"[WATCHDOG] ❌ Ошибка проверки scheduler: {e}", exc_info=True)
             return False
             
-def check_database(self) -> bool:
-    """Проверяет состояние подключения к БД с retry"""
-    from moviebot.database.db_connection import get_db_connection
-    
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            conn = get_db_connection()
-            try:
-                conn.rollback()
-            except:
-                pass
-            
-            cursor = conn.cursor()
-            try:
-                cursor.execute("SELECT 1")
-                cursor.fetchone()
-            finally:
-                cursor.close()
-            
-            self.health_status['database'] = {
-                'status': 'healthy',
-                'last_check': datetime.now().isoformat(),
-                'error': None,
-                'attempt': attempt
-            }
-            logger.debug("[WATCHDOG] БД проверена успешно")
-            return True
+    def check_database(self) -> bool:
+        """Проверяет состояние подключения к БД с retry"""
+        from moviebot.database.db_connection import get_db_connection
         
-        except Exception as e:
-            logger.warning(f"[WATCHDOG] Проблема с БД (попытка {attempt}/{max_retries}): {e}")
-            time.sleep(1)  # пауза перед повтором
-    
-    self.health_status['database'] = {
-        'status': 'unhealthy',
-        'last_check': datetime.now().isoformat(),
-        'error': f"Не удалось после {max_retries} попыток"
-    }
-    return False
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                conn = get_db_connection()
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+                finally:
+                    cursor.close()
+                
+                self.health_status['database'] = {
+                    'status': 'healthy',
+                    'last_check': datetime.now().isoformat(),
+                    'error': None,
+                    'attempt': attempt
+                }
+                logger.debug("[WATCHDOG] БД проверена успешно")
+                return True
+            
+            except Exception as e:
+                logger.warning(f"[WATCHDOG] Проблема с БД (попытка {attempt}/{max_retries}): {e}")
+                time.sleep(1)  # пауза перед повтором
+        
+        self.health_status['database'] = {
+            'status': 'unhealthy',
+            'last_check': datetime.now().isoformat(),
+            'error': f"Не удалось после {max_retries} попыток"
+        }
+        return False
             
     def check_bot(self) -> bool:
         """Проверяет состояние бота"""
@@ -246,7 +241,6 @@ def check_database(self) -> bool:
             'last_crash': self.last_crash_time.isoformat() if self.last_crash_time else None,
             'crash_count': self.crash_count
         }
-
 # Глобальный экземпляр watchdog
 _watchdog_instance: Optional[BotWatchdog] = None
 
@@ -256,11 +250,3 @@ def get_watchdog(check_interval: int = 60) -> BotWatchdog:
     if _watchdog_instance is None:
         _watchdog_instance = BotWatchdog(check_interval=check_interval)
     return _watchdog_instance
-
-
-
-
-
-
-
-

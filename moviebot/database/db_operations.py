@@ -9,6 +9,7 @@ from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.config import DEFAULT_WATCHED_EMOJIS, KP_TOKEN
+from moviebot.utils.helpers import extract_film_info_from_existing
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -1487,7 +1488,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
     has_plan = False
     plan_type = None
     if existing:
-        film_id = existing[0] if not isinstance(existing, dict) else existing.get('id')
+        film_id, _ = extract_film_info_from_existing(existing)
         with db_lock:
             cursor.execute(
                 'SELECT plan_type FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1',
@@ -1514,10 +1515,9 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
 
     try:
         if existing:
-            film_id = existing[0] if not isinstance(existing, dict) else existing.get('id')
+            film_id, _ = extract_film_info_from_existing(existing)  # watched не нужен здесь
             title = existing[1] if not isinstance(existing, dict) else existing.get('title')
-            watched = existing[2] if not isinstance(existing, dict) else existing.get('watched')
-
+            
             logger.info(f"[ADD_AND_ANNOUNCE] {film_type.capitalize()} уже в базе (id={film_id}) — показываем полную карточку")
             show_film_info_with_buttons(
                 chat_id=chat_id,
@@ -1525,7 +1525,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
                 info=info,
                 link=link,
                 kp_id=kp_id,
-                existing=(film_id, title, watched)
+                existing=(film_id, title)  # передаём только id и title
             )
         else:
             logger.info(f"[ADD_AND_ANNOUNCE] Новый {film_type} — показываем карточку с кнопкой добавления")

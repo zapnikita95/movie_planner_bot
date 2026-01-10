@@ -271,12 +271,17 @@ def migrate_movies_series_fields(cursor, conn):
         conn.rollback()
 
 def init_database():
-    """Инициализация базы данных: создание таблиц и миграции"""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
+    logger.info("[DB INIT] Начинаем инициализацию базы...")
+
+    # Создаём ВРЕМЕННОЕ соединение ТОЛЬКО для миграций
+    conn = None
+    cursor = None
     try:
-        # Создание таблиц (все с IF NOT EXISTS)
+        conn = psycopg2.connect(DATABASE_URL)
+        conn.autocommit = False  # будем вручную управлять транзакциями
+        cursor = conn.cursor()
+
+        # === Создание таблиц (все IF NOT EXISTS) ===
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS movies (
                 id SERIAL PRIMARY KEY,
@@ -569,7 +574,7 @@ def init_database():
         conn.commit()
 
         # Миграции уже применены один раз — отключаем, чтобы запуск был быстрым
-        migrations = [
+        #migrations = [
             #migrate_movies_chat_id_to_bigint,
             #migrate_subscriptions_group_size,
             #migrate_payments_table,
@@ -591,16 +596,16 @@ def init_database():
             #igrate_promocodes_tables,
             #migrate_admins_table,
             #migrate_movies_series_fields
-        ]
+        #]
 
-        for migration in migrations:
-            try:
-                logger.info(f"[DB] Применяем миграцию: {migration.__name__}")
-                migration(cursor, conn)
-                conn.commit()
-            except Exception as e:
-                logger.warning(f"[DB] Миграция {migration.__name__} уже применена или ошибка: {e}")
-                conn.rollback()
+        #for migration in migrations:
+        #    try:
+        #        logger.info(f"[DB] Применяем миграцию: {migration.__name__}")
+        ##        migration(cursor, conn)
+        #        conn.commit()
+        #    except Exception as e:
+        #        logger.warning(f"[DB] Миграция {migration.__name__} уже применена или ошибка: {e}")
+        #        conn.rollback()
 
         # Индексы
         try:
@@ -626,7 +631,13 @@ def init_database():
         
     except Exception as e:
         logger.error(f"[DB] Критическая ошибка инициализации БД: {e}", exc_info=True)
+        if conn:
+            conn.rollback()
         raise
+
     finally:
-        cursor.close()
-        conn.close()
+        if cursor:
+            cursor.close()
+        # conn.close()   ← НЕ ЗАКРЫВАЕМ соединение здесь!
+
+    logger.info("[DB] База данных полностью инициализирована")

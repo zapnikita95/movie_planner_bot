@@ -3563,7 +3563,7 @@ def register_series_handlers(bot_param):
 
             conn = get_db_connection()
             cur = conn.cursor()
-            cur.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id))
+            cur.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
             row = cur.fetchone()
             cur.close()
             conn.close()

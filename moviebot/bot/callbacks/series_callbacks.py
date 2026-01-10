@@ -1023,7 +1023,7 @@ def rate_film_callback(call):
         # Проверяем, есть ли фильм в базе (kp_id хранится как строка)
         film_id = None
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
             row = cursor.fetchone()
 
         if row:
