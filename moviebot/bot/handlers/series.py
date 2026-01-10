@@ -53,57 +53,60 @@ logger.info("=" * 80)
 def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
     """Показывает описание фильма с кнопками действий"""
     import inspect
+    import traceback
     
     kp_id = int(kp_id)
-    # Сначала обработаем message_id
+    
+    # САМОЕ ВАЖНОЕ: фиксируем is_series САМЫМ ПЕРВЫМ ДЕЙСТВИЕМ и больше никогда не меняем!
+    is_series = bool(info.get('is_series', False))
+    logger.info(f"[SHOW FILM INFO] >>> ФИКСИРУЕМ is_series = {is_series} (из входного info)")
+
+    # Лог с caller'ом (оставляем для дебага)
+    logger.info(
+        "[SHOW FILM INFO] >>> ВХОД | caller = %s() | file = %s:%d | kp_id=%s | is_series=%s | existing=%s | msg_id=%s | user_id=%s",
+        inspect.stack()[1].function,
+        inspect.stack()[1].filename.split('/')[-1],
+        inspect.stack()[1].lineno,
+        kp_id,
+        is_series,
+        existing,
+        message_id,
+        user_id
+    )
+
     if message_id:
         try:
             bot.edit_message_text("⏳ Загружаю...", chat_id, message_id)
         except:
             message_id = None
 
-    # Лог с caller'ом (оставляем для дебага)
-    logger.info(
-        "[SHOW FILM INFO] >>> ВХОД | caller = %s() | file = %s:%d | kp_id=%s | existing=%s | msg_id=%s | user_id=%s",
-        inspect.stack()[1].function,
-        inspect.stack()[1].filename.split('/')[-1],
-        inspect.stack()[1].lineno,
-        kp_id,
-        existing,
-        message_id,
-        user_id
-    )
-
-    logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
-
     try:
-        # Инициализируем plan_info как None, чтобы она была доступна во всех путях выполнения
         plan_info = None
         
-        is_series = info.get('is_series', False)
         type_emoji = "📺" if is_series else "🎬"
+        film_type_text = "Сериал" if is_series else "Фильм"
         logger.info(f"[SHOW FILM INFO] is_series={is_series}, type_emoji={type_emoji}")
         
         # Формируем текст описания
         text = ""
 
         if existing:
-            # Защитная распаковка: existing может быть (id, title) или (id, title, watched)
+            # Защитная распаковка existing
             if len(existing) == 3:
                 film_id, title_from_db, watched = existing
             elif len(existing) == 2:
                 film_id, title_from_db = existing
-                watched = 0  # по умолчанию не просмотрено
+                watched = 0
             else:
-                logger.error(f"[SHOW FILM INFO] Некорректный existing: {existing} (ожидается 2 или 3 элемента)")
+                logger.error(f"[SHOW FILM INFO] Некорректный existing: {existing}")
                 film_id = existing[0] if existing else None
                 title_from_db = "Без названия"
                 watched = 0
 
-            # Запрашиваем полные данные из БД (если есть)
+            # Получаем данные из БД, но НЕ перезаписываем is_series!
             db_row = None
             try:
-                from moviebot.database.db_connection import get_db_connection  # если ещё не импортировано
+                from moviebot.database.db_connection import get_db_connection
 
                 with get_db_connection() as conn:
                     with conn.cursor() as cur:
@@ -117,6 +120,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.warning(f"[DB_FETCH] Не удалось получить полные данные: {db_err}")
 
             if db_row:
+                db_is_series = bool(db_row[6])
+                if db_is_series != is_series:
+                    logger.warning(f"[SHOW FILM INFO] Конфликт is_series! API/info = {is_series}, БД = {db_is_series}. Оставляем значение из info: {is_series}")
+                
                 info = {
                     'title': db_row[0] or title_from_db,
                     'year': db_row[1],
@@ -124,18 +131,17 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     'description': db_row[3],
                     'director': db_row[4],
                     'actors': db_row[5],
-                    'is_series': bool(db_row[6])
+                    'is_series': is_series  # ← важно! используем фиксированное значение
                 }
             else:
-                # Fallback, если БД не ответила
                 info = info or {}
                 info['title'] = title_from_db
+                info['is_series'] = is_series  # защита
 
-            film_type_text = "Сериал" if info.get('is_series', False) else "Фильм"
             text += f"✅ <b>{film_type_text} уже в базе</b>\n\n"
 
-        # Основной текст карточки (теперь info гарантированно полный)
-        type_emoji = "📺" if info.get('is_series') else "🎬"
+        # Основной текст
+        type_emoji = "📺" if is_series else "🎬"  # ещё раз, на всякий
         text += f"{type_emoji} <b>{info.get('title', 'Без названия')}</b> ({info.get('year') or '—'})\n"
 
         if info.get('director'):
@@ -147,29 +153,18 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if info.get('description'):
             text += f"\n<i>Кратко:</i> {info['description']}\n"
 
-        # Статус выхода серий только для сериалов — с тотальной защитой и логами
-        if info.get('is_series'):
-            logger.info(f"[SHOW_FILM] Сериал! kp_id={kp_id} | info имеет title? {bool(info.get('title'))} | title='{info.get('title')}'")
-            
-            text += "\n\n"  # отступ для красоты
-            
+        # Статус выхода серий — только если сериал
+        if is_series:
+            logger.info(f"[SHOW_FILM] Сериал! kp_id={kp_id}")
+            text += "\n\n"
             try:
-                logger.debug(f"[SERIES_STATUS] >>> Запрос статуса серий kp_id={kp_id}")
                 is_airing, next_episode = get_series_airing_status(kp_id)
-                logger.debug(f"[SERIES_STATUS] <<< Получено: is_airing={is_airing}, next_episode={next_episode}")
-                
                 if is_airing and next_episode:
-                    text += f"🟢 <b>Сериал выходит</b>\n"
-                    text += f"📅 След. серия: S{next_episode['season']} E{next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
+                    text += f"🟢 <b>Сериал выходит</b>\n📅 След. серия: S{next_episode['season']} E{next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
                 else:
                     text += f"🔴 <b>Новых серий нет</b>\n"
-                    
             except Exception as e:
-                logger.error(
-                    f"[SERIES_STATUS_CRASH] kp_id={kp_id} | {type(e).__name__}: {str(e)} | "
-                    f"traceback: {''.join(traceback.format_exception(type(e), e, e.__traceback__))}",
-                    exc_info=True
-                )
+                logger.error(f"[SERIES_STATUS_CRASH] {e}", exc_info=True)
                 text += f"ℹ️ Не удалось загрузить статус новых серий\n"
 
         text += f"\n<a href='{link}'>Кинопоиск</a>"
@@ -744,19 +739,75 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         error_text += "❌ Не удалось полностью загрузить информацию.\n"
         error_text += "Но вы всё равно можете добавить/запланировать 👇"
 
-        # Кнопки: две широкие по одной в строке + две узкие рядом
-        markup = InlineKeyboardMarkup(row_width=2)
+        # === ОТПРАВКА ОСНОВНОГО СООБЩЕНИЯ ===
+        logger.info("[SHOW FILM INFO] Попытка отправки/обновления сообщения")
 
-        # Широкие кнопки — каждая на отдельной строке
-        markup.add(
+        if message_id:
+            try:
+                bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=text,
+                    parse_mode='HTML',
+                    reply_markup=markup,
+                    disable_web_page_preview=False
+                )
+                logger.info(f"[SHOW FILM INFO] Успешно отредактировано, message_id={message_id}")
+            except Exception as edit_e:
+                logger.warning(f"[EDIT FAIL] {edit_e}")
+                # Если edit упал — пробуем отправить новое
+                try:
+                    bot.send_message(
+                        chat_id=chat_id,
+                        text=text,
+                        parse_mode='HTML',
+                        reply_markup=markup,
+                        disable_web_page_preview=False,
+                        message_thread_id=message_thread_id
+                    )
+                except Exception as send_e:
+                    logger.error(f"[SEND FAIL] {send_e}", exc_info=True)
+                    fallback_text = f"🎬 {info.get('title', 'Фильм/Сериал')}\n<a href='{link}'>Кинопоиск</a>"
+                    bot.send_message(chat_id, fallback_text, parse_mode='HTML', message_thread_id=message_thread_id)
+        else:
+            try:
+                bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    parse_mode='HTML',
+                    reply_markup=markup,
+                    disable_web_page_preview=False,
+                    message_thread_id=message_thread_id
+                )
+            except Exception as send_e:
+                logger.error(f"[SEND FAIL] {send_e}", exc_info=True)
+                fallback_text = f"🎬 {info.get('title', 'Фильм/Сериал')}\n<a href='{link}'>Кинопоиск</a>"
+                bot.send_message(chat_id, fallback_text, parse_mode='HTML', message_thread_id=message_thread_id)
+
+        logger.info("[SHOW FILM INFO] ===== END (успешно) =====")
+
+    except Exception as e:
+        import traceback
+        logger.critical(
+            f"[SHOW_FILM_CRASH] kp_id={kp_id} | chat_id={chat_id} | user_id={user_id} | "
+            f"ОШИБКА: {type(e).__name__}: {str(e)}\n"
+            f"Полный traceback:\n{''.join(traceback.format_exception(type(e), e, e.__traceback__))}\n"
+            f"info на момент краша: {info}",
+            exc_info=True
+        )
+
+        # ЕДИНСТВЕННЫЙ НАДЁЖНЫЙ FALLBACK
+        safe_title = info.get('title') or "Фильм/Сериал"
+        error_text = f"🎬 <b>{safe_title}</b>\n<a href='{link}'>Кинопоиск</a>\n\n❌ Не удалось загрузить полную информацию.\nНо вы можете:"
+
+        fallback_markup = InlineKeyboardMarkup(row_width=2)
+        fallback_markup.add(
             InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{kp_id}")
         )
-        markup.add(
+        fallback_markup.add(
             InlineKeyboardButton("📅 Запланировать", callback_data=f"plan_from_added:{kp_id}")
         )
-
-        # Узкие кнопки — в одной строке рядом
-        markup.row(
+        fallback_markup.row(
             InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
             InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
         )
@@ -768,7 +819,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     message_id=message_id,
                     text=error_text,
                     parse_mode='HTML',
-                    reply_markup=markup,
+                    reply_markup=fallback_markup,
                     disable_web_page_preview=False
                 )
             else:
@@ -776,13 +827,18 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     chat_id=chat_id,
                     text=error_text,
                     parse_mode='HTML',
-                    reply_markup=markup,
+                    reply_markup=fallback_markup,
                     disable_web_page_preview=False,
                     message_thread_id=message_thread_id
                 )
-        except Exception as send_err:
-            logger.error("Не удалось отправить fallback", exc_info=True)
-            bot.send_message(chat_id, f"🎬 {safe_title}\n{link}", parse_mode='HTML')
+        except Exception as final_err:
+            logger.error(f"[FALLBACK FAIL] {final_err}")
+            bot.send_message(
+                chat_id,
+                f"🎬 {safe_title}\n{link}",
+                parse_mode='HTML',
+                message_thread_id=message_thread_id
+            )
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
 def search_type_callback(call):
