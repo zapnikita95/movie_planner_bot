@@ -104,6 +104,8 @@ def add_to_database_callback(call):
         import re
         from html import unescape
         
+        existing = (film_id, title, watched)
+
         # Название и год
         title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>\s*\((\d{4})\)', message_text)
         if title_match:
@@ -294,26 +296,39 @@ def plan_from_added_callback(call):
         
         # Добавляем фильм в базу, если его нет
         film_id = None
+        watched = 0  # дефолт для нового фильма
+        existing = None
         try:
             with db_semaphore:
                 with db_lock:
-                    cur_add = conn.cursor(cursor_factory=RealDictCursor)  # ← новое имя + берём глобальный conn
-                    cur_add.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                    cur_add = conn.cursor(cursor_factory=RealDictCursor)
+                    # Проверяем наличие + сразу берём нужные поля
+                    cur_add.execute(
+                        'SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s',
+                        (chat_id, str(kp_id))
+                    )
                     row = cur_add.fetchone()
+
                     if row:
+                        existing = row  # row — RealDictRow
                         film_id, watched = extract_film_info_from_existing(existing)
-                    
-                    if not film_id:
+                        logger.info(f"[PLAN FROM ADDED] Фильм уже в базе: film_id={film_id}, watched={watched}")
+                    else:
+                        # Добавляем новый
                         is_series_int = 1 if is_series else 0
                         cur_add.execute('''
                             INSERT INTO movies (chat_id, kp_id, title, link, is_series, added_by, added_at, source)
                             VALUES (%s, %s, %s, %s, %s, %s, NOW(), 'plan_button')
                             ON CONFLICT (chat_id, kp_id) DO NOTHING
-                            RETURNING id
+                            RETURNING id, title, watched
                         ''', (chat_id, str(kp_id), title, link, is_series_int, user_id))
-                        esult = cur_add.fetchone()
+                        
+                        result = cur_add.fetchone()
                         if result:
-                            film_id = result.get('id') if isinstance(result, dict) else result[0]
+                            existing = result
+                            film_id, watched = extract_film_info_from_existing(existing)
+                            logger.info(f"[PLAN FROM ADDED] Фильм добавлен: film_id={film_id}")
+                        
                         conn.commit()
                     
                     cur_add.close()
@@ -692,8 +707,6 @@ def show_film_description_callback(call):
             'actors': actors,
             'is_series': is_series
         }
-        
-        existing = (film_id, title, watched)
         
         # Ищем существующее сообщение с описанием фильма в bot_messages
         from moviebot.states import bot_messages
