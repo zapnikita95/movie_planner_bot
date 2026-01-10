@@ -158,11 +158,16 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
             # При ошибке создаем пустую разметку для кнопки "Перейти к описанию"
             markup = InlineKeyboardMarkup()
     
-    # Добавляем кнопку "Перейти к описанию" для обоих типов планов (если есть kp_id)
+    # Добавляем кнопку "Вернуться к описанию" для обоих типов планов (если есть kp_id)
     if kp_id:
         if not markup.keyboard:
-            markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{int(kp_id)}"))
+            markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton(
+                "◀️ Вернуться к описанию",
+                callback_data=f"back_to_film:{int(kp_id)}"
+            )
+        )
     
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
     if plan_type == 'home' and markup.keyboard and any(btn.callback_data.startswith("streaming_select:") for row in markup.keyboard for btn in row):
@@ -1408,8 +1413,32 @@ def get_plan_day_or_date_internal(message, state):
     
     if not plan_dt:
         logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать дату из текста: '{text}'")
-        bot.reply_to(message, "Не удалось распознать день/дату. Попробуйте снова.")
-        return
+        
+        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        kp_id = state.get('kp_id')
+        if kp_id:
+            try:
+                kp_id_int = int(kp_id)  # приводим к int на всякий случай
+                markup.add(
+                    InlineKeyboardButton(
+                        "◀️ Вернуться к описанию",
+                        callback_data=f"back_to_film:{kp_id_int}"
+                    )
+                )
+            except (ValueError, TypeError):
+                logger.warning(f"[PLAN DATE ERROR] kp_id в состоянии не число: {kp_id}")
+                # кнопка просто не добавится — не критично
+        
+        bot.reply_to(
+            message,
+            "Не удалось распознать день/дату.\nПопробуйте ввести снова или вернитесь к описанию.",
+            reply_markup=markup
+        )
+        
+        return  # ← СОСТОЯНИЕ НЕ УДАЛЯЕМ — продолжаем ждать правильный ввод
     
     # Вызываем process_plan
     message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
@@ -1740,7 +1769,7 @@ def streaming_done_callback(call):
                 plan_type = plan_row.get('plan_type')
                 title = plan_row.get('title')
             else:
-                film_id = plan_row.get('id') if isinstance(plan_row, dict) else (plan_row[0] if plan_row else None)
+                film_id = plan_row[0]
                 plan_datetime = plan_row[1]
                 plan_type = plan_row[2]
                 title = plan_row[3]
@@ -1774,10 +1803,10 @@ def streaming_done_callback(call):
         else:
             date_str = "дата не указана"
         
-        type_text = "дома" if plan_type == 'home' else "в кино"
+        type_text = "дома 🏠" if plan_type == 'home' else "в кино 🎥"
         confirmation_text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
         
-        # Получаем kp_id для кнопки "Перейти к описанию"
+        # Получаем kp_id для кнопки
         kp_id = None
         with db_lock:
             cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
@@ -1785,10 +1814,20 @@ def streaming_done_callback(call):
             if movie_row:
                 kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
         
-        # Создаем кнопку "Перейти к описанию"
-        markup = InlineKeyboardMarkup()
+        # Создаём клавиатуру
+        markup = InlineKeyboardMarkup(row_width=1)
+        
         if kp_id:
-            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{int(kp_id)}"))
+            try:
+                kp_id_int = int(kp_id)
+                markup.add(
+                    InlineKeyboardButton(
+                        "◀️ Вернуться к описанию",
+                        callback_data=f"back_to_film:{kp_id_int}"
+                    )
+                )
+            except ValueError:
+                logger.warning(f"[STREAMING DONE] kp_id не число: {kp_id}")
         
         # Обновляем сообщение вместо удаления
         try:
@@ -1803,7 +1842,7 @@ def streaming_done_callback(call):
         except Exception as e:
             logger.warning(f"[STREAMING DONE] Не удалось обновить сообщение: {e}, пробуем отправить новое")
             try:
-                bot.send_message(chat_id, confirmation_text, parse_mode='HTML')
+                bot.send_message(chat_id, confirmation_text, parse_mode='HTML', reply_markup=markup)
                 bot.delete_message(chat_id, message_id)
             except Exception as e2:
                 logger.error(f"[STREAMING DONE] Не удалось отправить новое сообщение: {e2}")
@@ -1813,7 +1852,7 @@ def streaming_done_callback(call):
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
-
+        
 @bot.message_handler(func=lambda message: message.from_user.id in user_plan_state and user_plan_state[message.from_user.id].get("step") == 3)
 def handle_plan_date(message):
     user_id = message.from_user.id
