@@ -532,7 +532,10 @@ def handle_seasons_kp(call):
     try:
         bot.answer_callback_query(call.id, text="⏳ Загружаю описание...")
 
-        kp_id = int(call.data.split(":")[1])
+        kp_id_str = call.data.split(":")[1]
+        kp_id = int(kp_id_str)  # для логов и вызовов
+        kp_id_db = str(kp_id)   # для SQL-запросов (kp_id в БД — TEXT)
+
         chat_id = call.message.chat.id
         user_id = call.from_user.id
         message_id = call.message.message_id
@@ -544,7 +547,8 @@ def handle_seasons_kp(call):
             cursor.execute('''
                 SELECT id, title, watched, link, year, genres, description, director, actors, is_series
                 FROM movies WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, str(str(kp_id))))
+            ''', (chat_id, kp_id_db))
+
             row = cursor.fetchone()
 
         if not row:
@@ -677,17 +681,20 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
 
     try:
         with db_lock:
-            # Считаем общее количество
+            # Создаём курсор ЗДЕСЬ, внутри with db_lock
+            cursor = conn.cursor()
+
+            # 1. Считаем общее количество
             cursor.execute("""
                 SELECT COUNT(DISTINCT m.id) AS total_count
                 FROM movies m
                 WHERE m.chat_id = %s AND m.is_series = 1
             """, (chat_id,))
             count_row = cursor.fetchone()
-            total_count = count_row['total_count'] if count_row else 0  # ← по ключу!
+            total_count = count_row['total_count'] if count_row else 0
             total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
 
-            # Основной запрос
+            # 2. Основной запрос
             cursor.execute("""
                 SELECT 
                     m.id AS film_id,
@@ -724,31 +731,44 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
 
             rows = cursor.fetchall()
 
-        for row in rows:
-            next_episode = row['next_episode']
-            if isinstance(next_episode, str):
-                try:
-                    next_episode = json.loads(next_episode)
-                except:
-                    next_episode = None
+            # Всё, что нужно с данными — делаем внутри этого же блока
+            for row in rows:
+                next_episode = row['next_episode']
+                if isinstance(next_episode, str):
+                    try:
+                        next_episode = json.loads(next_episode)
+                    except:
+                        next_episode = None
 
-            items.append({
-                'film_id': row['film_id'],
-                'kp_id': row['kp_id'],
-                'title': row['title'],
-                'year': row['year'],
-                'poster_url': row['poster_url'],
-                'link': row['link'] or f"https://www.kinopoisk.ru/series/{row['kp_id']}/",
-                'is_ongoing': row['is_ongoing'],
-                'seasons_count': row['seasons_count'],
-                'next_episode': next_episode,
-                'last_api_update': row['last_api_update'],
-                'watched_count': row['watched_episodes_count'],
-                'has_subscription': row['has_subscription'],
-            })
+                items.append({
+                    'film_id': row['film_id'],
+                    'kp_id': row['kp_id'],
+                    'title': row['title'],
+                    'year': row['year'],
+                    'poster_url': row['poster_url'],
+                    'link': row['link'] or f"https://www.kinopoisk.ru/series/{row['kp_id']}/",
+                    'is_ongoing': row['is_ongoing'],
+                    'seasons_count': row['seasons_count'],
+                    'next_episode': next_episode,
+                    'last_api_update': row['last_api_update'],
+                    'watched_count': row['watched_episodes_count'],
+                    'has_subscription': row['has_subscription'],
+                })
+
+            # Закрываем курсор явно (хотя with db_lock и так закроет соединение)
+            cursor.close()
+
+    except psycopg2.InterfaceError as cursor_err:
+        logger.error(f"[GET_USER_SERIES_PAGE] Курсор уже закрыт: {cursor_err}")
+        with db_lock:
+            conn.rollback()
+        return {'items': [], 'total_pages': 1, 'total_count': 0, 'current_page': page}
 
     except Exception as e:
         logger.error(f"[GET_USER_SERIES_PAGE] Ошибка: {e}", exc_info=True)
+        with db_lock:
+            conn.rollback()
+        return {'items': [], 'total_pages': 1, 'total_count': 0, 'current_page': page}
 
     return {
         'items': items,
@@ -756,7 +776,6 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
         'total_count': total_count,
         'current_page': page
     }
-
 @bot.callback_query_handler(func=lambda c: c.data.startswith(('seasons_page:', 'seasons_refresh:')))
 def handle_seasons_pagination(call):
     try:
