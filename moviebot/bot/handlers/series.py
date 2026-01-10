@@ -87,13 +87,23 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Формируем текст описания
         text = ""
 
-        # Если уже в базе — берём полные данные из БД
         if existing:
-            film_id, title_from_db, watched = existing
+            # Защитная распаковка: existing может быть (id, title) или (id, title, watched)
+            if len(existing) == 3:
+                film_id, title_from_db, watched = existing
+            elif len(existing) == 2:
+                film_id, title_from_db = existing
+                watched = 0  # по умолчанию не просмотрено
+            else:
+                logger.error(f"[SHOW FILM INFO] Некорректный existing: {existing} (ожидается 2 или 3 элемента)")
+                film_id = existing[0] if existing else None
+                title_from_db = "Без названия"
+                watched = 0
 
-            # Запрашиваем все нужные поля из базы по id — безопасный способ
+            # Запрашиваем полные данные из БД (если есть)
+            db_row = None
             try:
-                from moviebot.database.db_operations import get_db_connection  # если ещё не импортировано
+                from moviebot.database.db_connection import get_db_connection  # если ещё не импортировано
 
                 with get_db_connection() as conn:
                     with conn.cursor() as cur:
@@ -103,29 +113,25 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                             WHERE id = %s AND chat_id = %s
                         """, (film_id, chat_id))
                         db_row = cur.fetchone()
-
-                if db_row:
-                    info = {
-                        'title': db_row[0] or title_from_db,
-                        'year': db_row[1],
-                        'genres': db_row[2],
-                        'description': db_row[3],
-                        'director': db_row[4],
-                        'actors': db_row[5],
-                        'is_series': bool(db_row[6])
-                    }
-                else:
-                    # Если вдруг не нашли — fallback
-                    info = info or {}
-                    info['title'] = title_from_db
-
             except Exception as db_err:
-                logger.error(f"[DB_FETCH_ERROR] Не удалось получить данные из БД для film_id={film_id}: {db_err}")
-                # Продолжаем с тем, что есть в info
+                logger.warning(f"[DB_FETCH] Не удалось получить полные данные: {db_err}")
+
+            if db_row:
+                info = {
+                    'title': db_row[0] or title_from_db,
+                    'year': db_row[1],
+                    'genres': db_row[2],
+                    'description': db_row[3],
+                    'director': db_row[4],
+                    'actors': db_row[5],
+                    'is_series': bool(db_row[6])
+                }
+            else:
+                # Fallback, если БД не ответила
                 info = info or {}
                 info['title'] = title_from_db
 
-            film_type_text = "Сериал" if info.get('is_series') else "Фильм"
+            film_type_text = "Сериал" if info.get('is_series', False) else "Фильм"
             text += f"✅ <b>{film_type_text} уже в базе</b>\n\n"
 
         # Основной текст карточки (теперь info гарантированно полный)
