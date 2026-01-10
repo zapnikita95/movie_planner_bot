@@ -4,7 +4,6 @@ Callback handlers для карточки фильма (add_to_database, plan_fr
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
 from moviebot.api.kinopoisk_api import get_facts
 from moviebot.api.kinopoisk_api import get_external_sources  # Добавил это для фикса NameError
@@ -22,210 +21,131 @@ if 'streaming_sources_cache' not in globals():
     
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_to_database:"))
 def add_to_database_callback(call):
-    """Обработчик кнопки '➕ Добавить в базу'"""
-    logger.info("=" * 80)
-    logger.info(f"[ADD TO DATABASE] START: callback_id={call.id}, data={call.data}")
+    """Обработчик кнопки '➕ Добавить в базу' — добавляет фильм/сериал и показывает актуальную карточку"""
+    logger.info(f"[ADD TO DB] START: data={call.data}, user={call.from_user.id}")
 
-    film_id = None
-    title_db = None
-    watched = 0
-    existing = None
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    message_id = call.message.message_id
+    thread_id = getattr(call.message, 'message_thread_id', None)
 
     try:
         bot.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
 
-        kp_id_str = call.data.split(":")[1]
-        kp_id = int(kp_id_str)
-        chat_id = call.message.chat.id
-        user_id = call.from_user.id
-
-        logger.info(f"[ADD TO DATABASE] kp_id={kp_id}, chat_id={chat_id}")
-
-        conn.rollback()  # чистим транзакцию на всякий
-
-        # Проверяем, есть ли фильм в базе — безопасно
-        row = None
+        # 1. Парсим kp_id
+        kp_id_str = call.data.split(":", 1)[1].strip()
         try:
-            with db_lock:
+            kp_id = int(kp_id_str)
+        except ValueError:
+            logger.error(f"[ADD TO DB] Некорректный kp_id: {kp_id_str}")
+            bot.edit_message_text("❌ Некорректный ID", chat_id, message_id, message_thread_id=thread_id)
+            return
+
+        # 2. Пытаемся взять максимально свежие данные из API
+        from moviebot.api.kinopoisk_api import extract_movie_info
+
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"  # начальная
+        info = extract_movie_info(link)
+
+        if not info or not info.get('title'):
+            logger.warning("[ADD TO DB] API не вернул данные → fallback")
+            info = {}  # будем пытаться восстановить минимально
+
+        is_series = info.get('is_series', False)
+
+        # Корректируем ссылку в зависимости от типа
+        if is_series:
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+
+        # 3. Проверяем, вдруг уже есть в базе
+        existing = None
+        with db_lock:
+            try:
                 cursor.execute("""
-                    SELECT id, title, link, watched, is_series 
+                    SELECT id, title, watched 
                     FROM movies 
                     WHERE chat_id = %s AND kp_id = %s
                 """, (chat_id, kp_id_str))
                 row = cursor.fetchone()
-        except Exception as e:
-            logger.error(f"[ADD TO DATABASE] Ошибка проверки существования фильма: {e}")
 
-        if row and isinstance(row, (tuple, list)) and len(row) >= 2:
-            # Уже в базе — безопасная распаковка
-            film_id = row[0]
-            title_db = row[1]
-            link = row[2] or f"https://www.kinopoisk.ru/film/{kp_id}/"
-            watched = row[3] if len(row) > 3 else 0
-            is_series = bool(row[4]) if len(row) > 4 else False
-
-            existing = (film_id, title_db, watched)
-
-            # Второй запрос — полные данные
-            full_row = None
-            try:
-                with db_lock:
-                    cursor.execute("""
-                        SELECT title, year, genres, description, director, actors, is_series
-                        FROM movies 
-                        WHERE id = %s
-                    """, (film_id,))
-                    full_row = cursor.fetchone()
-            except Exception as e:
-                logger.warning(f"[ADD TO DATABASE] Не удалось взять полные данные: {e}")
-
-            if full_row and isinstance(full_row, (tuple, list)) and len(full_row) >= 6:
-                info = {
-                    'title': full_row[0],
-                    'year': full_row[1],
-                    'genres': full_row[2],
-                    'description': full_row[3],
-                    'director': full_row[4],
-                    'actors': full_row[5],
-                    'is_series': bool(full_row[6])
-                }
-            else:
-                info = {
-                    'title': title_db,
-                    'year': None,
-                    'genres': None,
-                    'description': None,
-                    'director': None,
-                    'actors': None,
-                    'is_series': is_series
-                }
-
-            logger.info(f"[ADD TO DATABASE] Уже в базе: film_id={film_id}, title={title_db}")
-            bot.answer_callback_query(call.id, f"ℹ️ {title_db} уже в базе", show_alert=False)
-
-        else:
-            # Новый сериал/фильм — парсим из сообщения
-            logger.info("[ADD TO DATABASE] Не найден → парсим из сообщения")
-
-            # Новый фильм/сериал — берём данные из API в первую очередь
-            logger.info("[ADD TO DATABASE] Не найден в базе → запрашиваем из Kinopoisk API")
-
-            from moviebot.api.kinopoisk_api import extract_movie_info
-
-            api_info = extract_movie_info(kp_id)  # ← основной источник правды
-
-            if api_info and api_info.get('title'):
-                title = api_info['title']
-                year = api_info.get('year')
-                genres = api_info.get('genres')
-                description = api_info.get('description')
-                director = api_info.get('director')
-                actors = api_info.get('actors')
-                is_series = api_info.get('is_series', False)
-                logger.info(f"[ADD TO DATABASE] Данные успешно взяты из API: {title}")
-            else:
-                # Fallback — парсим из сообщения (как было раньше)
-                logger.warning(f"[ADD TO DATABASE] API не дал название для kp_id={kp_id} → парсим сообщение")
-
-                message_text = call.message.text or ""
-                import re
-                from html import unescape
-
-                title_match = re.search(r'[📺🎬]\s*<b>(.*?)</b>', message_text)
-                title = unescape(title_match.group(1)) if title_match else f"Фильм {kp_id}"
-
-                year_match = re.search(r'\((\d{4})\)', message_text)
-                year = int(year_match.group(1)) if year_match else None
-
-                director = unescape(re.search(r'<i>Режиссёр:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>Режиссёр:</i>', message_text) else None
-                genres = unescape(re.search(r'<i>Жанры:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>Жанры:</i>', message_text) else None
-                actors = unescape(re.search(r'<i>В ролях:</i>\s*(.+?)(?:\n|$)', message_text).group(1).strip()) if re.search(r'<i>В ролях:</i>', message_text) else None
-                desc_match = re.search(r'<i>Кратко:</i>\s*(.+?)(?:\n|🟢|🔴|Кинопоиск|$)', message_text, re.DOTALL)
-                description = unescape(desc_match.group(1).strip()) if desc_match else None
-                is_series = '📺' in message_text
-
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
-
-            info = {
-                'title': title,
-                'year': year,
-                'genres': genres,
-                'description': description,
-                'director': director,
-                'actors': actors,
-                'is_series': is_series
-            }
-
-            # Добавляем в базу
-            with db_lock:
-                cursor.execute('''
-                    INSERT INTO movies 
-                    (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'button')
-                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET 
-                        link = EXCLUDED.link,
-                        title = EXCLUDED.title,
-                        year = COALESCE(EXCLUDED.year, movies.year),
-                        genres = COALESCE(EXCLUDED.genres, movies.genres),
-                        description = COALESCE(EXCLUDED.description, movies.description),
-                        director = COALESCE(EXCLUDED.director, movies.director),
-                        actors = COALESCE(EXCLUDED.actors, movies.actors),
-                        is_series = EXCLUDED.is_series
-                    RETURNING id, title, watched
-                ''', (
-                    chat_id, link, kp_id_str, title, year, genres, description, director, actors,
-                    1 if is_series else 0, user_id
-                ))
-
-                result = cursor.fetchone()
-                conn.commit()
-
-                if result:
-                    if isinstance(result, dict):
-                        film_id = result.get('id')
-                        title_db = result.get('title')
-                        watched = result.get('watched', 0)
-                    else:
-                        film_id = result[0]
-                        title_db = result[1]
-                        watched = result[2] if len(result) > 2 else 0
-
-                    existing = (film_id, title_db, watched)
+                if row:
+                    existing = (row[0], row[1], row[2])
+                    logger.info(f"[ADD TO DB] Уже существует → existing={existing}")
+                    conn.commit()
                 else:
-                    film_id = None
-                    title_db = title
-                    watched = 0
-                    existing = None
-                    logger.warning("[ADD TO DATABASE] RETURNING вернул None — использую данные из сообщения")
+                    # 4. Добавляем в базу
+                    title = info.get('title', f"Без названия {kp_id}")
+                    year = info.get('year')
+                    genres = info.get('genres')
+                    description = info.get('description')
+                    director = info.get('director')
+                    actors = info.get('actors')
 
-            bot.answer_callback_query(call.id, f"✅ {title_db} добавлен в базу!", show_alert=False)
+                    cursor.execute('''
+                        INSERT INTO movies 
+                        (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'button')
+                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET
+                            link = EXCLUDED.link,
+                            title = EXCLUDED.title,
+                            year = COALESCE(EXCLUDED.year, movies.year),
+                            genres = COALESCE(EXCLUDED.genres, movies.genres),
+                            description = COALESCE(EXCLUDED.description, movies.description),
+                            director = COALESCE(EXCLUDED.director, movies.director),
+                            actors = COALESCE(EXCLUDED.actors, movies.actors),
+                            is_series = EXCLUDED.is_series
+                        RETURNING id, title, watched
+                    ''', (
+                        chat_id, link, kp_id_str, title, year, genres, description, director, actors,
+                        1 if is_series else 0, user_id
+                    ))
 
-        # Показываем карточку с полными данными
+                    result = cursor.fetchone()
+                    if result:
+                        existing = (result[0], result[1], result[2])
+                    conn.commit()
+
+                    logger.info(f"[ADD TO DB] Добавлен/обновлён → existing={existing}")
+
+            except Exception as db_err:
+                logger.error(f"[ADD TO DB] Ошибка БД: {db_err}", exc_info=True)
+                conn.rollback()
+                raise
+
+        # 5. Гарантируем наличие is_series в info
+        if 'is_series' not in info:
+            # Последняя проверка по ссылке (самый надёжный fallback)
+            info['is_series'] = '/series/' in link
+            logger.warning(f"[ADD TO DB] is_series отсутствовал в info → восстановили по ссылке: {info['is_series']}")
+
+        # 6. Финальная карточка — всегда с existing и правильной ссылкой
         from moviebot.bot.handlers.series import show_film_info_with_buttons
+
         show_film_info_with_buttons(
             chat_id=chat_id,
             user_id=user_id,
-            info=info,
+            info=info,                  # теперь is_series точно есть
             link=link,
             kp_id=kp_id,
             existing=existing,
-            message_id=call.message.message_id,
-            message_thread_id=getattr(call.message, 'message_thread_id', None)
+            message_id=message_id,
+            message_thread_id=thread_id
         )
 
+        bot.answer_callback_query(call.id, "✅ Готово!", show_alert=False)
+
     except Exception as e:
-        logger.error(f"[ADD TO DATABASE] КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        logger.error(f"[ADD TO DB] Критическая ошибка: {e}", exc_info=True)
         try:
             conn.rollback()
         except:
             pass
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка добавления", show_alert=True)
+            bot.edit_message_text("❌ Не удалось добавить в базу", chat_id, message_id, message_thread_id=thread_id)
         except:
             pass
 
-    finally:
-        logger.info(f"[ADD TO DATABASE] END")
+    logger.info("[ADD TO DB] END")
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_from_added:"))
 def plan_from_added_callback(call):
@@ -421,67 +341,6 @@ def show_facts_callback(call):
             logger.error(f"[SHOW FACTS] Не удалось ответить на callback: {answer_e}", exc_info=True)
 
 
-@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"), priority=1)
-def plan_type_callback_fallback(call):
-    """Запасной обработчик выбора типа плана (на случай, если основной не срабатывает)"""
-    logger.info("=" * 80)
-    logger.info(f"[PLAN TYPE FALLBACK] ===== START: callback_id={call.id}, callback_data={call.data}")
-    try:
-        try:
-            try:
-                bot.answer_callback_query(call.id)
-            except Exception as e:
-                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-        except Exception as e:
-            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-        user_id = call.from_user.id
-        chat_id = call.message.chat.id
-        plan_type = call.data.split(":")[1]  # 'home' или 'cinema'
-        
-        logger.info(f"[PLAN TYPE FALLBACK] Получен callback: user_id={user_id}, chat_id={chat_id}, plan_type={plan_type}")
-        logger.info(f"[PLAN TYPE FALLBACK] user_plan_state keys={list(user_plan_state.keys())}")
-        logger.info(f"[PLAN TYPE FALLBACK] user_id in user_plan_state = {user_id in user_plan_state}")
-        
-        if user_id not in user_plan_state:
-            logger.warning(f"[PLAN TYPE FALLBACK] Состояние не найдено для user_id={user_id}")
-            bot.edit_message_text("❌ Ошибка: сессия истекла. Начните заново с /plan", chat_id, call.message.message_id)
-            return
-        
-        state = user_plan_state[user_id]
-        link = state.get('link')
-        
-        if not link:
-            logger.warning(f"[PLAN TYPE FALLBACK] Ссылка не найдена в состоянии: {state}")
-            bot.edit_message_text("❌ Ошибка: не найдена ссылка на фильм. Начните заново с /plan", chat_id, call.message.message_id)
-            del user_plan_state[user_id]
-            return
-        
-        state['type'] = plan_type
-        state['step'] = 3
-        
-        try:
-            bot.delete_message(chat_id, call.message.message_id)
-        except:
-            pass
-        
-        bot.send_message(chat_id, f"📅 Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\nМожно указать:\n• День недели (сегодня, завтра, понедельник и т.д.)\n• Дату (01.01, 1 января и т.д.)\n• Время (19:00, 20:30)")
-        
-        logger.info(f"[PLAN TYPE FALLBACK] Пользователь {user_id} выбрал {plan_type}, link={link}")
-    except Exception as e:
-        logger.error(f"[PLAN TYPE FALLBACK] Ошибка: {e}", exc_info=True)
-        try:
-            try:
-                try:
-                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-                except Exception as e:
-                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-            except Exception as e:
-                logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-        except:
-            pass
-    finally:
-        logger.info(f"[PLAN TYPE FALLBACK] ===== END: callback_id={call.id}")
-
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("plan_type:"))
 def handle_plan_type(call):
     try:
@@ -563,10 +422,22 @@ def handle_plan_type(call):
         except Exception as e:
             logger.debug(f"[PLAN TYPE] Не удалось удалить сообщение: {e}")
 
-        bot.send_message(
+        # Отправляем промпт и сразу сохраняем его message_id
+        sent_prompt = bot.send_message(
             chat_id,
-            "📅 Когда планируете смотреть?\n\nПримеры:\n• сегодня\n• завтра 20:00\n• 15.01\n• понедельник вечером"
+            "📅 Когда планируете смотреть?\n\nПримеры:\n"
+            "• сегодня\n"
+            "• завтра 20:00\n"
+            "• 15.01\n"
+            "• понедельник вечером\n"
+            "• 17 января 21:00",
+            parse_mode='HTML'
         )
+
+        # Самое важное — сохраняем ID промпта!
+        user_plan_state[user_id]['prompt_message_id'] = sent_prompt.message_id
+        logger.info(f"[PLAN TYPE] Сохранён prompt_message_id={sent_prompt.message_id} для user {user_id}")
+        
         
     except Exception as e:
         logger.error(f"[PLAN TYPE] Ошибка: {e}", exc_info=True)
@@ -1273,7 +1144,7 @@ def confirm_remove(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("back_to_film:"))
 def back_to_film_description(call):
-    """Кнопка «◀️ Вернуться к описанию» — всегда показывает актуальную карточку с правильными кнопками"""
+    """Кнопка «◀️ Вернуться к описанию» — всегда показывает актуальную карточку с правильными кнопками для фильма/сериала"""
     logger.info(f"[BACK TO FILM] START: data={call.data}, user={call.from_user.id}")
 
     chat_id = call.message.chat.id
@@ -1284,19 +1155,18 @@ def back_to_film_description(call):
     try:
         bot.answer_callback_query(call.id, text="⏳ Загружаю...")
 
-        # kp_id всегда строка в БД (PostgreSQL)
         kp_id_str = call.data.split(":", 1)[1].strip()
         try:
             kp_id_int = int(kp_id_str)
-            kp_id_db = str(kp_id_int)  # для запросов
+            kp_id_db = str(kp_id_int)
         except ValueError:
             logger.warning(f"[BACK TO FILM] Некорректный kp_id: {kp_id_str}")
-            bot.edit_message_text("❌ Некорректная ссылка на фильм", chat_id, message_id)
+            bot.edit_message_text("❌ Некорректная ссылка на фильм/сериал", chat_id, message_id)
             return
 
-        link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"  # базовая, дальше уточним
+        link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"  # базовая
 
-        # ─── 1. Пытаемся взять свежие данные из API ───────────────────────
+        # 1. Пытаемся взять свежие данные из API
         info = None
         try:
             from moviebot.api.kinopoisk_api import extract_movie_info
@@ -1306,7 +1176,7 @@ def back_to_film_description(call):
         except Exception as e:
             logger.warning(f"[BACK TO FILM] API не сработал: {e}")
 
-        # ─── 2. Fallback — данные из базы ─────────────────────────────────
+        # 2. Fallback — данные из базы, с is_series
         is_series = False
         existing = None
 
@@ -1320,7 +1190,7 @@ def back_to_film_description(call):
                 row = cursor.fetchone()
 
                 if row:
-                    info = info or {}  # если API не дал — полностью из БД
+                    info = info or {}  # если API не дал — из БД
                     info.update({
                         'title': row[1],
                         'year': row[2],
@@ -1332,26 +1202,25 @@ def back_to_film_description(call):
                     })
                     is_series = info['is_series']
                     existing = (row[0], row[1], row[8])  # id, title, watched
-                    logger.info(f"[BACK TO FILM] Данные из БД, existing={existing}")
+                    logger.info(f"[BACK TO FILM] Данные из БД, existing={existing}, is_series={is_series}")
 
                 conn.commit()
             except Exception as e:
                 logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")
                 conn.rollback()
 
-        # Если совсем ничего не нашли
         if not info or not info.get('title'):
             bot.edit_message_text(
-                "❌ Не удалось загрузить информацию о фильме",
+                "❌ Не удалось загрузить информацию о фильме/сериале",
                 chat_id, message_id, message_thread_id=message_thread_id
             )
             return
 
-        # Уточняем ссылку с учётом сериала
+        # Уточняем link для сериала
         if is_series:
             link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"
 
-        # ─── Главный вызов — с existing! ──────────────────────────────────
+        # Главный вызов — с existing и is_series учтено в info
         from moviebot.bot.handlers.series import show_film_info_with_buttons
 
         show_film_info_with_buttons(
@@ -1359,13 +1228,13 @@ def back_to_film_description(call):
             user_id=user_id,
             info=info,
             link=link,
-            kp_id=kp_id_int,           # лучше передавать int
-            existing=existing,         # ← самое важное!
+            kp_id=kp_id_int,
+            existing=existing,
             message_id=message_id,
             message_thread_id=message_thread_id
         )
 
-        logger.info(f"[BACK TO FILM] Успешно, existing={'есть' if existing else 'нет'}")
+        logger.info(f"[BACK TO FILM] Успешно, is_series={is_series}, existing={'есть' if existing else 'нет'}")
 
     except Exception as e:
         logger.error(f"[BACK TO FILM] Критическая ошибка: {e}", exc_info=True)
@@ -1375,7 +1244,7 @@ def back_to_film_description(call):
             bot.edit_message_text("❌ Ошибка при загрузке описания", chat_id, message_id)
         except:
             pass
-
+        
 @bot.callback_query_handler(func=lambda call: call.data == "delete_this_message")
 def delete_recommendations_message(call):
     try:
