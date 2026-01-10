@@ -565,8 +565,7 @@ def init_database():
         safe_migrations = [
             # Самое важное сейчас — added_by в movies
             "ALTER TABLE movies ADD COLUMN IF NOT EXISTS added_by BIGINT",
-            
-            # Другие поля, которые раньше были/могут понадобиться позже
+            "ALTER TABLE movies ADD COLUMN IF NOT EXISTS added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",   # ← вот это добавь
             "ALTER TABLE movies ADD COLUMN IF NOT EXISTS source TEXT",
             "ALTER TABLE movies ADD COLUMN IF NOT EXISTS rating_kp REAL",
             "ALTER TABLE movies ADD COLUMN IF NOT EXISTS votes_kp INTEGER",
