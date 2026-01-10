@@ -20,7 +20,7 @@ def has_notifications_access(chat_id, user_id=None):
                 cursor.execute(
                     """
                     SELECT 1 FROM subscriptions 
-                    WHERE chat_id = %s AND user_id = %s AND active = TRUE AND expires_at > NOW()
+                    WHERE chat_id = %s AND user_id = %s AND is_active = TRUE AND expires_at > NOW()
                     LIMIT 1
                     """,
                     (chat_id, user_id)
