@@ -50,6 +50,119 @@ logger.info(f"[SEARCH TYPE HANDLER] Регистрация обработчик�
 logger.info(f"[SEARCH TYPE HANDLER] id(bot)={id(bot)}")
 logger.info("=" * 80)
 
+def get_film_current_state(chat_id, kp_id, user_id=None):
+    """
+    Получает актуальное состояние фильма/сериала из базы данных.
+    
+    Returns:
+        dict с ключами:
+        - film_id: int или None
+        - existing: tuple (film_id, title, watched) или None
+        - plan_info: dict с ключами 'id', 'type', 'date' или None
+        - has_tickets: bool (True если у плана в кино есть билеты)
+        - is_subscribed: bool (для сериалов, True если пользователь подписан)
+    """
+    kp_id_str = str(kp_id)
+    film_id = None
+    existing = None
+    plan_info = None
+    has_tickets = False
+    is_subscribed = False
+    
+    try:
+        with db_lock:
+            # Получаем информацию о фильме
+            cursor.execute("""
+                SELECT id, title, watched, is_series
+                FROM movies 
+                WHERE chat_id = %s AND kp_id = %s
+            """, (chat_id, kp_id_str))
+            film_row = cursor.fetchone()
+            
+            if film_row:
+                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
+                watched = bool(film_row.get('watched') if isinstance(film_row, dict) else film_row[2])
+                existing = (film_id, title, watched)
+                
+                # Проверяем план для этого фильма
+                cursor.execute("""
+                    SELECT id, plan_type, plan_datetime, ticket_file_id
+                    FROM plans 
+                    WHERE film_id = %s AND chat_id = %s 
+                    LIMIT 1
+                """, (film_id, chat_id))
+                plan_row = cursor.fetchone()
+                
+                if plan_row:
+                    plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                    plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[1]
+                    plan_dt_value = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[2]
+                    ticket_file_id = plan_row.get('ticket_file_id') if isinstance(plan_row, dict) else (plan_row[3] if len(plan_row) > 3 else None)
+                    
+                    # Форматируем дату
+                    date_str = "не указана"
+                    if plan_dt_value and user_id:
+                        try:
+                            user_tz = get_user_timezone_or_default(user_id)
+                            if isinstance(plan_dt_value, datetime):
+                                if plan_dt_value.tzinfo is None:
+                                    dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                                else:
+                                    dt = plan_dt_value.astimezone(user_tz)
+                            else:
+                                dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                            date_str = dt.strftime('%d.%m.%Y %H:%M')
+                        except Exception as e:
+                            logger.warning(f"[GET FILM STATE] Ошибка парсинга plan_datetime: {e}")
+                            date_str = str(plan_dt_value)[:16] if plan_dt_value else "не указана"
+                    
+                    plan_info = {
+                        'id': plan_id,
+                        'type': plan_type,
+                        'date': date_str
+                    }
+                    
+                    # Проверяем наличие билетов для планов в кино
+                    if plan_type == 'cinema' and ticket_file_id:
+                        import json
+                        try:
+                            # ticket_file_id может быть JSON массивом или строкой
+                            tickets_data = json.loads(ticket_file_id) if isinstance(ticket_file_id, str) else ticket_file_id
+                            if isinstance(tickets_data, list) and len(tickets_data) > 0:
+                                has_tickets = True
+                            elif tickets_data and isinstance(tickets_data, str) and tickets_data.strip():
+                                has_tickets = True
+                        except:
+                            # Если не JSON, проверяем как строку
+                            if ticket_file_id and str(ticket_file_id).strip():
+                                has_tickets = True
+                
+                # Для сериалов проверяем подписку
+                is_series_db = bool(film_row.get('is_series') if isinstance(film_row, dict) else (film_row[3] if len(film_row) > 3 else 0))
+                if is_series_db and user_id:
+                    query_user = user_id if user_id is not None else None
+                    cursor.execute("""
+                        SELECT subscribed 
+                        FROM series_subscriptions 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                        LIMIT 1
+                    """, (chat_id, film_id, query_user))
+                    sub_row = cursor.fetchone()
+                    if sub_row:
+                        is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
+    
+    except Exception as e:
+        logger.error(f"[GET FILM STATE] Ошибка получения состояния: {e}", exc_info=True)
+    
+    return {
+        'film_id': film_id,
+        'existing': existing,
+        'plan_info': plan_info,
+        'has_tickets': has_tickets,
+        'is_subscribed': is_subscribed
+    }
+
 def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
     """Показывает описание фильма с кнопками действий"""
     import inspect
@@ -81,11 +194,25 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             message_id = None
 
     try:
-        plan_info = None
+        # ВСЕГДА получаем актуальное состояние из БД
+        current_state = get_film_current_state(chat_id, kp_id, user_id)
+        actual_existing = current_state['existing']
+        plan_info = current_state['plan_info']
+        has_tickets = current_state['has_tickets']
+        is_subscribed = current_state['is_subscribed']
+        
+        # Используем актуальное existing, если оно есть, иначе используем переданное
+        if actual_existing:
+            existing = actual_existing
+        elif existing:
+            # existing передан, но проверяем, актуален ли он
+            pass
+        else:
+            existing = None
         
         type_emoji = "📺" if is_series else "🎬"
         film_type_text = "Сериал" if is_series else "Фильм"
-        logger.info(f"[SHOW FILM INFO] is_series={is_series}, type_emoji={type_emoji}")
+        logger.info(f"[SHOW FILM INFO] is_series={is_series}, type_emoji={type_emoji}, plan_info={plan_info}, has_tickets={has_tickets}")
         
         # Формируем текст описания
         text = ""
@@ -330,98 +457,21 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 else:
                     markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{premiere_date_str}"))
 
-        # Получаем film_id для проверки оценок и планов
-        logger.info(f"[SHOW FILM INFO] Получение film_id...")
+        # Получаем film_id и watched из existing (уже получено через get_film_current_state)
+        logger.info(f"[SHOW FILM INFO] Получение film_id из existing...")
         film_id = None
-        watched = False  # Инициализируем watched по умолчанию
+        watched = False
         if existing:
-            film_id, watched = extract_film_info_from_existing(existing)
+            film_id, _, watched = existing
             logger.info(f"[SHOW FILM INFO] film_id из existing: {film_id}, watched: {watched}")
         else:
-            logger.info(f"[SHOW FILM INFO] Запрос film_id из БД...")
-            try:
-                lock_acquired = db_lock.acquire(timeout=3.0)
-                if lock_acquired:
-                    try:
-                        # Приводим kp_id к строке, так как в БД это text
-                        cursor.execute("SELECT id, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(str(kp_id))))
-                        film_row = cursor.fetchone()
-                        if film_row:
-                            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                            watched = film_row.get('watched') if isinstance(film_row, dict) else (film_row[1] if len(film_row) > 1 else False)
-                        logger.info(f"[SHOW FILM INFO] Запрос film_id выполнен, film_id={film_id}, watched={watched}")
-                    finally:
-                        db_lock.release()
-                        logger.info(f"[SHOW FILM INFO] db_lock освобожден после запроса film_id")
-                else:
-                    logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос film_id (не критично)")
-                    film_id = None
-                    watched = False
-            except Exception as film_id_e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка при запросе film_id (не критично): {film_id_e}")
-                film_id = None
-                watched = False
-            logger.info(f"[SHOW FILM INFO] film_id из БД: {film_id}, watched: {watched}")
+            film_id = current_state.get('film_id')
+            if film_id and actual_existing:
+                watched = actual_existing[2] if len(actual_existing) > 2 else False
+            logger.info(f"[SHOW FILM INFO] film_id из current_state: {film_id}, watched: {watched}")
         
-        # Проверяем, есть ли уже план для этого фильма (БЕЗ lock — read-only, безопасно)
-        logger.info(f"[SHOW FILM INFO] Проверка планов для film_id={film_id}...")
-        has_plan = False
-        plan_info = None
-        if film_id:
-            try:
-                cursor = get_db_cursor()  # берём курсор без lock
-                try:
-                    cursor.execute('''
-                        SELECT id, plan_type, plan_datetime 
-                        FROM plans 
-                        WHERE film_id = %s AND chat_id = %s 
-                        LIMIT 1
-                    ''', (film_id, chat_id))
-                    plan_row = cursor.fetchone()
-                    
-                    has_plan = plan_row is not None
-                    if has_plan:
-                        # Обработка результата (RealDictCursor или tuple)
-                        if isinstance(plan_row, dict):
-                            plan_id = plan_row.get('id')
-                            plan_type = plan_row.get('plan_type')
-                            plan_dt_value = plan_row.get('plan_datetime')
-                        else:  # tuple
-                            plan_id = plan_row[0]
-                            plan_type = plan_row[1]
-                            plan_dt_value = plan_row[2] if len(plan_row) > 2 else None
-                        
-                        # Форматируем дату
-                        if plan_dt_value and user_id:
-                            user_tz = get_user_timezone_or_default(user_id)
-                            try:
-                                if isinstance(plan_dt_value, datetime):
-                                    if plan_dt_value.tzinfo is None:
-                                        dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
-                                    else:
-                                        dt = plan_dt_value.astimezone(user_tz)
-                                else:
-                                    dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
-                                date_str = dt.strftime('%d.%m.%Y %H:%M')
-                            except Exception as e:
-                                logger.warning(f"[SHOW FILM INFO] Ошибка парсинга plan_datetime: {e}")
-                                date_str = str(plan_dt_value)[:16]
-                        else:
-                            date_str = "не указана"
-                        
-                        plan_info = {
-                            'id': plan_id,
-                            'type': plan_type,
-                            'date': date_str
-                        }
-                    logger.info(f"[SHOW FILM INFO] Запрос планов выполнен, has_plan={has_plan}")
-                finally:
-                    cursor.close()  # всегда закрываем курсор
-            except Exception as plan_e:
-                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при проверке планов (пропускаем): {plan_e}", exc_info=True)
-                has_plan = False
-                plan_info = None
-        logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}")
+        has_plan = plan_info is not None
+        logger.info(f"[SHOW FILM INFO] Проверка планов завершена, has_plan={has_plan}, plan_info={plan_info}")
         
         # Добавляем кнопку "Просмотрено" для всех фильмов (даже не добавленных в базу)
         # Кнопка должна работать для всех фильмов, даже если film_id отсутствует
@@ -446,6 +496,18 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             else:
                 markup.add(InlineKeyboardButton("✏️ Изменить в расписании", callback_data="edit:plan"))  # фоллбек на общее меню
 
+            # Кнопка билетов для планов в кино
+            if plan_info and plan_info.get('type') == 'cinema':
+                from moviebot.utils.helpers import has_tickets_access
+                if has_tickets_access(chat_id, user_id):
+                    if has_tickets:
+                        markup.add(InlineKeyboardButton("🎟️ Билеты", callback_data=f"show_ticket:{plan_info['id']}"))
+                    else:
+                        markup.add(InlineKeyboardButton("🎟️ Добавить билет", callback_data=f"add_ticket:{plan_info['id']}"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_info['id']}"))
+
+            # Онлайн-кинотеатр для планов дома
             if plan_info and plan_info.get('type') == 'home' and not watched and has_sources:
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{int(kp_id)}"))
         else:
@@ -567,35 +629,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             else:
                 markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{int(kp_id)}"))
 
-            # Подписка/отписка — ТОЛЬКО внутри if is_series
-            is_subscribed = False
-            if film_id:
-                try:
-                    lock_acquired = db_lock.acquire(timeout=3.0)
-                    if lock_acquired:
-                        try:
-                            # В группе подписка привязана к chat_id, user_id=NULL
-                            query_user = user_id if user_id is not None else None
-                            cursor.execute(
-                                """
-                                SELECT subscribed 
-                                FROM series_subscriptions 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                                LIMIT 1
-                                """,
-                                (chat_id, film_id, query_user)
-                            )
-                            sub_row = cursor.fetchone()
-                            if sub_row:
-                                is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
-                        finally:
-                            db_lock.release()
-                except Exception as e:
-                    logger.warning(f"[SHOW FILM INFO] Ошибка проверки подписки: {e}")
-
+            # Подписка/отписка — используем данные из current_state
             if has_access:
                 if is_subscribed:
-                    markup.add(InlineKeyboardButton("🔕 Отписаться от новых серий", callback_data=f"series_unsubscribe:{int(kp_id)}"))
+                    markup.add(InlineKeyboardButton("🔕 Убрать подписку на новые серии", callback_data=f"series_unsubscribe:{int(kp_id)}"))
                 else:
                     markup.add(InlineKeyboardButton("🔔 Подписаться на новые серии", callback_data=f"series_subscribe:{int(kp_id)}"))
             else:

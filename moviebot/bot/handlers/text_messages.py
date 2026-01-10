@@ -309,26 +309,30 @@ def check_plan_datetime_reply(message):
     if not message.text or not message.text.strip():
         return False
     
-    # В группах принимаем только реплаи
+    # В группах принимаем только реплаи на бота
     if not is_private:
         if not message.reply_to_message:
             return False
         if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
             return False
-        reply_text = message.reply_to_message.text or ""
-        if "Когда планируете смотреть" not in reply_text:
-            return False
-        # Проверяем, что это ответ на правильный промпт
+        # Проверяем, что это ответ на правильный промпт (либо на запрос даты, либо на сообщение об ошибке)
         prompt_message_id = state.get('prompt_message_id')
+        reply_text = message.reply_to_message.text or ""
+        is_prompt = "Когда планируете смотреть" in reply_text
+        is_error = "Не понял дату/время" in reply_text
+        if not (is_prompt or is_error):
+            return False
         if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
             return False
     else:
-        # В личке принимаем реплай или следующее сообщение
+        # В личке: принимаем реплай на промпт/ошибку или следующее сообщение (если состояние активно)
         if message.reply_to_message:
             # Если это реплай, проверяем, что это ответ на правильный промпт
             if message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
                 reply_text = message.reply_to_message.text or ""
-                if "Когда планируете смотреть" not in reply_text:
+                is_prompt = "Когда планируете смотреть" in reply_text
+                is_error = "Не понял дату/время" in reply_text
+                if not (is_prompt or is_error):
                     return False
                 prompt_message_id = state.get('prompt_message_id')
                 if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
@@ -413,7 +417,7 @@ def check_plan_link_reply(message):
     if not message.text or not message.text.strip():
         return False
     
-    # В группах принимаем только реплаи
+    # В группах принимаем только реплаи на бота
     if not is_private:
         if not message.reply_to_message:
             return False
@@ -427,7 +431,7 @@ def check_plan_link_reply(message):
         if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
             return False
     else:
-        # В личке принимаем реплай или следующее сообщение
+        # В личке: принимаем реплай на промпт или следующее сообщение (если состояние активно)
         if message.reply_to_message:
             # Если это реплай, проверяем, что это ответ на правильный промпт
             if message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:

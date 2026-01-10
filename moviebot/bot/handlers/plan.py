@@ -578,115 +578,94 @@ def show_schedule(message):
             logger.info(f"[SHOW FILM DESCRIPTION] Вызов answer_callback_query")
             bot.answer_callback_query(call.id)
             logger.info(f"[SHOW FILM DESCRIPTION] answer_callback_query выполнен")
-            kp_id = call.data.split(":")[1]
+            kp_id_str = call.data.split(":")[1]
+            kp_id = int(kp_id_str)
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            message_id = call.message.message_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
             
             logger.info(f"[SHOW FILM DESCRIPTION] Пользователь {user_id} хочет посмотреть описание фильма kp_id={kp_id}")
             
-            # Проверяем, есть ли фильм в базе
-            with db_lock:
-                cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                row = cursor.fetchone()
+            # Получаем актуальное состояние через get_film_current_state
+            from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
+            current_state = get_film_current_state(chat_id, kp_id, user_id)
+            existing = current_state['existing']
             
-            existing = None
+            # Определяем ссылку
             link = None
-            if row:
-                if isinstance(row, dict):
-                    film_id = row.get('id')
-                    title = row.get('title')
-                    watched = row.get('watched')
-                    link = row.get('link')
-                else:
-                    film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
-                    title = row[1]
-                    watched = row[2]
-                    link = row[3] if len(row) > 3 else None
-                existing = (film_id, title, watched)
+            if existing:
+                # Если фильм в базе, получаем ссылку из БД
+                with db_lock:
+                    cursor.execute('SELECT link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
+                    row = cursor.fetchone()
+                    if row:
+                        link = row.get('link') if isinstance(row, dict) else row[0]
+                        is_series = bool(row.get('is_series') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0))
+                        if not link:
+                            # Формируем ссылку на основе is_series
+                            link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
             
             if not link:
+                # Фильм не в базе, пробуем API для определения типа
                 link = f"https://www.kinopoisk.ru/film/{kp_id}/"
             
-            # Если фильм в базе, формируем info из БД (без API запроса)
-            if existing:
-                logger.info(f"[SHOW FILM DESCRIPTION] Фильм в базе, формирую info из БД без API запроса")
-                film_id, title, watched = existing
-                
-                # Получаем полную информацию из БД
-                with db_lock:
-                    cursor.execute('''
-                        SELECT year, genres, description, director, actors, is_series
-                        FROM movies WHERE id = %s AND chat_id = %s
-                    ''', (film_id, chat_id))
-                    db_row = cursor.fetchone()
-                
-                if db_row:
-                    if isinstance(db_row, dict):
-                        year = db_row.get('year')
-                        genres = db_row.get('genres')
-                        description = db_row.get('description')
-                        director = db_row.get('director')
-                        actors = db_row.get('actors')
-                        is_series = bool(db_row.get('is_series', 0))
-                    else:
-                        year = db_row.get("year") if isinstance(db_row, dict) else (db_row[0] if db_row else None)
-                        genres = db_row[1]
-                        description = db_row[2]
-                        director = db_row[3]
-                        actors = db_row[4]
-                        is_series = bool(db_row[5] if len(db_row) > 5 else 0)
-                    
-                    # Формируем словарь info из данных БД
-                    info = {
-                        'title': title,
-                        'year': year,
-                        'genres': genres,
-                        'description': description,
-                        'director': director,
-                        'actors': actors,
-                        'is_series': is_series
-                    }
-                    
-                    # Ищем существующее сообщение с описанием фильма в bot_messages
-                    from moviebot.states import bot_messages
-                    film_message_id = None
-                    for msg_id, link_value in bot_messages.items():
-                        if link_value and kp_id in str(link_value):
-                            film_message_id = msg_id
-                            logger.info(f"[SHOW FILM DESCRIPTION] Найдено сообщение с описанием фильма: message_id={film_message_id}")
-                            break
-                    
-                    # Обновляем или отправляем новое сообщение
-                    from moviebot.bot.handlers.series import show_film_info_with_buttons
-                    show_film_info_with_buttons(
-                        chat_id, user_id, info, link, kp_id, existing=existing,
-                        message_id=film_message_id
-                    )
-                    logger.info(f"[SHOW FILM DESCRIPTION] Сообщение обновлено/отправлено из БД: message_id={film_message_id}")
-                else:
-                    logger.warning(f"[SHOW FILM DESCRIPTION] Не удалось получить данные из БД, делаю API запрос")
-                    from moviebot.api.kinopoisk_api import extract_movie_info
-                    info = extract_movie_info(link)
-                    if info:
-                        from moviebot.bot.handlers.series import show_film_info_with_buttons
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
-                    else:
-                        bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-            else:
-                # Фильм не в базе - получаем информацию через API
-                logger.info(f"[SHOW FILM DESCRIPTION] Фильм не в базе, получаю информацию через API")
-                from moviebot.api.kinopoisk_api import extract_movie_info
-                if not link:
-                    link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-                info = extract_movie_info(link)
-                
-                if not info:
-                    bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-                    return
-                
-                from moviebot.bot.handlers.series import show_film_info_with_buttons
-                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None)
+            # Получаем информацию через API
+            from moviebot.api.kinopoisk_api import extract_movie_info
+            info = extract_movie_info(link)
             
+            if not info or not info.get('title'):
+                # Если API не сработал, пробуем получить из БД
+                if existing:
+                    with db_lock:
+                        cursor.execute('''
+                            SELECT title, year, genres, description, director, actors, is_series, link
+                            FROM movies WHERE id = %s AND chat_id = %s
+                        ''', (existing[0], chat_id))
+                        db_row = cursor.fetchone()
+                        if db_row:
+                            info = {
+                                'title': db_row[0],
+                                'year': db_row[1],
+                                'genres': db_row[2],
+                                'description': db_row[3],
+                                'director': db_row[4],
+                                'actors': db_row[5],
+                                'is_series': bool(db_row[6])
+                            }
+                            if not link:
+                                link = db_row[7] if len(db_row) > 7 else f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            if not info or not info.get('title'):
+                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                return
+            
+            # Убеждаемся, что is_series правильно установлен
+            if existing:
+                with db_lock:
+                    cursor.execute('SELECT is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
+                    row = cursor.fetchone()
+                    if row:
+                        info['is_series'] = bool(row.get('is_series') if isinstance(row, dict) else row[0])
+            
+            # Уточняем link для сериала
+            if info.get('is_series'):
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            elif not link or '/series/' in link:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            # Вызываем show_film_info_with_buttons с актуальным existing
+            # existing будет переопределен внутри функции через get_film_current_state, но передаем для оптимизации
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=existing,
+                message_id=message_id,
+                message_thread_id=message_thread_id
+            )
             logger.info(f"[SHOW FILM DESCRIPTION] ===== END (успешно) =====")
             
         except Exception as e:
@@ -836,6 +815,27 @@ def plan_type_callback(call):
         bot.answer_callback_query(call.id, "Режим планирования отменён")
         bot.edit_message_text("✅ Режим планирования отменён. Можете использовать другие команды.", 
                              chat_id, call.message.message_id)
+
+    @bot.callback_query_handler(func=lambda call: call.data == "cancel_plan")
+    def cancel_plan_callback(call):
+        """Обработчик отмены планирования из сообщения об ошибке"""
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        if user_id in user_plan_state:
+            del user_plan_state[user_id]
+            logger.info(f"[PLAN] Пользователь {user_id} отменил планирование")
+        
+        try:
+            bot.answer_callback_query(call.id, "Планирование отменено")
+            bot.edit_message_text("✅ Планирование отменено. Можете использовать другие команды.", 
+                                 chat_id, call.message.message_id)
+        except Exception as e:
+            logger.warning(f"[CANCEL PLAN] Ошибка редактирования сообщения: {e}")
+            try:
+                bot.send_message(chat_id, "✅ Планирование отменено. Можете использовать другие команды.")
+            except:
+                pass
 
 
     @bot.callback_query_handler(func=lambda call: call.data == "plan_from_list")
@@ -1077,13 +1077,17 @@ def get_plan_link_internal(message, state):
     
     prompt_message_id = state.get('prompt_message_id')
     
-    # В группах принимаем только реплаи
+    # В группах принимаем только реплаи на бота
     if not is_private:
-        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+        if not is_reply:
             logger.info(f"[PLAN LINK] В группе сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
             return
+        # Проверяем, что это ответ на правильный промпт
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            logger.info(f"[PLAN LINK] В группе реплай не на правильный промпт, игнорируем")
+            return
     else:
-        # В личке принимаем реплай или следующее сообщение (если состояние активно)
+        # В личке: принимаем реплай на промпт или следующее сообщение (если состояние активно)
         if is_reply:
             # Проверяем, что это ответ на правильное сообщение
             if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
@@ -1172,10 +1176,22 @@ def get_plan_day_or_date_internal(message, state):
                 message.reply_to_message.from_user and 
                 message.reply_to_message.from_user.id == BOT_ID)
     
+    # В группах принимаем только реплаи на бота
     if not is_private:
-        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+        if not is_reply:
             logger.info(f"[PLAN DAY/DATE INTERNAL] В группе не реплай на бота → игнорируем")
             return
+        # Проверяем, что это ответ на правильный промпт
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            logger.info(f"[PLAN DAY/DATE INTERNAL] В группе реплай не на правильный промпт → игнорируем")
+            return
+    else:
+        # В личке: если это реплай, проверяем, что на правильный промпт
+        if is_reply and prompt_message_id:
+            if message.reply_to_message.message_id != prompt_message_id:
+                logger.info(f"[PLAN DAY/DATE INTERNAL] В личке реплай не на правильный промпт → игнорируем")
+                return
+        # Если не реплай, но состояние активно - принимаем как следующее сообщение
     
     text = (message.text or "").strip()
     if not text:
@@ -1425,7 +1441,8 @@ def get_plan_day_or_date_internal(message, state):
             callback_data="cancel_plan"
         ))
         
-        bot.reply_to(
+        # Отправляем сообщение об ошибке и ВОЗОБНОВЛЯЕМ состояние планирования
+        error_msg = bot.reply_to(
             message,
             "Не понял дату/время 😔\n\n"
             "Попробуй ещё раз. Примеры:\n"
@@ -1438,6 +1455,11 @@ def get_plan_day_or_date_internal(message, state):
             reply_markup=markup,
             parse_mode='HTML'
         )
+        
+        # ВАЖНО: Сохраняем message_id ошибки в состояние, чтобы пользователь мог ответить на него
+        state['prompt_message_id'] = error_msg.message_id
+        # Состояние НЕ удаляем - пользователь может ввести снова
+        logger.info(f"[PLAN DAY/DATE INTERNAL] Состояние планирования сохранено для повторного ввода, prompt_message_id={error_msg.message_id}")
         return   # ← СОСТОЯНИЕ ОСТАЁТСЯ! Пользователь может ввести снова
     
     # Если дата успешно распознана → идём дальше

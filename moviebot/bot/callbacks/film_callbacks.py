@@ -1161,7 +1161,7 @@ def back_to_film_description(call):
             kp_id_db = str(kp_id_int)
         except ValueError:
             logger.warning(f"[BACK TO FILM] Некорректный kp_id: {kp_id_str}")
-            bot.edit_message_text("❌ Некорректная ссылка на фильм/сериал", chat_id, message_id)
+            bot.edit_message_text("❌ Некорректная ссылка на фильм/сериал", chat_id, message_id, message_thread_id=message_thread_id)
             return
 
         link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"  # базовая
@@ -1176,38 +1176,61 @@ def back_to_film_description(call):
         except Exception as e:
             logger.warning(f"[BACK TO FILM] API не сработал: {e}")
 
-        # 2. Fallback — данные из базы, с is_series
+        # 2. Получаем актуальное состояние через get_film_current_state
+        from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
+        current_state = get_film_current_state(chat_id, kp_id_int, user_id)
+        existing = current_state['existing']
+        
+        # 3. Fallback — данные из базы, с is_series
         is_series = False
-        existing = None
-
-        with db_lock:
-            try:
-                cursor.execute("""
-                    SELECT id, title, year, genres, description, director, actors, is_series, watched
-                    FROM movies
-                    WHERE chat_id = %s AND kp_id = %s
-                """, (chat_id, kp_id_db))
-                row = cursor.fetchone()
-
-                if row:
-                    info = info or {}  # если API не дал — из БД
-                    info.update({
-                        'title': row[1],
-                        'year': row[2],
-                        'genres': row[3],
-                        'description': row[4],
-                        'director': row[5],
-                        'actors': row[6],
-                        'is_series': bool(row[7])
-                    })
-                    is_series = info['is_series']
-                    existing = (row[0], row[1], row[8])  # id, title, watched
-                    logger.info(f"[BACK TO FILM] Данные из БД, existing={existing}, is_series={is_series}")
-
-                conn.commit()
-            except Exception as e:
-                logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")
-                conn.rollback()
+        if existing:
+            # existing уже получен через get_film_current_state
+            # Получаем is_series из БД или API
+            with db_lock:
+                try:
+                    cursor.execute("""
+                        SELECT is_series
+                        FROM movies
+                        WHERE chat_id = %s AND kp_id = %s
+                    """, (chat_id, kp_id_db))
+                    row = cursor.fetchone()
+                    if row:
+                        is_series = bool(row.get('is_series') if isinstance(row, dict) else row[0])
+                except Exception as e:
+                    logger.warning(f"[BACK TO FILM] Ошибка получения is_series из БД: {e}")
+            
+            # Если API дал данные, используем их, иначе из БД
+            if not info or not info.get('title'):
+                with db_lock:
+                    try:
+                        cursor.execute("""
+                            SELECT title, year, genres, description, director, actors, is_series
+                            FROM movies
+                            WHERE chat_id = %s AND kp_id = %s
+                        """, (chat_id, kp_id_db))
+                        row = cursor.fetchone()
+                        if row:
+                            info = info or {}
+                            info.update({
+                                'title': row[0],
+                                'year': row[1],
+                                'genres': row[2],
+                                'description': row[3],
+                                'director': row[4],
+                                'actors': row[5],
+                                'is_series': bool(row[6])
+                            })
+                            is_series = info['is_series']
+                    except Exception as e:
+                        logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")
+        else:
+            # Фильм не в базе, используем данные из API
+            if info:
+                is_series = info.get('is_series', False)
+            else:
+                # Если API не сработал, пробуем определить по ссылке
+                if '/series/' in link or '/series/' in call.data:
+                    is_series = True
 
         if not info or not info.get('title'):
             bot.edit_message_text(
@@ -1216,20 +1239,22 @@ def back_to_film_description(call):
             )
             return
 
+        # Убеждаемся, что is_series правильно установлен в info
+        info['is_series'] = is_series
+        
         # Уточняем link для сериала
         if is_series:
             link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"
 
-        # Главный вызов — с existing и is_series учтено в info
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
-
+        # Главный вызов — existing будет получен внутри show_film_info_with_buttons через get_film_current_state
+        # Но передаем его для оптимизации, если он уже есть
         show_film_info_with_buttons(
             chat_id=chat_id,
             user_id=user_id,
             info=info,
             link=link,
             kp_id=kp_id_int,
-            existing=existing,
+            existing=existing,  # Может быть None, тогда внутри функции будет получен актуальный
             message_id=message_id,
             message_thread_id=message_thread_id
         )
@@ -1241,7 +1266,7 @@ def back_to_film_description(call):
         try:
             with db_lock:
                 conn.rollback()
-            bot.edit_message_text("❌ Ошибка при загрузке описания", chat_id, message_id)
+            bot.edit_message_text("❌ Ошибка при загрузке описания", chat_id, message_id, message_thread_id=message_thread_id)
         except:
             pass
         
