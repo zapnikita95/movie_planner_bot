@@ -1157,6 +1157,7 @@ def get_plan_day_or_date_internal(message, state):
     """Внутренняя функция для получения дня/даты в /plan"""
     logger.info("=" * 80)
     logger.info(f"[PLAN DAY/DATE INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    
     user_id = message.from_user.id
     plan_type = state.get('plan_type')
     link = state.get('link')
@@ -1168,35 +1169,24 @@ def get_plan_day_or_date_internal(message, state):
     from moviebot.bot.bot_init import BOT_ID
     is_private = message.chat.type == 'private'
     is_reply = (message.reply_to_message and 
-               message.reply_to_message.from_user and 
-               message.reply_to_message.from_user.id == BOT_ID)
+                message.reply_to_message.from_user and 
+                message.reply_to_message.from_user.id == BOT_ID)
     
-    # В группах принимаем только реплаи
     if not is_private:
         if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
-            logger.info(f"[PLAN DAY/DATE INTERNAL] В группе сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
+            logger.info(f"[PLAN DAY/DATE INTERNAL] В группе не реплай на бота → игнорируем")
             return
-    else:
-        # В личке принимаем реплай или следующее сообщение (если состояние активно)
-        if is_reply:
-            # Проверяем, что это ответ на правильное сообщение
-            if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
-                logger.info(f"[PLAN DAY/DATE INTERNAL] В личке реплай не на правильное сообщение, игнорируем")
-                return
-        # Если не реплай, но состояние активно - принимаем как следующее сообщение
     
-    # Берем текст из сообщения пользователя (не из реплая)
-    text = message.text.strip() if message.text else ""
+    text = (message.text or "").strip()
     if not text:
-        logger.warning(f"[PLAN DAY/DATE INTERNAL] Текст сообщения пуст, пропускаем")
+        logger.warning("[PLAN DAY/DATE INTERNAL] Пустой текст → пропускаем")
         return
     
-    text = text.lower().strip()
+    text_lower = text.lower().strip()
     
-    logger.info(f"[PLAN DAY/DATE INTERNAL] Обработка: text='{text}', plan_type={plan_type}, link={link}, reply_to_message_id={message.reply_to_message.message_id if message.reply_to_message else None}")
+    logger.info(f"[PLAN DAY/DATE INTERNAL] Текст: '{text_lower}', plan_type={plan_type}, link={link}")
     
     if not plan_type or not link:
-        logger.warning(f"[PLAN DAY/DATE INTERNAL] Отсутствует plan_type или link: plan_type={plan_type}, link={link}")
         bot.reply_to(message, "❌ Ошибка: не указан тип просмотра или ссылка. Начните заново.")
         if user_id in user_plan_state:
             del user_plan_state[user_id]
@@ -1411,49 +1401,58 @@ def get_plan_day_or_date_internal(message, state):
                                     except ValueError as e:
                                         logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты: {e}")
     
+    # Если всё-таки не удалось распознать
     if not plan_dt:
-        logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать дату из текста: '{text}'")
-        
-        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+        logger.warning(f"[PLAN DAY/DATE INTERNAL] Не удалось распознать: '{text}'")
         
         markup = InlineKeyboardMarkup(row_width=1)
         
+        # Кнопка возврата к описанию, если есть kp_id
         kp_id = state.get('kp_id')
         if kp_id:
             try:
-                kp_id_int = int(kp_id)  # приводим к int на всякий случай
-                markup.add(
-                    InlineKeyboardButton(
-                        "◀️ Вернуться к описанию",
-                        callback_data=f"back_to_film:{kp_id_int}"
-                    )
-                )
-            except (ValueError, TypeError):
-                logger.warning(f"[PLAN DATE ERROR] kp_id в состоянии не число: {kp_id}")
-                # кнопка просто не добавится — не критично
+                kp_id_int = int(kp_id)
+                markup.add(InlineKeyboardButton(
+                    "◀️ Вернуться к описанию",
+                    callback_data=f"back_to_film:{kp_id_int}"
+                ))
+            except:
+                pass
+        
+        # Кнопка отмены планирования
+        markup.add(InlineKeyboardButton(
+            "❌ Отменить планирование",
+            callback_data="cancel_plan"
+        ))
         
         bot.reply_to(
             message,
-            "Не удалось распознать день/дату.\nПопробуйте ввести снова или вернитесь к описанию.",
-            reply_markup=markup
+            "Не понял дату/время 😔\n\n"
+            "Попробуй ещё раз. Примеры:\n"
+            "• сегодня 21:00\n"
+            "• завтра 19:30\n"
+            "• пт 18:45\n"
+            "• 15 января 20:00\n"
+            "• 22.01 22:30\n"
+            "• в субботу 19:00",
+            reply_markup=markup,
+            parse_mode='HTML'
         )
-        
-        return  # ← СОСТОЯНИЕ НЕ УДАЛЯЕМ — продолжаем ждать правильный ввод
+        return   # ← СОСТОЯНИЕ ОСТАЁТСЯ! Пользователь может ввести снова
     
-    # Вызываем process_plan
+    # Если дата успешно распознана → идём дальше
     message_date_utc = datetime.fromtimestamp(message.date, tz=pytz.utc) if message.date else None
-    # Преобразуем plan_dt обратно в строку для process_plan
-    day_or_date_str = plan_dt.strftime('%d.%m.%Y %H:%M') if plan_dt else None
+    day_or_date_str = plan_dt.strftime('%d.%m.%Y %H:%M')
+    
     result = process_plan(bot, user_id, message.chat.id, link, plan_type, day_or_date_str, message_date_utc)
+    
     if result == 'NEEDS_TIMEZONE':
         show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
     elif result:
-        # process_plan уже очистил состояние, но на всякий случай проверим
+        # process_plan уже должен чистить состояние, но на всякий случай
         if user_id in user_plan_state:
             del user_plan_state[user_id]
-            logger.info(f"[PLAN DAY/DATE INTERNAL] Состояние планирования очищено для user_id={user_id}")
-        if user_id in user_plan_state:
-            del user_plan_state[user_id]
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Состояние очищено после успеха")
 
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_plan:"))
