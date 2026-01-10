@@ -19,7 +19,7 @@ from moviebot.database.db_operations import (
     get_watched_emojis, get_user_timezone, get_notification_settings, set_notification_setting
 )
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.database.db_operations import get_user_timezone_or_default
+from moviebot.database.db_operations import get_user_timezone_or_default, get_user_films_count
 from moviebot.utils.helpers import extract_film_info_from_existing
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
@@ -54,6 +54,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
     """Показывает описание фильма с кнопками действий"""
     import inspect
     
+    kp_id = int(kp_id)
     # Сначала обработаем message_id
     if message_id:
         try:
@@ -76,21 +77,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
     logger.info(f"[SHOW FILM INFO] ===== START: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id}, message_id={message_id}, existing={existing}")
 
     try:
-        # ← ФИКС: приводим kp_id к int сразу здесь (самое важное место!)
-        try:
-            kp_id = int(kp_id)  # если строка — делаем число
-            logger.info(f"[SHOW FILM INFO] kp_id успешно приведён к int: {kp_id}")
-        except (ValueError, TypeError) as conv_e:
-            logger.error(f"[SHOW FILM INFO] Не удалось привести kp_id к int: {kp_id}, ошибка: {conv_e}")
-            bot.send_message(chat_id, "❌ Ошибка с ID фильма. Попробуйте заново.")
-            return
-
-        logger.info(f"[SHOW FILM INFO] info keys: {list(info.keys()) if info else 'None'}")
-        if not info:
-            logger.error(f"[SHOW FILM INFO] info is None или пустой!")
-            bot.send_message(chat_id, "❌ Произошла ошибка: информация о фильме не получена.")
-            return
-        
         # Инициализируем plan_info как None, чтобы она была доступна во всех путях выполнения
         plan_info = None
         
@@ -99,14 +85,43 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         logger.info(f"[SHOW FILM INFO] is_series={is_series}, type_emoji={type_emoji}")
         
         # Формируем текст описания
-        # Если фильм уже в базе, добавляем сообщение об этом в начало
         text = ""
+
+        # Если уже в базе — берём полные данные из БД
         if existing:
-            # Определяем, сериал это или фильм
-            film_type_text = "Сериал" if is_series else "Фильм"
+            film_id, title_from_db, watched = existing
+
+            # Запрашиваем все нужные поля из базы по id
+            with db_lock:
+                cursor.execute("""
+                    SELECT title, year, genres, description, director, actors, is_series
+                    FROM movies 
+                    WHERE id = %s AND chat_id = %s
+                """, (film_id, chat_id))
+                db_row = cursor.fetchone()
+
+            if db_row:
+                info = {
+                    'title': db_row[0] or title_from_db,
+                    'year': db_row[1],
+                    'genres': db_row[2],
+                    'description': db_row[3],
+                    'director': db_row[4],
+                    'actors': db_row[5],
+                    'is_series': bool(db_row[6])
+                }
+            else:
+                # Если вдруг не нашли (крайне редко) — fallback на то, что было
+                info = info or {}
+                info['title'] = title_from_db
+
+            film_type_text = "Сериал" if info.get('is_series') else "Фильм"
             text += f"✅ <b>{film_type_text} уже в базе</b>\n\n"
-        text += f"{type_emoji} <b>{info['title']}</b> ({info['year'] or '—'})\n"
-        logger.info(f"[SHOW FILM INFO] Текст начала формироваться, title={info.get('title')}")
+
+        # Основной текст карточки (теперь info гарантированно полный)
+        type_emoji = "📺" if info.get('is_series') else "🎬"
+        text += f"{type_emoji} <b>{info.get('title', 'Без названия')}</b> ({info.get('year') or '—'})\n"
+
         if info.get('director'):
             text += f"<i>Режиссёр:</i> {info['director']}\n"
         if info.get('genres'):
@@ -115,150 +130,67 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             text += f"<i>В ролях:</i> {info['actors']}\n"
         if info.get('description'):
             text += f"\n<i>Кратко:</i> {info['description']}\n"
-        logger.info(f"[SHOW FILM INFO] Базовый текст сформирован, is_series={is_series}")
-        
-        # Если это сериал, добавляем информацию о статусе выхода серий
-        if is_series:
-            logger.info(f"[SHOW FILM INFO] Получение статуса выхода серий для kp_id={kp_id}")
+
+        # Статус выхода серий только для сериалов
+        if info.get('is_series'):
             try:
                 is_airing, next_episode = get_series_airing_status(kp_id)
-                logger.info(f"[SHOW FILM INFO] is_airing={is_airing}, next_episode={next_episode}")
                 if is_airing and next_episode:
                     text += f"\n🟢 <b>Сериал выходит сейчас</b>\n"
                     text += f"📅 Следующая серия: Сезон {next_episode['season']}, Эпизод {next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
                 else:
                     text += f"\n🔴 <b>Сериал не выходит</b>\n"
-            except Exception as airing_e:
-                logger.error(f"[SHOW FILM INFO] Ошибка get_series_airing_status: {airing_e}", exc_info=True)
-                # Продолжаем без информации о статусе выхода
-        
+            except Exception as e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка статуса серий: {e}")
+
         text += f"\n<a href='{link}'>Кинопоиск</a>"
-        logger.info(f"[SHOW FILM INFO] Ссылка добавлена, existing={existing}")
-        
-        # Если фильм уже в базе, показываем дополнительную информацию
+
+        # Просмотрено / не просмотрено + оценки
         if existing:
-            logger.info(f"[SHOW FILM INFO] Фильм в базе, обрабатываем existing={existing}")
-            logger.info(f"[SHOW FILM INFO] Тип existing: {type(existing)}, isinstance dict: {isinstance(existing, dict)}, isinstance tuple: {isinstance(existing, tuple)}")
-            try:
-                if isinstance(existing, dict):
-                    logger.info(f"[SHOW FILM INFO] existing - словарь, извлекаю через .get()")
-                    film_id = existing.get('id')
-                    watched = existing.get('watched')
-                else:
-                    logger.info(f"[SHOW FILM INFO] existing - не словарь, извлекаю через индексы, len={len(existing) if hasattr(existing, '__len__') else 'N/A'}")
-                    film_id, watched = extract_film_info_from_existing(existing)
-                    watched = existing[2] if len(existing) > 2 else None
-                logger.info(f"[SHOW FILM INFO] Извлечены film_id={film_id}, watched={watched}")
-            except Exception as extract_e:
-                logger.error(f"[SHOW FILM INFO] ❌ ОШИБКА при извлечении film_id и watched: {extract_e}", exc_info=True)
-                logger.error(f"[SHOW FILM INFO] existing type: {type(existing)}, value: {existing}")
-                # Пытаемся продолжить с дефолтными значениями
-                film_id = None
-                watched = False
-            
             if watched:
-                logger.info(f"[SHOW FILM INFO] Фильм просмотрен, запрашиваем оценки...")
-                avg = None
-                user_rating = None
+                text += "\n\n✅ <b>Просмотрено</b>"
                 try:
-                    # Чтение безопасно без блокировки, используем короткий таймаут только для защиты от deadlock
-                    lock_acquired = False
-                    try:
-                        # Короткий таймаут 1 секунда - если lock занят, просто пропускаем запрос
-                        lock_acquired = db_lock.acquire(timeout=3.0)
-                        if lock_acquired:
-                            logger.info(f"[SHOW FILM INFO] db_lock получен, выполняю запрос AVG...")
-                            try:
-                                cursor.execute('SELECT AVG(rating) as avg FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
-                                avg_result = cursor.fetchone()
-                                logger.info(f"[SHOW FILM INFO] AVG запрос выполнен, результат: {avg_result}")
-                                if avg_result:
-                                    avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                                    avg = float(avg) if avg is not None else None
-                                else:
-                                    avg = None
-                                
-                                # Получаем личную оценку пользователя (если есть)
-                                if user_id:
-                                    logger.info(f"[SHOW FILM INFO] Запрос личной оценки пользователя user_id={user_id}...")
-                                    cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
-                                    user_rating_row = cursor.fetchone()
-                                    logger.info(f"[SHOW FILM INFO] Личная оценка получена: {user_rating_row}")
-                                    if user_rating_row:
-                                        user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
-                                    else:
-                                        user_rating = None
-                            finally:
-                                db_lock.release()
-                                logger.info(f"[SHOW FILM INFO] db_lock освобожден")
-                        else:
-                            logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос оценок (не критично)")
-                            avg = None
-                            user_rating = None
-                    except Exception as lock_e:
-                        logger.warning(f"[SHOW FILM INFO] Ошибка при получении lock для оценок: {lock_e}")
-                        if lock_acquired:
-                            try:
-                                db_lock.release()
-                            except:
-                                pass
-                        avg = None
-                        user_rating = None
-                except Exception as db_e:
-                    logger.warning(f"[SHOW FILM INFO] Ошибка при запросе оценок (не критично): {db_e}")
-                    avg = None
-                    user_rating = None
-                
-                text += f"\n\n✅ <b>Просмотрено</b>"
-                if avg:
-                    text += f"\n⭐ <b>Средняя оценка: {avg:.1f}/10</b>"
-                # Добавляем строку о личной оценке пользователя (чтобы текст всегда менялся при обновлении)
-                if user_rating is not None:
-                    text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
-                else:
-                    text += f"\n⭐ <b>Ваша оценка: —</b>"
+                    with db_lock:
+                        cursor.execute("""
+                            SELECT AVG(rating) as avg 
+                            FROM ratings 
+                            WHERE chat_id = %s AND film_id = %s 
+                            AND (is_imported = FALSE OR is_imported IS NULL)
+                        """, (chat_id, film_id))
+                        avg_result = cursor.fetchone()
+                        avg = avg_result[0] if avg_result else None
+                        if avg:
+                            text += f"\n⭐ <b>Средняя оценка: {avg:.1f}/10</b>"
+
+                    if user_id:
+                        with db_lock:
+                            cursor.execute("""
+                                SELECT rating 
+                                FROM ratings 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                                AND (is_imported = FALSE OR is_imported IS NULL)
+                            """, (chat_id, film_id, user_id))
+                            user_rating_row = cursor.fetchone()
+                            user_rating = user_rating_row[0] if user_rating_row else None
+                            text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
+                except Exception as e:
+                    logger.warning(f"[SHOW FILM INFO] Ошибка оценок: {e}")
             else:
-                logger.info(f"[SHOW FILM INFO] Фильм не просмотрен (watched=False), проверяем личную оценку...")
-                text += f"\n\n⏳ <b>Ещё не просмотрено</b>"
-                # Добавляем строку о личной оценке пользователя даже если фильм не просмотрен (чтобы текст всегда менялся)
-                if user_id and film_id:
-                    logger.info(f"[SHOW FILM INFO] Запрос личной оценки (без блокировки, чтение безопасно)...")
-                    user_rating = None
+                text += "\n\n⏳ <b>Ещё не просмотрено</b>"
+                if user_id:
                     try:
-                        # Чтение безопасно без блокировки, используем короткий таймаут только для защиты от deadlock
-                        lock_acquired = False
-                        try:
-                            # Короткий таймаут 1 секунда - если lock занят, просто пропускаем запрос
-                            lock_acquired = db_lock.acquire(timeout=3.0)
-                            if lock_acquired:
-                                try:
-                                    cursor.execute('SELECT rating FROM ratings WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id, user_id))
-                                    user_rating_row = cursor.fetchone()
-                                    logger.info(f"[SHOW FILM INFO] Запрос личной оценки выполнен, результат: {user_rating_row}")
-                                    if user_rating_row:
-                                        user_rating = user_rating_row.get('rating') if isinstance(user_rating_row, dict) else user_rating_row[0]
-                                finally:
-                                    db_lock.release()
-                                    logger.info(f"[SHOW FILM INFO] db_lock освобожден")
-                            else:
-                                logger.info(f"[SHOW FILM INFO] db_lock занят, пропускаем запрос оценки (не критично)")
-                        except Exception as lock_e:
-                            logger.warning(f"[SHOW FILM INFO] Ошибка при получении lock для оценки: {lock_e}")
-                            if lock_acquired:
-                                try:
-                                    db_lock.release()
-                                except:
-                                    pass
-                        
-                        # Добавляем оценку в текст
-                        if user_rating is not None:
-                            text += f"\n⭐ <b>Ваша оценка: {user_rating}/10</b>"
-                        else:
-                            text += f"\n⭐ <b>Ваша оценка: —</b>"
-                    except Exception as db_e:
-                        logger.warning(f"[SHOW FILM INFO] Ошибка при запросе оценки (не критично): {db_e}")
-                else:
-                    logger.info(f"[SHOW FILM INFO] user_id или film_id отсутствуют, пропускаем запрос оценки")
+                        with db_lock:
+                            cursor.execute("""
+                                SELECT rating 
+                                FROM ratings 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                                AND (is_imported = FALSE OR is_imported IS NULL)
+                            """, (chat_id, film_id, user_id))
+                            user_rating_row = cursor.fetchone()
+                            user_rating = user_rating_row[0] if user_rating_row else None
+                            text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
+                    except Exception as e:
+                        logger.warning(f"[SHOW FILM INFO] Ошибка личной оценки: {e}")
             
             # Добавляем информацию о планировании, если фильм/сериал запланирован
             if plan_info:
@@ -1480,7 +1412,33 @@ def register_series_handlers(bot_param):
                     )
                     logger.warning(f"[RANDOM CALLBACK] Access denied for mode {mode}, user_id={user_id}")
                     return
-            
+                
+            if mode == 'database':
+                count = get_user_films_count(user_id)
+                if count == 0:
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(
+                        InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search")
+                    )
+                    markup.add(
+                        InlineKeyboardButton("⬅️ Назад к режимам", callback_data="start_menu:random")
+                    )
+
+                    bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text=(
+                            "😔 <b>В вашей базе пока нет фильмов</b>\n\n"
+                            "Рандом по своей базе работает только когда в базе есть хотя бы один фильм.\n\n"
+                            "Что делаем дальше?"
+                        ),
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    bot.answer_callback_query(call.id)
+                    logger.info(f"[RANDOM] Пустая база user_id={user_id} — показываем кнопки в главное меню")
+                    return
+                        
             if user_id not in user_random_state:
                 logger.warning(f"[RANDOM CALLBACK] State not found for user_id={user_id}, state keys: {list(user_random_state.keys())}, initializing new state")
                 # Инициализируем состояние заново, если оно не найдено

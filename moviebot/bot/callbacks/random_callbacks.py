@@ -4,10 +4,9 @@ from moviebot.bot.bot_init import bot
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-
+from moviebot.database.db_operations import get_user_films_count
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
+from moviebot.bot.handlers.text_messages import expect_text_from_user, user_search_state
 from moviebot.states import user_random_state
 
 from moviebot.utils.helpers import has_recommendations_access
@@ -44,7 +43,37 @@ def register_random_callbacks(bot):
                     )
                     logger.warning(f"[RANDOM CALLBACK] Access denied for mode {mode}, user_id={user_id}")
                     return
-            
+                
+            # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+            # НОВАЯ ПРОВЕРКА ПУСТОЙ БАЗЫ ДЛЯ РЕЖИМА database
+            if mode == 'database':
+                count = get_user_films_count(user_id)
+                if count == 0:
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(
+                        InlineKeyboardButton("🔍 Начать поиск фильмов", callback_data="start_search"),
+                    )
+                    markup.add(
+                        InlineKeyboardButton("⬅️ Назад", callback_data="rand_mode:back")  # ← существующий callback
+                    )
+
+                    bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        text=(
+                            "😔 <b>В вашей базе пока нет фильмов</b>\n\n"
+                            "Чтобы использовать рандом по своей базе, добавьте хотя бы один фильм.\n\n"
+                            "Что делаем сейчас?"
+                        ),
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    bot.answer_callback_query(call.id)
+                    logger.info(f"[RANDOM] Пустая база для user_id={user_id}, показываем предложение добавить фильмы")
+                    return
+            # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+
+
             # Для режима my_votes проверяем наличие импортированных оценок
             if mode == 'my_votes':
                 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
@@ -318,3 +347,58 @@ def register_random_callbacks(bot):
     
     logger.info("✅ Random callbacks registered")
 
+    @bot.callback_query_handler(func=lambda call: call.data == "start_search")
+    def handle_start_search_callback(call):
+        """
+        Запускает процесс поиска из экрана "пустая база" → 
+        показывает выбор типа + устанавливает ожидание текста
+        """
+        try:
+            bot.answer_callback_query(call.id)
+            
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            is_private = call.message.chat.type == 'private'
+            
+            # Создаём кнопки выбора типа (как в /search без текста)
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+            )
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            prompt_text = "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик"
+            
+            # Отправляем новое сообщение (не редактируем старое о пустой базе — лучше не путать пользователя)
+            sent_msg = bot.send_message(
+                chat_id,
+                prompt_text,
+                reply_markup=markup
+            )
+            
+            # Сохраняем состояние (по аналогии с handle_search)
+            user_search_state[user_id] = {
+                'chat_id': chat_id,
+                'message_id': sent_msg.message_id,
+                'search_type': 'mixed'  # по умолчанию mixed, пользователь может уточнить тип
+            }
+            logger.info(f"[START_SEARCH] Состояние поиска установлено: {user_search_state[user_id]}")
+            
+            # Устанавливаем ожидание текста — это самое важное!
+            if is_private and sent_msg:
+                expect_text_from_user(
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    expected_for='search',
+                    message_id=sent_msg.message_id
+                )
+            
+            logger.info(f"[START_SEARCH] Ожидание текста установлено для user_id={user_id}")
+            
+        except Exception as e:
+            logger.error(f"[START_SEARCH] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Не получилось запустить поиск 😔", show_alert=True)
+            except:
+                pass

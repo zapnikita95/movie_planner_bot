@@ -1314,19 +1314,62 @@ def confirm_remove(call):
     except:
         pass
 
-    kp_id = call.data.split(":")[1]
-    chat_id = call.message.chat.id
+    try:
+        kp_id_str = call.data.split(":")[1]
+        kp_id = int(kp_id_str)
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
 
-    with db_lock:
-        cursor.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-        conn.commit()
+        with db_lock:
+            # Сначала получаем название (чтобы показать нормальное сообщение)
+            cursor.execute("""
+                SELECT id, title 
+                FROM movies 
+                WHERE chat_id = %s AND kp_id = %s
+            """, (chat_id, kp_id_str))
+            row = cursor.fetchone()
 
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text="✅ Фильм удалён из базы.",
-        reply_markup=None
-    )
+            if not row:
+                bot.edit_message_text(
+                    "Фильм уже удалён или не найден.",
+                    chat_id, message_id
+                )
+                return
+
+            film_id = row[0] if isinstance(row, tuple) else row.get('id')
+            title = row[1] if isinstance(row, tuple) else row.get('title', f"ID {kp_id}")
+
+            # Удаляем
+            cursor.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
+            conn.commit()
+
+        # Кнопка "Перейти к описанию"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(
+            "📖 Перейти к описанию",
+            callback_data=f"show_film_description:{kp_id}"
+        ))
+
+        bot.edit_message_text(
+            f"✅ <b>{title}</b> удалён из базы!",
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+
+        logger.info(f"[REMOVE FROM DB] Успешно удалён: kp_id={kp_id}, title='{title}'")
+
+    except Exception as e:
+        logger.error(f"[CONFIRM REMOVE] Ошибка: {e}", exc_info=True)
+        conn.rollback()
+        try:
+            bot.edit_message_text(
+                "Произошла ошибка при удалении.",
+                chat_id, message_id
+            )
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("back_to_film:"))
 def back_to_film_description(call):

@@ -1447,7 +1447,36 @@ def is_bot_participant(chat_id, user_id):
         logger.error(f"[IS_BOT_PARTICIPANT] Ошибка: {e}")
         return False
 
+def get_user_films_count(user_id: int) -> int:
+    """
+    Возвращает количество фильмов/сериалов в личной базе пользователя.
+    Таблица: user_films
+    """
+    conn = None
+    try:
+        # Вариант 1 — самый вероятный (проверь, есть ли такая функция)
+        conn = get_db_connection()  # ← если есть в db_connection.py
 
+        # Вариант 2 — если get_db_connection нет, используй напрямую
+        # conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*)
+            FROM user_films
+            WHERE user_id = %s
+        """, (user_id,))
+        
+        count = cursor.fetchone()[0]
+        return int(count)
+        
+    except Exception as e:
+        logger.error(f"[DB] Ошибка при подсчёте фильмов пользователя {user_id}: {e}", exc_info=True)
+        return 0
+    finally:
+        if conn:
+            conn.close()
+            
 def add_and_announce(link, chat_id, user_id=None, source='unknown'):
     """Обрабатывает присланную ссылку на фильм/сериал.
     Показывает соответствующую карточку в зависимости от наличия в базе.
