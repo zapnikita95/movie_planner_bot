@@ -558,6 +558,35 @@ def init_database():
         conn.commit()
         logger.info("[DB] Все таблицы созданы")
 
+        # ──────────────────────────────────────────────────────────────
+        # Безопасные миграции — добавляем поля, которых может не хватать
+        # Выполняется при каждом запуске, но не падает, если поле уже есть
+        # ──────────────────────────────────────────────────────────────
+        safe_migrations = [
+            # Самое важное сейчас — added_by в movies
+            "ALTER TABLE movies ADD COLUMN IF NOT EXISTS added_by BIGINT",
+            
+            # Другие поля, которые раньше были/могут понадобиться позже
+            "ALTER TABLE movies ADD COLUMN IF NOT EXISTS source TEXT",
+            "ALTER TABLE movies ADD COLUMN IF NOT EXISTS rating_kp REAL",
+            "ALTER TABLE movies ADD COLUMN IF NOT EXISTS votes_kp INTEGER",
+            
+            # На всякий случай для других таблиц (можно потом расширять)
+            "ALTER TABLE plans ADD COLUMN IF NOT EXISTS ticket_notification_sent BOOLEAN DEFAULT FALSE",
+        ]
+
+        for sql in safe_migrations:
+            try:
+                cursor.execute(sql)
+                conn.commit()
+                logger.info(f"[DB Migration] Применено: {sql}")
+            except Exception as e:
+                # Если ошибка не про "уже существует" — логируем
+                err_str = str(e).lower()
+                if "already exists" not in err_str and "duplicate" not in err_str:
+                    logger.warning(f"[DB Migration] Проблема при выполнении: {sql} → {e}")
+                conn.rollback()
+
         # Добавляем владельца бота как админа (если нет)
         cursor.execute('SELECT id FROM admins WHERE user_id = %s', (301810276,))
         if not cursor.fetchone():
@@ -627,6 +656,7 @@ def init_database():
             logger.warning(f"[DB] Ошибка создания индексов: {e}")
             conn.rollback()
 
+
         logger.info("[DB] База данных полностью инициализирована")
         
     except Exception as e:
@@ -638,6 +668,4 @@ def init_database():
     finally:
         if cursor:
             cursor.close()
-        # conn.close()   ← НЕ ЗАКРЫВАЕМ соединение здесь!
-
-    logger.info("[DB] База данных полностью инициализирована")
+        # conn.close()   ← НЕ ЗАКРЫВАЕМ здесь!
