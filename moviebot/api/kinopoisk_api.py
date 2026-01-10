@@ -16,23 +16,29 @@ logger = logging.getLogger(__name__)
 
 def log_kinopoisk_api_request(endpoint, method='GET', status_code=None, user_id=None, chat_id=None, kp_id=None):
     """Логирует запрос к API Кинопоиска в БД"""
-    try:
-        with db_lock:
-            cursor.execute('''
-                INSERT INTO kinopoisk_api_logs (endpoint, method, status_code, user_id, chat_id, kp_id)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (endpoint, method, status_code, user_id, chat_id, kp_id))
-            conn.commit()
-    except Exception as e:
-        logger.error(f"Ошибка логирования запроса к API Кинопоиска: {e}", exc_info=True)
+    with db_lock:
         try:
+            # Самое важное: всегда чистим возможную сломанную транзакцию
             conn.rollback()
-        except:
-            pass
 
-import re
-import requests
+            # kp_id приводим к строке (потому что столбец text)
+            kp_id_str = str(kp_id) if kp_id is not None else None
 
+            cursor.execute('''
+                INSERT INTO kinopoisk_api_logs 
+                (endpoint, method, status_code, user_id, chat_id, kp_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (endpoint, method, status_code, user_id, chat_id, kp_id_str))
+            
+            conn.commit()
+            
+        except Exception as e:
+            logger.error(f"Ошибка логирования API-запроса: {e}", exc_info=True)
+            try:
+                conn.rollback()
+            except:
+                pass  # если соединение уже мертво — молчим
+        
 def extract_movie_info(link_or_id):
     """
     Извлекает информацию о фильме/сериале по ссылке или kp_id.
