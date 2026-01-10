@@ -55,7 +55,6 @@ def settings_command(message):
         
         # Сначала показываем меню выбора действия
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
         markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
         
         # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
@@ -216,43 +215,6 @@ def handle_settings_callback(call):
         
         # Для остальных действий вызываем обычный answer_callback_query в начале
         bot.answer_callback_query(call.id)
-        
-        if action == "emoji":
-            # Показываем настройки эмодзи
-            logger.info(f"[SETTINGS CALLBACK] Обработка action=emoji для user_id={user_id}, chat_id={chat_id}")
-            current = get_watched_emojis(chat_id)
-            current_emojis_str = ''.join(current) if isinstance(current, list) else str(current)
-            logger.info(f"[SETTINGS CALLBACK] Текущие эмодзи: {current_emojis_str}")
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("➕ Добавить к текущим", callback_data="settings:add"))
-            markup.add(InlineKeyboardButton("🔄 Заменить полностью", callback_data="settings:replace"))
-            markup.add(InlineKeyboardButton("🗑️ Сбросить", callback_data="settings:reset"))
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
-            
-            bot.edit_message_text(
-                f"😀 <b>Настройка эмодзи просмотра</b>\n\n"
-                f"<b>Текущие реакции:</b> {current_emojis_str}\n\n"
-                f"Выберите действие или поставьте реакцию на это сообщение — она автоматически добавится к текущим.",
-                call.message.chat.id,
-                call.message.message_id,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
-            logger.info(f"[SETTINGS CALLBACK] Сообщение с настройками эмодзи обновлено для user_id={user_id}")
-            
-            # Сохраняем состояние для обработки реакций
-            user_settings_state[user_id] = {
-                'settings_msg_id': call.message.message_id,
-                'chat_id': chat_id,
-                'adding_reactions': False
-            }
-            settings_messages[call.message.message_id] = {
-                'user_id': user_id,
-                'action': 'add',
-                'chat_id': chat_id
-            }
-            return
         
         if action == "notifications":
             # Проверяем доступ к настройкам напоминаний
@@ -738,7 +700,6 @@ def handle_settings_callback(call):
         if action == "back":
             # Возврат к главному меню settings
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("😀 Настроить эмодзи просмотра", callback_data="settings:emoji"))
             markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
             
             # Проверяем доступ к настройкам напоминаний
@@ -771,42 +732,7 @@ def handle_settings_callback(call):
                 reply_markup=markup,
                 parse_mode='HTML'
             )
-            return
-        
-        if action == "reset":
-            # Сброс к значению по умолчанию для этого чата
-            with db_lock:
-                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
-                conn.commit()
-            bot.edit_message_text(
-                "✅ Реакции сброшены к значению по умолчанию (✅)",
-                call.message.chat.id,
-                call.message.message_id,
-                parse_mode='HTML'
-            )
-            logger.info(f"Реакции сброшены для чата {chat_id} пользователем {user_id}")
-            if user_id in user_settings_state:
-                del user_settings_state[user_id]
-            return
-        
-        if action == "add" or action == "replace":
-            # Для add и replace - сохраняем режим и просим отправить эмодзи
-            user_settings_state[user_id] = {
-                'adding_reactions': True,
-                'settings_msg_id': call.message.message_id,
-                'action': action,  # "add" или "replace"
-                'chat_id': chat_id
-            }
-            
-            mode_text = "добавлены к текущим" if action == "add" else "заменят текущие"
-            bot.edit_message_text(
-                f"⚙️ <b>Настройки реакций</b>\n\n"
-                f"📝 Поставьте выбранный эмодзи в ответ на это сообщение.\n\n"
-                f"Новые реакции будут {mode_text}.",
-                call.message.chat.id,
-                call.message.message_id,
-                parse_mode='HTML'
-            )
+
             # Обновляем информацию о сообщении settings
             if call.message.message_id in settings_messages:
                 settings_messages[call.message.message_id]['action'] = action
