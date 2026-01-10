@@ -1243,22 +1243,24 @@ def delete_cancel(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("confirm_delete:"))
 def confirm_remove_from_database(call):
     """Финальное удаление после подтверждения"""
+    logger.info("=" * 80)
+    logger.info(f"[CONFIRM DELETE] START: callback_id={call.id}, data={call.data}")
+
     try:
         bot.answer_callback_query(call.id)
 
-        try:
-            kp_id = int(call.data.split(":")[1])
-        except (IndexError, ValueError):
-            bot.answer_callback_query(call.id, "Ошибка: неверный ID", show_alert=True)
-            return
-
+        kp_id_str = call.data.split(":")[1]
+        kp_id = int(kp_id_str)
         chat_id = call.message.chat.id
         message_id = call.message.message_id
         user_id = call.from_user.id
 
         with db_lock:
-            # Получаем film_id и название
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+            cursor.execute("""
+                SELECT id, title 
+                FROM movies 
+                WHERE chat_id = %s AND kp_id = %s
+            """, (chat_id, kp_id_str))
             film = cursor.fetchone()
 
             if not film:
@@ -1268,9 +1270,8 @@ def confirm_remove_from_database(call):
                 )
                 return
 
-            # Безопасное извлечение независимо от dict или tuple
-            film_id = film.get('id') if isinstance(film, dict) else film[0]
-            title = film.get('title') if isinstance(film, dict) else film[1]
+            film_id = film[0] if isinstance(film, tuple) else film.get('id')
+            title = film[1] if isinstance(film, tuple) else film.get('title', f"ID {kp_id}")
 
             # Удаляем всё связанное
             cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
@@ -1278,19 +1279,31 @@ def confirm_remove_from_database(call):
             cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
             conn.commit()
 
+        # Кнопка "Перейти к описанию"
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton(
+            "📖 Перейти к описанию",
+            callback_data=f"show_film_description:{kp_id}"
+        ))
+
         bot.edit_message_text(
-            f"✅ Фильм <b>{title}</b> успешно удалён из базы!",
-            chat_id, message_id,
+            f"✅ <b>{title}</b> успешно удалён из базы!",
+            chat_id,
+            message_id,
+            reply_markup=markup,
             parse_mode='HTML'
         )
 
         logger.info(f"[REMOVE FROM DB] Успешно удалён: kp_id={kp_id}, title='{title}', user_id={user_id}")
 
     except Exception as e:
-        logger.error(f"[CONFIRM DELETE] Ошибка при удалении kp_id={kp_id if 'kp_id' in locals() else 'unknown'}: {e}", exc_info=True)
+        logger.error(f"[CONFIRM DELETE] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "Ошибка при удалении", show_alert=True)
-            bot.edit_message_text("Произошла ошибка при удалении фильма.", chat_id, message_id)
+            bot.edit_message_text(
+                "Произошла ошибка при удалении фильма.",
+                chat_id, message_id
+            )
         except:
             pass
         
