@@ -3,7 +3,6 @@
 """
 import logging
 logger = logging.getLogger(__name__)
-from moviebot.database.db_operations import get_user_personal_subscriptions
 
 def has_notifications_access(chat_id, user_id=None):
     """
@@ -12,7 +11,7 @@ def has_notifications_access(chat_id, user_id=None):
     - В группе (user_id=None) — проверяем подписку группы
     """
     from moviebot.database.db_connection import db_lock, get_db_cursor
-    
+
     try:
         with db_lock:
             cursor = get_db_cursor() 
@@ -46,6 +45,7 @@ def has_tickets_access(chat_id, user_id):
     """Проверяет, есть ли у пользователя доступ к функциям билетов в кино
     (требуется подписка 'tickets' или 'all')
     """
+    from moviebot.database.db_operations import get_user_personal_subscriptions
     # Убрана проверка для создателя - теперь даже создатель должен иметь подписку
     
     # Проверяем личную подписку - используем get_user_personal_subscriptions для проверки всех личных подписок
@@ -78,6 +78,8 @@ def has_tickets_access(chat_id, user_id):
 
 
 def has_recommendations_access(chat_id, user_id):
+    from moviebot.database.db_operations import get_user_personal_subscriptions
+
     """Проверяет, есть ли у пользователя доступ к функциям рекомендаций
     (требуется подписка 'recommendations' или 'all')
     """
