@@ -516,9 +516,8 @@ def get_sequels(kp_id):
 def get_external_sources(kp_id: int):
     """Получает внешние источники для просмотра фильма/сериала"""
     if not isinstance(kp_id, int) or kp_id <= 0:
-        logger.warning(f"Некорректный kp_id: {kp_id}")
-        return []
-
+            logger.warning(f"Некорректный kp_id: {kp_id} (не число или <=0)")
+            return []
     headers = {
         'X-API-KEY': KP_TOKEN,
         'Content-Type': 'application/json'

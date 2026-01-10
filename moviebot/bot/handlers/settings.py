@@ -44,15 +44,6 @@ def settings_command(message):
         log_request(user_id, username, '/settings', chat_id)
         logger.info(f"Команда /settings от пользователя {user_id}")
         
-        # Проверяем на reset
-        if message.text and 'reset' in message.text.lower():
-            with db_lock:
-                cursor.execute("DELETE FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
-                conn.commit()
-            bot.reply_to(message, "✅ Реакции сброшены к значению по умолчанию (✅)")
-            logger.info(f"Реакции сброшены для чата {chat_id}")
-            return
-        
         # Сначала показываем меню выбора действия
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
