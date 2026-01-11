@@ -49,6 +49,31 @@ DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 50000
 
+# Функция get_whisper (восстановить оригинал или чуть упрощённый)
+def get_whisper():
+    global _whisper
+    if _whisper is None:
+        logger.info(f"Загрузка whisper-tiny (кэш: {CACHE_DIR})...")
+        try:
+            whisper_cache = CACHE_DIR / 'whisper'
+            whisper_cache.mkdir(parents=True, exist_ok=True)
+            
+            model = whisper.load_model("tiny", download_root=str(whisper_cache))
+            
+            class WhisperWrapper:
+                def __init__(self, model):
+                    self.model = model
+                
+                def __call__(self, audio_path):
+                    result = self.model.transcribe(str(audio_path), language="ru")
+                    return {"text": result.get("text", "").strip()}
+            
+            _whisper = WhisperWrapper(model)
+            logger.info("whisper-tiny успешно загружен")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки whisper-tiny: {e}", exc_info=True)
+            _whisper = False
+    return _whisper
 
 def get_model():
     global _model

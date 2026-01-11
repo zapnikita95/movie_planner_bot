@@ -1338,7 +1338,8 @@ def help_command(message):
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/help', message.chat.id)
     logger.info(f"Команда /help от пользователя {message.from_user.id}")
-    text = """🎬 Помощь по командам бота:
+
+    text = r"""🎬 Помощь по командам бота:
 
 /list — Показать список непросмотренных фильмов
 /random — Выбрать случайный непросмотренный фильм с фильтрами (год, жанр, режиссёр)
@@ -1382,9 +1383,9 @@ def help_command(message):
 Приятного просмотра! 🍿
 
 Если у вас возникли сложности с ботом или оплатой, напишите нам:
-@zap\_nikita
+@zap\\\_nikita
 movie-planner-bot@yandex.com"""
-    
+
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
     # Переключаемся на HTML, так как Markdown может вызывать ошибки парсинга
