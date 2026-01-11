@@ -11,10 +11,6 @@ print("Python version:", sys.version)
 # КРИТИЧЕСКИ ВАЖНО: Настройка logging ДО всех импортов
 import logging
 from datetime import datetime, timedelta
-from moviebot.web.web_app import create_web_app
-
-# Добавляем родительскую директорию в sys.path, чтобы moviebot стал видимым пакетом
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Простая настройка — работает на Railway 100%
 logging.basicConfig(
@@ -73,15 +69,15 @@ from apscheduler.schedulers.background import BackgroundScheduler
 # Импортируем бота из bot_init (он уже создан там)
 from moviebot.bot.bot_init import bot, init_bot_id
 
-# Очистка старых webhook + drop pending updates — КРИТИЧНО для избежания 409
-try:
-    bot.delete_webhook(drop_pending_updates=True)
-    logger.info("[BOT] Старый webhook успешно удалён + pending updates сброшены")
-except Exception as e:
-    logger.debug(f"[BOT] Webhook уже не был установлен или ошибка очистки: {e}")
-
 # Получаем ID бота и инициализируем его в bot_init
 BOT_ID = init_bot_id()  # Использует глобальный bot из bot_init
+
+# Очищаем старые webhook
+try:
+    bot.remove_webhook()
+    logger.info("Старые webhook очищены")
+except Exception as e:
+    logger.warning(f"Не удалось очистить webhook: {e}")
 
 # Планировщик для уведомлений
 scheduler = BackgroundScheduler()
@@ -234,21 +230,9 @@ from moviebot.bot.handlers.settings.join import register_join_handlers
 register_join_handlers(bot)
 logger.info("✅ join handlers зарегистрированы")
 
-try:
-    from moviebot.bot.handlers.state_handlers import register_admin_text_handlers
-    register_admin_text_handlers(bot)
-    logger.info("✅ admin text states handlers (high priority) зарегистрированы")
-except ImportError as e:
-    logger.error(f"❌ Не удалось импортировать state_handlers: {e}")
-
 from moviebot.bot.handlers.shazam import register_shazam_handlers
 register_shazam_handlers(bot)
 logger.info("✅ shazam handlers зарегистрированы")
-
-# Добавляем promo handlers (ОЧЕНЬ ВАЖНО — ДО text_messages!)
-from moviebot.bot.handlers.promo import register_promo_handlers
-register_promo_handlers(bot)
-logger.info("✅ promo handlers зарегистрированы")
 
 # === РЕГИСТРАЦИЯ CALLBACKS (после рефакторинга) ===
 from moviebot.bot.callbacks.film_callbacks import register_film_callbacks
@@ -370,49 +354,123 @@ logger.info("=" * 80)
 # 
 # ИЗМЕНЕНИЯ В ЭТОМ БЛОКЕ МОГУТ СЛОМАТЬ ДЕПЛОЙ НА RAILWAY!
 # ============================================================================
-# main.py — конец файла (замени весь блок if __name__ == "__main__": и ниже)
-
-logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
-    logger.info("=== ЗАПУСК БОТА ===")
+    logger.info("=== ЗАПУСК СКРИПТА ===")
 
-    # Определяем, что мы на Railway (самый надёжный способ)
-    IS_RAILWAY = 'RAILWAY_ENVIRONMENT' in os.environ
+    PORT = os.getenv('PORT')
+    IS_RAILWAY = PORT is not None and PORT.strip() != ''
+    USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
+    IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False').lower() == 'true'
 
-    PORT = int(os.getenv('PORT', 5000))
+    # На Railway почти всегда нужен Flask → создаём его один раз
+    from moviebot.web.web_app import create_web_app
 
-    if IS_RAILWAY:
-        logger.info("Обнаружен Railway → режим WEBHOOK (принудительно)")
-
-        # Создаём Flask приложение
+    # Защита: создаём app только если его ещё нет
+    if 'app' not in globals():
         app = create_web_app(bot)
-
-        # Формируем URL webhook
-        public_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN')
-        if not public_domain:
-            logger.critical("!!! RAILWAY_PUBLIC_DOMAIN НЕ НАЙДЕН !!! Webhook невозможен")
-            raise RuntimeError("RAILWAY_PUBLIC_DOMAIN not set")
-
-        webhook_path = "/webhook"  # ← здесь точно /webhook, как в web_app.py
-        webhook_url = f"https://{public_domain}{webhook_path}"
-
-        logger.info(f"Установка webhook → {webhook_url}")
-
-        try:
-            bot.set_webhook(url=webhook_url)
-            logger.info("Webhook успешно установлен!")
-        except Exception as e:
-            logger.critical("Ошибка при set_webhook", exc_info=True)
-            raise
-
-        # Запускаем Flask — он будет принимать все запросы Telegram
-        logger.info(f"Запуск Flask на 0.0.0.0:{PORT}")
-        app.run(host="0.0.0.0", port=PORT, debug=False)
-        logger.info("=== BOT FULLY STARTED ON RAILWAY ===")
-        logger.info(f"Webhook URL: https://{os.getenv('RAILWAY_PUBLIC_DOMAIN')}/webhook")
-        logger.info("Готов принимать обновления от Telegram...")
+        logger.info("Flask app создан")
     else:
-        # Локально — polling
-        logger.info("Локальный режим → polling")
+        logger.warning("Попытка повторного создания app — пропускаем")
+
+    # ========================================================================
+    # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Фоновая загрузка IMDb баз и эмбеддингов
+    # ========================================================================
+    # Загружаем ПОСЛЕ успешного деплоя, чтобы не перегрузить память при старте
+    # Запускаем в отдельном потоке, чтобы не блокировать Flask
+    # ========================================================================
+    def load_databases_in_background():
+        """Загружает IMDb базы и строит эмбеддинги в фоне после деплоя"""
+        import time
+        import threading
+        
+        # Ждем 10 секунд после старта, чтобы убедиться, что деплой успешен
+        logger.info("[BACKGROUND] Ожидание 10 секунд перед загрузкой баз...")
+        time.sleep(10)
+        
+        try:
+            logger.info("[BACKGROUND] ===== НАЧАЛО ЗАГРУЗКИ IMDb БАЗ И ЭМБЕДДИНГОВ =====")
+            
+            # 1. Загружаем IMDb базу
+            from moviebot.services.shazam_service import build_imdb_database
+            logger.info("[BACKGROUND] Шаг 1: Загрузка IMDb базы...")
+            build_imdb_database()
+            logger.info("[BACKGROUND] ✅ IMDb база загружена")
+            
+            # 2. Строим эмбеддинги (TMDB индекс)
+            from moviebot.services.shazam_service import build_tmdb_index
+            logger.info("[BACKGROUND] Шаг 2: Построение эмбеддингов (TMDB индекс)...")
+            build_tmdb_index()
+            logger.info("[BACKGROUND] ✅ Эмбеддинги построены")
+            
+            logger.info("[BACKGROUND] ===== ЗАГРУЗКА БАЗ И ЭМБЕДДИНГОВ ЗАВЕРШЕНА =====")
+            
+        except Exception as e:
+            logger.error(f"[BACKGROUND] ❌ Ошибка при загрузке баз: {e}", exc_info=True)
+            logger.warning("[BACKGROUND] Будет использована ленивая загрузка при первом использовании")
+            # НЕ поднимаем исключение - это не критично для работы бота
+            # Бот продолжит работать, базы загрузятся при первом использовании
+    
+    # ========================================================================
+    # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: Запуск фоновой задачи загрузки баз
+    # ========================================================================
+    # Запускаем ТОЛЬКО на Railway/Production, чтобы не перегрузить память при старте
+    # Задача выполняется в отдельном daemon-потоке и не блокирует Flask
+    # Если загрузка не удастся, будет использована ленивая загрузка при первом использовании
+    # ========================================================================
+    if IS_RAILWAY or IS_PRODUCTION:
+        import threading
+        background_thread = threading.Thread(target=load_databases_in_background, daemon=True)
+        background_thread.start()
+        logger.info("[MAIN] ✅ Фоновая задача загрузки баз запущена (IMDb + эмбеддинги)")
+
+    if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
+        logger.info("Railway/Production/Webhook режим")
+
+        # Пытаемся установить webhook
+        WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+        if not WEBHOOK_URL:
+            railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN') or os.getenv('RAILWAY_STATIC_URL')
+            if railway_domain:
+                WEBHOOK_URL = f"https://{railway_domain.rstrip('/')}"
+            else:
+                logger.warning("Не удалось определить WEBHOOK_URL — webhook не будет установлен")
+                WEBHOOK_URL = None
+
+        if USE_WEBHOOK and WEBHOOK_URL:
+            try:
+                bot.remove_webhook()
+                webhook_path = "/webhook"
+                full_url = f"{WEBHOOK_URL}{webhook_path}"
+                bot.set_webhook(url=full_url)
+                logger.info(f"Webhook установлен → {full_url}")
+            except Exception as e:
+                logger.error("Ошибка установки webhook", exc_info=True)
+                # НЕ выходим — Flask всё равно нужен
+        else:
+            logger.info("Webhook НЕ используется (или URL не найден) → polling в фоне")
+
+            def run_polling():
+                try:
+                    logger.info("Polling запущен в фоновом потоке")
+                    bot.infinity_polling(none_stop=True, interval=0, timeout=20)
+                except Exception as e:
+                    logger.critical("Polling упал", exc_info=True)
+
+            import threading
+            polling_thread = threading.Thread(target=run_polling, daemon=True)
+            polling_thread.start()
+
+        # Flask в главном потоке — обязателен для Railway health checks и webhook
+        port = int(PORT or 8080)
+        logger.info(f"Запуск Flask на порту {port}")
+        app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
+
+    else:
+        # Локальный запуск (почти никогда не используется на Railway)
+        logger.info("Локальный режим — чистый polling")
+        try:
+            bot.remove_webhook()
+        except:
+            pass
         bot.infinity_polling(none_stop=True, interval=0, timeout=20)

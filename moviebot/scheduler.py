@@ -1677,7 +1677,7 @@ def process_recurring_payments():
                     logger.warning(f"[RECURRING PAYMENT] Платеж {payment.id} не успешен, статус: {payment.status}, cancellation_details: {has_cancellation_details}, reason: {cancellation_reason}")
                     
                     # Подсчитываем количество неудачных попыток за последние 7 дней
-                    from moviebot.database.db_operations import get_db_connection, get_db_cursor, db_lock
+                    from moviebot.database.db_connection import get_db_connection, get_db_cursor
                     conn_retry = get_db_connection()
                     cursor_retry = conn_retry.cursor()
                     retry_count = 0
