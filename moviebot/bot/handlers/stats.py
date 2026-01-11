@@ -1,4 +1,4 @@
-from moviebot.bot.bot_init import bot
+from moviebot.bot.bot_init import bot, BOT_ID
 """
 Обработчики команд /stats, /total, /admin_stats
 """
@@ -375,7 +375,7 @@ def register_stats_handlers(bot):
                                         release_date = None
                                         for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
                                             try:
-                                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                                release_date = datetime.strptime(release_str.split('T')[0], fmt)
                                                 break
                                             except:
                                                 continue
