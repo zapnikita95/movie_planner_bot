@@ -8,6 +8,7 @@ import random
 import threading
 import requests
 import pytz
+import time
 from datetime import datetime
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton  
@@ -26,7 +27,7 @@ from moviebot.utils.helpers import has_tickets_access, has_recommendations_acces
 from moviebot.utils.parsing import parse_plan_date_text
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
 
-from moviebot.config import KP_TOKEN, PLANS_TZ
+from moviebot.config import KP_TOKEN, PLANS_TZ, TOKEN
 
 from moviebot.states import (
 
@@ -4483,6 +4484,65 @@ def register_series_handlers(bot_param):
                         logger.info(f"[DICE GAME] participant {pid}: username={pinfo.get('username')}, dice_message_id={pinfo.get('dice_message_id')}, has_value={'value' in pinfo}")
                     for dmid, duid in game_state.get('dice_messages', {}).items():
                         logger.info(f"[DICE GAME] dice_message {dmid} -> user_id {duid}")
+                    
+                    # КРИТИЧЕСКИ ВАЖНО: Боты не получают edited_message для своих собственных сообщений
+                    # Поэтому нужно периодически проверять результат через прямой API вызов getUpdates
+                    def check_dice_result_after_delay():
+                        """Проверяет результат dice через 2-3 секунды после отправки через getUpdates"""
+                        time.sleep(2.5)  # Ждем, пока кубик остановится (обычно 1-2 секунды)
+                        
+                        try:
+                            # Проверяем, что состояние игры все еще существует
+                            if chat_id not in dice_game_state:
+                                logger.warning(f"[DICE GAME POLL] Чат {chat_id} больше не в dice_game_state")
+                                return
+                            
+                            current_game_state = dice_game_state[chat_id]
+                            if user_id not in current_game_state.get('participants', {}):
+                                logger.warning(f"[DICE GAME POLL] Пользователь {user_id} больше не в participants")
+                                return
+                            
+                            # Получаем результат через прямой API вызов getUpdates
+                            from moviebot.bot.bot_init import BOT_ID
+                            from moviebot.utils.random_events import update_dice_game_message
+                            
+                            url = f"https://api.telegram.org/bot{TOKEN}/getUpdates"
+                            params = {'offset': -100, 'limit': 100, 'timeout': 1}  # Получаем последние 100 обновлений
+                            
+                            try:
+                                response = requests.get(url, params=params, timeout=5)
+                                if response.status_code == 200:
+                                    data = response.json()
+                                    if data.get('ok') and data.get('result'):
+                                        # Ищем обновление с нашим message_id
+                                        for update in data['result']:
+                                            if 'message' in update and update['message'].get('message_id') == dice_msg.message_id:
+                                                if 'dice' in update['message']:
+                                                    dice_value = update['message']['dice'].get('value')
+                                                    if dice_value is not None and 1 <= dice_value <= 6:
+                                                        logger.info(f"[DICE GAME POLL] ✅ Найден результат dice: {dice_value} для message_id={dice_msg.message_id}")
+                                                        
+                                                        # Сохраняем значение
+                                                        if user_id in current_game_state.get('participants', {}):
+                                                            current_game_state['participants'][user_id]['value'] = dice_value
+                                                            logger.info(f"[DICE GAME POLL] ✅ Сохранено значение {dice_value} для user_id={user_id}")
+                                                            
+                                                            # Обновляем сообщение с результатами
+                                                            message_id_to_update = current_game_state.get('message_id')
+                                                            if message_id_to_update:
+                                                                update_dice_game_message(chat_id, current_game_state, message_id_to_update, BOT_ID)
+                                                                logger.info(f"[DICE GAME POLL] ✅ Сообщение с результатами обновлено")
+                                                        return
+                                    logger.warning(f"[DICE GAME POLL] ⚠️ Результат dice не найден в getUpdates для message_id={dice_msg.message_id}")
+                            except Exception as api_e:
+                                logger.error(f"[DICE GAME POLL] ❌ Ошибка при вызове getUpdates API: {api_e}", exc_info=True)
+                            
+                        except Exception as poll_e:
+                            logger.error(f"[DICE GAME POLL] ❌ Ошибка при проверке результата dice: {poll_e}", exc_info=True)
+                    
+                    # Запускаем проверку в отдельном потоке
+                    poll_thread = threading.Thread(target=check_dice_result_after_delay, daemon=True)
+                    poll_thread.start()
                     
                     # Обновляем сообщение с результатами
                     message_id_to_update = game_state.get('message_id', message_id)

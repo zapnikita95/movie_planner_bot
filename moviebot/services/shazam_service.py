@@ -194,7 +194,16 @@ def parse_json_list(json_str, key='name', top_n=10):
 
 def build_tmdb_index():
     global _index, _movies_df
-    
+
+    # ВРЕМЕННЫЙ БЛОК — УДАЛИТЬ ПОСЛЕ ПЕРВОГО ЗАПУСКА
+    if INDEX_PATH.exists():
+        INDEX_PATH.unlink()
+        logger.info("Удалён старый индекс для пересоздания")
+    if DATA_PATH.exists():
+        DATA_PATH.unlink()
+        logger.info("Удалён старый processed.csv для пересоздания")
+    # КОНЕЦ ВРЕМЕННОГО БЛОКА
+
     if INDEX_PATH.exists() and DATA_PATH.exists():
         try:
             _index = faiss.read_index(str(INDEX_PATH))
@@ -203,7 +212,7 @@ def build_tmdb_index():
             return _index, _movies_df
         except Exception as e:
             logger.warning(f"Не удалось загрузить индекс: {e} → пересоздаём")
-    
+        
     # === СКАЧИВАНИЕ И ПОИСК CSV ФАЙЛА ===
     if not TMDB_CSV_PATH.exists():
         logger.info("TMDB CSV не найден — скачиваем через Kaggle API...")
@@ -280,7 +289,7 @@ def build_tmdb_index():
     # Режиссёры (поле director уже готово как строка)
     df['director_str'] = df['director'].fillna('')
     
-    # Продюсеры — если хочешь, можно добавить (поле producers есть)
+    # Продюсеры
     df['producers_str'] = df['producers'].fillna('')
     
     df['description'] = df.apply(
@@ -292,7 +301,10 @@ def build_tmdb_index():
         axis=1
     )
     
-    df['imdb_id'] = df['imdb_id'].astype(str).str.replace('tt', '', regex=False)
+    # ФИКС IMDB ID — убираем .0 и добавляем tt, если это чистые цифры
+    df['imdb_id'] = df['imdb_id'].astype(str).str.replace(r'\.0$', '', regex=True)
+    df['imdb_id'] = df['imdb_id'].apply(lambda x: f"tt{x}" if x.isdigit() else x)
+    
     processed = df[['imdb_id', 'title', 'year', 'description']].copy()
     processed = processed.head(MAX_MOVIES)
     
@@ -328,7 +340,6 @@ def get_index_and_movies():
     if _index is None or _movies_df is None:
         _index, _movies_df = build_tmdb_index()
     return _index, _movies_df
-
 
 def search_movies(query, top_k=5):
     try:
