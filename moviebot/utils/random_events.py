@@ -193,13 +193,17 @@ def send_dice_game_event(chat_id, skip_checks=False):
         logger.error(f"[DICE GAME] Критическая ошибка в send_dice_game_event: {e}", exc_info=True)
         return False
 
-
 def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
     """
     Обновляет сообщение с игрой в кубик, показывая результаты и количество оставшихся участников
     bot_id - ID бота для исключения из подсчета участников
+    При ничьей — сбрасывает результаты и автоматически запускает переброс кубика от бота
     """
     try:
+        import threading
+        from moviebot.bot.bot_init import bot
+        from datetime import datetime, timedelta
+
         # Получаем список всех активных участников (исключая бота)
         with db_lock:
             if bot_id:
@@ -252,16 +256,13 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
         start_time = game_state.get('start_time')
         if start_time:
             if isinstance(start_time, str):
-                # Парсим строку ISO формата
                 try:
-                    # Пробуем использовать fromisoformat (Python 3.7+)
                     if hasattr(datetime, 'fromisoformat'):
                         if start_time.endswith('Z'):
                             start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
                         else:
                             start_time = datetime.fromisoformat(start_time)
                     else:
-                        # Fallback для старых версий Python
                         from dateutil.parser import parse
                         start_time = parse(start_time)
                     if start_time.tzinfo is None:
@@ -274,7 +275,7 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
             elif start_time.tzinfo is None:
                 start_time = plans_tz.localize(start_time)
             elapsed_seconds = (datetime.now(plans_tz) - start_time).total_seconds()
-            game_expired = elapsed_seconds >= 600  # 10 минут = 600 секунд
+            game_expired = elapsed_seconds >= 600
         else:
             game_expired = False
         
@@ -287,12 +288,13 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
             all_threw = remaining_count == 0
             all_have_results = len(participants_without_results) == 0 and len(participants_with_results) > 0
         
-        # Если время игры истекло и есть результаты, определяем победителя (тот, кто выбросил больше)
+        # Логика окончания игры или ничьей
         if game_expired and participants_with_values_dict:
             max_value = max(participants_with_values_dict.values())
             winners = [uid for uid, val in participants_with_values_dict.items() if val == max_value]
             
             if len(winners) == 1:
+                # Один победитель — конец
                 winner_id = winners[0]
                 winner_info = game_state['participants'][winner_id]
                 winner_name = winner_info.get('username', 'участник')
@@ -307,7 +309,6 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                 text += f"🏆 <b>Победитель: {user_display}</b> (выбросил {max_value})\n\n"
                 text += f"🎬 {user_display} выбирает фильм для вашей компании!\n"
                 
-                # Отправка сообщения победителю
                 winner_mention = f"@{winner_info.get('username')}" if winner_info.get('username') else user_display
                 
                 markup_winner = InlineKeyboardMarkup(row_width=1)
@@ -325,7 +326,9 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                 if chat_id in dice_game_state:
                     del dice_game_state[chat_id]
                 return
+            
             elif len(winners) > 1:
+                # Ничья → сброс + автоматический переброс
                 winner_names = []
                 for winner_id in winners:
                     winner_info = game_state['participants'][winner_id]
@@ -336,17 +339,34 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                     except:
                         user_display = winner_name if not winner_name.startswith('user_') else "участник"
                     winner_names.append(user_display)
-                text += f"⏰ <b>Время вышло!</b>\n\n"
+                
                 text += f"🤝 <b>Ничья!</b> У {len(winners)} участников выпало {max_value}:\n"
                 for name in winner_names:
                     text += f"• {name}\n"
-                text += "\n🎲 Перекидываем кубик для определения победителя!\n"
-        
+                text += "\n🎲 Перекидываем! Бросайте снова!\n"
+                
+                # СБРОС СОСТОЯНИЯ РАУНДА
+                game_state['participants'] = {}
+                game_state['dice_messages'] = {}
+                game_state['start_time'] = datetime.now(plans_tz)
+                
+                # Автоматический бросок от бота в фоне
+                def send_bot_dice():
+                    try:
+                        bot_dice_msg = bot.send_dice(chat_id, emoji='🎲')
+                        logger.info(f"[DICE GAME] Переброс ничьи: бот кинул кубик, msg_id={bot_dice_msg.message_id}")
+                    except Exception as e:
+                        logger.error(f"[DICE GAME] Ошибка переброса: {e}")
+                
+                threading.Thread(target=send_bot_dice, daemon=True).start()
+
         elif all_threw and all_have_results and participants_with_values_dict:
+            # Аналогично для случая когда все бросили без таймаута
             max_value = max(participants_with_values_dict.values())
             winners = [uid for uid, val in participants_with_values_dict.items() if val == max_value]
             
             if len(winners) == 1:
+                # ... (твой текущий код победителя — без изменений)
                 winner_id = winners[0]
                 winner_info = game_state['participants'][winner_id]
                 winner_name = winner_info.get('username', 'участник')
@@ -360,7 +380,6 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                 text += f"🏆 <b>Победитель: {user_display}</b> (выбросил {max_value})\n\n"
                 text += f"🎬 {user_display} выбирает фильм для вашей компании!\n"
                 
-                # Отправка сообщения победителю
                 winner_mention = f"@{winner_info.get('username')}" if winner_info.get('username') else user_display
                 
                 markup_winner = InlineKeyboardMarkup(row_width=1)
@@ -379,6 +398,7 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                     del dice_game_state[chat_id]
                     
             elif len(winners) > 1:
+                # Ничья — тот же сброс + переброс
                 winner_names = []
                 for winner_id in winners:
                     winner_info = game_state['participants'][winner_id]
@@ -389,11 +409,27 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                     except:
                         user_display = winner_name if not winner_name.startswith('user_') else "участник"
                     winner_names.append(user_display)
+                
                 text += f"🤝 <b>Ничья!</b> У {len(winners)} участников выпало {max_value}:\n"
                 for name in winner_names:
                     text += f"• {name}\n"
-                text += "\n🎲 Перекидываем кубик для определения победителя!\n"
+                text += "\n🎲 Перекидываем! Бросайте снова!\n"
                 
+                # СБРОС
+                game_state['participants'] = {}
+                game_state['dice_messages'] = {}
+                game_state['start_time'] = datetime.now(plans_tz)
+                
+                # Переброс в фоне
+                def send_bot_dice():
+                    try:
+                        bot_dice_msg = bot.send_dice(chat_id, emoji='🎲')
+                        logger.info(f"[DICE GAME] Переброс ничьи: бот кинул, msg_id={bot_dice_msg.message_id}")
+                    except Exception as e:
+                        logger.error(f"[DICE GAME] Ошибка переброса: {e}")
+                
+                threading.Thread(target=send_bot_dice, daemon=True).start()
+
         elif remaining_count > 0:
             text += f"⏳ Осталось бросить кубик: <b>{remaining_count}</b> участник(ов)\n\n"
         elif len(participants_without_results) > 0:
@@ -401,12 +437,11 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
         else:
             text += "✅ Все участники бросили кубик!\n\n"
         
-        # Клавиатура (убрана кнопка "Бросить кубик" - пользователи отправляют кубики сами)
+        # Клавиатура
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
         markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
         
-        # <<< КРИТИЧЕСКИЙ ФИКС: обрабатываем ошибку "message not modified" >>>
         try:
             bot.edit_message_text(
                 text=text,
@@ -417,13 +452,13 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
             )
         except ApiTelegramException as e:
             if e.error_code == 400 and "message is not modified" in str(e.description).lower():
-                logger.debug(f"[DICE GAME] Сообщение не изменилось — пропускаем edit (chat_id={chat_id}, message_id={message_id})")
+                logger.debug(f"[DICE GAME] Сообщение не изменилось — пропускаем edit")
                 return
             else:
-                logger.error(f"[DICE GAME] Ошибка Telegram API при edit_message_text: {e}", exc_info=True)
+                logger.error(f"[DICE GAME] Ошибка edit_message_text: {e}", exc_info=True)
                 raise
         except Exception as e:
-            logger.error(f"[DICE GAME] Неизвестная ошибка при обновлении сообщения: {e}", exc_info=True)
+            logger.error(f"[DICE GAME] Неизвестная ошибка при обновлении: {e}", exc_info=True)
             raise
             
     except Exception as e:
