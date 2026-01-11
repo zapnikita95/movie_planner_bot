@@ -296,8 +296,12 @@ def handle_rating_internal(message, rating):
     
     # Если film_id не найден, но есть kp_id, добавляем фильм в базу
     if not film_id and kp_id:
+        # Пробуем сначала /film/, затем /series/ если нужно
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         info = extract_movie_info(link)
+        # Если получена информация, проверяем is_series и корректируем ссылку
+        if info and info.get('is_series'):
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
         if info:
             film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
             if was_inserted:

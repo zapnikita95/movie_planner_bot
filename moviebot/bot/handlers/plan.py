@@ -2096,7 +2096,6 @@ def stream_sel_callback(call):
             bot.edit_message_text(
                 "😔 Не найдено онлайн-кинотеатров для просмотра.",
                 chat_id, message_id,
-                message_thread_id=message_thread_id,
                 reply_markup=InlineKeyboardMarkup().add(
                     InlineKeyboardButton("◀️ Назад", callback_data=f"back_to_film:{kp_id}")
                 )
@@ -2116,7 +2115,6 @@ def stream_sel_callback(call):
         bot.edit_message_text(
             "📺 <b>Онлайн-кинотеатры для просмотра:</b>\n\nВыберите платформу:",
             chat_id, message_id,
-            message_thread_id=message_thread_id,
             reply_markup=markup,
             parse_mode='HTML'
         )

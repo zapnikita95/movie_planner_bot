@@ -1408,20 +1408,21 @@ def handle_rate_list_reply(message):
         reply_msg_id = message.reply_to_message.message_id if message.reply_to_message else None
         from moviebot.states import rating_messages
         
-        cleaned = False
-        if reply_msg_id and reply_msg_id in rating_messages:
-            del rating_messages[reply_msg_id]
-            cleaned = True
-            logger.info(f"[HANDLE RATE LIST REPLY] Очищено rating_messages для reply_msg_id={reply_msg_id}")
-        
         try:
             from moviebot.bot.handlers.rate import handle_rating_internal
             handle_rating_internal(message, rating)
             logger.info(f"[HANDLE RATE LIST REPLY] handle_rating_internal завершен")
+            
+            # Удаляем rating_messages только после успешной обработки
+            if reply_msg_id and reply_msg_id in rating_messages:
+                del rating_messages[reply_msg_id]
+                logger.info(f"[HANDLE RATE LIST REPLY] Очищено rating_messages для reply_msg_id={reply_msg_id}")
         except Exception as rating_e:
             logger.error(f"[HANDLE RATE LIST REPLY] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
-            if not cleaned and reply_msg_id and reply_msg_id in rating_messages:
+            # Удаляем rating_messages даже при ошибке, чтобы не блокировать повторные попытки
+            if reply_msg_id and reply_msg_id in rating_messages:
                 del rating_messages[reply_msg_id]
+                logger.info(f"[HANDLE RATE LIST REPLY] Очищено rating_messages после ошибки для reply_msg_id={reply_msg_id}")
         
         return
     

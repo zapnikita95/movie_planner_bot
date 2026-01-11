@@ -1078,10 +1078,18 @@ def confirm_remove_from_database(call):
 
         # Получаем информацию о фильме через API для показа описания
         from moviebot.api.kinopoisk_api import extract_movie_info
+        # Сначала пробуем получить информацию, чтобы определить is_series
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         info = extract_movie_info(link)
         
         if info:
+            # Корректируем ссылку в зависимости от типа (сериал или фильм)
+            is_series = info.get('is_series', False)
+            if is_series:
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            else:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
             # Обновляем описание - теперь фильм не в базе (existing=None)
             from moviebot.bot.handlers.series import show_film_info_with_buttons
             message_thread_id = getattr(call.message, 'message_thread_id', None)
