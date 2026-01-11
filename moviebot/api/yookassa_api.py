@@ -287,7 +287,7 @@ def create_recurring_payment(
     group_username: Optional[str] = None
 ) -> Optional[Any]:
     """
-    Создает безакцептный рекуррентный платеж
+    Создает безакцептный рекуррентный платеж используя сохраненный payment_method_id
     
     Args:
         user_id: ID пользователя Telegram
@@ -304,6 +304,14 @@ def create_recurring_payment(
     Returns:
         Объект Payment или None в случае ошибки
     """
+    if not YOOKASSA_AVAILABLE:
+        logger.error("[YOOKASSA] Модуль yookassa не установлен")
+        return None
+    
+    if not Configuration.account_id or not Configuration.secret_key:
+        if not init_yookassa():
+            return None
+    
     payment_id = str(uuid.uuid4())
     
     # Формируем описание платежа
@@ -342,14 +350,25 @@ def create_recurring_payment(
     if group_username:
         metadata["group_username"] = group_username
     
-    # Создаем безакцептный платеж
-    payment = create_payment(
-        amount=amount,
-        description=description,
-        metadata=metadata,
-        payment_method_id=payment_method_id,
-        capture=True
-    )
-    
-    return payment
+    # Создаем безакцептный рекуррентный платеж с явным указанием всех параметров
+    # Используем сохраненный payment_method_id для автоматического списания
+    try:
+        payment_data = {
+            "amount": {
+                "value": f"{amount:.2f}",
+                "currency": "RUB"
+            },
+            "capture": True,
+            "payment_method_id": payment_method_id,
+            "description": description,
+            "metadata": metadata
+        }
+        
+        logger.info(f"[YOOKASSA RECURRING] Создание рекуррентного платежа: amount={amount}, payment_method_id={payment_method_id}")
+        payment = Payment.create(payment_data)
+        logger.info(f"[YOOKASSA RECURRING] Платеж создан: id={payment.id}, status={payment.status}")
+        return payment
+    except Exception as e:
+        logger.error(f"[YOOKASSA RECURRING] Ошибка создания рекуррентного платежа: {e}", exc_info=True)
+        return None
 

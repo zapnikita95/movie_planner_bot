@@ -1641,11 +1641,14 @@ def process_recurring_payments():
                     
                     # Если есть cancellation_details или это одна из первых 5 попыток - планируем повтор
                     if has_cancellation_details and retry_count < 5:
-                        # Планируем следующую попытку через день в 9:00 МСК
+                        # ПЛАНИРУЕМ ПОВТОРНУЮ ПОПЫТКУ ЧЕРЕЗ ДЕНЬ
+                        # Для неудачных рекуррентных платежей следующая попытка будет через день в 9:00 МСК
                         tomorrow = now + timedelta(days=1)
                         next_attempt = PLANS_TZ.localize(
                             datetime.combine(tomorrow.date(), datetime.min.time().replace(hour=9, minute=0))
                         ).astimezone(pytz.UTC)
+                        
+                        logger.info(f"[RECURRING PAYMENT] Планируется повторная попытка для подписки {subscription_id} через день: {next_attempt}")
                         
                         # Обновляем next_payment_date в БД
                         from moviebot.database.db_operations import update_subscription_next_payment
