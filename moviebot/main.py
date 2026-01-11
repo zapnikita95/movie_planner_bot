@@ -359,29 +359,34 @@ if __name__ == "__main__":
     if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
         logger.info("Railway/Production/Webhook режим")
 
-        # Пытаемся установить webhook
-        WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+        # Временный жёсткий фикс — используем заведомо рабочий домен
+        WEBHOOK_URL = None
+        
+        # Можно раскомментировать, когда Railway починит переменную
+        # WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+        
         if not WEBHOOK_URL:
-            railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN') or os.getenv('RAILWAY_STATIC_URL')
-            if railway_domain:
-                WEBHOOK_URL = f"https://{railway_domain.rstrip('/')}"
-            else:
-                logger.warning("Не удалось определить WEBHOOK_URL — webhook не будет установлен")
-                WEBHOOK_URL = None
+            # railway_domain = os.getenv('RAILWAY_PUBLIC_DOMAIN') or os.getenv('RAILWAY_STATIC_URL')
+            # ↑ закомментировали старую логику
+            
+            # ЖЁСТКО прописываем правильный домен (пока баг с переменной)
+            correct_domain = "web-production-3921c.up.railway.app"
+            WEBHOOK_URL = f"https://{correct_domain}"
+            logger.info(f"[FIX] Принудительно используем домен: {correct_domain}")
 
         if USE_WEBHOOK and WEBHOOK_URL:
             try:
                 bot.remove_webhook()
                 webhook_path = "/webhook"
                 full_url = f"{WEBHOOK_URL}{webhook_path}"
-                bot.set_webhook(url=full_url)
+                bot.set_webhook(url=full_url, drop_pending_updates=True)  # +очистка очереди
                 logger.info(f"Webhook установлен → {full_url}")
             except Exception as e:
                 logger.error("Ошибка установки webhook", exc_info=True)
                 # НЕ выходим — Flask всё равно нужен
         else:
             logger.info("Webhook НЕ используется (или URL не найден) → polling в фоне")
-
+            
             def run_polling():
                 try:
                     logger.info("Polling запущен в фоновом потоке")
@@ -390,6 +395,7 @@ if __name__ == "__main__":
                     logger.critical("Polling упал", exc_info=True)
 
             import threading
+            # ... (остальное без изменений)
             polling_thread = threading.Thread(target=run_polling, daemon=True)
             polling_thread.start()
 
