@@ -384,8 +384,17 @@ def search_movies(query, top_k=5):
         for idx in I[0]:
             if idx < len(movies):
                 row = movies.iloc[idx]
+                imdb_id_raw = str(row['imdb_id']).strip()
+                # Очищаем IMDB ID: убираем .0, убираем все tt в начале, добавляем один tt
+                imdb_id_clean = imdb_id_raw.replace('.0', '').replace('.', '')
+                imdb_id_clean = imdb_id_clean.lstrip('t')
+                if imdb_id_clean and imdb_id_clean.isdigit():
+                    imdb_id_clean = f"tt{imdb_id_clean}"
+                else:
+                    imdb_id_clean = imdb_id_raw  # Если не получилось очистить, оставляем как есть
+                
                 results.append({
-                    'imdb_id': row['imdb_id'],
+                    'imdb_id': imdb_id_clean,
                     'title': row['title'],
                     'year': row['year'] if pd.notna(row['year']) else None,
                     'description': row['description'][:500]

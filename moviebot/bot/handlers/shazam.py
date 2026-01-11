@@ -142,15 +142,18 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
             kp_id = None
             imdb_id_raw = result.get('imdb_id')
             if imdb_id_raw:
-                full_imdb_id = f"tt{str(imdb_id_raw).zfill(7)}"
+                # imdb_id уже должен быть в формате tt1234567
                 try:
-                    film_info = get_film_by_imdb_id(full_imdb_id)
+                    film_info = get_film_by_imdb_id(imdb_id_raw)
                     if film_info:
                         kp_id = film_info.get('kp_id')
                         kp_title = film_info.get('title')
                         kp_year = film_info.get('year')
+                        logger.info(f"[SHAZAM TEXT] Найден в Кинопоиске: {kp_title} (kp_id={kp_id}) для imdb_id={imdb_id_raw}")
+                    else:
+                        logger.warning(f"[SHAZAM TEXT] Фильм с IMDB ID {imdb_id_raw} не найден в Кинопоиске")
                 except Exception as e:
-                    logger.warning(f"Kinopoisk не дал данные для {full_imdb_id}: {e}")
+                    logger.warning(f"[SHAZAM TEXT] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
             
             # Что показываем
             display_title = kp_title or omdb_title
@@ -376,15 +379,18 @@ def process_shazam_voice_async(message, loading_msg):
             kp_id = None
             imdb_id_raw = result.get('imdb_id')
             if imdb_id_raw:
-                full_imdb_id = f"tt{str(imdb_id_raw).zfill(7)}"
+                # imdb_id уже должен быть в формате tt1234567
                 try:
-                    film_info = get_film_by_imdb_id(full_imdb_id)
+                    film_info = get_film_by_imdb_id(imdb_id_raw)
                     if film_info:
                         kp_id = film_info.get('kp_id')
                         kp_title = film_info.get('title')
                         kp_year = film_info.get('year')
+                        logger.info(f"[SHAZAM VOICE] Найден в Кинопоиске: {kp_title} (kp_id={kp_id}) для imdb_id={imdb_id_raw}")
+                    else:
+                        logger.warning(f"[SHAZAM VOICE] Фильм с IMDB ID {imdb_id_raw} не найден в Кинопоиске")
                 except Exception as e:
-                    logger.warning(f"Kinopoisk не дал данные для {full_imdb_id}: {e}")
+                    logger.warning(f"[SHAZAM VOICE] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
             
             display_title = kp_title or omdb_title
             display_year = f" ({kp_year or omdb_year})" if (kp_year or omdb_year) else ""
