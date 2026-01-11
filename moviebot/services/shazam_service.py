@@ -17,6 +17,12 @@ from tqdm import tqdm
 from datetime import datetime
 import whisper  # только это нужно из speech-библиотек
 
+# В начале файла (после всех импортов)
+import threading
+
+# Глобальная блокировка для индекса
+_index_lock = threading.Lock()
+
 # Отключаем ненужный параллелизм, чтобы не было segmentation fault
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
@@ -48,6 +54,19 @@ DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'
 
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 50000
+
+
+def init_shazam_index():
+    """Инициализация индекса при запуске приложения"""
+    logger.info("Запуск инициализации индекса шазама при старте приложения...")
+    with _index_lock:
+        if _index is None or _movies_df is None:
+            try:
+                get_index_and_movies()  # Это вызовет build_tmdb_index()
+                logger.info("Индекс шазама успешно инициализирован при старте")
+            except Exception as e:
+                logger.error(f"Ошибка инициализации индекса при старте: {e}", exc_info=True)
+
 
 # Функция get_whisper (восстановить оригинал или чуть упрощённый)
 def get_whisper():
@@ -301,9 +320,10 @@ def build_tmdb_index():
         axis=1
     )
     
-    # ФИКС IMDB ID — убираем .0 и добавляем tt, если это чистые цифры
-    df['imdb_id'] = df['imdb_id'].astype(str).str.replace(r'\.0$', '', regex=True)
-    df['imdb_id'] = df['imdb_id'].apply(lambda x: f"tt{x}" if x.isdigit() else x)
+    # ФИКС IMDB ID — чистим .0 и оставляем только один tt
+    df['imdb_id'] = df['imdb_id'].astype(str).str.strip()  # убираем пробелы
+    df['imdb_id'] = df['imdb_id'].str.replace(r'\.0$', '', regex=True)  # убираем .0
+    df['imdb_id'] = df['imdb_id'].apply(lambda x: x if x.startswith('tt') else f"tt{x}")  # добавляем tt ТОЛЬКО если его нет
     
     processed = df[['imdb_id', 'title', 'year', 'description']].copy()
     processed = processed.head(MAX_MOVIES)
@@ -337,9 +357,11 @@ def build_tmdb_index():
 
 def get_index_and_movies():
     global _index, _movies_df
-    if _index is None or _movies_df is None:
-        _index, _movies_df = build_tmdb_index()
-    return _index, _movies_df
+
+    with _index_lock:  # ← Только один worker может войти сюда одновременно
+        if _index is None or _movies_df is None:
+            _index, _movies_df = build_tmdb_index()
+        return _index, _movies_df
 
 def search_movies(query, top_k=5):
     try:
