@@ -167,7 +167,6 @@ def parse_json_list(json_str, key='name', top_n=10):
     except:
         return ''
 
-
 def build_tmdb_index():
     global _index, _movies_df
     
@@ -206,12 +205,11 @@ def build_tmdb_index():
             
             logger.info("Скачиваем датасет через Kaggle API...")
             kaggle.api.dataset_download_files(
-                "alanvourch/tmdb-movies-daily-updates",  # ← Изменено здесь!
+                "alanvourch/tmdb-movies-daily-updates",
                 path=str(CACHE_DIR),
                 unzip=True
             )
             
-            # В новом датасете главный файл — TMDB_all_movies.csv
             actual_csv = CACHE_DIR / "TMDB_all_movies.csv"
             if not actual_csv.exists():
                 logger.error("TMDB_all_movies.csv не найден после скачивания")
@@ -247,31 +245,25 @@ def build_tmdb_index():
     df = df.dropna(subset=['overview', 'title'])
     df = df.sort_values('vote_count', ascending=False).head(MAX_MOVIES * 2)
     
-    df['genres_str'] = df['genres'].apply(lambda x: parse_json_list(x, 'name'))
-    df['keywords_str'] = df['keywords'].apply(lambda x: parse_json_list(x, 'name', top_n=15))
+    logger.info("Keywords отсутствуют — используем только сюжет, жанры, актёров и режиссёра")
     
-    # Актёры — в новом датасете поле 'cast' это JSON-строка
+    df['genres_str'] = df['genres'].apply(lambda x: parse_json_list(x, 'name'))
+    
+    # Актёры (поле cast есть!)
     df['actors_str'] = df['cast'].apply(lambda x: parse_json_list(x, 'name', top_n=10))
     
-    # Режиссёры — ищем в 'crew' только с job == "Director"
-    def get_directors(crew_json):
-        if pd.isna(crew_json) or crew_json == '[]':
-            return ''
-        try:
-            items = json.loads(crew_json)
-            directors = [item['name'] for item in items if item.get('job') == 'Director']
-            return ', '.join(directors[:3])
-        except:
-            return ''
+    # Режиссёры (поле director уже готово как строка)
+    df['director_str'] = df['director'].fillna('')
     
-    df['director_str'] = df['crew'].apply(get_directors)
+    # Продюсеры — если хочешь, можно добавить (поле producers есть)
+    df['producers_str'] = df['producers'].fillna('')
     
     df['description'] = df.apply(
         lambda row: f"{row['title']} ({row['year']}) {row['genres_str']}. "
                     f"Plot: {row['overview']}. "
-                    f"Keywords: {row['keywords_str']}. "
                     f"Actors: {row['actors_str']}. "
-                    f"Director: {row['director_str']}",
+                    f"Director: {row['director_str']}. "
+                    f"Producers: {row['producers_str']}",
         axis=1
     )
     
