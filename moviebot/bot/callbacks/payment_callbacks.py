@@ -1268,9 +1268,23 @@ def register_payment_callbacks(bot_instance):
                     'expansion_new_size': new_size
                 }
                 
-                # Переходим к созданию платежа через обработчик pay:group
-                action = f"pay:group:{new_size}:{plan_type}:{period_type}"
-                # Продолжаем выполнение ниже в коде (обработчик pay:group:...)
+                # Показываем информацию о расширении и кнопку оплаты
+                text = f"📈 <b>Расширение подписки</b>\n\n"
+                text += f"Текущий размер: <b>{current_size} участников</b>\n"
+                text += f"Новый размер: <b>{new_size} участников</b>\n"
+                text += f"💰 Доплата: <b>{diff}₽</b>\n\n"
+                text += "Нажмите кнопку ниже, чтобы оплатить расширение:"
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton(f"💳 Оплатить {diff}₽", callback_data=f"payment:pay:group:{new_size}:{plan_type}:{period_type}"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                
+                try:
+                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
         
             if action.startswith("add_member:"):
                 # Добавление участника в подписку через кнопку
@@ -1979,6 +1993,8 @@ def register_payment_callbacks(bot_instance):
                 else:
                     # В группе — показываем только текущую группу
                     try:
+                        from moviebot.database.db_operations import get_subscription_members
+                        
                         chat = bot.get_chat(chat_id)
                         group_title = chat.title or "Без названия"
                         group_username = chat.username
@@ -4028,9 +4044,11 @@ def register_payment_callbacks(bot_instance):
                     "payment_id": payment_id
                 }
             
-                # Проверяем, является ли это объединенным платежом
+                # Проверяем, является ли это объединенным платежом или расширением
                 payment_state = user_payment_state.get(user_id, {})
                 is_combined = payment_state.get('is_combined', False)
+                is_expansion = payment_state.get('is_expansion', False)
+                
                 if is_combined:
                     combine_type = payment_state.get('combine_type')
                     existing_subs = payment_state.get('existing_subs', [])
@@ -4040,6 +4058,16 @@ def register_payment_callbacks(bot_instance):
                         existing_subs_ids = [str(sub.get('id')) for sub in existing_subs if sub.get('id')]
                         metadata["existing_subs_ids"] = ','.join(existing_subs_ids)
                         logger.info(f"[PAYMENT] Объединенный платеж: combine_type={combine_type}, existing_subs_ids={metadata['existing_subs_ids']}")
+                
+                if is_expansion:
+                    expansion_subscription_id = payment_state.get('expansion_subscription_id')
+                    expansion_current_size = payment_state.get('expansion_current_size')
+                    expansion_new_size = payment_state.get('expansion_new_size')
+                    metadata["is_expansion"] = "true"
+                    metadata["expansion_subscription_id"] = str(expansion_subscription_id) if expansion_subscription_id else ""
+                    metadata["expansion_current_size"] = str(expansion_current_size) if expansion_current_size else ""
+                    metadata["expansion_new_size"] = str(expansion_new_size) if expansion_new_size else ""
+                    logger.info(f"[PAYMENT] Расширение подписки: subscription_id={expansion_subscription_id}, {expansion_current_size}->{expansion_new_size}")
             
                 # Добавляем group_size, telegram_username или group_username в зависимости от типа подписки
                 if sub_type == 'group':
@@ -4058,6 +4086,7 @@ def register_payment_callbacks(bot_instance):
                             metadata["telegram_username"] = telegram_username
             
                 # Создаем платеж
+                # Для всех подписок кроме lifetime добавляем save_payment_method: True
                 payment_data = {
                     "amount": {
                         "value": f"{final_price:.2f}",
@@ -4069,9 +4098,13 @@ def register_payment_callbacks(bot_instance):
                     },
                     "capture": True,
                     "description": description,
-                    "metadata": metadata,
-                    "save_payment_method": True
+                    "metadata": metadata
                 }
+                
+                # Добавляем save_payment_method для всех не-lifetime подписок
+                if period_type != 'lifetime':
+                    payment_data["save_payment_method"] = True
+                    logger.info(f"[YOOKASSA] save_payment_method=True добавлен для period_type={period_type}")
                 
                 try:
                     payment = Payment.create(payment_data)
@@ -4406,6 +4439,7 @@ def register_payment_callbacks(bot_instance):
                         metadata["group_username"] = group_username
                 
                 # Создаем платеж
+                # Для всех подписок кроме lifetime добавляем save_payment_method: True
                 payment_data = {
                     "amount": {
                         "value": f"{final_price:.2f}",
@@ -4417,9 +4451,13 @@ def register_payment_callbacks(bot_instance):
                     },
                     "capture": True,
                     "description": description,
-                    "metadata": metadata,
-                    "save_payment_method": True
+                    "metadata": metadata
                 }
+                
+                # Добавляем save_payment_method для всех не-lifetime подписок
+                if period_type != 'lifetime':
+                    payment_data["save_payment_method"] = True
+                    logger.info(f"[YOOKASSA] save_payment_method=True добавлен для period_type={period_type}")
                 
                 try:
                     payment = Payment.create(payment_data)
@@ -5040,6 +5078,7 @@ def register_payment_callbacks(bot_instance):
                 
                     description = f"Обновление групповой подписки (на {group_size} участников): {plan_names.get(new_plan_type, new_plan_type)}, период: {period_type}"
                 
+                    # Для всех подписок кроме lifetime добавляем save_payment_method: True
                     payment_data = {
                         "amount": {
                             "value": f"{upgrade_price:.2f}",
@@ -5051,9 +5090,13 @@ def register_payment_callbacks(bot_instance):
                         },
                         "capture": True,
                         "description": description,
-                        "metadata": metadata,
-                        "save_payment_method": True
+                        "metadata": metadata
                     }
+                    
+                    # Добавляем save_payment_method для всех не-lifetime подписок
+                    if period_type != 'lifetime':
+                        payment_data["save_payment_method"] = True
+                        logger.info(f"[YOOKASSA] save_payment_method=True добавлен для period_type={period_type} (upgrade)")
                     
                     payment = Payment.create(payment_data, str(uuid_module.uuid4()))
                 

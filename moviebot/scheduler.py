@@ -1362,7 +1362,7 @@ def check_subscription_payments():
         logger.error(f"[SUBSCRIPTION PAYMENT] Ошибка проверки подписок: {e}", exc_info=True)
 
 
-def send_successful_payment_notification(chat_id, subscription_id, subscription_type, plan_type, period_type):
+def send_successful_payment_notification(chat_id, subscription_id, subscription_type, plan_type, period_type, is_recurring=False):
     """Отправляет уведомление об успешном платеже"""
     if not bot:
         return
@@ -1387,31 +1387,87 @@ def send_successful_payment_notification(chat_id, subscription_id, subscription_
         }
         plan_name = plan_names.get(plan_type, plan_type)
         
-        text = "Спасибо, оплата успешно проведена!\n\n"
-        text += f"Ваша подписка: {plan_name}\n"
+        # Определяем список функций для подписки
+        features_list = []
+        if plan_type == 'all':
+            features_list = [
+                '🔔 Уведомления о сериалах',
+                '🎯 Персональные рекомендации',
+                '🎫 Билеты в кино'
+            ]
+        elif plan_type == 'notifications':
+            features_list = ['🔔 Уведомления о сериалах']
+        elif plan_type == 'recommendations':
+            features_list = ['🎯 Персональные рекомендации']
+        elif plan_type == 'tickets':
+            features_list = ['🎫 Билеты в кино']
         
-        # Если подписка навсегда, показываем "Действует неограниченно"
-        if period_type == 'lifetime' or expires_at is None:
-            text += "Действует неограниченно"
-        else:
-            # Показываем дату окончания действия подписки
-            if isinstance(expires_at, datetime):
-                expires_at_local = expires_at.astimezone(PLANS_TZ) if expires_at.tzinfo else PLANS_TZ.localize(expires_at)
-                text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
+        if is_recurring:
+            # Уведомление для рекуррентных платежей
+            text = "✅ <b>Спасибо, что вы с нами!</b>\n\n"
+            text += f"Ваш план продлён до "
+            
+            # Показываем дату следующего списания (next_payment_date), а не expires_at
+            if next_payment_date:
+                if isinstance(next_payment_date, datetime):
+                    next_payment_local = next_payment_date.astimezone(PLANS_TZ) if next_payment_date.tzinfo else PLANS_TZ.localize(next_payment_date)
+                    text += f"<b>{next_payment_local.strftime('%d.%m.%Y')}</b>\n\n"
+                else:
+                    # Если next_payment_date - строка, пытаемся распарсить
+                    try:
+                        from dateutil import parser
+                        next_payment_dt = parser.parse(str(next_payment_date))
+                        next_payment_local = next_payment_dt.astimezone(PLANS_TZ) if next_payment_dt.tzinfo else PLANS_TZ.localize(next_payment_dt)
+                        text += f"<b>{next_payment_local.strftime('%d.%m.%Y')}</b>\n\n"
+                    except:
+                        text += f"<b>{next_payment_date}</b>\n\n"
+            elif period_type == 'lifetime' or expires_at is None:
+                text += "<b>бессрочно</b>\n\n"
             else:
-                # Если expires_at - строка, пытаемся распарсить
-                try:
-                    from dateutil import parser
-                    expires_at_dt = parser.parse(str(expires_at))
-                    expires_at_local = expires_at_dt.astimezone(PLANS_TZ) if expires_at_dt.tzinfo else PLANS_TZ.localize(expires_at_dt)
+                # Если next_payment_date нет, используем expires_at
+                if isinstance(expires_at, datetime):
+                    expires_at_local = expires_at.astimezone(PLANS_TZ) if expires_at.tzinfo else PLANS_TZ.localize(expires_at)
+                    text += f"<b>{expires_at_local.strftime('%d.%m.%Y')}</b>\n\n"
+                else:
+                    try:
+                        from dateutil import parser
+                        expires_at_dt = parser.parse(str(expires_at))
+                        expires_at_local = expires_at_dt.astimezone(PLANS_TZ) if expires_at_dt.tzinfo else PLANS_TZ.localize(expires_at_dt)
+                        text += f"<b>{expires_at_local.strftime('%d.%m.%Y')}</b>\n\n"
+                    except:
+                        text += f"<b>{expires_at}</b>\n\n"
+            
+            text += "Вам доступны:\n"
+            for feature in features_list:
+                text += f"• {feature}\n"
+        else:
+            # Уведомление для обычных платежей (старый формат)
+            text = "✅ <b>Спасибо, оплата успешно проведена!</b>\n\n"
+            text += f"Ваша подписка: {plan_name}\n"
+            
+            # Если подписка навсегда, показываем "Действует неограниченно"
+            if period_type == 'lifetime' or expires_at is None:
+                text += "Действует неограниченно"
+            else:
+                # Показываем дату окончания действия подписки
+                if isinstance(expires_at, datetime):
+                    expires_at_local = expires_at.astimezone(PLANS_TZ) if expires_at.tzinfo else PLANS_TZ.localize(expires_at)
                     text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
-                except:
-                    text += f"Действует до: {expires_at}"
+                else:
+                    # Если expires_at - строка, пытаемся распарсить
+                    try:
+                        from dateutil import parser
+                        expires_at_dt = parser.parse(str(expires_at))
+                        expires_at_local = expires_at_dt.astimezone(PLANS_TZ) if expires_at_dt.tzinfo else PLANS_TZ.localize(expires_at_dt)
+                        text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
+                    except:
+                        text += f"Действует до: {expires_at}"
         
         markup = InlineKeyboardMarkup()
         
         # Для групповых подписок проверяем, есть ли участники группы, которых можно добавить
-        if subscription_type == 'group' and chat_id < 0:
+        # Только для обычных платежей (не рекуррентных)
+        if subscription_type == 'group' and chat_id < 0 and not is_recurring:
             try:
                 from moviebot.database.db_operations import get_subscription_members, get_active_group_users
                 from moviebot.bot.bot_init import BOT_ID
@@ -1600,13 +1656,15 @@ def process_recurring_payments():
                     renew_subscription(subscription_id, period_type)
                     update_payment_status(payment_id, 'succeeded', subscription_id)
                     
-                    # Отправляем уведомление об успешном платеже
+                    # Отправляем уведомление об успешном рекуррентном платеже
+                    # is_recurring=True для отображения специального текста
                     send_successful_payment_notification(
                         chat_id=chat_id,
                         subscription_id=subscription_id,
                         subscription_type=subscription_type,
                         plan_type=plan_type,
-                        period_type=period_type
+                        period_type=period_type,
+                        is_recurring=True
                     )
                 else:
                     # Платеж не успешен - проверяем причину

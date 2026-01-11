@@ -211,9 +211,10 @@ def create_web_app(bot):
                     upgrade_subscription_id = metadata.get('upgrade_subscription_id')
                     upgrade_from_plan = metadata.get('upgrade_from_plan')
                     
-                    # Проверяем, является ли это объединенным платежом
+                    # Проверяем, является ли это объединенным платежом или расширением
                     is_combined = metadata.get('is_combined', 'false').lower() == 'true'
                     combine_type = metadata.get('combine_type')
+                    is_expansion = metadata.get('is_expansion', 'false').lower() == 'true'
                     
                     # Инициализируем subscription_id
                     subscription_id = None
@@ -298,6 +299,32 @@ def create_web_app(bot):
                             
                         except Exception as sub_error:
                             logger.error(f"[YOOKASSA] Ошибка при создании новой подписки: {sub_error}", exc_info=True)
+                            subscription_id = None
+                    elif is_expansion:
+                        # Расширение подписки - обновляем размер существующей подписки
+                        try:
+                            expansion_sub_id = int(metadata.get('expansion_subscription_id', 0))
+                            expansion_new_size = int(metadata.get('expansion_new_size', 0))
+                            
+                            if not expansion_sub_id or not expansion_new_size:
+                                logger.error(f"[YOOKASSA] Ошибка расширения: некорректные параметры expansion_subscription_id={expansion_sub_id}, expansion_new_size={expansion_new_size}")
+                                subscription_id = None
+                            else:
+                                from moviebot.database.db_operations import get_subscription_by_id, update_subscription_group_size
+                                
+                                # Получаем информацию о подписке для расширения
+                                expansion_sub = get_subscription_by_id(expansion_sub_id)
+                                if not expansion_sub or expansion_sub.get('user_id') != user_id:
+                                    logger.error(f"[YOOKASSA] Подписка {expansion_sub_id} не найдена или не принадлежит пользователю {user_id}")
+                                    subscription_id = None
+                                else:
+                                    # Обновляем размер подписки (цена уже рассчитана как разница)
+                                    current_size = expansion_sub.get('group_size') or 2
+                                    update_subscription_group_size(expansion_sub_id, expansion_new_size, amount)
+                                    subscription_id = expansion_sub_id
+                                    logger.info(f"[YOOKASSA] Подписка {expansion_sub_id} расширена: {current_size} -> {expansion_new_size}, доплата: {amount}₽")
+                        except Exception as expansion_error:
+                            logger.error(f"[YOOKASSA] Ошибка при расширении подписки: {expansion_error}", exc_info=True)
                             subscription_id = None
                     elif upgrade_subscription_id:
                         # Обновление существующей подписки (оплата доплаты)
