@@ -155,15 +155,20 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                                 pass
                        
                         if not sources_dict and kp_id:
-                            if sources:
-                                sources_dict = {platform: url for platform, url in sources[:6]}
-                                sources_json = json.dumps(sources_dict, ensure_ascii=False)
-                                cursor.execute('''
-                                    UPDATE plans
-                                    SET ticket_file_id = %s
-                                    WHERE id = %s AND chat_id = %s
-                                ''', (sources_json, plan_id, chat_id))
-                                conn.commit()
+                            # Получаем sources из API
+                            try:
+                                sources = get_external_sources(kp_id)
+                                if sources:
+                                    sources_dict = {platform: url for platform, url in sources[:6]}
+                                    sources_json = json.dumps(sources_dict, ensure_ascii=False)
+                                    cursor.execute('''
+                                        UPDATE plans
+                                        SET ticket_file_id = %s
+                                        WHERE id = %s AND chat_id = %s
+                                    ''', (sources_json, plan_id, chat_id))
+                                    conn.commit()
+                            except Exception as e:
+                                logger.warning(f"[PLAN NOTIFICATION] Ошибка получения sources для kp_id={kp_id}: {e}")
                        
                         if sources_dict:
                             if not markup:
@@ -981,6 +986,13 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
         text += f"📺 <b>{title}</b>\n"
         text += f"📅 Сезон {season}, Эпизод {episode}\n\n"
         text += f"<a href='https://www.kinopoisk.ru/series/{kp_id}/'>Кинопоиск</a>\n\n"
+
+        # Получаем sources из API
+        sources = None
+        try:
+            sources = get_external_sources(kp_id)
+        except Exception as e:
+            logger.warning(f"[SERIES NOTIFICATION] Ошибка получения sources для kp_id={kp_id}: {e}")
 
         if sources:
             text += "🎬 <b>Смотреть онлайн:</b>\n"
