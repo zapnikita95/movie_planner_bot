@@ -453,14 +453,24 @@ def premiere_add_to_db(call):
     logger.info("=" * 80)
     logger.info(f"[PREMIERE ADD] ===== START: callback_id={call.id}, callback_data={call.data}")
     try:
-        bot.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
-        logger.info(f"[PREMIERE ADD] answer_callback_query вызван, callback_id={call.id}")
+        # Проверяем, не устарел ли callback, но продолжаем выполнение даже если устарел
+        callback_is_old = False
+        try:
+            bot.answer_callback_query(call.id, text="⏳ Добавляю в базу...")
+            logger.info(f"[PREMIERE ADD] answer_callback_query вызван, callback_id={call.id}")
+        except Exception as answer_error:
+            error_str = str(answer_error)
+            if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+                callback_is_old = True
+                logger.warning(f"[PREMIERE ADD] Callback query устарел, но продолжаем выполнение: {answer_error}")
+            else:
+                logger.error(f"[PREMIERE ADD] Ошибка answer_callback_query: {answer_error}", exc_info=True)
         
         kp_id = call.data.split(":")[1]
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         chat_id = call.message.chat.id
         user_id = call.from_user.id
-        message_id = call.message.message_id
+        message_id = call.message.message_id if not callback_is_old else None
         
         logger.info(f"[PREMIERE ADD] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
         
@@ -474,7 +484,11 @@ def premiere_add_to_db(call):
             title = existing_row[1] if not isinstance(existing_row, dict) else existing_row.get('title')
             
             logger.info(f"[PREMIERE ADD] Фильм уже в базе: film_id={film_id}, title={title}")
-            bot.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
+            if not callback_is_old:
+                try:
+                    bot.answer_callback_query(call.id, f"ℹ️ {title} уже в базе", show_alert=False)
+                except:
+                    pass
             
             # Получаем полную информацию из БД (без API запроса)
             with db_lock:
@@ -523,7 +537,7 @@ def premiere_add_to_db(call):
                 
                 # Показываем описание фильма с кнопками
                 from moviebot.bot.handlers.series import show_film_info_with_buttons
-                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
+                show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=message_id, message_thread_id=getattr(call.message, 'message_thread_id', None))
                 logger.info(f"[PREMIERE ADD] Описание фильма показано из БД: kp_id={kp_id}")
             return
         
@@ -531,18 +545,54 @@ def premiere_add_to_db(call):
         logger.info(f"[PREMIERE ADD] Фильм не найден в базе, получаю информацию через API")
         info = extract_movie_info(link)
         if not info:
-            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            if not callback_is_old:
+                try:
+                    bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                except:
+                    pass
+            else:
+                # Если callback устарел, отправляем новое сообщение об ошибке
+                try:
+                    send_kwargs = {
+                        'text': "❌ Не удалось получить информацию о фильме",
+                        'chat_id': chat_id
+                    }
+                    if message_thread_id is not None:
+                        send_kwargs['message_thread_id'] = message_thread_id
+                    bot.send_message(**send_kwargs)
+                except:
+                    pass
             return
         
         # Добавляем в базу
         film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
         
         if not film_id:
-            bot.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+            if not callback_is_old:
+                try:
+                    bot.answer_callback_query(call.id, "❌ Не удалось добавить фильм", show_alert=True)
+                except:
+                    pass
+            else:
+                # Если callback устарел, отправляем новое сообщение об ошибке
+                try:
+                    send_kwargs = {
+                        'text': "❌ Не удалось добавить фильм",
+                        'chat_id': chat_id
+                    }
+                    if message_thread_id is not None:
+                        send_kwargs['message_thread_id'] = message_thread_id
+                    bot.send_message(**send_kwargs)
+                except:
+                    pass
             return
         
         logger.info(f"[PREMIERE ADD] Фильм добавлен в базу: film_id={film_id}, was_inserted={was_inserted}")
-        bot.answer_callback_query(call.id, "✅ Фильм добавлен в базу!", show_alert=False)
+        if not callback_is_old:
+            try:
+                bot.answer_callback_query(call.id, "✅ Фильм добавлен в базу!", show_alert=False)
+            except:
+                pass
         
         # Получаем полную информацию из БД (без повторного API запроса)
         with db_lock:
@@ -595,7 +645,8 @@ def premiere_add_to_db(call):
             
             # Показываем описание фильма с кнопками
             from moviebot.bot.handlers.series import show_film_info_with_buttons
-            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=None)
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=existing, message_id=message_id, message_thread_id=message_thread_id)
             logger.info(f"[PREMIERE ADD] Описание фильма показано из БД: kp_id={kp_id}")
         else:
             logger.error(f"[PREMIERE ADD] Не удалось получить данные из БД после добавления: film_id={film_id}")

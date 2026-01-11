@@ -4221,11 +4221,21 @@ def register_series_handlers(bot_param):
                     
                     # Показываем первую страницу списка
                     show_similar_films_page(filtered_films, chat_id, user_id, message_id or call.message.message_id, mode, page=0)
-                    bot.answer_callback_query(call.id)
+                    try:
+                        bot.answer_callback_query(call.id)
+                    except Exception as answer_error:
+                        error_str = str(answer_error)
+                        if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                            logger.error(f"[RANDOM MY_VOTES] Ошибка answer_callback_query: {answer_error}", exc_info=True)
                     # Не удаляем состояние, чтобы пагинация работала
                 else:
                     bot.edit_message_text("😔 Не найдено похожих фильмов по заданным фильтрам.", chat_id, message_id or call.message.message_id)
-                    bot.answer_callback_query(call.id)
+                    try:
+                        bot.answer_callback_query(call.id)
+                    except Exception as answer_error:
+                        error_str = str(answer_error)
+                        if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                            logger.error(f"[RANDOM MY_VOTES] Ошибка answer_callback_query: {answer_error}", exc_info=True)
                     del user_random_state[user_id]
                     return
             elif mode == 'group_votes':
@@ -4395,11 +4405,21 @@ def register_series_handlers(bot_param):
                     
                     # Показываем первую страницу списка
                     show_similar_films_page(filtered_films, chat_id, user_id, message_id or call.message.message_id, mode, page=0)
-                    bot.answer_callback_query(call.id)
+                    try:
+                        bot.answer_callback_query(call.id)
+                    except Exception as answer_error:
+                        error_str = str(answer_error)
+                        if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                            logger.error(f"[RANDOM GROUP_VOTES] Ошибка answer_callback_query: {answer_error}", exc_info=True)
                     # Не удаляем состояние, чтобы пагинация работала
                 else:
                     bot.edit_message_text("😔 Не найдено похожих фильмов по заданным фильтрам.", chat_id, message_id or call.message.message_id)
-                    bot.answer_callback_query(call.id)
+                    try:
+                        bot.answer_callback_query(call.id)
+                    except Exception as answer_error:
+                        error_str = str(answer_error)
+                        if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                            logger.error(f"[RANDOM GROUP_VOTES] Ошибка answer_callback_query: {answer_error}", exc_info=True)
                     del user_random_state[user_id]
                     return
             elif mode == 'database':
@@ -5940,15 +5960,28 @@ def add_film_from_search_callback(call):
         logger.info("=" * 80)
         logger.info(f"[ADD FILM FROM SEARCH] ===== START: callback_id={call.id}, callback_data={call.data}")
         try:
-            from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot, call.id, text="⏳ Загружаю информацию...")
-            logger.info(f"[ADD FILM FROM SEARCH] answer_callback_query вызван, callback_id={call.id}")
+            # Проверяем, не устарел ли callback, но продолжаем выполнение даже если устарел
+            callback_is_old = False
+            try:
+                bot.answer_callback_query(call.id, text="⏳ Загружаю информацию...")
+                logger.info(f"[ADD FILM FROM SEARCH] answer_callback_query вызван, callback_id={call.id}")
+            except Exception as answer_error:
+                error_str = str(answer_error)
+                if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+                    callback_is_old = True
+                    logger.warning(f"[ADD FILM FROM SEARCH] Callback query устарел, но продолжаем выполнение: {answer_error}")
+                else:
+                    logger.error(f"[ADD FILM FROM SEARCH] Ошибка answer_callback_query: {answer_error}", exc_info=True)
             
             # Парсим callback_data: add_film_{kp_id}:{film_type}
             parts = call.data.split(":")
             if len(parts) < 2:
                 logger.error(f"[ADD FILM FROM SEARCH] Неверный формат callback_data: {call.data}")
-                bot.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
+                if not callback_is_old:
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Ошибка: неверный формат", show_alert=True)
+                    except:
+                        pass
                 return
             
             kp_id = parts[0].replace("add_film_", "")
@@ -5956,6 +5989,8 @@ def add_film_from_search_callback(call):
             
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            message_id = call.message.message_id if not callback_is_old else None
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
             
             logger.info(f"[ADD FILM FROM SEARCH] kp_id={kp_id}, film_type={film_type}, user_id={user_id}, chat_id={chat_id}")
             
@@ -5970,8 +6005,23 @@ def add_film_from_search_callback(call):
             
             if not info:
                 logger.error(f"[ADD FILM FROM SEARCH] Не удалось получить информацию о фильме: kp_id={kp_id}")
-                from moviebot.bot.bot_init import safe_answer_callback_query
-                safe_answer_callback_query(bot, call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                if not callback_is_old:
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+                    except:
+                        pass
+                else:
+                    # Если callback устарел, отправляем новое сообщение об ошибке
+                    try:
+                        send_kwargs = {
+                            'text': "❌ Не удалось получить информацию о фильме",
+                            'chat_id': chat_id
+                        }
+                        if message_thread_id is not None:
+                            send_kwargs['message_thread_id'] = message_thread_id
+                        bot.send_message(**send_kwargs)
+                    except:
+                        pass
                 return
             
             # Проверяем, есть ли фильм уже в базе
@@ -5992,13 +6042,16 @@ def add_film_from_search_callback(call):
                     existing = (film_id, title, watched)
             
             # Показываем карточку фильма с кнопками (всегда, даже если просмотрен)
-            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_str, existing)
+            show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_str, existing, message_id=message_id, message_thread_id=message_thread_id)
             
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: успешно показана информация о фильме {kp_id}")
         except Exception as e:
             logger.error(f"[ADD FILM FROM SEARCH] Ошибка: {e}", exc_info=True)
-            from moviebot.bot.bot_init import safe_answer_callback_query
-            safe_answer_callback_query(bot, call.id, "❌ Ошибка обработки", show_alert=True)
+            if not callback_is_old:
+                try:
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                except:
+                    pass
         finally:
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
 
