@@ -54,6 +54,52 @@ ACTORS_MAPPING_PATH = DATA_DIR / 'actors_to_movies.json'
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 50000
 
+# Принудительная инициализация при запуске модуля (если нужно)
+def initialize_shazam_data():
+    """Генерируем все необходимые файлы один раз, если их нет"""
+    required_paths = [
+        TMDB_PARQUET_PATH,          # исходный датасет (должен быть где-то скачан заранее)
+        INDEX_PATH,
+        DATA_PATH,
+        ACTORS_INDEX_PATH,
+        ACTORS_MAPPING_PATH,
+        ACTORS_DATA_PATH,
+    ]
+
+    missing = [p for p in required_paths if not p.exists()]
+
+    if not missing:
+        logger.info("Все файлы shazam уже на месте в volume — пропускаем генерацию")
+        return
+
+    logger.warning(f"Обнаружено {len(missing)} отсутствующих файлов shazam. Запускаем инициализацию...")
+
+    # 1. Если нет parquet — это критично, без него ничего не сгенерировать
+    if not TMDB_PARQUET_PATH.exists():
+        logger.error(
+            "CRITICAL: TMDB_PARQUET_PATH не найден!\n"
+            "Скачай датасет вручную и загрузи в volume через File Browser или shell.\n"
+            "Путь: /app/cache/tmdb_movies.parquet"
+        )
+        # Можно sys.exit(1) если хочешь упасть при старте
+        return
+
+    # 2. Генерируем основной индекс (если нужно)
+    if not INDEX_PATH.exists() or not DATA_PATH.exists():
+        logger.info("Генерация основного TMDB индекса...")
+        build_tmdb_index()
+
+    # 3. Генерируем актёрский индекс (если нужно)
+    if not all(p.exists() for p in [ACTORS_INDEX_PATH, ACTORS_MAPPING_PATH, ACTORS_DATA_PATH]):
+        logger.info("Генерация актёрского индекса...")
+        build_actors_index()
+
+    logger.info("Инициализация shazam данных завершена")
+
+# Запускаем инициализацию сразу при импорте модуля (если это handler — сработает при загрузке бота)
+initialize_shazam_data()
+
+# --------------------- КОНЕЦ ДОБАВЛЕНИЯ ---------------------
 
 def get_model():
     global _model
