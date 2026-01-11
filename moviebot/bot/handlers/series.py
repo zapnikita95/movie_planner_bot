@@ -380,7 +380,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # Создаем кнопки
         logger.info(f"[SHOW FILM INFO] Создание кнопок...")
         markup = InlineKeyboardMarkup(row_width=2)
-        # Флаг для отслеживания, добавлены ли уже кнопки "Интересные факты" и "Оценить"
+        # Флаг для отслеживания, добавлены ли уже кнопки "Факты" и "Оценить"
         facts_and_rate_added = False
         
         # Проверяем премьеру
@@ -543,7 +543,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if film_id:
             markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{int(kp_id)}"))
             
-        # Добавляем кнопки "Интересные факты" и "Оценить" всегда (для фильмов в базе и не в базе)
+        # Добавляем кнопки "Факты" и "Оценить" всегда (для фильмов в базе и не в базе)
         logger.info(f"[SHOW FILM INFO] Добавление кнопок оценок для film_id={film_id}...")
         if film_id:
             # Получаем информацию об оценках — каждый раз новый курсор
@@ -601,15 +601,15 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             
             if not facts_and_rate_added:
                 markup.row(
-                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{int(kp_id)}"),
+                    InlineKeyboardButton("🤔 Факты", callback_data=f"show_facts:{int(kp_id)}"),
                     InlineKeyboardButton(rating_text, callback_data=f"rate_film:{int(kp_id)}")
                 )
                 facts_and_rate_added = True
         else:
-            # Фильм не в базе - добавляем кнопки "Интересные факты" и "Оценить"
+            # Фильм не в базе - добавляем кнопки "Факты" и "Оценить"
             if not facts_and_rate_added:
                 markup.row(
-                    InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{int(kp_id)}"),
+                    InlineKeyboardButton("🤔 Факты", callback_data=f"show_facts:{int(kp_id)}"),
                     InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{int(kp_id)}")
                 )
                 facts_and_rate_added = True
@@ -846,7 +846,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             InlineKeyboardButton("📅 Запланировать", callback_data=f"plan_from_added:{kp_id}")
         )
         fallback_markup.row(
-            InlineKeyboardButton("🤔 Интересные факты", callback_data=f"show_facts:{kp_id}"),
+            InlineKeyboardButton("🤔 Факты", callback_data=f"show_facts:{kp_id}"),
             InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_id}")
         )
 

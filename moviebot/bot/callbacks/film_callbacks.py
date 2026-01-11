@@ -307,7 +307,7 @@ def plan_from_added_callback(call):
         
 @bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
 def show_facts_callback(call):
-    """Обработчик кнопки 'Интересные факты'"""
+    """Обработчик кнопки 'Факты'"""
     try:
         kp_id = call.data.split(":")[1]
         chat_id = call.message.chat.id

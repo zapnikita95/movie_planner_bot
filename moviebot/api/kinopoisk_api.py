@@ -189,7 +189,7 @@ def get_facts(kp_id):
                         elif fact_type == 'BLOOPER':
                             bloopers_list.append((fact_type, fact_text))
                 
-                text = "🤔 <b>Интересные факты о фильме:</b>\n\n"
+                text = "🤔 <b>Факты о фильме:</b>\n\n"
                 
                 # Сначала Факты
                 if facts_list:

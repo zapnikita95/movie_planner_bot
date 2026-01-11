@@ -1151,7 +1151,7 @@ def rate_film_callback(call):
         
     @bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
     def facts_callback(call):
-        """Обработчик кнопки 'Интересные факты'"""
+        """Обработчик кнопки 'Факты'"""
         try:
             # Сразу отвечаем на callback, чтобы убрать "часики"
             try:
