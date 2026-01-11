@@ -356,11 +356,6 @@ if __name__ == "__main__":
     # Задача выполняется в отдельном daemon-потоке и не блокирует Flask
     # Если загрузка не удастся, будет использована ленивая загрузка при первом использовании
     # ========================================================================
-    if IS_RAILWAY or IS_PRODUCTION:
-        import threading
-        background_thread.start()
-        logger.info("[MAIN] ✅ Фоновая задача загрузки баз запущена (IMDb + эмбеддинги)")
-
     if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
         logger.info("Railway/Production/Webhook режим")
 
