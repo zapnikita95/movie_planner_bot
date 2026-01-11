@@ -358,7 +358,6 @@ if __name__ == "__main__":
     # ========================================================================
     if IS_RAILWAY or IS_PRODUCTION:
         import threading
-        background_thread = threading.Thread(target=load_databases_in_background, daemon=True)
         background_thread.start()
         logger.info("[MAIN] ✅ Фоновая задача загрузки баз запущена (IMDb + эмбеддинги)")
 
