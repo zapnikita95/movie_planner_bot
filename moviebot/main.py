@@ -375,7 +375,7 @@ if __name__ == "__main__":
     # Запускаем в отдельном потоке, чтобы не блокировать Flask
     # ========================================================================
     def load_databases_in_background():
-        """Загружает IMDb базы и строит эмбеддинги в фоне после деплоя"""
+        """Строит эмбеддинги (TMDB индекс) в фоне после деплоя"""
         import time
         import threading
         
@@ -384,23 +384,18 @@ if __name__ == "__main__":
         time.sleep(10)
         
         try:
-            logger.info("[BACKGROUND] ===== НАЧАЛО ЗАГРУЗКИ IMDb БАЗ И ЭМБЕДДИНГОВ =====")
+            logger.info("[BACKGROUND] ===== НАЧАЛО ЗАГРУЗКИ ЭМБЕДДИНГОВ (TMDB) =====")
             
-            # 1. Загружаем IMDb базу
-            logger.info("[BACKGROUND] Шаг 1: Загрузка IMDb базы...")
-            build_imdb_database()
-            logger.info("[BACKGROUND] ✅ IMDb база загружена")
-            
-            # 2. Строим эмбеддинги (TMDB индекс)
+            # Строим эмбеддинги (TMDB индекс)
             from moviebot.services.shazam_service import build_tmdb_index
-            logger.info("[BACKGROUND] Шаг 2: Построение эмбеддингов (TMDB индекс)...")
+            logger.info("[BACKGROUND] Построение эмбеддингов (TMDB индекс)...")
             build_tmdb_index()
             logger.info("[BACKGROUND] ✅ Эмбеддинги построены")
             
-            logger.info("[BACKGROUND] ===== ЗАГРУЗКА БАЗ И ЭМБЕДДИНГОВ ЗАВЕРШЕНА =====")
+            logger.info("[BACKGROUND] ===== ЗАГРУЗКА ЭМБЕДДИНГОВ ЗАВЕРШЕНА =====")
             
         except Exception as e:
-            logger.error(f"[BACKGROUND] ❌ Ошибка при загрузке баз: {e}", exc_info=True)
+            logger.error(f"[BACKGROUND] ❌ Ошибка при загрузке эмбеддингов: {e}", exc_info=True)
             logger.warning("[BACKGROUND] Будет использована ленивая загрузка при первом использовании")
             # НЕ поднимаем исключение - это не критично для работы бота
             # Бот продолжит работать, базы загрузятся при первом использовании
