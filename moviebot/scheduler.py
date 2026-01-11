@@ -621,116 +621,69 @@ def check_and_send_plan_notifications():
 
             else:
 
-                # Для планов дома проверяем два типа уведомлений:
+                # Для планов дома проверяем уведомления:
+                # 1. Напоминание на время плана (если план в будущем)
+                # 2. Напоминание в стандартное время (если план на сегодня и время совпадает со стандартным)
 
-                # 1. Напоминание в день просмотра (только если это сегодня)
-                # Время зависит от дня недели: будни 19:00, выходные 9:00
-
-                if plan_dt_local.date() == now_local.date():
-                    # Получаем настройки времени напоминаний
-                    notify_settings = get_notification_settings(chat_id)
-                    
-                    # Определяем, будний день или выходной (0 = понедельник, 6 = воскресенье)
-                    weekday = plan_dt_local.weekday()  # 0-6, где 0 = понедельник, 6 = воскресенье
-                    is_weekend = weekday >= 5  # Суббота (5) и воскресенье (6)
-                    
-                    # Если разделение на будни/выходные отключено, используем настройки для будних дней
-                    if notify_settings.get('separate_weekdays') == 'false':
-                        reminder_hour = notify_settings.get('home_weekday_hour', 19)
-                        reminder_minute = notify_settings.get('home_weekday_minute', 0)
-                    elif is_weekend:
-                        reminder_hour = notify_settings.get('home_weekend_hour', 9)
-                        reminder_minute = notify_settings.get('home_weekend_minute', 0)
-                    else:
-                        reminder_hour = notify_settings.get('home_weekday_hour', 19)
-                        reminder_minute = notify_settings.get('home_weekday_minute', 0)
-
-                    reminder_dt = plan_dt_local.replace(hour=reminder_hour, minute=reminder_minute)
-
-                    reminder_utc = reminder_dt.astimezone(pytz.utc)
-
-                    
-
-                    # Планируем напоминание, если оно еще не запланировано и время еще не прошло
-                    # Проверяем, не было ли уже отправлено уведомление
-                    if reminder_utc > now_utc and not notification_sent:
-
-                        try:
-
-                            job_id = f'plan_reminder_{chat_id}_{plan_id}_{int(reminder_utc.timestamp())}'
-
-                            existing_job = scheduler.get_job(job_id)
-
-                            if not existing_job:
-
-                                scheduler.add_job(
-
-                                    send_plan_notification,
-
-                                    'date',
-
-                                    run_date=reminder_utc,
-
-                                    args=[chat_id, film_id, title, link, plan_type, plan_id],
-
-                                    id=job_id
-
-                                )
-
-                                logger.info(f"[PLAN CHECK] Запланировано напоминание для плана дома {plan_id} (фильм {title}) на {reminder_utc} ({reminder_hour}:{reminder_minute:02d})")
-
-                        except Exception as e:
-
-                            logger.warning(f"[PLAN CHECK] Не удалось запланировать напоминание для плана {plan_id}: {e}")
-
-                    elif reminder_utc <= now_utc and reminder_utc >= now_utc - timedelta(minutes=30):
-
-                        # Время напоминания уже прошло, но не более 30 минут назад - отправляем сразу
-                        # Проверяем, не было ли уже отправлено уведомление
-                        if not notification_sent:
-                            try:
-                                # Проверяем, не запланировано ли уже уведомление
-                                job_id = f'plan_reminder_{chat_id}_{plan_id}_{int(reminder_utc.timestamp())}'
-                                existing_job = scheduler.get_job(job_id)
-                                if not existing_job:
-                                    send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
-                                    logger.info(f"[PLAN CHECK] Напоминание отправлено сразу для плана дома {plan_id} (фильм {title})")
-                                else:
-                                    logger.info(f"[PLAN CHECK] Напоминание уже запланировано для плана дома {plan_id}")
-                            except Exception as e:
-                                logger.error(f"[PLAN CHECK] Ошибка отправки напоминания для плана {plan_id}: {e}", exc_info=True)
-                        else:
-                            logger.info(f"[PLAN CHECK] Напоминание уже отправлено для плана дома {plan_id}, пропускаем")
-
+                # Получаем настройки времени напоминаний
+                notify_settings = get_notification_settings(chat_id)
                 
+                # Определяем, будний день или выходной (0 = понедельник, 6 = воскресенье)
+                weekday = plan_dt_local.weekday()  # 0-6, где 0 = понедельник, 6 = воскресенье
+                is_weekend = weekday >= 5  # Суббота (5) и воскресенье (6)
+                
+                # Определяем стандартное время напоминания
+                if notify_settings.get('separate_weekdays') == 'false':
+                    default_hour = notify_settings.get('home_weekday_hour', 19)
+                    default_minute = notify_settings.get('home_weekday_minute', 0)
+                elif is_weekend:
+                    default_hour = notify_settings.get('home_weekend_hour', 9)
+                    default_minute = notify_settings.get('home_weekend_minute', 0)
+                else:
+                    default_hour = notify_settings.get('home_weekday_hour', 19)
+                    default_minute = notify_settings.get('home_weekday_minute', 0)
 
-                # 2. Напоминание на время плана (время уже наступило или прошло не более 30 минут назад)
+                # Проверяем, совпадает ли время плана со стандартным временем
+                plan_hour = plan_dt_local.hour
+                plan_minute = plan_dt_local.minute
+                is_default_time = (plan_hour == default_hour and plan_minute == default_minute)
 
-                if plan_datetime <= now_utc and plan_datetime >= now_utc - timedelta(minutes=30):
-
-                    # Проверяем, не было ли уже отправлено уведомление
+                # 1. Напоминание на время плана (для всех планов, если время еще не прошло)
+                plan_utc = plan_dt_local.astimezone(pytz.utc)
+                
+                if plan_utc > now_utc and not notification_sent:
+                    # План в будущем - планируем уведомление на время плана
+                    try:
+                        job_id = f'plan_notify_home_{chat_id}_{plan_id}_{int(plan_utc.timestamp())}'
+                        existing_job = scheduler.get_job(job_id)
+                        
+                        if not existing_job:
+                            scheduler.add_job(
+                                send_plan_notification,
+                                'date',
+                                run_date=plan_utc,
+                                args=[chat_id, film_id, title, link, plan_type, plan_id, user_id],
+                                id=job_id
+                            )
+                            logger.info(f"[PLAN CHECK] Запланировано уведомление для плана дома {plan_id} (фильм {title}) на время плана {plan_utc} ({plan_hour:02d}:{plan_minute:02d})")
+                    except Exception as e:
+                        logger.warning(f"[PLAN CHECK] Не удалось запланировать уведомление на время плана {plan_id}: {e}")
+                        
+                elif plan_utc <= now_utc and plan_utc >= now_utc - timedelta(minutes=30):
+                    # Время плана уже прошло, но не более 30 минут назад - отправляем сразу
                     if not notification_sent:
                         try:
-
-                            # Проверяем, не было ли уже запланировано это уведомление
-
-                            job_id = f'plan_notify_{chat_id}_{film_id}_{int(plan_datetime.timestamp())}'
-
+                            job_id = f'plan_notify_home_{chat_id}_{plan_id}_{int(plan_utc.timestamp())}'
                             existing_job = scheduler.get_job(job_id)
-
                             if not existing_job:
-
-                                # Отправляем уведомление сразу, так как время уже наступило
-
                                 send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
-
-                                logger.info(f"[PLAN CHECK] Уведомление отправлено для плана {plan_id} (фильм {title})")
-
+                                logger.info(f"[PLAN CHECK] Уведомление отправлено сразу для плана дома {plan_id} (фильм {title}) на время плана {plan_utc}")
+                            else:
+                                logger.info(f"[PLAN CHECK] Уведомление уже запланировано для плана дома {plan_id}")
                         except Exception as e:
-
                             logger.error(f"[PLAN CHECK] Ошибка отправки уведомления для плана {plan_id}: {e}", exc_info=True)
                     else:
-                        logger.info(f"[PLAN CHECK] Уведомление уже отправлено для плана {plan_id}, пропускаем")
+                        logger.info(f"[PLAN CHECK] Уведомление уже отправлено для плана дома {plan_id}, пропускаем")
 
     except Exception as e:
 

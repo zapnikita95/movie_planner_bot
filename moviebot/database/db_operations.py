@@ -254,6 +254,17 @@ def set_user_timezone(user_id, timezone_name):
 
 
 
+def get_user_films_count(user_id):
+    """Возвращает количество фильмов в базе пользователя (для личного чата, где chat_id = user_id)"""
+    with db_lock:
+        cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (user_id,))
+        row = cursor.fetchone()
+        if row:
+            count = row.get('count') if isinstance(row, dict) else row[0]
+            return count if count else 0
+        return 0
+
+
 def get_watched_reactions(chat_id):
 
     """Возвращает словарь с обычными и кастомными эмодзи для реакций"""

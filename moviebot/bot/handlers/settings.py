@@ -1042,7 +1042,7 @@ def handle_timezone_callback(call):
                 # КРИТИЧЕСКИЙ ФИКС: Продолжаем планирование, если есть все необходимые данные
                 # (pending_text не обязателен, главное - link, plan_type, pending_plan_dt)
                 link = state.get('link')
-                plan_type = state.get('type')
+                plan_type = state.get('plan_type')  # ИСПРАВЛЕНО: было 'type'
                 pending_plan_dt = state.get('pending_plan_dt')
                 pending_message_date_utc = state.get('pending_message_date_utc')
                 chat_id_from_state = state.get('chat_id', chat_id)
@@ -1066,6 +1066,22 @@ def handle_timezone_callback(call):
                         logger.info(f"[TIMEZONE CALLBACK] Планирование успешно завершено")
                     else:
                         logger.warning(f"[TIMEZONE CALLBACK] Ошибка при продолжении планирования")
+                elif link and plan_type:
+                    # Если есть link и plan_type, но нет pending_plan_dt - устанавливаем step=3 для продолжения планирования
+                    logger.info(f"[TIMEZONE CALLBACK] Устанавливаем step=3 для продолжения планирования: link={link}, plan_type={plan_type}")
+                    state['step'] = 3
+                    state['chat_id'] = chat_id_from_state
+                    user_plan_state[user_id] = state
+                    # Отправляем промпт для ввода времени/даты
+                    from moviebot.bot.bot_init import bot
+                    prompt_msg = bot.send_message(
+                        chat_id_from_state,
+                        f"Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\n"
+                        f"Примеры: сегодня 21:00, завтра 19:30, пт 18:45, 15 января 20:00"
+                    )
+                    state['prompt_message_id'] = prompt_msg.message_id
+                    user_plan_state[user_id] = state
+                    logger.info(f"[TIMEZONE CALLBACK] Промпт отправлен для продолжения планирования, prompt_message_id={prompt_msg.message_id}")
                 else:
                     logger.warning(f"[TIMEZONE CALLBACK] Недостаточно данных для продолжения планирования: link={link}, plan_type={plan_type}, pending_plan_dt={pending_plan_dt}")
         else:

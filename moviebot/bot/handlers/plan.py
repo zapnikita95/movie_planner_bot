@@ -1536,7 +1536,17 @@ def get_plan_day_or_date_internal(message, state):
     result = process_plan(bot, user_id, message.chat.id, link, plan_type, day_or_date_str, message_date_utc)
     
     if result == 'NEEDS_TIMEZONE':
+        # Сохраняем состояние планирования для продолжения после выбора часового пояса
+        state['pending_text'] = text
+        state['pending_plan_dt'] = day_or_date_str
+        state['pending_message_date_utc'] = message_date_utc
+        state['link'] = link
+        state['plan_type'] = plan_type
+        state['chat_id'] = message.chat.id
+        user_plan_state[user_id] = state
+        logger.info(f"[PLAN DAY/DATE INTERNAL] Состояние планирования сохранено для продолжения после выбора часового пояса")
         show_timezone_selection(message.chat.id, user_id, "Для планирования фильма нужно выбрать часовой пояс:")
+        # НЕ удаляем состояние - оно нужно для продолжения планирования после выбора часового пояса
     elif result:
         # process_plan уже должен чистить состояние, но на всякий случай
         if user_id in user_plan_state:
