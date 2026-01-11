@@ -9,7 +9,7 @@ import sys
 import time
 # Импорт yookassa удален, используется moviebot.api.yookassa_api
 from dotenv import load_dotenv
-# Инициализация индекса шазама убрана - будет ленивая загрузка при первом использовании
+from moviebot.services.shazam_service import init_shazam_index
 
 # Загружаем переменные окружения из .env файла (для локальной разработки)
 # В Railway переменные окружения уже доступны через os.getenv()
