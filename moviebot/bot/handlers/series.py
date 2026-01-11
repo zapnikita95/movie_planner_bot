@@ -1558,7 +1558,58 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-            mode = call.data.split(":")[1]
+            data_parts = call.data.split(":", 1)
+            if len(data_parts) < 2:
+                bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+                return
+            mode_or_action = data_parts[1]
+            
+            # Обработка кнопки "Назад к режимам"
+            if mode_or_action == "back":
+                logger.info(f"[RANDOM CALLBACK] Back to mode selection")
+                bot.answer_callback_query(call.id)
+                
+                # Показываем выбор режима
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+                
+                # Проверяем доступ к рекомендациям
+                has_rec_access = has_recommendations_access(chat_id, user_id)
+                
+                if has_rec_access:
+                    markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+                    markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
+                    markup.add(InlineKeyboardButton("🔒 По оценкам в базе", callback_data="rand_mode_locked:group_votes"))
+                
+                if has_rec_access:
+                    markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+                else:
+                    markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
+                
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                
+                bot.edit_message_text(
+                    "🎲 <b>Выберите режим рандома:</b>",
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                # Очищаем состояние
+                if user_id in user_random_state:
+                    user_random_state[user_id] = {
+                        'step': 'mode',
+                        'mode': None,
+                        'periods': [],
+                        'genres': [],
+                        'directors': [],
+                        'actors': []
+                    }
+                return
+            
+            mode = mode_or_action
             
             # Инициализируем состояние, если его нет (может быть утеряно при перезапуске бота или долгом ожидании)
             if user_id not in user_random_state:
@@ -1652,7 +1703,9 @@ def register_series_handlers(bot_param):
             
             with db_lock:
                 if mode == 'my_votes':
-                    # Для режима "по моим оценкам" - получаем годы из импортированных фильмов с оценкой 9-10
+                    # Для режима "по моим оценкам" - получаем годы из импортированных фильмов и импортированных оценок с оценкой 9-10
+                    years = []
+                    # Годы из фильмов в базе
                     cursor.execute("""
                         SELECT DISTINCT m.year
                         FROM movies m
@@ -1662,9 +1715,25 @@ def register_series_handlers(bot_param):
                         ORDER BY m.year
                     """, (chat_id, user_id))
                     years_rows = cursor.fetchall()
-                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    years_from_movies = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    years.extend(years_from_movies)
                     
-                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode")
+                    # Годы из импортированных оценок (film_id = NULL)
+                    cursor.execute("""
+                        SELECT DISTINCT r.year
+                        FROM ratings r
+                        WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                        AND r.film_id IS NULL AND r.year IS NOT NULL
+                        ORDER BY r.year
+                    """, (chat_id, user_id))
+                    years_rows_imported = cursor.fetchall()
+                    years_from_imported = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows_imported if row]
+                    years.extend(years_from_imported)
+                    
+                    # Убираем дубликаты
+                    years = sorted(list(set(years)))
+                    
+                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode (from movies: {len(years_from_movies)}, from imported: {len(years_from_imported)})")
                     
                     # Определяем доступные периоды на основе найденных годов
                     for period in all_periods:
@@ -1766,6 +1835,7 @@ def register_series_handlers(bot_param):
                 for period in available_periods:
                     markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
             
             bot.answer_callback_query(call.id)
             # Определяем номер шага в зависимости от режима
@@ -1890,7 +1960,7 @@ def register_series_handlers(bot_param):
                 for period in available_periods:
                     markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
-            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="rand_content_type:back"))
+            markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
             
             mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм на Кинопоиске по заданным фильтрам.'
             content_type_text = {
@@ -2043,9 +2113,10 @@ def register_series_handlers(bot_param):
                 markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_year:done"))
             else:
                 markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
+            markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
             
             selected = ', '.join(selected_periods) if selected_periods else 'ничего'
-            text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
+            text = f"{mode_description}\n\n🎲 <b>Шаг 1/3: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
             
             try:
                 bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
