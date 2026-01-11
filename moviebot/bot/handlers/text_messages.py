@@ -1,50 +1,56 @@
-from moviebot.bot.bot_init import bot
+# ==================== text_messages.py ====================
 """
 Единый главный обработчик для всех текстовых сообщений
 Обрабатывает состояния, реплаи, ссылки на Кинопоиск и т.д.
 """
 import logging
 import re
+from datetime import datetime, timedelta
+from collections import defaultdict
+
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+from moviebot.bot.bot_init import bot, BOT_ID
 from moviebot.database.db_connection import db_lock, get_db_connection, get_db_cursor
-
-
-# Логируем, что модуль импортирован (декораторы выполнятся при импорте)
-logger = logging.getLogger(__name__)
-logger.info("=" * 80)
-logger.info("[TEXT MESSAGES] Модуль text_messages.py импортирован - декораторы будут зарегистрированы")
-logger.info("=" * 80)
-
-from moviebot.database.db_operations import log_request, get_user_timezone_or_default, set_notification_setting
-
-from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
+from moviebot.database.db_operations import (
+    log_request,
+    get_user_timezone_or_default,
+    set_notification_setting,
+    add_and_announce,
+    is_bot_participant,
+    get_watched_emojis,
+    get_watched_custom_emoji_ids
+)
 from moviebot.api.kinopoisk_api import extract_movie_info, search_films
-
 from moviebot.states import (
-
     user_search_state, user_plan_state, user_ticket_state,
     user_settings_state, user_edit_state, user_view_film_state,
     user_import_state, user_clean_state, user_cancel_subscription_state,
     user_refund_state, user_promo_state, user_promo_admin_state,
     user_unsubscribe_state, user_add_admin_state,
-    bot_messages, plan_error_messages, list_messages, added_movie_messages, rating_messages,
-    plan_notification_messages, settings_messages, user_expected_text
+    bot_messages, plan_error_messages, list_messages, added_movie_messages,
+    rating_messages, plan_notification_messages, settings_messages,
+    user_expected_text
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
-
-# Не импортируем search_films_with_type здесь, чтобы избежать циклического импорта
-# Импортируем внутри функции process_search_query
 from moviebot.bot.handlers.list import handle_view_film_reply_internal
 
-from moviebot.bot.bot_init import BOT_ID
+# Импорты обработчиков, которые регистрируют себя через декораторы
+import moviebot.bot.handlers.promo      # noqa: F401
+import moviebot.bot.handlers.admin      # noqa: F401
 
-# Импортируем обработчики промокодов для автоматической регистрации
-import moviebot.bot.handlers.promo  # noqa: F401
-# Импортируем обработчики админских команд для автоматической регистрации
-import moviebot.bot.handlers.admin  # noqa: F401
-from moviebot.database.db_operations import add_and_announce, is_bot_participant, get_watched_emojis, get_watched_custom_emoji_ids
+logger = logging.getLogger(__name__)
+logger.info("=" * 80)
+logger.info("[TEXT MESSAGES] Модуль text_messages.py импортирован - декораторы будут зарегистрированы")
+logger.info("=" * 80)
 
+# ─── Защита от дублей обработки одного и того же сообщения ────────
+# Ключ: user_id → (message_id, timestamp)
+last_processed_private = defaultdict(lambda: (0, datetime(2000, 1, 1)))
+PROTECT_WINDOW = timedelta(seconds=15)   # 15 секунд — достаточно даже для очень медленного интернета
+# ──────────────────────────────────────────────────────────────────────
+
+# Остальной код файла...
 
 # logger уже создан выше
 conn = get_db_connection()
@@ -1104,12 +1110,27 @@ def handle_group_search_reply(message):
 
 # ==================== ОБРАБОТЧИК ДЛЯ ПРИВАТНЫХ ЧАТОВ: SHAZAM ТЕКСТ (REPLY) ====================
 @bot.message_handler(func=lambda m: m.chat.type == 'private' and
-                                      m.reply_to_message and
-                                      m.reply_to_message.from_user.id == BOT_ID and
-                                      m.text and
-                                      "Опишите, что есть в фильме?" in (m.reply_to_message.text or ""))
+                                    m.reply_to_message and
+                                    m.reply_to_message.from_user.id == BOT_ID and
+                                    m.text and
+                                    "Опишите, что есть в фильме?" in (m.reply_to_message.text or ""))
 def handle_private_shazam_text_reply(message):
     """Обработчик текстового запроса Shazam в приватных чатах - reply на сообщение бота"""
+    user_id = message.from_user.id
+    msg_id = message.message_id
+
+    now = datetime.utcnow()
+
+    prev_msg_id, prev_time = last_processed[user_id]
+
+    # Защита от дубля
+    if msg_id == prev_msg_id and (now - prev_time) < PROTECT_WINDOW:
+        logger.warning(f"[DUP] Игнорируем дубль сообщения {msg_id} от {user_id}")
+        return
+
+    # Обновляем кэш
+    last_processed[user_id] = (msg_id, now)
+    
     from moviebot.states import user_expected_text
     user_id = message.from_user.id
     

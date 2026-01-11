@@ -17,6 +17,183 @@ cursor = get_db_cursor()
 plans_tz = PLANS_TZ
 
 
+def _get_random_events_enabled(chat_id):
+    """Вспомогательная функция для проверки включенности случайных событий"""
+    with db_lock:
+        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+        row = cursor.fetchone()
+        if row:
+            value = row.get('value') if isinstance(row, dict) else row[0]
+            return value == 'true'
+    return True  # По умолчанию включено
+
+
+def _mark_event_sent(chat_id, event_type):
+    """Вспомогательная функция для отметки отправленного события"""
+    now = datetime.now(plans_tz)
+    today = now.date()
+    with db_lock:
+        cursor.execute("""
+            INSERT INTO event_notifications (chat_id, event_type, sent_date)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (chat_id, event_type, sent_date) DO NOTHING
+        """, (chat_id, event_type, today))
+        conn.commit()
+
+
+def send_dice_game_event(chat_id, skip_checks=False):
+    """
+    Общая функция для отправки события игры в кубик
+    
+    Args:
+        chat_id: ID чата
+        skip_checks: Если True, пропускает проверки на активных участников и время (для примеров из настроек)
+    
+    Returns:
+        bool: True если событие успешно отправлено, False иначе
+    """
+    try:
+        now = datetime.now(plans_tz)
+        
+        # Проверяем, что это групповой чат (не личный)
+        try:
+            chat_info = bot.get_chat(chat_id)
+            if chat_info.type == 'private':
+                logger.warning(f"[DICE GAME] Чат {chat_id} является личным, пропускаем")
+                return False
+        except Exception as e:
+            logger.warning(f"[DICE GAME] Не удалось получить информацию о чате {chat_id}: {e}")
+            return False
+        
+        # Проверяем, включены ли случайные события (если не пропускаем проверки)
+        if not skip_checks:
+            if not _get_random_events_enabled(chat_id):
+                logger.info(f"[DICE GAME] Случайные события выключены для чата {chat_id}")
+                return False
+            
+            # Проверяем, когда последний раз запускали игру
+            with db_lock:
+                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_dice_game_date'", (chat_id,))
+                last_date_row = cursor.fetchone()
+            
+            if last_date_row:
+                last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
+                try:
+                    last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+                    days_passed = (now.date() - last_date).days
+                    if days_passed < 14:
+                        logger.info(f"[DICE GAME] Для чата {chat_id} прошло только {days_passed} дней с последнего события (нужно 14)")
+                        return False
+                except Exception as e:
+                    logger.warning(f"[DICE GAME] Ошибка при парсинге last_dice_game_date: {e}")
+        
+        # Проверяем количество активных участников (если не пропускаем проверки)
+        if not skip_checks:
+            try:
+                chat_members_count = bot.get_chat_member_count(chat_id)
+                total_participants = max(1, chat_members_count - 1)
+            except Exception as e:
+                logger.warning(f"[DICE GAME] Не удалось получить количество участников чата {chat_id}: {e}")
+                return False
+            
+            threshold_time = (now - timedelta(days=30)).isoformat()
+            with db_lock:
+                bot_id = bot.get_me().id
+                cursor.execute('''
+                    SELECT COUNT(DISTINCT user_id) AS count
+                    FROM stats 
+                    WHERE chat_id = %s 
+                    AND timestamp >= %s
+                    AND user_id != %s
+                ''', (chat_id, threshold_time, bot_id))
+                row = cursor.fetchone()
+                active_participants = row.get("count") if isinstance(row, dict) else (row[0] if row else 0)
+            
+            required_participants = int(total_participants * 0.65)
+            if active_participants < required_participants:
+                logger.info(f"[DICE GAME] Для чата {chat_id} недостаточно активных участников ({active_participants} из {required_participants})")
+                return False
+        
+        # Отправляем сообщение
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+        markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+        
+        text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+        text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
+        text += "Ниже бот бросит тестовый кубик, вы можете на него нажать, чтобы тоже сделать бросок.\n\n"
+        text += "Также, вы можете просто отправить эмодзи кубика в чат, бросок будет засчитан.\n\n"
+        text += "📝 Итоги будут подведены через 10 минут, даже если не все участники сделали бросок"
+        
+        current_chat_id = chat_id
+        
+        try:
+            msg = bot.send_message(
+                chat_id=current_chat_id,
+                text=text,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        except ApiTelegramException as e:
+            if e.error_code == 400 and 'upgraded to a supergroup chat' in str(e.description).lower():
+                try:
+                    new_chat_id = e.result_json['parameters']['migrate_to_chat_id']
+                    logger.info(f"[DICE GAME] Чат {chat_id} мигрировал в супергруппу {new_chat_id}. Отправляем туда.")
+                    
+                    msg = bot.send_message(
+                        chat_id=new_chat_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    
+                    current_chat_id = new_chat_id
+                except Exception as e2:
+                    logger.error(f"[DICE GAME] Не удалось отправить сообщение даже в новый чат {new_chat_id}: {e2}", exc_info=True)
+                    return False
+            else:
+                logger.error(f"[DICE GAME] Ошибка Telegram API при отправке в чат {chat_id}: {e}", exc_info=True)
+                return False
+        except Exception as e:
+            logger.error(f"[DICE GAME] Непредвиденная ошибка при отправке в чат {chat_id}: {e}", exc_info=True)
+            return False
+        
+        # Сохраняем состояние игры
+        dice_game_state[current_chat_id] = {
+            'participants': {},
+            'message_id': msg.message_id,
+            'start_time': now,
+            'dice_messages': {}
+        }
+        
+        # Автоматически бросаем кубик от имени бота после отправки сообщения
+        try:
+            bot_dice_msg = bot.send_dice(current_chat_id, emoji='🎲')
+            logger.info(f"[DICE GAME] Бот автоматически бросил кубик в чате {current_chat_id}, message_id={bot_dice_msg.message_id if bot_dice_msg else None}")
+        except Exception as dice_e:
+            logger.error(f"[DICE GAME] Ошибка при автоматическом броске кубика: {dice_e}", exc_info=True)
+        
+        # Отмечаем, что событие отправлено (если не пропускаем проверки)
+        if not skip_checks:
+            _mark_event_sent(current_chat_id, 'random_event')
+            
+            # Сохраняем дату последнего запуска
+            with db_lock:
+                cursor.execute('''
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, 'last_dice_game_date', %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                ''', (current_chat_id, now.date().isoformat()))
+                conn.commit()
+        
+        logger.info(f"[DICE GAME] Успешно отправлено событие игры в кубик для чата {current_chat_id}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"[DICE GAME] Критическая ошибка в send_dice_game_event: {e}", exc_info=True)
+        return False
+
+
 def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
     """
     Обновляет сообщение с игрой в кубик, показывая результаты и количество оставшихся участников
@@ -251,3 +428,4 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
             
     except Exception as e:
         logger.error(f"[DICE GAME] Критическая ошибка в update_dice_game_message: {e}", exc_info=True)
+        raise

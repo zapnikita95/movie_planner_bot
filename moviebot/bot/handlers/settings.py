@@ -283,65 +283,12 @@ def handle_settings_callback(call):
                 
                 bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
             else:
-                # Пример события без участника (игра в кубик)
-                try:
-                    chat_members_count = bot.get_chat_member_count(chat_id)
-                    total_participants = max(1, chat_members_count - 1)
-                except Exception as e:
-                    logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить количество участников чата: {e}")
-                    bot.answer_callback_query(call.id, "Ошибка при получении информации о чате", show_alert=True)
+                # Пример события без участника (игра в кубик) - используем общую функцию
+                from moviebot.utils.random_events import send_dice_game_event
+                success = send_dice_game_event(chat_id, skip_checks=True)  # skip_checks=True для примера
+                if not success:
+                    bot.answer_callback_query(call.id, "Ошибка при отправке примера события", show_alert=True)
                     return
-                
-                threshold_time = (datetime.now(PLANS_TZ) - timedelta(days=30)).isoformat()
-                
-                with db_lock:
-                    bot_id = bot.get_me().id
-                    cursor.execute('''
-                        SELECT COUNT(DISTINCT user_id) AS count
-                        FROM stats 
-                        WHERE chat_id = %s 
-                        AND timestamp >= %s
-                        AND user_id != %s
-                    ''', (chat_id, threshold_time, bot_id))
-                    row = cursor.fetchone()
-                    active_participants = row.get("count") if isinstance(row, dict) else (row[0] if row else 0)
-                
-                required_participants = int(total_participants * 0.65)
-                if active_participants < required_participants:
-                    bot.answer_callback_query(
-                        call.id,
-                        f"Для игры в кубик нужно не менее 65% активных участников ({required_participants} из {total_participants}). Сейчас активных: {active_participants}.",
-                        show_alert=True
-                    )
-                    return
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
-                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
-                
-                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
-                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
-                text += "Ниже бот бросит тестовый кубик, вы можете на него нажать, чтобы тоже сделать бросок.\n\n"
-                text += "Также, вы можете просто отправить эмодзи кубика в чат, бросок будет засчитан.\n\n"
-                text += "📝 Итоги будут подведены через 10 минут, даже если не все участники сделали бросок"
-                
-                sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                
-                if chat_id not in dice_game_state:
-                    dice_game_state[chat_id] = {
-                        'participants': {},
-                        'message_id': sent_msg.message_id,
-                        'start_time': datetime.now(PLANS_TZ),
-                        'dice_messages': {}
-                    }
-                    logger.info(f"[RANDOM EVENTS EXAMPLE] Инициализировано состояние игры для примера события в чате {chat_id}, message_id={sent_msg.message_id}")
-                
-                # Автоматически бросаем кубик от имени бота после отправки сообщения
-                try:
-                    bot_dice_msg = bot.send_dice(chat_id, emoji='🎲')
-                    logger.info(f"[RANDOM EVENTS EXAMPLE] Бот автоматически бросил кубик, message_id={bot_dice_msg.message_id if bot_dice_msg else None}")
-                except Exception as dice_e:
-                    logger.error(f"[RANDOM EVENTS EXAMPLE] Ошибка при автоматическом броске кубика: {dice_e}", exc_info=True)
             
             return
         
