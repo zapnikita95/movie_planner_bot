@@ -42,7 +42,7 @@ os.environ['HF_HOME'] = str(CACHE_DIR / 'huggingface')
 os.environ['TRANSFORMERS_CACHE'] = str(CACHE_DIR / 'huggingface' / 'transformers')
 os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sentence_transformers')
 
-TMDB_PARQUET_PATH = CACHE_DIR / 'tmdb_movies.parquet'
+TMDB_CSV_PATH = CACHE_DIR / 'tmdb_movies.csv'  # Финальный путь после скачивания
 INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'
 DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'
 
@@ -180,25 +180,69 @@ def build_tmdb_index():
         except Exception as e:
             logger.warning(f"Не удалось загрузить индекс: {e} → пересоздаём")
     
-    # =============================================================================
-    # Важно! Этот блок должен выполняться ТОЛЬКО один раз локально!
-    # После создания файлов закомментируй/удали скачивание
-    # =============================================================================
-    if not TMDB_PARQUET_PATH.exists():
-        logger.error(
-            "TMDB parquet отсутствует!\n"
-            "1. Запусти этот код ЛОКАЛЬНО один раз\n"
-            "2. Скачай датасет вручную/через kaggle\n"
-            "3. Положи в /app/cache/tmdb_movies.parquet\n"
-            "4. Сгенерируй индекс и закоммить/залей в volume"
-        )
-        # Возвращаем None, None - поиск будет возвращать пустой список
-        return None, None
+    # === СКАЧИВАНИЕ И ПОИСК CSV ФАЙЛА ===
+    if not TMDB_CSV_PATH.exists():
+        logger.info("TMDB CSV не найден — скачиваем через Kaggle API...")
+        try:
+            import subprocess
+            
+            # Настройка kaggle.json
+            kaggle_dir = Path("/root/.kaggle")
+            kaggle_dir.mkdir(parents=True, exist_ok=True)
+            kaggle_json = kaggle_dir / "kaggle.json"
+            
+            kaggle_username = os.getenv("KAGGLE_USERNAME")
+            kaggle_key = os.getenv("KAGGLE_KEY")
+            
+            if not kaggle_username or not kaggle_key:
+                logger.error("KAGGLE_USERNAME и KAGGLE_KEY не установлены в переменных окружения")
+                return None, None
+            
+            if not kaggle_json.exists():
+                with open(kaggle_json, "w") as f:
+                    f.write(f'{{"username":"{kaggle_username}","key":"{kaggle_key}"}}')
+                os.chmod(kaggle_json, 0o600)
+            
+            # Скачиваем и распаковываем
+            logger.info("Скачиваем датасет через Kaggle CLI...")
+            subprocess.check_call([
+                "kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies",
+                "-p", str(CACHE_DIR), "--unzip"
+            ])
+            
+            # Ищем файл по паттерну (на случай смены версии v11 → v12 и т.д.)
+            possible_files = list(CACHE_DIR.glob("TMDB_movie_dataset_v*.csv"))
+            if not possible_files:
+                # Проверяем также без префикса версии
+                possible_files = list(CACHE_DIR.glob("*movie*.csv"))
+                if not possible_files:
+                    logger.error("CSV файл TMDB_movie_dataset_v*.csv не найден после распаковки")
+                    logger.info(f"Содержимое CACHE_DIR: {list(CACHE_DIR.iterdir())}")
+                    return None, None
+            
+            actual_csv = possible_files[0]
+            logger.info(f"Найден главный файл: {actual_csv.name} (размер: {actual_csv.stat().st_size / 1e6:.1f} MB)")
+            
+            # Копируем в финальный путь (используем copy вместо move для безопасности)
+            import shutil
+            shutil.copy(actual_csv, TMDB_CSV_PATH)
+            logger.info(f"TMDB CSV успешно скопирован: {TMDB_CSV_PATH}")
+            
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Ошибка скачивания через Kaggle CLI: {e}", exc_info=True)
+            return None, None
+        except Exception as e:
+            logger.error(f"Ошибка обработки TMDB датасета: {e}", exc_info=True)
+            return None, None
 
-    # Дальше — обработка датасета (оставляем как было)
-    logger.info("Читаем TMDB датасет...")
-    df = pd.read_parquet(TMDB_PARQUET_PATH)
-    logger.info(f"Загружено {len(df)} записей")
+    # === Чтение и обработка CSV ===
+    logger.info("Загружаем TMDB датасет из CSV...")
+    try:
+        df = pd.read_csv(TMDB_CSV_PATH)
+        logger.info(f"Загружено {len(df)} записей")
+    except Exception as e:
+        logger.error(f"Ошибка чтения CSV файла: {e}", exc_info=True)
+        return None, None
     
     df['year'] = pd.to_datetime(df['release_date'], errors='coerce').dt.year
     current_year = datetime.now().year
