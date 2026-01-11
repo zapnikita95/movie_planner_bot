@@ -4570,7 +4570,8 @@ def register_series_handlers(bot_param):
         Основная логика теперь здесь.
         """
         try:
-            from moviebot.bot.bot_init import BOT_ID, PLANS_TZ
+            from moviebot.bot.bot_init import BOT_ID
+            from moviebot.config import PLANS_TZ
             from moviebot.utils.random_events import update_dice_game_message
             from datetime import datetime
 
