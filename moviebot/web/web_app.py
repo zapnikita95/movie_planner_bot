@@ -1227,8 +1227,18 @@ def create_web_app(bot):
     # Функция ОБЯЗАТЕЛЬНО должна возвращать app для запуска на Railway
     # Без этого Railway не сможет запустить веб-сервер
     # ========================================================================
-    # Инициализация индекса шазама убрана - будет ленивая загрузка при первом использовании
-    # (синхронная инициализация блокировала запуск приложения на Railway)
+    # Инициализация индекса шазама в фоновом потоке (не блокирует запуск приложения)
+    def init_shazam_background():
+        try:
+            logger.info("[WEB APP] Запуск инициализации индекса шазама в фоновом потоке...")
+            init_shazam_index()
+            logger.info("[WEB APP] ✅ Инициализация индекса шазама завершена")
+        except Exception as e:
+            logger.error(f"[WEB APP] ❌ Ошибка при инициализации индекса шазама: {e}", exc_info=True)
+    
+    thread = threading.Thread(target=init_shazam_background, daemon=True)
+    thread.start()
+    logger.info("[WEB APP] ✅ Фоновый поток для инициализации индекса шазама запущен")
 
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
