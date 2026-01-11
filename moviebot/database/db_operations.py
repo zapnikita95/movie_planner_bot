@@ -1485,35 +1485,23 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
 
     # Проверяем, есть ли фильм в базе
     with db_lock:
-        cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+        cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
         existing = cursor.fetchone()
 
     try:
-        if existing:
-            # Фильм уже в базе — показываем полную карточку со всеми кнопками
-            film_id = existing[0] if not isinstance(existing, dict) else existing.get('id')
-            title = existing[1] if not isinstance(existing, dict) else existing.get('title')
-            watched = existing[2] if not isinstance(existing, dict) else existing.get('watched')
+        # Всегда используем одну функцию — она умеет показывать и новые, и существующие
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=existing  # передаём None или кортеж — функция внутри разберётся
+        )
+        
+        logger.info(f"[ADD_AND_ANNOUNCE] Карточка показана для kp_id={kp_id}")
+        return True
 
-            logger.info(f"[ADD_AND_ANNOUNCE] Фильм уже в базе (id={film_id}) — показываем полную карточку")
-            show_film_info_with_buttons(
-                chat_id=chat_id,
-                user_id=user_id,
-                info=info,
-                link=link,
-                kp_id=kp_id,
-                existing=(film_id, title, watched)
-            )
-        else:
-            # Новый фильм — показываем карточку БЕЗ добавления, с кнопкой "Добавить в базу"
-            logger.info(f"[ADD_AND_ANNOUNCE] Новый фильм — показываем карточку с кнопкой добавления")
-            show_film_info_without_adding(
-                chat_id=chat_id,
-                user_id=user_id,
-                info=info,
-                link=link,
-                kp_id=kp_id
-            )
     except Exception as e:
         logger.error(f"[ADD_AND_ANNOUNCE] Ошибка при показе карточки: {e}", exc_info=True)
         # Фолбек — простое сообщение с названием и ссылкой
