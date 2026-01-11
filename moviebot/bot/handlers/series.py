@@ -4089,14 +4089,28 @@ def register_series_handlers(bot_param):
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))  # ← НОВАЯ КНОПКА
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
             
-            bot.edit_message_text(
-                "🎫 <b>Добавление билета</b>\n\n"
-                "Выберите тип билета:",
-                chat_id,
-                call.message.message_id,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
+            try:
+                bot.edit_message_text(
+                    "🎫 <b>Добавление билета</b>\n\n"
+                    "Выберите тип билета:",
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+            except Exception as edit_e:
+                logger.error(f"[TICKET NEW] Ошибка при редактировании сообщения: {edit_e}", exc_info=True)
+                # Пробуем отправить новое сообщение
+                try:
+                    bot.send_message(
+                        chat_id,
+                        "🎫 <b>Добавление билета</b>\n\n"
+                        "Выберите тип билета:",
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                except Exception as send_e:
+                    logger.error(f"[TICKET NEW] Ошибка при отправке сообщения: {send_e}", exc_info=True)
         except Exception as e:
             logger.error(f"[TICKET NEW] Ошибка: {e}", exc_info=True)
             try:
@@ -4120,13 +4134,15 @@ def register_series_handlers(bot_param):
                 'type': 'event'
             }
             
-            bot.edit_message_text(
+            sent_msg = bot.edit_message_text(
                 "🎤 <b>Добавление билета на мероприятие</b>\n\n"
                 "Напишите название мероприятия в ответ на это сообщение:",
                 chat_id,
                 call.message.message_id,
                 parse_mode='HTML'
             )
+            # Сохраняем message_id для проверки реплая в групповом чате
+            user_ticket_state[user_id]['prompt_message_id'] = call.message.message_id
         except Exception as e:
             logger.error(f"[TICKET ADD EVENT] Ошибка: {e}", exc_info=True)
             try:

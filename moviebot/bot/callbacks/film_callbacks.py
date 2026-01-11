@@ -1197,8 +1197,7 @@ def back_to_film_description(call):
     message_id = call.message.message_id
     message_thread_id = getattr(call.message, 'message_thread_id', None)
 
-    # КРИТИЧЕСКИ ВАЖНО: Проверяем, не устарел ли callback query ДО начала тяжелых операций
-    # Если callback устарел - сразу выходим, не делая API запросов и операций с БД
+    # Проверяем, не устарел ли callback query, но продолжаем выполнение даже если устарел
     callback_is_old = False
     try:
         bot.answer_callback_query(call.id, text="⏳ Загружаю...")
@@ -1206,14 +1205,9 @@ def back_to_film_description(call):
         error_str = str(answer_error)
         if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
             callback_is_old = True
-            logger.warning(f"[BACK TO FILM] Callback query устарел, ПРОПУСКАЕМ обработку: {answer_error}")
+            logger.warning(f"[BACK TO FILM] Callback query устарел, но продолжаем выполнение: {answer_error}")
         else:
             logger.error(f"[BACK TO FILM] Ошибка answer_callback_query: {answer_error}", exc_info=True)
-    
-    # Если callback устарел - СРАЗУ выходим, не делая тяжелых операций (API, БД)
-    if callback_is_old:
-        logger.info(f"[BACK TO FILM] ⚠️ Пропущен устаревший callback, выходим БЕЗ обработки")
-        return
 
     try:
 
@@ -1328,6 +1322,12 @@ def back_to_film_description(call):
             else:
                 link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"
         # Если link_from_db есть, он уже установлен выше
+
+        # Если callback устарел, используем send_message вместо edit_message_text
+        # (show_film_info_with_buttons сам обработает это через message_id=None)
+        if callback_is_old:
+            logger.info(f"[BACK TO FILM] Callback устарел, отправляем новое сообщение вместо редактирования")
+            message_id = None  # Это заставит show_film_info_with_buttons использовать send_message
 
         # Главный вызов — existing будет получен внутри show_film_info_with_buttons через get_film_current_state
         # Но передаем его для оптимизации, если он уже есть
