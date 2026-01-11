@@ -586,63 +586,61 @@ def handle_promo(message):
             )
     
     elif user_id in user_promo_admin_state:
-        state = user_promo_admin_state[user_id]
-        
-        # Проверка лички/реплая
-        try:
-            chat_info = bot.get_chat(chat_id)
-            is_private = chat_info.type == 'private'
-        except:
-            is_private = chat_id > 0
-        
-        if not is_private and not message.reply_to_message:
+        logger.info(f"[PROMO ADMIN] Пользователь {user_id} в состоянии создания промокода")
+
+        text = message.text.strip()
+        if not text:
+            bot.reply_to(message, "❌ Нельзя отправлять пустое сообщение")
             return
-        
-        parts = text.strip().split()
+
+        # Проверяем, что это личка (для админ-команд не обязательно, но оставляем безопасность)
+        if message.chat.type != 'private':
+            if not message.reply_to_message:
+                logger.info("[PROMO ADMIN] Пропущено — не реплай в группе")
+                return
+
+        parts = text.split(maxsplit=2)
         if len(parts) != 3:
-            send_error_message(
+            bot.reply_to(
                 message,
-                "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\n\nНапример: NEW2026 20% 100",
-                state=state,
-                back_callback="admin:back"
+                "❌ Неверный формат.\nПример: <code>DIM 95% 1</code> или <code>SALE500 20% 50</code>",
+                parse_mode='HTML'
             )
             return
-        
+
+        code = parts[0].strip().upper()
+        discount_input = parts[1].strip()
+        try:
+            total_uses = int(parts[2].strip())
+            if total_uses < 1:
+                raise ValueError("Количество должно быть ≥ 1")
+        except ValueError as ve:
+            bot.reply_to(
+                message,
+                f"❌ Ошибка в количестве использований: {ve}\nДолжно быть целое число ≥ 1"
+            )
+            return
+
         try:
             from moviebot.utils.promo import create_promocode
-            code = parts[0].strip()
-            discount_input = parts[1].strip()
-            total_uses_str = parts[2].strip()
-            
-            success, result_message = create_promocode(code, discount_input, total_uses_str)
-            
+            success, result_message = create_promocode(code, discount_input, total_uses)
+
             if success:
-                bot.reply_to(message, f"✅ {result_message}")
-                
-                # Обновление меню /promo
-                class FakeMessage:
-                    def __init__(self, original_message):
-                        self.chat = original_message.chat
-                        self.from_user = original_message.from_user
-                        self.message_id = original_message.message_id
-                        self.text = '/promo'
-                
-                fake_msg = FakeMessage(message)
+                bot.reply_to(message, f"✅ Успешно создано!\n{result_message}", parse_mode='HTML')
+
+                # Перезапускаем меню /promo
                 from moviebot.bot.handlers.promo import promo_command
-                promo_command(fake_msg)
+                promo_command(message)  # ← теперь напрямую, без фейкового сообщения
+
             else:
-                bot.reply_to(message, f"❌ {result_message}")
-            
-            del user_promo_admin_state[user_id]
-            
+                bot.reply_to(message, f"❌ Не получилось создать:\n{result_message}", parse_mode='HTML')
+
+            # Убираем состояние в любом случае
+            user_promo_admin_state.pop(user_id, None)
+
         except Exception as e:
-            logger.error(f"[PROMO HANDLER] Ошибка создания промокода: {e}", exc_info=True)
-            send_error_message(
-                message,
-                "❌ Ошибка при создании промокода.",
-                state=state,
-                back_callback="admin:back"
-            )
+            logger.error(f"[PROMO ADMIN CREATE] Критическая ошибка: {e}", exc_info=True)
+            bot.reply_to(message, "❌ Произошла ошибка при создании промокода. Попробуйте позже.")
 
 # ==================== HANDLER ДЛЯ БИЛЕТОВ ====================
 
