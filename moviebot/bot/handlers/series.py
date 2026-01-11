@@ -4470,9 +4470,19 @@ def register_series_handlers(bot_param):
                     logger.info(f"[DICE GAME] Пользователь {user_id} ({username}) бросил кубик в чате {chat_id}, message_id={dice_msg.message_id}")
                     logger.info(f"[DICE GAME] Текущее состояние dice_game_state[{chat_id}]: participants={list(game_state.get('participants', {}).keys())}, dice_messages={list(game_state.get('dice_messages', {}).keys())}")
                     
+                    # Детальное логирование состояния для отладки
+                    for pid, pinfo in game_state.get('participants', {}).items():
+                        logger.info(f"[DICE GAME] participant {pid}: username={pinfo.get('username')}, dice_message_id={pinfo.get('dice_message_id')}, has_value={'value' in pinfo}")
+                    for dmid, duid in game_state.get('dice_messages', {}).items():
+                        logger.info(f"[DICE GAME] dice_message {dmid} -> user_id {duid}")
+                    
                     # Обновляем сообщение с результатами
                     message_id_to_update = game_state.get('message_id', message_id)
-                    update_dice_game_message(chat_id, game_state, message_id_to_update, BOT_ID)
+                    try:
+                        update_dice_game_message(chat_id, game_state, message_id_to_update, BOT_ID)
+                        logger.info(f"[DICE GAME] ✅ Сообщение с результатами обновлено успешно")
+                    except Exception as update_e:
+                        logger.error(f"[DICE GAME] ❌ Ошибка при обновлении сообщения с результатами: {update_e}", exc_info=True)
                 else:
                     raise Exception("Не удалось отправить кубик")
             except Exception as e:
@@ -4510,7 +4520,7 @@ def register_series_handlers(bot_param):
         return
 
 
-    @bot.edited_message_handler(content_types=['dice'])
+    @bot.edited_message_handler(func=lambda m: m.dice is not None)
     def handle_dice_result_edited(message):
         """Обработчик обновления сообщения с кубиком (когда кубик останавливается и value становится известным)"""
         try:
