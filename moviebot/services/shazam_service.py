@@ -40,14 +40,17 @@ _movies_df = None
 CACHE_DIR = Path('cache')
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+DATA_DIR = Path('data/shazam')
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 # Кэш для huggingface моделей
 os.environ['HF_HOME'] = str(CACHE_DIR / 'huggingface')
 os.environ['TRANSFORMERS_CACHE'] = str(CACHE_DIR / 'huggingface' / 'transformers')
 os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sentence_transformers')
 
-TMDB_CSV_PATH = CACHE_DIR / 'tmdb_movies.csv'  # 'cache/tmdb_movies.csv' локально
-INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'
-DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'
+TMDB_CSV_PATH = CACHE_DIR / 'tmdb_movies.csv'  # 'cache/tmdb_movies.csv'
+INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'     # 'data/shazam/tmdb_index.faiss'
+DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'  # 'data/shazam/tmdb_movies_processed.csv'
 
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 50000
