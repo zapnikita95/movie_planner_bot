@@ -158,62 +158,37 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
             shazam_state.pop(user_id, None)
             return
         
-        # Отправляем каждый фильм карточкой
+        # Формируем одно сообщение со всеми фильмами
+        films_text = "🔍 <b>Найдено фильмов:</b>\n\n"
         for i, result in enumerate(valid_results, 1):
-            # Данные из OMDB по умолчанию
-            omdb_title = result['title']
-            omdb_year = result.get('year', '')
-            director = result.get('director', '')
-            actors = result.get('actors', '')
-            rating = result.get('imdb_rating', '')
-            poster_url = result.get('poster_url')
-            
             # Данные из Кинопоиска уже получены при фильтрации
             kp_id = result.get('kp_id')
             kp_title = result.get('kp_title')
             kp_year = result.get('kp_year')
+            omdb_title = result['title']
+            omdb_year = result.get('year', '')
             
             # Что показываем
             display_title = kp_title or omdb_title
             display_year = f" ({kp_year or omdb_year})" if (kp_year or omdb_year) else ""
             
-            card_text = f"<b>{i}. {display_title}{display_year}</b>\n"
-            if director and director != "Не указано":
-                card_text += f"🎬 Режиссёр: {director}\n"
-            if actors and actors != "Не указано":
-                card_text += f"🎭 В ролях: {actors}\n"
-            if rating and rating != "N/A":
-                card_text += f"⭐ IMDb: {rating}\n"
+            films_text += f"{i}. <b>{display_title}{display_year}</b>\n"
             
-            # Кнопка с русским названием (если есть)
+            # Кнопка с русским названием
             button_text = f"Подробнее о {i}. {display_title}{display_year}"
             if kp_id:
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{int(kp_id)}"))
             else:
                 markup.add(InlineKeyboardButton(button_text, callback_data="shazam:no_kp"))
-            
-            # Отправляем фото или текст
-            if poster_url:
-                try:
-                    bot.send_photo(
-                        chat_id=chat_id,
-                        photo=poster_url,
-                        caption=card_text,
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    logger.warning(f"Не удалось отправить постер: {e}")
-                    bot.send_message(chat_id=chat_id, text=card_text, parse_mode='HTML')
-            else:
-                bot.send_message(chat_id=chat_id, text=card_text, parse_mode='HTML')
         
         # Кнопка назад
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
         
-        # Финальное сообщение с кнопками
+        # Отправляем одно сообщение со всеми фильмами и кнопками
         bot.send_message(
             chat_id=chat_id,
-            text="👆 Выберите фильм для подробной информации на Кинопоиске:",
+            text=films_text,
+            parse_mode='HTML',
             reply_markup=markup
         )
         
@@ -415,56 +390,37 @@ def process_shazam_voice_async(message, loading_msg):
             shazam_state.pop(user_id, None)
             return
         
-        # Отправляем карточки
+        # Формируем одно сообщение со всеми фильмами
+        films_text = "🔍 <b>Найдено фильмов:</b>\n\n"
         for i, result in enumerate(valid_results, 1):
-            omdb_title = result['title']
-            omdb_year = result.get('year', '')
-            director = result.get('director', '')
-            actors = result.get('actors', '')
-            rating = result.get('imdb_rating', '')
-            poster_url = result.get('poster_url')
-            
             # Данные из Кинопоиска уже получены при фильтрации
             kp_id = result.get('kp_id')
             kp_title = result.get('kp_title')
             kp_year = result.get('kp_year')
+            omdb_title = result['title']
+            omdb_year = result.get('year', '')
             
+            # Что показываем
             display_title = kp_title or omdb_title
             display_year = f" ({kp_year or omdb_year})" if (kp_year or omdb_year) else ""
             
-            card_text = f"<b>{i}. {display_title}{display_year}</b>\n"
-            if director and director != "Не указано":
-                card_text += f"🎬 Режиссёр: {director}\n"
-            if actors and actors != "Не указано":
-                card_text += f"🎭 В ролях: {actors}\n"
-            if rating and rating != "N/A":
-                card_text += f"⭐ IMDb: {rating}\n"
+            films_text += f"{i}. <b>{display_title}{display_year}</b>\n"
             
+            # Кнопка с русским названием
             button_text = f"Подробнее о {i}. {display_title}{display_year}"
             if kp_id:
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{int(kp_id)}"))
             else:
                 markup.add(InlineKeyboardButton(button_text, callback_data="shazam:no_kp"))
-            
-            if poster_url:
-                try:
-                    bot.send_photo(
-                        chat_id=chat_id,
-                        photo=poster_url,
-                        caption=card_text,
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    logger.warning(f"Не удалось отправить постер: {e}")
-                    bot.send_message(chat_id=chat_id, text=card_text, parse_mode='HTML')
-            else:
-                bot.send_message(chat_id=chat_id, text=card_text, parse_mode='HTML')
         
+        # Кнопка назад
         markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
         
+        # Отправляем одно сообщение со всеми фильмами и кнопками
         bot.send_message(
             chat_id=chat_id,
-            text="👆 Выберите фильм для подробной информации на Кинопоиске:",
+            text=films_text,
+            parse_mode='HTML',
             reply_markup=markup
         )
         
