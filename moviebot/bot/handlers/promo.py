@@ -436,3 +436,12 @@ def handle_promo_admin_text(message):
     except Exception as e:
         logger.error(f"[PROMO ADMIN TEXT] Ошибка при создании: {e}", exc_info=True)
         bot.reply_to(message, "❌ Ошибка при создании промокода. Попробуйте позже.")
+
+def register_promo_handlers(bot):
+    """
+    Регистрация всех handlers из promo.py
+    Вызывается один раз при старте бота
+    """
+    # Здесь ничего не нужно писать — все @bot.message_handler и @bot.callback_query_handler
+    # уже зарегистрированы автоматически при импорте файла
+    pass

@@ -240,10 +240,15 @@ try:
     logger.info("✅ admin text states handlers (high priority) зарегистрированы")
 except ImportError as e:
     logger.error(f"❌ Не удалось импортировать state_handlers: {e}")
-    
+
 from moviebot.bot.handlers.shazam import register_shazam_handlers
 register_shazam_handlers(bot)
 logger.info("✅ shazam handlers зарегистрированы")
+
+# Добавляем promo handlers (ОЧЕНЬ ВАЖНО — ДО text_messages!)
+from moviebot.bot.handlers.promo import register_promo_handlers
+register_promo_handlers(bot)
+logger.info("✅ promo handlers зарегистрированы")
 
 # === РЕГИСТРАЦИЯ CALLBACKS (после рефакторинга) ===
 from moviebot.bot.callbacks.film_callbacks import register_film_callbacks
