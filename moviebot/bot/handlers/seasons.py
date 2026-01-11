@@ -43,7 +43,7 @@ def get_series_airing_status(kp_id):
                         release_date = None
                         for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
                             try:
-                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                release_date = datetime.strptime(release_str.split('T')[0], fmt)
                                 break
                             except:
                                 continue
@@ -90,7 +90,7 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
                         release_date = None
                         for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
                             try:
-                                release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                release_date = datetime.strptime(release_str.split('T')[0], fmt)
                                 break
                             except:
                                 continue

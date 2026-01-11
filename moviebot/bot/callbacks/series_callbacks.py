@@ -5,6 +5,7 @@ Callback handlers для работы с сериалами
 import logging
 import json
 import re
+from datetime import datetime, timedelta
 
 import pytz
 import telebot
@@ -118,7 +119,7 @@ def register_series_callbacks(bot):
                                 release_date = None
                                 for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
                                     try:
-                                        release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                        release_date = datetime.strptime(release_str.split('T')[0], fmt)
                                         break
                                     except:
                                         continue
@@ -173,7 +174,7 @@ def register_series_callbacks(bot):
                                     release_date = None
                                     for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
                                         try:
-                                            release_date = dt.strptime(release_str.split('T')[0], fmt)
+                                            release_date = datetime.strptime(release_str.split('T')[0], fmt)
                                             break
                                         except:
                                             continue
@@ -440,8 +441,8 @@ def register_series_callbacks(bot):
                     release_str = ep.get('releaseDate', '')
                     if release_str and release_str != '—':
                         try:
-                            release_date = dt.strptime(release_str, '%Y-%m-%d').replace(tzinfo=pytz.utc)
-                            if release_date > dt.now(pytz.utc):
+                            release_date = datetime.strptime(release_str, '%Y-%m-%d').replace(tzinfo=pytz.utc)
+                            if release_date > datetime.now(pytz.utc):
                                 if nearest_release_date is None or release_date < nearest_release_date:
                                     nearest_release_date = release_date
                         except:
@@ -450,7 +451,7 @@ def register_series_callbacks(bot):
             if nearest_release_date:
                 next_check_date = nearest_release_date - timedelta(days=1)  # Проверяем за день до выхода
             else:
-                next_check_date = dt.now(pytz.utc) + timedelta(weeks=3)  # Если нет дат, проверка через 3 недели
+                next_check_date = datetime.now(pytz.utc) + timedelta(weeks=3)  # Если нет дат, проверка через 3 недели
             
             logger.info(f"[SERIES SUBSCRIBE] Постановка задачи проверки на {next_check_date}")
             scheduler.add_job(
@@ -1151,7 +1152,7 @@ def rate_film_callback(call):
         
     @bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
     def facts_callback(call):
-        """Обработчик кнопки 'Факты'"""
+        """Обработчик кнопки 'Интересные факты'"""
         try:
             # Сразу отвечаем на callback, чтобы убрать "часики"
             try:

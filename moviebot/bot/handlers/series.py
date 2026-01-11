@@ -215,6 +215,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         film_type_text = "Сериал" if is_series else "Фильм"
         logger.info(f"[SHOW FILM INFO] is_series={is_series}, type_emoji={type_emoji}, plan_info={plan_info}, has_tickets={has_tickets}")
         
+        # Инициализируем markup заранее, чтобы избежать UnboundLocalError
+        markup = InlineKeyboardMarkup()
+        
         # Формируем текст описания
         text = ""
 
@@ -248,19 +251,33 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.warning(f"[DB_FETCH] Не удалось получить полные данные: {db_err}")
 
             if db_row:
-                db_is_series = bool(db_row[6])
+                # Обрабатываем как dict или tuple
+                if isinstance(db_row, dict):
+                    db_is_series = bool(db_row.get('is_series', 0))
+                    info = {
+                        'title': db_row.get('title') or title_from_db,
+                        'year': db_row.get('year'),
+                        'genres': db_row.get('genres'),
+                        'description': db_row.get('description'),
+                        'director': db_row.get('director'),
+                        'actors': db_row.get('actors'),
+                        'is_series': is_series  # ← важно! используем фиксированное значение
+                    }
+                else:
+                    # tuple/list
+                    db_is_series = bool(db_row[6] if len(db_row) > 6 else 0)
+                    info = {
+                        'title': db_row[0] if len(db_row) > 0 else title_from_db,
+                        'year': db_row[1] if len(db_row) > 1 else None,
+                        'genres': db_row[2] if len(db_row) > 2 else None,
+                        'description': db_row[3] if len(db_row) > 3 else None,
+                        'director': db_row[4] if len(db_row) > 4 else None,
+                        'actors': db_row[5] if len(db_row) > 5 else None,
+                        'is_series': is_series  # ← важно! используем фиксированное значение
+                    }
+                
                 if db_is_series != is_series:
                     logger.warning(f"[SHOW FILM INFO] Конфликт is_series! API/info = {is_series}, БД = {db_is_series}. Оставляем значение из info: {is_series}")
-                
-                info = {
-                    'title': db_row[0] or title_from_db,
-                    'year': db_row[1],
-                    'genres': db_row[2],
-                    'description': db_row[3],
-                    'director': db_row[4],
-                    'actors': db_row[5],
-                    'is_series': is_series  # ← важно! используем фиксированное значение
-                }
             else:
                 info = info or {}
                 info['title'] = title_from_db
