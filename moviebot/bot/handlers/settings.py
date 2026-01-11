@@ -316,13 +316,14 @@ def handle_settings_callback(call):
                     return
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
                 markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
                 markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
                 
                 text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
                 text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
-                text += f"⏳ Осталось бросить кубик: {active_participants} участник(ов)"
+                text += "Ниже бот бросит тестовый кубик, вы можете на него нажать, чтобы тоже сделать бросок.\n\n"
+                text += "Также, вы можете просто отправить эмодзи кубика в чат, бросок будет засчитан.\n\n"
+                text += "📝 Итоги будут подведены через 10 минут, даже если не все участники сделали бросок"
                 
                 sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 
@@ -334,6 +335,13 @@ def handle_settings_callback(call):
                         'dice_messages': {}
                     }
                     logger.info(f"[RANDOM EVENTS EXAMPLE] Инициализировано состояние игры для примера события в чате {chat_id}, message_id={sent_msg.message_id}")
+                
+                # Автоматически бросаем кубик от имени бота после отправки сообщения
+                try:
+                    bot_dice_msg = bot.send_dice(chat_id, emoji='🎲')
+                    logger.info(f"[RANDOM EVENTS EXAMPLE] Бот автоматически бросил кубик, message_id={bot_dice_msg.message_id if bot_dice_msg else None}")
+                except Exception as dice_e:
+                    logger.error(f"[RANDOM EVENTS EXAMPLE] Ошибка при автоматическом броске кубика: {dice_e}", exc_info=True)
             
             return
         

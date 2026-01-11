@@ -9,6 +9,7 @@ import sys
 import time
 # Импорт yookassa удален, используется moviebot.api.yookassa_api
 from dotenv import load_dotenv
+from moviebot.services.shazam_service import init_shazam_index  # ← Добавь эту строку
 
 # Загружаем переменные окружения из .env файла (для локальной разработки)
 # В Railway переменные окружения уже доступны через os.getenv()
@@ -29,24 +30,6 @@ flask_logger.setLevel(logging.WARNING)
 #logger.info("[WEB APP] Flask приложение создано")
 
 # Глобальное логирование всех запросов - ПРИНУДИТЕЛЬНОЕ
-# Глобальное логирование всех запросов - ПРИНУДИТЕЛЬНОЕ
-
-# Проверяем переменные окружения при старте приложения
-def check_environment_variables():
-    """Проверяет наличие необходимых переменных окружения"""
-    nalog_inn = os.getenv('NALOG_INN')
-    nalog_password = os.getenv('NALOG_PASSWORD')
-    
-    logger.info("=" * 80)
-    logger.info("[WEB APP] Проверка переменных окружения при старте:")
-    logger.info(f"[WEB APP] NALOG_INN: {'✅ установлен' if nalog_inn and nalog_inn.strip() else '❌ НЕ УСТАНОВЛЕН'}")
-    logger.info(f"[WEB APP] NALOG_PASSWORD: {'✅ установлен' if nalog_password and nalog_password.strip() else '❌ НЕ УСТАНОВЛЕН'}")
-    
-    if not nalog_inn or not nalog_password or not nalog_inn.strip() or not nalog_password.strip():
-        logger.warning("[WEB APP] ⚠️ NALOG_INN или NALOG_PASSWORD не настроены - создание чеков будет недоступно")
-    else:
-        logger.info("[WEB APP] ✅ Все переменные для создания чеков настроены")
-    logger.info("=" * 80)
 
 # ============================================================================
 # ⚠️ КРИТИЧНО ДЛЯ RAILWAY: ФУНКЦИЯ create_web_app
@@ -59,12 +42,12 @@ def check_environment_variables():
     """Проверяет наличие необходимых переменных окружения"""
     nalog_inn = os.getenv('NALOG_INN')
     nalog_password = os.getenv('NALOG_PASSWORD')
-    
+   
     logger.info("=" * 80)
     logger.info("[WEB APP] Проверка переменных окружения при старте:")
     logger.info(f"[WEB APP] NALOG_INN: {'✅ установлен' if nalog_inn and nalog_inn.strip() else '❌ НЕ УСТАНОВЛЕН'}")
     logger.info(f"[WEB APP] NALOG_PASSWORD: {'✅ установлен' if nalog_password and nalog_password.strip() else '❌ НЕ УСТАНОВЛЕН'}")
-    
+   
     if not nalog_inn or not nalog_password or not nalog_inn.strip() or not nalog_password.strip():
         logger.warning("[WEB APP] ⚠️ NALOG_INN или NALOG_PASSWORD не настроены - создание чеков будет недоступно")
     else:
@@ -1244,10 +1227,18 @@ def create_web_app(bot):
     # Функция ОБЯЗАТЕЛЬНО должна возвращать app для запуска на Railway
     # Без этого Railway не сможет запустить веб-сервер
     # ========================================================================
+    # Инициализация шазама при запуске приложения (самое важное!)
+    init_shazam_index()  # ← Здесь строится индекс сразу после создания app
+
+    logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
+    logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
+    logger.info(f"[WEB APP] Возвращаем app: {app}")
+
     return app
 
 # Запуск приложения (критично для Railway — запускаем здесь)
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 8080))  # Railway сам подставит PORT
     logger.info(f"[WEB APP] Запуск Flask на host=0.0.0.0, port={port}")
+    app = create_web_app(None)  # bot=None для теста, в Railway передаётся настоящий bot
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
