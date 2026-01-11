@@ -5700,7 +5700,7 @@ def handle_successful_payment(message):
         
         # Создаем/продлеваем подписку (логика из payment_callbacks.py)
         from moviebot.scheduler import send_successful_payment_notification
-        from moviebot.database.db_operations import get_active_subscription, renew_subscription, add_subscription_member
+        from moviebot.database.db_operations import get_active_subscription, renew_subscription, add_subscription_member, create_subscription
         
         # Проверяем, есть ли уже активная подписка с такими же параметрами
         existing_sub = get_active_subscription(chat_id, user_id, subscription_type)
