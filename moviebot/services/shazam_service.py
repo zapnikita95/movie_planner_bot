@@ -59,13 +59,12 @@ MAX_MOVIES = 50000
 def init_shazam_index():
     """Инициализация индекса при запуске приложения"""
     logger.info("Запуск инициализации индекса шазама при старте приложения...")
-    with _index_lock:
-        if _index is None or _movies_df is None:
-            try:
-                get_index_and_movies()  # Это вызовет build_tmdb_index()
-                logger.info("Индекс шазама успешно инициализирован при старте")
-            except Exception as e:
-                logger.error(f"Ошибка инициализации индекса при старте: {e}", exc_info=True)
+    try:
+        # НЕ используем блокировку здесь - get_index_and_movies() уже защищена блокировкой
+        get_index_and_movies()  # Это вызовет build_tmdb_index() при необходимости
+        logger.info("Индекс шазама успешно инициализирован при старте")
+    except Exception as e:
+        logger.error(f"Ошибка инициализации индекса при старте: {e}", exc_info=True)
 
 
 def get_model():
