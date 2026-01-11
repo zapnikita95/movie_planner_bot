@@ -33,6 +33,7 @@ from moviebot.database.db_connection import get_db_connection
 # from moviebot.utils.helpers import (...)
 from moviebot.database.db_operations import get_user_timezone_or_default, get_notification_settings
 from moviebot.bot.handlers.seasons import get_series_airing_status
+from moviebot.utils.helpers import has_notifications_access
 
 logger = logging.getLogger(__name__)
 

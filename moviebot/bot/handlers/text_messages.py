@@ -863,7 +863,8 @@ def handle_promo_reply_direct(message):
                     metadata["group_size"] = str(group_size)
                 
                 try:
-                    payment = Payment.create({
+                    # Для всех подписок кроме lifetime добавляем save_payment_method: True
+                    payment_data = {
                         "amount": {
                             "value": f"{discounted_price:.2f}",
                             "currency": "RUB"
@@ -875,7 +876,14 @@ def handle_promo_reply_direct(message):
                         "capture": True,
                         "description": description,
                         "metadata": metadata
-                    })
+                    }
+                    
+                    # Добавляем save_payment_method для всех не-lifetime подписок
+                    if period_type != 'lifetime':
+                        payment_data["save_payment_method"] = True
+                        logger.info(f"[PROMO REPLY DIRECT] save_payment_method=True добавлен для period_type={period_type}")
+                    
+                    payment = Payment.create(payment_data)
                     
                     from moviebot.database.db_operations import save_payment
                     save_payment(

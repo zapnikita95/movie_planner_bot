@@ -186,11 +186,14 @@ def create_web_app(bot):
                     
                     # === ОПРЕДЕЛЯЕМ payment_method_id СРАЗУ ===
                     payment_method_id = None
-                    if full_payment and getattr(full_payment.payment_method, 'saved', False):
-                        payment_method_id = full_payment.payment_method.id
-                        logger.info(f"[YOOKASSA] Карта сохранена! payment_method_id={payment_method_id}")
+                    if full_payment and hasattr(full_payment, 'payment_method') and full_payment.payment_method:
+                        if getattr(full_payment.payment_method, 'saved', False):
+                            payment_method_id = full_payment.payment_method.id
+                            logger.info(f"[YOOKASSA] Карта сохранена! payment_method_id={payment_method_id}")
+                        else:
+                            logger.info("[YOOKASSA] Карта НЕ сохранена — автоплатёж отключён")
                     else:
-                        logger.info("[YOOKASSA] Карта НЕ сохранена — автоплатёж отключён")
+                        logger.info("[YOOKASSA] payment_method отсутствует в объекте платежа")
                     
                     # Проверяем, является ли это обновлением существующей подписки
                     upgrade_subscription_id = metadata.get('upgrade_subscription_id')
@@ -442,19 +445,20 @@ def create_web_app(bot):
                         logger.info(f"[YOOKASSA] payment_method_id {payment_method_id} сохранён в платеж")
                     
                     # === СОХРАНЕНИЕ payment_method_id В ПОДПИСКУ ТОЛЬКО ЕСЛИ saved: true ===
-                    if full_payment and getattr(full_payment.payment_method, 'saved', False) and subscription_id:
-                        saved_pm_id = full_payment.payment_method.id
-                        from moviebot.database.db_connection import get_db_connection, db_lock
-                        conn_sub = get_db_connection()
-                        cursor_sub = conn_sub.cursor()
-                        with db_lock:
-                            cursor_sub.execute("""
-                                UPDATE subscriptions 
-                                SET payment_method_id = %s
-                                WHERE id = %s
-                            """, (saved_pm_id, subscription_id))
-                            conn_sub.commit()
-                        logger.info(f"[YOOKASSA] Автоплатёж включён для подписки {subscription_id} (payment_method_id={saved_pm_id})")
+                    if full_payment and hasattr(full_payment, 'payment_method') and full_payment.payment_method:
+                        if getattr(full_payment.payment_method, 'saved', False) and subscription_id:
+                            saved_pm_id = full_payment.payment_method.id
+                            from moviebot.database.db_connection import get_db_connection, db_lock
+                            conn_sub = get_db_connection()
+                            cursor_sub = conn_sub.cursor()
+                            with db_lock:
+                                cursor_sub.execute("""
+                                    UPDATE subscriptions 
+                                    SET payment_method_id = %s
+                                    WHERE id = %s
+                                """, (saved_pm_id, subscription_id))
+                                conn_sub.commit()
+                            logger.info(f"[YOOKASSA] Автоплатёж включён для подписки {subscription_id} (payment_method_id={saved_pm_id})")
                     
                     # Создаем чек от самозанятого
                     check_url = None

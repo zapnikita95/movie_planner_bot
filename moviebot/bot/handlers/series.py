@@ -1553,13 +1553,21 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            mode = call.data.split(":")[1]
+            
+            # Инициализируем состояние, если его нет (может быть утеряно при перезапуске бота или долгом ожидании)
             if user_id not in user_random_state:
-                bot.answer_callback_query(call.id)
-                return
+                logger.info(f"[RANDOM CALLBACK] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': None,
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
 
             state = user_random_state[user_id]
-            mode = call.data.split(":")[1]
             
             logger.info(f"[RANDOM CALLBACK] Mode: {mode}, user_id={user_id}, chat_id={chat_id}")
             
@@ -1606,18 +1614,6 @@ def register_series_handlers(bot_param):
                     bot.answer_callback_query(call.id)
                     logger.info(f"[RANDOM] Пустая база chat_id={chat_id}, user_id={user_id} — показываем кнопки в главное меню")
                     return
-                        
-            if user_id not in user_random_state:
-                logger.warning(f"[RANDOM CALLBACK] State not found for user_id={user_id}, state keys: {list(user_random_state.keys())}, initializing new state")
-                # Инициализируем состояние заново, если оно не найдено
-                user_random_state[user_id] = {
-                    'step': 'mode',
-                    'mode': None,
-                    'periods': [],
-                    'genres': [],
-                    'directors': [],
-                    'actors': []
-                }
             
             logger.info(f"[RANDOM CALLBACK] State found: {user_random_state[user_id]}")
             
@@ -1828,18 +1824,20 @@ def register_series_handlers(bot_param):
             user_id = call.from_user.id
             chat_id = call.message.chat.id
 
-            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            # Инициализируем состояние, если его нет
             if user_id not in user_random_state:
-                bot.answer_callback_query(call.id)
-                return
+                logger.info(f"[RANDOM CALLBACK] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': None,
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
 
             state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
-            
-            if user_id not in user_random_state:
-                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}")
-                bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
-                return
             
             mode = user_random_state[user_id].get('mode')
             if mode != 'kinopoisk':
@@ -1906,17 +1904,20 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== PERIOD HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            # Инициализируем состояние, если его нет
             if user_id not in user_random_state:
-                bot.answer_callback_query(call.id)
-                return
+                logger.info(f"[RANDOM CALLBACK] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': None,
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
 
             state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
-            
-            if user_id not in user_random_state:
-                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}, reinitializing")
-                user_random_state[user_id] = {'step': 'period', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
             
             mode = user_random_state[user_id].get('mode')
             
@@ -2489,19 +2490,20 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== YEAR HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            # Инициализируем состояние, если его нет
             if user_id not in user_random_state:
-                bot.answer_callback_query(call.id)
-                return
+                logger.info(f"[RANDOM CALLBACK] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': None,
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
 
             state = user_random_state[user_id]
-
             data = call.data.split(":", 1)[1]
-            
-            if user_id not in user_random_state:
-                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}")
-                bot.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
-                return
             
             mode = user_random_state[user_id].get('mode')
             
@@ -2571,17 +2573,20 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== GENRE HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            # Инициализируем состояние, если его нет
             if user_id not in user_random_state:
-                bot.answer_callback_query(call.id)
-                return
+                logger.info(f"[RANDOM CALLBACK] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': None,
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
 
             state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
-            
-            if user_id not in user_random_state:
-                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}, reinitializing")
-                user_random_state[user_id] = {'step': 'genre', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
             
             mode = user_random_state[user_id].get('mode')
             
@@ -2782,17 +2787,20 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== DIRECTOR HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            # Инициализируем состояние, если его нет
             if user_id not in user_random_state:
-                bot.answer_callback_query(call.id)
-                return
+                logger.info(f"[RANDOM CALLBACK] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': None,
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
 
             state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
-            
-            if user_id not in user_random_state:
-                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}, reinitializing")
-                user_random_state[user_id] = {'step': 'director', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
             
             if data == "skip":
                 user_random_state[user_id]['directors'] = []
@@ -2840,17 +2848,20 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== ACTOR HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            # Инициализируем состояние, если его нет
             if user_id not in user_random_state:
-                bot.answer_callback_query(call.id)
-                return
+                logger.info(f"[RANDOM CALLBACK] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': None,
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
 
             state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
-            
-            if user_id not in user_random_state:
-                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}, reinitializing")
-                user_random_state[user_id] = {'step': 'actor', 'periods': [], 'genres': [], 'directors': [], 'actors': []}
             
             if data == "skip":
                 user_random_state[user_id]['actors'] = []
