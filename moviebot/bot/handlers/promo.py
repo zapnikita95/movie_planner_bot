@@ -4,12 +4,9 @@ from moviebot.bot.bot_init import bot
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-
 from moviebot.states import user_promo_admin_state
-
-from moviebot.utils.promo import get_active_promocodes, get_all_promocodes, deactivate_promocode, get_promocode_info
+from moviebot.utils.promo import get_active_promocodes, get_all_promocodes, deactivate_promocode, get_promocode_info, create_promocode
 
 
 logger = logging.getLogger(__name__)
