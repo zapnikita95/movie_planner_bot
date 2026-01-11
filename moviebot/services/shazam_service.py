@@ -214,15 +214,8 @@ def parse_json_list(json_str, key='name', top_n=10):
 def build_tmdb_index():
     global _index, _movies_df
 
-    # ВРЕМЕННЫЙ БЛОК — УДАЛИТЬ ПОСЛЕ ПЕРВОГО ЗАПУСКА
-    if INDEX_PATH.exists():
-        INDEX_PATH.unlink()
-        logger.info("Удалён старый индекс для пересоздания")
-    if DATA_PATH.exists():
-        DATA_PATH.unlink()
-        logger.info("Удалён старый processed.csv для пересоздания")
-    # КОНЕЦ ВРЕМЕННОГО БЛОКА
-
+    # ФИКС: Проверяем наличие кеша индекса перед построением
+    # Если индекс существует, загружаем его вместо пересоздания
     if INDEX_PATH.exists() and DATA_PATH.exists():
         try:
             _index = faiss.read_index(str(INDEX_PATH))

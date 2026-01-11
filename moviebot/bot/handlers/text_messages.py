@@ -1181,8 +1181,39 @@ def handle_group_shazam_text_reply(message):
         return
     
     logger.info(f"[GROUP SHAZAM TEXT REPLY] Получен запрос от {message.from_user.id}: '{query[:50]}'")
-    from moviebot.bot.handlers.shazam import process_shazam_text_query
-    process_shazam_text_query(message, query, reply_to_message=message.reply_to_message)
+    
+    # ФИКС: Отправляем сообщение "Обрабатываю..." сразу и запускаем обработку в фоне
+    # Это позволяет вебхуку завершиться быстро и избежать таймаутов Telegram
+    try:
+        loading_msg = bot.reply_to(message, "🔍 Обрабатываю запрос...")
+        
+        # Запускаем обработку в отдельном потоке
+        from threading import Thread
+        from moviebot.bot.handlers.shazam import process_shazam_text_query
+        
+        def process_in_background():
+            try:
+                # Передаем loading_msg, чтобы не дублировать сообщение
+                process_shazam_text_query(message, query, reply_to_message=message.reply_to_message, loading_msg=loading_msg)
+            except Exception as e:
+                logger.error(f"[GROUP SHAZAM TEXT REPLY] Ошибка в фоновой обработке: {e}", exc_info=True)
+                try:
+                    bot.reply_to(message, f"❌ Произошла ошибка при обработке: {str(e)[:200]}")
+                except:
+                    pass
+        
+        thread = Thread(target=process_in_background, daemon=True)
+        thread.start()
+        logger.info(f"[GROUP SHAZAM TEXT REPLY] Обработка запущена в фоновом потоке для user_id={message.from_user.id}")
+        
+    except Exception as e:
+        logger.error(f"[GROUP SHAZAM TEXT REPLY] Критическая ошибка: {e}", exc_info=True)
+        # Пытаемся обработать синхронно как fallback
+        try:
+            from moviebot.bot.handlers.shazam import process_shazam_text_query
+            process_shazam_text_query(message, query, reply_to_message=message.reply_to_message)
+        except:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке запроса.")
 
 
 # ==================== СТАРЫЙ ОБРАБОТЧИК (ОСТАВЛЯЕМ ДЛЯ СОВМЕСТИМОСТИ) ====================

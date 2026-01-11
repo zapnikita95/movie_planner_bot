@@ -28,8 +28,15 @@ from moviebot.bot.handlers.text_messages import expect_text_from_user
 logger = logging.getLogger(__name__)
 
 
-def process_shazam_text_query(message, query, reply_to_message=None):
-    """Единая логика обработки текстового запроса Shazam. Используется обоими обработчиками."""
+def process_shazam_text_query(message, query, reply_to_message=None, loading_msg=None):
+    """Единая логика обработки текстового запроса Shazam. Используется обоими обработчиками.
+    
+    Args:
+        message: Объект сообщения Telegram
+        query: Текстовый запрос для поиска
+        reply_to_message: Сообщение, на которое отвечаем (опционально)
+        loading_msg: Сообщение "загрузка" (если уже отправлено, чтобы не дублировать)
+    """
     
     user_id = message.from_user.id
     chat_id = message.chat.id
@@ -43,11 +50,22 @@ def process_shazam_text_query(message, query, reply_to_message=None):
         shazam_state.pop(user_id, None)
         return
     
-    # Показываем анимацию загрузки
-    if reply_to_message:
-        loading_msg = bot.reply_to(message, "🔍 Мы уже ищем что-то похожее...")
+    # Показываем анимацию загрузки, если она еще не отправлена
+    if loading_msg is None:
+        if reply_to_message:
+            loading_msg = bot.reply_to(message, "🔍 Мы уже ищем что-то похожее...")
+        else:
+            loading_msg = bot.send_message(chat_id, "🔍 Мы уже ищем что-то похожее...")
     else:
-        loading_msg = bot.send_message(chat_id, "🔍 Мы уже ищем что-то похожее...")
+        # Обновляем существующее сообщение, если оно было передано
+        try:
+            bot.edit_message_text(
+                "🔍 Мы уже ищем что-то похожее...",
+                loading_msg.chat.id,
+                loading_msg.message_id
+            )
+        except:
+            pass
     
     try:
         # Ищем фильмы (results уже с OMDB данными)

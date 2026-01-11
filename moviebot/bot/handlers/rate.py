@@ -427,7 +427,6 @@ def handle_rating_internal(message, rating):
                 # Твой оригинальный блок обновления описания фильма — оставляю полностью
                 if kp_id:
                     try:
-                        from moviebot.states import bot_messages
                         film_message_id = None
                         for msg_id, link_value in bot_messages.items():
                             if link_value and kp_id in str(link_value):
