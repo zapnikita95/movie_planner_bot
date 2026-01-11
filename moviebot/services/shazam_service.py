@@ -29,6 +29,8 @@ _translator = None
 _whisper = None
 _index = None
 _movies_df = None
+_actors_index = None
+_actors_mapping = None
 
 # Пути — важно для Railway volume!
 DATA_DIR = Path('/app/data/shazam')
@@ -45,6 +47,9 @@ os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sent
 TMDB_PARQUET_PATH = CACHE_DIR / 'tmdb_movies.parquet'
 INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'
 DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'
+ACTORS_INDEX_PATH = DATA_DIR / 'tmdb_actors_index.faiss'
+ACTORS_DATA_PATH  = DATA_DIR / 'tmdb_actors_data.csv'     # для удобства отладки
+ACTORS_MAPPING_PATH = DATA_DIR / 'actors_to_movies.json'
 
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 50000
@@ -250,6 +255,131 @@ def build_tmdb_index():
     logger.info(f"Готово! Создан индекс на {len(processed)} фильмов")
     return index, processed
 
+def build_actors_index():
+    """
+    Создаёт отдельный индекс по актёрам.
+    Один актёр → несколько фильмов.
+    """
+    global _actors_index, _actors_mapping
+
+    if ACTORS_INDEX_PATH.exists() and ACTORS_MAPPING_PATH.exists():
+        try:
+            _actors_index = faiss.read_index(str(ACTORS_INDEX_PATH))
+            with open(ACTORS_MAPPING_PATH, 'r', encoding='utf-8') as f:
+                _actors_mapping = json.load(f)
+            logger.info(f"Актёрский индекс загружен: {len(_actors_mapping)} актёров")
+            return _actors_index, _actors_mapping
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки актёрского индекса: {e} → пересоздаём")
+
+    if not TMDB_PARQUET_PATH.exists():
+        logger.error("TMDB parquet не найден! Нельзя создать актёрский индекс.")
+        return None, None
+
+    logger.info("Создаём индекс по актёрам...")
+    df = pd.read_parquet(TMDB_PARQUET_PATH)
+
+    df['year'] = pd.to_datetime(df['release_date'], errors='coerce').dt.year
+    current_year = datetime.now().year
+    df = df[(df['year'] >= current_year - 50) & (df['vote_count'] >= MIN_VOTE_COUNT)]
+    df = df.dropna(subset=['title'])
+
+    actor_embeddings = []
+    actor_names_unique = []
+    actor_to_movies = {}  # имя_актёра → список imdb_id
+
+    model = get_model()
+
+    for _, row in tqdm(df.iterrows(), total=len(df), desc="Индексация актёров"):
+        try:
+            cast = json.loads(row['cast']) if pd.notna(row['cast']) else []
+            imdb = row['imdb_id']
+            year = int(row['year']) if pd.notna(row['year']) else 0
+
+            for actor in cast[:12]:  # берём до 12 самых важных
+                name = actor.get('name', '').strip()
+                if not name:
+                    continue
+
+                if name not in actor_to_movies:
+                    actor_to_movies[name] = []
+                actor_to_movies[name].append(imdb)
+
+                # Эмбеддинг: имя + год фильма (помогает с однофамильцами)
+                text = f"{name} {year}"
+                emb = model.encode(text)
+                actor_embeddings.append(emb)
+                actor_names_unique.append(name)
+        except Exception:
+            continue
+
+    # Убираем дубликаты актёров (оставляем первое вхождение)
+    seen = set()
+    unique_emb = []
+    unique_names = []
+    for name, emb in zip(actor_names_unique, actor_embeddings):
+        if name not in seen:
+            seen.add(name)
+            unique_emb.append(emb)
+            unique_names.append(name)
+
+    if not unique_emb:
+        logger.error("Не удалось создать эмбеддинги актёров!")
+        return None, None
+
+    embeddings = np.array(unique_emb).astype('float32')
+    dimension = embeddings.shape[1]
+
+    index = faiss.IndexFlatIP(dimension)  # Inner Product = косинусное при нормализации
+    faiss.normalize_L2(embeddings)        # важно для Inner Product
+    index.add(embeddings)
+
+    faiss.write_index(index, str(ACTORS_INDEX_PATH))
+    with open(ACTORS_MAPPING_PATH, 'w', encoding='utf-8') as f:
+        json.dump(actor_to_movies, f, ensure_ascii=False, indent=2)
+
+    # Сохраняем имена для последующего поиска
+    pd.DataFrame({'actor_name': unique_names}).to_csv(ACTORS_DATA_PATH, index=False)
+
+    _actors_index = index
+    _actors_mapping = actor_to_movies
+
+    logger.info(f"Актёрский индекс создан: {len(unique_names)} уникальных актёров")
+    return index, actor_to_movies
+
+def search_by_actors(query, top_k=12):
+    query_en = translate_to_english(query)
+    index, mapping = get_actors_index_and_mapping()
+    if index is None:
+        return []
+
+    model = get_model()
+    q_emb = model.encode([query_en])[0].astype('float32').reshape(1, -1)
+    faiss.normalize_L2(q_emb)
+
+    distances, indices = index.search(q_emb, k=top_k * 3)  # берём запас
+
+    candidate_imdb = set()
+    actor_data = pd.read_csv(ACTORS_DATA_PATH) if ACTORS_DATA_PATH.exists() else None
+
+    for dist, idx in zip(distances[0], indices[0]):
+        if idx < 0 or idx >= len(actor_data):
+            continue
+        actor_name = actor_data.iloc[idx]['actor_name']
+        for imdb_id in mapping.get(actor_name, []):
+            candidate_imdb.add(imdb_id)
+            if len(candidate_imdb) >= top_k * 2:
+                break
+        if len(candidate_imdb) >= top_k * 2:
+            break
+
+    return list(candidate_imdb)[:top_k * 2]
+
+def get_actors_index_and_mapping():
+    global _actors_index, _actors_mapping
+    if _actors_index is None or _actors_mapping is None:
+        _actors_index, _actors_mapping = build_actors_index()
+    return _actors_index, _actors_mapping
 
 def get_index_and_movies():
     global _index, _movies_df
@@ -259,28 +389,72 @@ def get_index_and_movies():
 
 
 def search_movies(query, top_k=5):
+    """
+    Комбинированный поиск: описание + актёры
+    Актёрский матч имеет более высокий приоритет
+    """
     try:
         query_en = translate_to_english(query)
-        index, movies = get_index_and_movies()
-        if index is None:
-            return []
-        
         model = get_model()
         query_emb = model.encode([query_en])[0].astype('float32').reshape(1, -1)
-        
-        D, I = index.search(query_emb, k=top_k)
-        
-        results = []
-        for idx in I[0]:
-            if idx < len(movies):
+        faiss.normalize_L2(query_emb)
+
+        # 1. Поиск по описанию (как раньше)
+        index, movies = get_index_and_movies()
+        if index is None:
+            desc_results = []
+        else:
+            D_desc, I_desc = index.search(query_emb, k=top_k * 2)
+            desc_results = []
+            for dist, idx in zip(D_desc[0], I_desc[0]):
+                if idx < 0 or idx >= len(movies):
+                    continue
                 row = movies.iloc[idx]
-                results.append({
+                desc_results.append({
                     'imdb_id': row['imdb_id'],
                     'title': row['title'],
                     'year': row['year'] if pd.notna(row['year']) else None,
-                    'description': row['description'][:500]
+                    'description': row['description'][:500],
+                    'score': float(dist),          # меньшее расстояние — лучше
+                    'source': 'description'
                 })
-        return results
+
+        # 2. Поиск по актёрам
+        actor_imdb_ids = search_by_actors(query, top_k=top_k * 3)
+
+        actor_results = []
+        if actor_imdb_ids and movies is not None:
+            matched = movies[movies['imdb_id'].isin(actor_imdb_ids)].copy()
+            if not matched.empty:
+                # Добавляем примерный score (меньше — лучше)
+                matched['score'] = 0.0  # актёры считаем очень релевантными
+                matched['source'] = 'actor'
+                actor_results = matched[['imdb_id', 'title', 'year', 'description', 'score', 'source']].to_dict('records')
+
+        # 3. Объединяем и ранжируем
+        all_results = desc_results + actor_results
+
+        # Сортировка: сначала актёры (score=0), потом по расстоянию
+        all_results.sort(key=lambda x: (x['score'], x['source'] != 'actor'), reverse=False)
+
+        # Убираем дубликаты (оставляем первый по релевантности)
+        seen = set()
+        unique = []
+        for r in all_results:
+            imdb = r['imdb_id']
+            if imdb not in seen:
+                seen.add(imdb)
+                unique.append({
+                    'imdb_id': imdb,
+                    'title': r['title'],
+                    'year': r['year'],
+                    'description': r['description'][:500]
+                })
+            if len(unique) >= top_k:
+                break
+
+        return unique[:top_k]
+
     except Exception as e:
-        logger.error(f"Ошибка поиска фильмов: {e}", exc_info=True)
+        logger.error(f"Ошибка в комбинированном поиске: {e}", exc_info=True)
         return []
