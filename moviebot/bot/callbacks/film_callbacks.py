@@ -1226,90 +1226,93 @@ def back_to_film_description(call):
             bot.edit_message_text("❌ Некорректная ссылка на фильм/сериал", chat_id, message_id, message_thread_id=message_thread_id)
             return
 
-        link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"  # базовая
-
-        # 1. Пытаемся взять свежие данные из API
+        # КРИТИЧЕСКИ ВАЖНО: Сначала получаем is_series из БД, чтобы использовать правильную ссылку для API
+        is_series = False
+        link_from_db = None
         info = None
+        
+        # 1. Получаем is_series и link из БД ПЕРВЫМ ДЕЛОМ
+        with db_lock:
+            try:
+                cursor.execute("""
+                    SELECT is_series, link
+                    FROM movies
+                    WHERE chat_id = %s AND kp_id = %s
+                """, (chat_id, kp_id_db))
+                row = cursor.fetchone()
+                if row:
+                    is_series = bool(row.get('is_series') if isinstance(row, dict) else row[0])
+                    link_from_db = row.get('link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                    logger.info(f"[BACK TO FILM] is_series из БД: {is_series}, link_from_db: {link_from_db}")
+            except Exception as e:
+                logger.warning(f"[BACK TO FILM] Ошибка получения is_series и link из БД: {e}")
+        
+        # 2. Формируем правильную ссылку на основе is_series из БД
+        if link_from_db:
+            link = link_from_db
+        else:
+            # Если нет в БД, используем базовую ссылку (будет использована для API)
+            link = f"https://www.kinopoisk.ru/series/{kp_id_int}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+        
+        # 3. Получаем данные из API с правильной ссылкой
         try:
             from moviebot.api.kinopoisk_api import extract_movie_info
             info = extract_movie_info(link)
             if info and info.get('title'):
                 logger.info(f"[BACK TO FILM] API успех: {info['title']}")
+                # ВАЖНО: Если is_series уже получен из БД, используем его, а не из API
+                if not link_from_db:  # Только если фильм не в БД, используем is_series из API
+                    is_series = info.get('is_series', False)
         except Exception as e:
             logger.warning(f"[BACK TO FILM] API не сработал: {e}")
 
-        # 2. Получаем актуальное состояние через get_film_current_state
+        # 4. Получаем актуальное состояние через get_film_current_state
         from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
         current_state = get_film_current_state(chat_id, kp_id_int, user_id)
         existing = current_state['existing']
         
-        # 3. Fallback — данные из базы, с is_series и link
-        is_series = False
-        link_from_db = None
-        if existing:
-            # existing уже получен через get_film_current_state
-            # Получаем is_series и link из БД
+        # 5. Если фильм в базе, но API не дал данных, получаем из БД
+        if existing and (not info or not info.get('title')):
             with db_lock:
                 try:
                     cursor.execute("""
-                        SELECT is_series, link
+                        SELECT title, year, genres, description, director, actors, is_series, link
                         FROM movies
                         WHERE chat_id = %s AND kp_id = %s
                     """, (chat_id, kp_id_db))
                     row = cursor.fetchone()
                     if row:
-                        is_series = bool(row.get('is_series') if isinstance(row, dict) else row[0])
-                        link_from_db = row.get('link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
-                        # Если есть ссылка из БД, используем её
+                        info = info or {}
+                        if isinstance(row, dict):
+                            info.update({
+                                'title': row.get('title'),
+                                'year': row.get('year'),
+                                'genres': row.get('genres'),
+                                'description': row.get('description'),
+                                'director': row.get('director'),
+                                'actors': row.get('actors'),
+                                'is_series': bool(row.get('is_series', 0))
+                            })
+                            if not link_from_db:
+                                link_from_db = row.get('link')
+                        else:
+                            info.update({
+                                'title': row[0] if len(row) > 0 else None,
+                                'year': row[1] if len(row) > 1 else None,
+                                'genres': row[2] if len(row) > 2 else None,
+                                'description': row[3] if len(row) > 3 else None,
+                                'director': row[4] if len(row) > 4 else None,
+                                'actors': row[5] if len(row) > 5 else None,
+                                'is_series': bool(row[6]) if len(row) > 6 else False
+                            })
+                            if not link_from_db and len(row) > 7:
+                                link_from_db = row[7]
+                        # Используем is_series из БД
+                        is_series = info['is_series']
                         if link_from_db:
                             link = link_from_db
-                            logger.info(f"[BACK TO FILM] Ссылка получена из БД: {link}, is_series={is_series}")
                 except Exception as e:
-                    logger.warning(f"[BACK TO FILM] Ошибка получения is_series и link из БД: {e}")
-            
-            # Если API дал данные, используем их, иначе из БД
-            if not info or not info.get('title'):
-                with db_lock:
-                    try:
-                        cursor.execute("""
-                            SELECT title, year, genres, description, director, actors, is_series
-                            FROM movies
-                            WHERE chat_id = %s AND kp_id = %s
-                        """, (chat_id, kp_id_db))
-                        row = cursor.fetchone()
-                        if row:
-                            info = info or {}
-                            if isinstance(row, dict):
-                                info.update({
-                                    'title': row.get('title'),
-                                    'year': row.get('year'),
-                                    'genres': row.get('genres'),
-                                    'description': row.get('description'),
-                                    'director': row.get('director'),
-                                    'actors': row.get('actors'),
-                                    'is_series': bool(row.get('is_series', 0))
-                                })
-                            else:
-                                info.update({
-                                    'title': row[0] if len(row) > 0 else None,
-                                    'year': row[1] if len(row) > 1 else None,
-                                    'genres': row[2] if len(row) > 2 else None,
-                                    'description': row[3] if len(row) > 3 else None,
-                                    'director': row[4] if len(row) > 4 else None,
-                                    'actors': row[5] if len(row) > 5 else None,
-                                    'is_series': bool(row[6]) if len(row) > 6 else False
-                                })
-                            is_series = info['is_series']
-                    except Exception as e:
-                        logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")
-        else:
-            # Фильм не в базе, используем данные из API
-            if info:
-                is_series = info.get('is_series', False)
-            else:
-                # Если API не сработал, пробуем определить по ссылке
-                if '/series/' in link or '/series/' in call.data:
-                    is_series = True
+                    logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")
 
         if not info or not info.get('title'):
             bot.edit_message_text(
@@ -1318,10 +1321,10 @@ def back_to_film_description(call):
             )
             return
 
-        # Убеждаемся, что is_series правильно установлен в info
+        # Убеждаемся, что is_series правильно установлен в info (приоритет у БД)
         info['is_series'] = is_series
         
-        # Уточняем link для сериала/фильма (используем ссылку из БД если есть, иначе формируем)
+        # Уточняем link для сериала/фильма (используем ссылку из БД если есть, иначе формируем на основе is_series)
         if not link_from_db:
             if is_series:
                 link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"

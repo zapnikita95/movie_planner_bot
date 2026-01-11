@@ -592,7 +592,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                             FROM stats
                             WHERE chat_id = %s AND user_id IS NOT NULL
                         ''', (chat_id,))
-                        active_users = {row[0] for row in cur.fetchall()}
+                        active_users_rows = cur.fetchall()
+                        active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in active_users_rows if row}
 
                         # 3. Кто оценил этот фильм
                         cur.execute('''
@@ -600,7 +601,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                             WHERE chat_id = %s AND film_id = %s 
                             AND (is_imported = FALSE OR is_imported IS NULL)
                         ''', (chat_id, film_id))
-                        rated_users = {row[0] for row in cur.fetchall()}
+                        rated_users_rows = cur.fetchall()
+                        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in rated_users_rows if row}
 
                         # Формируем текст кнопки
                         if avg_rating is not None:
