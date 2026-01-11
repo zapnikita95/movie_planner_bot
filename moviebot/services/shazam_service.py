@@ -359,16 +359,32 @@ def get_index_and_movies():
 
 def search_movies(query, top_k=5):
     try:
+        logger.info(f"[SEARCH MOVIES] Начало поиска для запроса: '{query}'")
+        
+        logger.info(f"[SEARCH MOVIES] Шаг 1: Перевод запроса...")
         query_en = translate_to_english(query)
+        logger.info(f"[SEARCH MOVIES] Переведено: '{query}' → '{query_en}'")
+        
+        logger.info(f"[SEARCH MOVIES] Шаг 2: Получение индекса и данных...")
         index, movies = get_index_and_movies()
         if index is None:
+            logger.warning("[SEARCH MOVIES] Индекс не найден, возвращаем пустой список")
             return []
+        logger.info(f"[SEARCH MOVIES] Индекс получен, фильмов: {len(movies)}")
         
+        logger.info(f"[SEARCH MOVIES] Шаг 3: Получение модели embeddings...")
         model = get_model()
+        logger.info(f"[SEARCH MOVIES] Модель получена")
+        
+        logger.info(f"[SEARCH MOVIES] Шаг 4: Создание эмбеддинга запроса...")
         query_emb = model.encode([query_en])[0].astype('float32').reshape(1, -1)
+        logger.info(f"[SEARCH MOVIES] Эмбеддинг создан, размер: {query_emb.shape}")
         
+        logger.info(f"[SEARCH MOVIES] Шаг 5: Поиск в индексе (top_k={top_k})...")
         D, I = index.search(query_emb, k=top_k)
+        logger.info(f"[SEARCH MOVIES] Поиск завершен, найдено индексов: {len(I[0])}")
         
+        logger.info(f"[SEARCH MOVIES] Шаг 6: Формирование результатов...")
         results = []
         for idx in I[0]:
             if idx < len(movies):
@@ -379,7 +395,8 @@ def search_movies(query, top_k=5):
                     'year': row['year'] if pd.notna(row['year']) else None,
                     'description': row['description'][:500]
                 })
+        logger.info(f"[SEARCH MOVIES] Результаты сформированы, найдено: {len(results)} фильмов")
         return results
     except Exception as e:
-        logger.error(f"Ошибка поиска фильмов: {e}", exc_info=True)
+        logger.error(f"[SEARCH MOVIES] Ошибка поиска фильмов: {e}", exc_info=True)
         return []
