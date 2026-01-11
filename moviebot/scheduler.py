@@ -1532,19 +1532,14 @@ def process_recurring_payments():
     try:
         from moviebot.api.yookassa_api import create_recurring_payment
         from moviebot.database.db_operations import renew_subscription, save_payment, update_payment_status, create_subscription
+        from moviebot.database.db_connection import get_db_connection
         import uuid as uuid_module
         
         now = datetime.now(pytz.UTC)
         
-        # КРИТИЧЕСКИЙ ФИКС: Добавляем rollback при ошибках транзакции
-        try:
-            # Сначала делаем rollback на случай если предыдущая транзакция упала
-            try:
-                conn.rollback()
-            except:
-                pass
-        except:
-            pass
+        # Создаем локальное соединение для этой функции, чтобы избежать проблем с закрытым глобальным соединением
+        conn_local = get_db_connection()
+        cursor_local = conn_local.cursor()
         
         # Находим подписки, у которых next_payment_date наступил и есть payment_method_id
         # Для тестовых подписок проверяем по времени (если прошло 10 минут)
@@ -1554,7 +1549,7 @@ def process_recurring_payments():
             try:
                 # Для тестовых подписок проверяем, если next_payment_date <= now
                 # Для остальных - только если сегодня и в дневное время (9:00-18:00 МСК)
-                cursor.execute("""
+                cursor_local.execute("""
                     SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
                            next_payment_date, payment_method_id, telegram_username, group_username, group_size
                     FROM subscriptions
@@ -1573,11 +1568,11 @@ def process_recurring_payments():
                          AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) < 18)
                     )
                 """, (now, now))
-                subscriptions = cursor.fetchall()
+                subscriptions = cursor_local.fetchall()
             except Exception as db_e:
                 logger.error(f"[RECURRING PAYMENT] Ошибка при запросе подписок: {db_e}", exc_info=True)
                 try:
-                    conn.rollback()
+                    conn_local.rollback()
                 except:
                     pass
                 subscriptions = []
