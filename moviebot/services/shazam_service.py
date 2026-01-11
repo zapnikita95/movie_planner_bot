@@ -385,13 +385,28 @@ def search_movies(query, top_k=5):
             if idx < len(movies):
                 row = movies.iloc[idx]
                 imdb_id_raw = str(row['imdb_id']).strip()
-                # Очищаем IMDB ID: убираем .0, убираем все tt в начале, добавляем один tt
-                imdb_id_clean = imdb_id_raw.replace('.0', '').replace('.', '')
-                imdb_id_clean = imdb_id_clean.lstrip('t')
-                if imdb_id_clean and imdb_id_clean.isdigit():
-                    imdb_id_clean = f"tt{imdb_id_clean}"
+                
+                # НОВАЯ ЛОГИКА: Если есть .0 в конце, переносим ноль в начало после tt
+                if imdb_id_raw.endswith('.0'):
+                    # Убираем .0 и все tt в начале
+                    digits_only = imdb_id_raw[:-2].lstrip('t')
+                    if digits_only and digits_only.isdigit():
+                        # Добавляем ноль в начало и префикс tt
+                        imdb_id_clean = f"tt0{digits_only}"
+                        logger.info(f"[SEARCH MOVIES] ID преобразован: '{imdb_id_raw}' → '{imdb_id_clean}' (перенесли .0 в начало)")
+                    else:
+                        imdb_id_clean = imdb_id_raw
+                        logger.warning(f"[SEARCH MOVIES] Не удалось обработать ID с .0: '{imdb_id_raw}'")
                 else:
-                    imdb_id_clean = imdb_id_raw  # Если не получилось очистить, оставляем как есть
+                    # Стандартная очистка: убираем все tt в начале, добавляем один tt
+                    imdb_id_clean = imdb_id_raw.lstrip('t')
+                    if imdb_id_clean and imdb_id_clean.isdigit():
+                        imdb_id_clean = f"tt{imdb_id_clean}"
+                    else:
+                        imdb_id_clean = imdb_id_raw
+                    
+                    if imdb_id_clean != imdb_id_raw:
+                        logger.info(f"[SEARCH MOVIES] ID очищен: '{imdb_id_raw}' → '{imdb_id_clean}'")
                 
                 results.append({
                     'imdb_id': imdb_id_clean,
