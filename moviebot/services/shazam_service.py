@@ -320,10 +320,11 @@ def build_tmdb_index():
         axis=1
     )
     
-    # ФИКС IMDB ID — чистим .0 и оставляем только один tt
+    # ФИКС IMDB ID — чистим .0 и убираем все tt в начале (сохраняем БЕЗ префикса tt)
     df['imdb_id'] = df['imdb_id'].astype(str).str.strip()  # убираем пробелы
     df['imdb_id'] = df['imdb_id'].str.replace(r'\.0$', '', regex=True)  # убираем .0
-    df['imdb_id'] = df['imdb_id'].apply(lambda x: x if x.startswith('tt') else f"tt{x}")  # добавляем tt ТОЛЬКО если его нет
+    # Убираем все "tt" в начале (может быть tttt или tt), сохраняем БЕЗ префикса
+    df['imdb_id'] = df['imdb_id'].str.replace(r'^tt+', '', regex=True)  # убираем все tt в начале
     
     processed = df[['imdb_id', 'title', 'year', 'description']].copy()
     processed = processed.head(MAX_MOVIES)
