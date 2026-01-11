@@ -4639,31 +4639,30 @@ def register_series_handlers(bot_param):
             
             logger.info(f"[DICE GAME RESULT EDITED] Получено значение кубика: {dice_value} для message_id={dice_message_id}, user_id={user_id}")
             
-            # Сохраняем message_id кубика для этого пользователя
-            if user_id not in game_state.get('participants', {}):
-                # Добавляем нового участника
-                username = message.from_user.username or message.from_user.first_name or f"user_{user_id}"
-                game_state['participants'][user_id] = {
-                    'username': username,
-                    'dice_message_id': dice_message_id,
-                    'user_id': user_id
-                }
-                game_state['dice_messages'] = game_state.get('dice_messages', {})
-                game_state['dice_messages'][dice_message_id] = user_id
-                logger.info(f"[DICE GAME RESULT EDITED] Добавлен новый участник: user_id={user_id}, username={username}")
-            else:
-                # Обновляем dice_message_id для существующего участника (на случай, если пользователь бросил кубик несколько раз)
-                game_state['participants'][user_id]['dice_message_id'] = dice_message_id
-                game_state['dice_messages'] = game_state.get('dice_messages', {})
-                game_state['dice_messages'][dice_message_id] = user_id
+            # Проверяем, не бросил ли уже этот пользователь кубик для этого game_state
+            if user_id in game_state.get('participants', {}):
+                existing_participant = game_state['participants'][user_id]
+                username = existing_participant.get('username', f'user_{user_id}')
+                existing_value = existing_participant.get('value')
+                logger.info(f"[DICE GAME RESULT EDITED] ⚠️ Пользователь {username} (user_id={user_id}) уже бросил кубик для этого события (значение: {existing_value}). Повторный бросок игнорируется.")
+                return
+            
+            # Добавляем нового участника
+            username = message.from_user.username or message.from_user.first_name or f"user_{user_id}"
+            game_state['participants'][user_id] = {
+                'username': username,
+                'dice_message_id': dice_message_id,
+                'user_id': user_id
+            }
+            game_state['dice_messages'] = game_state.get('dice_messages', {})
+            game_state['dice_messages'][dice_message_id] = user_id
+            logger.info(f"[DICE GAME RESULT EDITED] Добавлен новый участник: user_id={user_id}, username={username}")
             
             # Сохраняем значение кубика
-            old_value = game_state['participants'][user_id].get('value')
             game_state['participants'][user_id]['value'] = dice_value
             game_state['last_dice_time'] = datetime.now(PLANS_TZ)  # Обновляем время последнего броска
             
-            username = game_state['participants'][user_id].get('username', f'user_{user_id}')
-            logger.info(f"[DICE GAME RESULT EDITED] ✅ Сохранено значение кубика для {username} (user_id={user_id}): {dice_value} (было: {old_value})")
+            logger.info(f"[DICE GAME RESULT EDITED] ✅ Сохранено значение кубика для {username} (user_id={user_id}): {dice_value}")
             
             # Логируем итоговый результат
             participants_count = len(game_state.get('participants', {}))
