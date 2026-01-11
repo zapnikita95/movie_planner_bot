@@ -1197,16 +1197,25 @@ def back_to_film_description(call):
     message_id = call.message.message_id
     message_thread_id = getattr(call.message, 'message_thread_id', None)
 
+    # КРИТИЧЕСКИ ВАЖНО: Проверяем, не устарел ли callback query ДО начала тяжелых операций
+    # Если callback устарел - сразу выходим, не делая API запросов и операций с БД
+    callback_is_old = False
     try:
-        # Пытаемся ответить на callback, но игнорируем ошибку если callback устарел
-        try:
-            bot.answer_callback_query(call.id, text="⏳ Загружаю...")
-        except Exception as answer_error:
-            # Игнорируем ошибку устаревшего callback query
-            if "query is too old" in str(answer_error) or "query ID is invalid" in str(answer_error):
-                logger.warning(f"[BACK TO FILM] Callback query устарел, продолжаем без answer: {answer_error}")
-            else:
-                logger.error(f"[BACK TO FILM] Ошибка answer_callback_query: {answer_error}", exc_info=True)
+        bot.answer_callback_query(call.id, text="⏳ Загружаю...")
+    except Exception as answer_error:
+        error_str = str(answer_error)
+        if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+            callback_is_old = True
+            logger.warning(f"[BACK TO FILM] Callback query устарел, ПРОПУСКАЕМ обработку: {answer_error}")
+        else:
+            logger.error(f"[BACK TO FILM] Ошибка answer_callback_query: {answer_error}", exc_info=True)
+    
+    # Если callback устарел - СРАЗУ выходим, не делая тяжелых операций (API, БД)
+    if callback_is_old:
+        logger.info(f"[BACK TO FILM] ⚠️ Пропущен устаревший callback, выходим БЕЗ обработки")
+        return
+
+    try:
 
         kp_id_str = call.data.split(":", 1)[1].strip()
         try:
@@ -1234,23 +1243,29 @@ def back_to_film_description(call):
         current_state = get_film_current_state(chat_id, kp_id_int, user_id)
         existing = current_state['existing']
         
-        # 3. Fallback — данные из базы, с is_series
+        # 3. Fallback — данные из базы, с is_series и link
         is_series = False
+        link_from_db = None
         if existing:
             # existing уже получен через get_film_current_state
-            # Получаем is_series из БД или API
+            # Получаем is_series и link из БД
             with db_lock:
                 try:
                     cursor.execute("""
-                        SELECT is_series
+                        SELECT is_series, link
                         FROM movies
                         WHERE chat_id = %s AND kp_id = %s
                     """, (chat_id, kp_id_db))
                     row = cursor.fetchone()
                     if row:
                         is_series = bool(row.get('is_series') if isinstance(row, dict) else row[0])
+                        link_from_db = row.get('link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                        # Если есть ссылка из БД, используем её
+                        if link_from_db:
+                            link = link_from_db
+                            logger.info(f"[BACK TO FILM] Ссылка получена из БД: {link}, is_series={is_series}")
                 except Exception as e:
-                    logger.warning(f"[BACK TO FILM] Ошибка получения is_series из БД: {e}")
+                    logger.warning(f"[BACK TO FILM] Ошибка получения is_series и link из БД: {e}")
             
             # Если API дал данные, используем их, иначе из БД
             if not info or not info.get('title'):
@@ -1306,9 +1321,13 @@ def back_to_film_description(call):
         # Убеждаемся, что is_series правильно установлен в info
         info['is_series'] = is_series
         
-        # Уточняем link для сериала
-        if is_series:
-            link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"
+        # Уточняем link для сериала/фильма (используем ссылку из БД если есть, иначе формируем)
+        if not link_from_db:
+            if is_series:
+                link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"
+            else:
+                link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+        # Если link_from_db есть, он уже установлен выше
 
         # Главный вызов — existing будет получен внутри show_film_info_with_buttons через get_film_current_state
         # Но передаем его для оптимизации, если он уже есть

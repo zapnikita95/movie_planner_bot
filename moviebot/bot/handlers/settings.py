@@ -204,6 +204,141 @@ def handle_settings_callback(call):
             )
             return
         
+        # Обработчик для примеров событий (должен быть ДО общего answer_callback_query)
+        if action.startswith("random_events:example:"):
+            # Отправка примера случайного события
+            example_type = action.split(":")[-1]  # with_user или without_user
+            
+            # Проверяем, что это групповой чат
+            try:
+                chat_info = bot.get_chat(chat_id)
+                if chat_info.type == 'private':
+                    bot.answer_callback_query(call.id, "Примеры событий работают только в групповых чатах", show_alert=True)
+                    return
+            except Exception as e:
+                logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить информацию о чате {chat_id}: {e}")
+                bot.answer_callback_query(call.id, "Ошибка при отправке примера", show_alert=True)
+                return
+            
+            bot.answer_callback_query(call.id, "Отправляю пример события...")
+            
+            if example_type == "with_user":
+                # Пример события с участником (выбор случайного участника)
+                if BOT_ID is None:
+                    try:
+                        bot_info = bot.get_me()
+                        current_bot_id = bot_info.id
+                    except:
+                        current_bot_id = None
+                else:
+                    current_bot_id = BOT_ID
+                
+                with db_lock:
+                    if current_bot_id:
+                        cursor.execute('''
+                            SELECT DISTINCT user_id, username 
+                            FROM stats 
+                            WHERE chat_id = %s 
+                            AND user_id != %s
+                            LIMIT 10
+                        ''', (chat_id, current_bot_id))
+                    else:
+                        cursor.execute('''
+                            SELECT DISTINCT user_id, username 
+                            FROM stats 
+                            WHERE chat_id = %s 
+                            LIMIT 10
+                        ''', (chat_id,))
+                    participants = cursor.fetchall()
+                
+                if current_bot_id:
+                    filtered_participants = []
+                    for p in participants:
+                        p_user_id = p.get('user_id') if isinstance(p, dict) else p[0]
+                        if p_user_id != current_bot_id:
+                            filtered_participants.append(p)
+                    participants = filtered_participants
+                
+                if participants:
+                    participant = random.choice(participants)
+                    p_user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+                    username = participant.get('username') if isinstance(participant, dict) else participant[1]
+                    
+                    if username:
+                        user_name = f"@{username}"
+                    else:
+                        try:
+                            user_info = bot.get_chat_member(chat_id, p_user_id)
+                            user_name = user_info.user.first_name or "участник"
+                        except:
+                            user_name = "участник"
+                else:
+                    user_name = "участник"
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+                
+                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
+                
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            else:
+                # Пример события без участника (игра в кубик)
+                try:
+                    chat_members_count = bot.get_chat_member_count(chat_id)
+                    total_participants = max(1, chat_members_count - 1)
+                except Exception as e:
+                    logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить количество участников чата: {e}")
+                    bot.answer_callback_query(call.id, "Ошибка при получении информации о чате", show_alert=True)
+                    return
+                
+                threshold_time = (datetime.now(PLANS_TZ) - timedelta(days=30)).isoformat()
+                
+                with db_lock:
+                    bot_id = bot.get_me().id
+                    cursor.execute('''
+                        SELECT COUNT(DISTINCT user_id) AS count
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND timestamp >= %s
+                        AND user_id != %s
+                    ''', (chat_id, threshold_time, bot_id))
+                    row = cursor.fetchone()
+                    active_participants = row.get("count") if isinstance(row, dict) else (row[0] if row else 0)
+                
+                required_participants = int(total_participants * 0.65)
+                if active_participants < required_participants:
+                    bot.answer_callback_query(
+                        call.id,
+                        f"Для игры в кубик нужно не менее 65% активных участников ({required_participants} из {total_participants}). Сейчас активных: {active_participants}.",
+                        show_alert=True
+                    )
+                    return
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
+                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
+                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
+                
+                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
+                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
+                text += f"⏳ Осталось бросить кубик: {active_participants} участник(ов)"
+                
+                sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                
+                if chat_id not in dice_game_state:
+                    dice_game_state[chat_id] = {
+                        'participants': {},
+                        'message_id': sent_msg.message_id,
+                        'start_time': datetime.now(PLANS_TZ),
+                        'dice_messages': {}
+                    }
+                    logger.info(f"[RANDOM EVENTS EXAMPLE] Инициализировано состояние игры для примера события в чате {chat_id}, message_id={sent_msg.message_id}")
+            
+            return
+        
         # Для остальных действий вызываем обычный answer_callback_query в начале
         bot.answer_callback_query(call.id)
         
@@ -270,6 +405,15 @@ def handle_settings_callback(call):
             return
         
         if action == "import":
+            # Проверяем доступ к импорту базы из Кинопоиска
+            if not has_recommendations_access(chat_id, user_id):
+                bot.answer_callback_query(
+                    call.id,
+                    "📥 Импорт базы из Кинопоиска доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment",
+                    show_alert=True
+                )
+                return
+            
             # Импорт базы из Кинопоиска
             user_import_state[user_id] = {
                 'step': 'waiting_user_id',
@@ -294,152 +438,6 @@ def handle_settings_callback(call):
                 # Если edit не удался, используем исходный message_id
                 user_import_state[user_id]['prompt_message_id'] = call.message.message_id
             logger.info(f"[SETTINGS] Импорт базы - состояние установлено для user_id={user_id}, prompt_message_id={user_import_state[user_id]['prompt_message_id']}")
-            return
-        
-        if action.startswith("random_events:example:"):
-            # Отправка примера случайного события
-            example_type = action.split(":")[-1]  # with_user или without_user
-            
-            # Проверяем, что это групповой чат
-            try:
-                chat_info = bot.get_chat(chat_id)
-                if chat_info.type == 'private':
-                    bot.answer_callback_query(call.id, "Примеры событий работают только в групповых чатах", show_alert=True)
-                    return
-            except Exception as e:
-                logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить информацию о чате {chat_id}: {e}")
-                bot.answer_callback_query(call.id, "Ошибка при отправке примера", show_alert=True)
-                return
-            
-            bot.answer_callback_query(call.id, "Отправляю пример события...")
-            
-            if example_type == "with_user":
-                # Пример события с участником (выбор случайного участника)
-                # BOT_ID уже импортирован глобально
-                # Получаем BOT_ID, если он не определен
-                if BOT_ID is None:
-                    try:
-                        bot_info = bot.get_me()
-                        current_bot_id = bot_info.id
-                    except:
-                        current_bot_id = None
-                else:
-                    current_bot_id = BOT_ID
-                
-                with db_lock:
-                    if current_bot_id:
-                        cursor.execute('''
-                            SELECT DISTINCT user_id, username 
-                            FROM stats 
-                            WHERE chat_id = %s 
-                            AND user_id != %s
-                            LIMIT 10
-                        ''', (chat_id, current_bot_id))
-                    else:
-                        # Если BOT_ID не определен, получаем всех и фильтруем вручную
-                        cursor.execute('''
-                            SELECT DISTINCT user_id, username 
-                            FROM stats 
-                            WHERE chat_id = %s 
-                            LIMIT 10
-                        ''', (chat_id,))
-                    participants = cursor.fetchall()
-                
-                # Дополнительная фильтрация: исключаем бота из списка участников
-                if current_bot_id:
-                    filtered_participants = []
-                    for p in participants:
-                        p_user_id = p.get('user_id') if isinstance(p, dict) else p[0]
-                        if p_user_id != current_bot_id:
-                            filtered_participants.append(p)
-                    participants = filtered_participants
-                
-                if participants:
-                    participant = random.choice(participants)
-                    p_user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
-                    username = participant.get('username') if isinstance(participant, dict) else participant[1]
-                    
-                    if username:
-                        user_name = f"@{username}"
-                    else:
-                        try:
-                            user_info = bot.get_chat_member(chat_id, p_user_id)
-                            user_name = user_info.user.first_name or "участник"
-                        except:
-                            user_name = "участник"
-                else:
-                    user_name = "участник"
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
-                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
-                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
-                
-                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
-                text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
-                
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-            else:
-                # Пример события без участника (игра в кубик)
-                # Проверяем количество участников (исключая бота)
-                from moviebot.database.db_operations import is_bot_participant
-                
-                # Получаем общее количество участников группы
-                try:
-                    chat_members_count = bot.get_chat_member_count(chat_id)
-                    # Вычитаем бота из общего количества
-                    total_participants = max(1, chat_members_count - 1)  # Минимум 1, чтобы избежать деления на 0
-                except Exception as e:
-                    logger.warning(f"[RANDOM EVENTS EXAMPLE] Не удалось получить количество участников чата: {e}")
-                    bot.answer_callback_query(call.id, "Ошибка при получении информации о чате", show_alert=True)
-                    return
-                
-                with db_lock:
-                    # Получаем ID бота динамически — всегда актуально и безопасно
-                    bot_id = bot.get_me().id
-                    
-                    cursor.execute('''
-                        SELECT COUNT(DISTINCT user_id) AS count
-                        FROM stats 
-                        WHERE chat_id = %s 
-                        AND timestamp >= %s
-                        AND user_id != %s
-                    ''', (chat_id, threshold_time, bot_id))
-                    
-                    row = cursor.fetchone()
-                    active_participants = row.get("count") if isinstance(row, dict) else (row[0] if row else 0)
-                    
-                # Проверяем, что не менее 65% участников активны
-                required_participants = int(total_participants * 0.65)
-                if active_participants < required_participants:
-                    bot.answer_callback_query(
-                        call.id,
-                        f"Для игры в кубик нужно не менее 65% активных участников ({required_participants} из {total_participants}). Сейчас активных: {active_participants}.",
-                        show_alert=True
-                    )
-                    return
-                
-                markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice_game:start"))
-                markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
-                markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
-                
-                text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
-                text += "Испытайте удачу и определите, кто выберет фильм для вашей компании.\n\n"
-                text += f"⏳ Осталось бросить кубик: {active_participants} участник(ов)"
-                
-                sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                
-                # Инициализируем состояние игры для примера события
-                if chat_id not in dice_game_state:
-                    dice_game_state[chat_id] = {
-                        'participants': {},
-                        'message_id': sent_msg.message_id,
-                        'start_time': datetime.now(PLANS_TZ),
-                        'dice_messages': {}
-                    }
-                    logger.info(f"[RANDOM EVENTS EXAMPLE] Инициализировано состояние игры для примера события в чате {chat_id}, message_id={sent_msg.message_id}")
-            
             return
         
         if action.startswith("random_events:"):

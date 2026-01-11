@@ -33,7 +33,6 @@ def edit_command(message):
     markup.add(InlineKeyboardButton("📅 Изменить фильм в расписании", callback_data="edit:plan"))
     markup.add(InlineKeyboardButton("⭐ Изменить оценку", callback_data="edit:rating"))
     markup.add(InlineKeyboardButton("🗑️ Удалить оценку", callback_data="edit:delete_rating"))
-    markup.add(InlineKeyboardButton("👁️ Удалить просмотр", callback_data="edit:delete_watched"))
     markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="edit:delete_plan"))
     markup.add(InlineKeyboardButton("🎬 Удалить фильм из базы", callback_data="edit:delete_movie"))
     
@@ -135,6 +134,101 @@ def edit_action_callback(call):
             
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
             bot.edit_message_text("⭐ <b>Выберите фильм для изменения оценки:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        
+        elif action == "delete_rating":
+            # Показываем список фильмов с оценками для удаления
+            with db_lock:
+                cursor.execute('''
+                    SELECT m.id, m.title, m.year, r.rating
+                    FROM movies m
+                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                    WHERE m.chat_id = %s AND r.user_id = %s AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                    ORDER BY m.title
+                    LIMIT 20
+                ''', (chat_id, user_id))
+                movies = cursor.fetchall()
+            
+            if not movies:
+                bot.edit_message_text("Нет фильмов с вашими оценками для удаления.", chat_id, call.message.message_id)
+                return
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            for movie_row in movies:
+                film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
+                title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[1]
+                year = movie_row.get('year') if isinstance(movie_row, dict) else movie_row[2]
+                rating = movie_row.get('rating') if isinstance(movie_row, dict) else movie_row[3]
+                
+                year_str = f" ({year})" if year else ""
+                button_text = f"🗑️ {title}{year_str} — {rating}/10"
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_delete_rating:{film_id}"))
+            
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+            bot.edit_message_text("🗑️ <b>Выберите фильм для удаления оценки:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        
+        elif action == "delete_plan":
+            # Показываем список планов для удаления
+            with db_lock:
+                cursor.execute('''
+                    SELECT p.id, m.title, p.plan_type, p.plan_datetime
+                    FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.chat_id = %s
+                    ORDER BY p.plan_datetime
+                    LIMIT 20
+                ''', (chat_id,))
+                plans = cursor.fetchall()
+            
+            if not plans:
+                bot.edit_message_text("Нет планов для удаления.", chat_id, call.message.message_id)
+                return
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            for plan_row in plans:
+                plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                title = plan_row.get('title') if isinstance(plan_row, dict) else plan_row[1]
+                plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[2]
+                plan_dt = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[3]
+                
+                type_text = "🎦" if plan_type == 'cinema' else "🏠"
+                dt_str = plan_dt.strftime('%d.%m.%Y %H:%M') if isinstance(plan_dt, datetime) else "не указана"
+                
+                button_text = f"🗑️ {type_text} {title} ({dt_str})"
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_delete_plan:{plan_id}"))
+            
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+            bot.edit_message_text("🗑️ <b>Выберите план для удаления:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        
+        elif action == "delete_movie":
+            # Показываем список фильмов для удаления
+            with db_lock:
+                cursor.execute('''
+                    SELECT id, title, year
+                    FROM movies
+                    WHERE chat_id = %s
+                    ORDER BY title
+                    LIMIT 30
+                ''', (chat_id,))
+                movies = cursor.fetchall()
+            
+            if not movies:
+                bot.edit_message_text("Нет фильмов в базе для удаления.", chat_id, call.message.message_id)
+                return
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            for movie_row in movies:
+                film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
+                title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[1]
+                year = movie_row.get('year') if isinstance(movie_row, dict) else movie_row[2]
+                
+                year_str = f" ({year})" if year else ""
+                button_text = f"🗑️ {title}{year_str}"
+                if len(button_text) > 60:
+                    button_text = button_text[:57] + "..."
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_delete_movie:{film_id}"))
+            
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
+            bot.edit_message_text("🗑️ <b>Выберите фильм для удаления из базы:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         
         elif action == "cancel":
             from moviebot.bot.bot_init import safe_answer_callback_query
@@ -428,6 +522,138 @@ def edit_rating_callback(call):
         )
     except Exception as e:
         logger.error(f"[EDIT RATING] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_delete_rating:"))
+def edit_delete_rating_callback(call):
+    """Обработчик удаления оценки"""
+    logger.info(f"[EDIT DELETE RATING] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        film_id = int(call.data.split(":")[1])
+        
+        with db_lock:
+            cursor.execute('DELETE FROM ratings WHERE film_id = %s AND chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (film_id, chat_id, user_id))
+            conn.commit()
+        
+        bot.edit_message_text("✅ Оценка удалена.", chat_id, call.message.message_id)
+        
+        # Проверяем, нужно ли вернуться в настройки
+        from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
+        if from_settings:
+            try:
+                from moviebot.bot.handlers.settings import settings_command
+                class FakeMessage:
+                    def __init__(self, call):
+                        self.from_user = call.from_user
+                        self.chat = call.message.chat
+                        self.text = '/settings'
+                
+                fake_message = FakeMessage(call)
+                settings_command(fake_message)
+                try:
+                    bot.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
+            except Exception as e:
+                logger.error(f"[EDIT DELETE RATING] Ошибка при возврате в настройки: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[EDIT DELETE RATING] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_delete_plan:"))
+def edit_delete_plan_callback(call):
+    """Обработчик удаления плана"""
+    logger.info(f"[EDIT DELETE PLAN] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        plan_id = int(call.data.split(":")[1])
+        
+        with db_lock:
+            cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+            conn.commit()
+        
+        bot.edit_message_text("✅ План удален из расписания.", chat_id, call.message.message_id)
+        
+        # Проверяем, нужно ли вернуться в настройки
+        from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
+        if from_settings:
+            try:
+                from moviebot.bot.handlers.settings import settings_command
+                class FakeMessage:
+                    def __init__(self, call):
+                        self.from_user = call.from_user
+                        self.chat = call.message.chat
+                        self.text = '/settings'
+                
+                fake_message = FakeMessage(call)
+                settings_command(fake_message)
+                try:
+                    bot.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
+            except Exception as e:
+                logger.error(f"[EDIT DELETE PLAN] Ошибка при возврате в настройки: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[EDIT DELETE PLAN] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit_delete_movie:"))
+def edit_delete_movie_callback(call):
+    """Обработчик удаления фильма из базы"""
+    logger.info(f"[EDIT DELETE MOVIE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        film_id = int(call.data.split(":")[1])
+        
+        with db_lock:
+            # Удаляем фильм и все связанные данные
+            cursor.execute('DELETE FROM ratings WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+            cursor.execute('DELETE FROM plans WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            conn.commit()
+        
+        bot.edit_message_text("✅ Фильм удален из базы.", chat_id, call.message.message_id)
+        
+        # Проверяем, нужно ли вернуться в настройки
+        from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
+        if from_settings:
+            try:
+                from moviebot.bot.handlers.settings import settings_command
+                class FakeMessage:
+                    def __init__(self, call):
+                        self.from_user = call.from_user
+                        self.chat = call.message.chat
+                        self.text = '/settings'
+                
+                fake_message = FakeMessage(call)
+                settings_command(fake_message)
+                try:
+                    bot.delete_message(chat_id, call.message.message_id)
+                except:
+                    pass
+            except Exception as e:
+                logger.error(f"[EDIT DELETE MOVIE] Ошибка при возврате в настройки: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[EDIT DELETE MOVIE] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:

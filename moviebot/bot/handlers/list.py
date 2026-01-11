@@ -46,18 +46,34 @@ def register_list_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("list_page:"))
     def handle_list_page(call):
         """Обработчик переключения страниц в /list"""
+        user_id = call.from_user.id
+        
+        # Проверяем, не устарел ли callback query
+        callback_is_old = False
         try:
-            user_id = call.from_user.id
+            bot.answer_callback_query(call.id)
+        except Exception as answer_error:
+            error_str = str(answer_error)
+            if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+                callback_is_old = True
+                logger.warning(f"[LIST PAGE] Callback query устарел, ПРОПУСКАЕМ: {answer_error}")
+        
+        if callback_is_old:
+            return
+        
+        try:
             page = int(call.data.split(":")[1])
             
             state = user_list_state.get(user_id)
             if not state:
-                bot.answer_callback_query(call.id, "Сессия устарела. Используйте /list заново")
+                try:
+                    bot.answer_callback_query(call.id, "Сессия устарела. Используйте /list заново")
+                except:
+                    pass
                 return
             
             chat_id = state['chat_id']
             show_list_page(bot, chat_id, user_id, page, call.message.message_id)
-            bot.answer_callback_query(call.id)
         except Exception as e:
             logger.error(f"[LIST] Ошибка в handle_list_page: {e}", exc_info=True)
             try:
@@ -68,15 +84,36 @@ def register_list_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data == "noop")
     def handle_noop(call):
         """Обработчик для неактивных кнопок (noop)"""
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            # Игнорируем ошибки устаревших callback queries для noop
+            pass
     
     @bot.callback_query_handler(func=lambda call: call.data == "plan_from_list")
     def plan_from_list_callback(call):
         """Обработчик кнопки 'Запланировать просмотр' из /list"""
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # КРИТИЧЕСКИ ВАЖНО: Проверяем, не устарел ли callback query ДО начала операций
+        callback_is_old = False
         try:
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            
+            bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+        except Exception as answer_error:
+            error_str = str(answer_error)
+            if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+                callback_is_old = True
+                logger.warning(f"[PLAN FROM LIST] Callback query устарел, ПРОПУСКАЕМ обработку: {answer_error}")
+            else:
+                logger.error(f"[PLAN FROM LIST] Ошибка answer_callback_query: {answer_error}", exc_info=True)
+        
+        # Если callback устарел - СРАЗУ выходим
+        if callback_is_old:
+            logger.info(f"[PLAN FROM LIST] ⚠️ Пропущен устаревший callback, выходим БЕЗ обработки")
+            return
+        
+        try:
             logger.info(f"[PLAN FROM LIST] Пользователь {user_id} хочет запланировать фильм из /list")
             
             # Устанавливаем состояние для планирования
@@ -85,7 +122,6 @@ def register_list_handlers(bot):
                 'chat_id': chat_id
             }
             
-            bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
             prompt_msg = bot.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
             # Сохраняем message_id промпта в состояние
             user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
@@ -100,10 +136,27 @@ def register_list_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data == "view_film_from_list")
     def view_film_from_list_callback(call):
         """Обработчик кнопки 'Посмотреть страницу фильма' из /list"""
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # КРИТИЧЕСКИ ВАЖНО: Проверяем, не устарел ли callback query ДО начала операций
+        callback_is_old = False
         try:
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            
+            bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
+        except Exception as answer_error:
+            error_str = str(answer_error)
+            if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+                callback_is_old = True
+                logger.warning(f"[VIEW FILM FROM LIST] Callback query устарел, ПРОПУСКАЕМ обработку: {answer_error}")
+            else:
+                logger.error(f"[VIEW FILM FROM LIST] Ошибка answer_callback_query: {answer_error}", exc_info=True)
+        
+        # Если callback устарел - СРАЗУ выходим
+        if callback_is_old:
+            logger.info(f"[VIEW FILM FROM LIST] ⚠️ Пропущен устаревший callback, выходим БЕЗ обработки")
+            return
+        
+        try:
             logger.info(f"[VIEW FILM FROM LIST] Пользователь {user_id} хочет посмотреть страницу фильма из /list")
             
             # Устанавливаем состояние для просмотра фильма
@@ -111,7 +164,6 @@ def register_list_handlers(bot):
                 'chat_id': chat_id
             }
             
-            bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
             prompt_msg = bot.send_message(chat_id, "Пришлите в ответном сообщении ссылку или ID фильма, чье описание хотите посмотреть")
             # Сохраняем message_id промпта в состояние
             user_view_film_state[user_id]['prompt_message_id'] = prompt_msg.message_id

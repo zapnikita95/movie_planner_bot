@@ -72,27 +72,33 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     # Извлекаем kp_id из ссылки
     match = re.search(r'kinopoisk\.ru/(film|series)/(\d+)', link)
     kp_id = match.group(2) if match else None
+    is_series_from_link = match.group(1) == 'series' if match else False
     
     with db_lock:
         if kp_id:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+            cursor.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
         else:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+            cursor.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
         row = cursor.fetchone()
         if not row:
-            # При планировании фильма дома автоматически добавляем его в базу
+            # При планировании фильма автоматически добавляем его в базу
             info = extract_movie_info(link)
             if info:
                 is_series_val = 1 if info.get('is_series') else 0
+                kp_id_from_info = str(info.get('kp_id', kp_id))
+                # Обновляем kp_id из info, если он есть
+                if kp_id_from_info:
+                    kp_id = kp_id_from_info
                 cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series', 
-                             (chat_id, link, info['kp_id'], info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors'], is_series_val))
+                             (chat_id, link, kp_id, info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors'], is_series_val))
                 conn.commit()
-                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(info['kp_id'])))
+                cursor.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                 row = cursor.fetchone()
                 if row:
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
                     title = row.get('title') if isinstance(row, dict) else row[1]
-                    logger.info(f"[PROCESS_PLAN] Фильм автоматически добавлен в базу при планировании: kp_id={info['kp_id']}, film_id={film_id}")
+                    is_series_db = bool(row.get('is_series') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0))
+                    logger.info(f"[PROCESS_PLAN] Фильм автоматически добавлен в базу при планировании: kp_id={kp_id}, film_id={film_id}, is_series={is_series_db}")
                 else:
                     bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
                     return False
@@ -102,6 +108,13 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
         else:
             film_id = row.get('id') if isinstance(row, dict) else row[0]
             title = row.get('title') if isinstance(row, dict) else row[1]
+            is_series_db = bool(row.get('is_series') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0))
+            # Получаем kp_id из базы, если он еще не был извлечен из ссылки
+            if not kp_id:
+                cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                kp_row = cursor.fetchone()
+                if kp_row:
+                    kp_id = str(kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0])
         
         # TODO: Добавить обработку сериалов (episode_info) из moviebot.py строки 23196-23274
         
@@ -110,10 +123,26 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
                       (chat_id, film_id, plan_type, plan_utc, user_id))
         plan_id_row = cursor.fetchone()
         plan_id = plan_id_row.get('id') if isinstance(plan_id_row, dict) else plan_id_row[0] if plan_id_row else None
+        
+        # ВАЖНО: Получаем kp_id из базы, чтобы быть уверенными, что он правильный
+        if film_id:
+            cursor.execute('SELECT kp_id, is_series FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            movie_row = cursor.fetchone()
+            if movie_row:
+                kp_id_from_db = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+                is_series_db = bool(movie_row.get('is_series') if isinstance(movie_row, dict) else (movie_row[1] if len(movie_row) > 1 else 0))
+                if kp_id_from_db:
+                    kp_id = str(kp_id_from_db)
+                    logger.info(f"[PROCESS PLAN] kp_id получен из базы: {kp_id}, is_series={is_series_db}")
+                elif not kp_id:
+                    logger.warning(f"[PROCESS PLAN] kp_id не найден в базе для film_id={film_id}")
+            else:
+                logger.warning(f"[PROCESS PLAN] Фильм не найден в базе для film_id={film_id}")
+        
         conn.commit()
         
         # Успешное планирование - фильм уже в базе (film_id получен выше)
-        logger.info(f"[PLAN] Успешное планирование: plan_id={plan_id}, film_id={film_id}, plan_type={plan_type}, plan_datetime={plan_utc}")
+        logger.info(f"[PLAN] Успешное планирование: plan_id={plan_id}, film_id={film_id}, kp_id={kp_id}, plan_type={plan_type}, plan_datetime={plan_utc}")
     
     # Формируем сообщение об успехе
     date_str = plan_dt.strftime('%d.%m %H:%M')
@@ -160,14 +189,19 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     
     # Добавляем кнопку "Вернуться к описанию" для обоих типов планов (если есть kp_id)
     if kp_id:
-        if not markup.keyboard:
-            markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(
-            InlineKeyboardButton(
-                "◀️ Вернуться к описанию",
-                callback_data=f"back_to_film:{int(kp_id)}"
+        try:
+            kp_id_int = int(kp_id)
+            if not markup.keyboard:
+                markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                InlineKeyboardButton(
+                    "◀️ Вернуться к описанию",
+                    callback_data=f"back_to_film:{kp_id_int}"
+                )
             )
-        )
+            logger.info(f"[PROCESS PLAN] Добавлена кнопка 'Вернуться к описанию' с kp_id={kp_id_int}")
+        except (ValueError, TypeError) as e:
+            logger.warning(f"[PROCESS PLAN] Не удалось преобразовать kp_id в int: {kp_id}, ошибка: {e}")
     
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
     if plan_type == 'home' and markup.keyboard and any(btn.callback_data.startswith("streaming_select:") for row in markup.keyboard for btn in row):

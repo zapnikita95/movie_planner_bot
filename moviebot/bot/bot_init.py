@@ -115,18 +115,43 @@ def safe_answer_callback_query(bot_instance, callback_query_id, text=None, show_
         cache_time: Время кэширования (опционально)
     
     Returns:
-        bool: True если успешно, False если ошибка
+        bool: True если успешно, False если ошибка (включая устаревшие callback queries)
     """
     try:
         bot_instance.answer_callback_query(callback_query_id, text=text, show_alert=show_alert, url=url, cache_time=cache_time)
         return True
     except Exception as e:
-        error_msg = str(e).lower()
+        error_str = str(e)
+        error_msg = error_str.lower()
         # Игнорируем ошибки устаревших callback'ов
-        if 'too old' in error_msg or 'timeout expired' in error_msg or 'invalid' in error_msg:
+        if 'too old' in error_msg or 'timeout expired' in error_msg or 'invalid' in error_msg or 'query id is invalid' in error_msg:
             logger.debug(f"[SAFE CALLBACK] Callback query {callback_query_id} устарел или невалиден, игнорируем: {e}")
         else:
             logger.warning(f"[SAFE CALLBACK] Ошибка при ответе на callback query {callback_query_id}: {e}")
+        return False
+
+
+def check_callback_query_is_old(bot_instance, callback_query_id, text=None):
+    """
+    Проверяет, не устарел ли callback query. Используется для раннего выхода из handlers.
+    
+    Args:
+        bot_instance: Экземпляр бота
+        callback_query_id: ID callback query
+        text: Текст ответа (опционально)
+    
+    Returns:
+        bool: True если callback query устарел, False если все в порядке
+    """
+    try:
+        bot_instance.answer_callback_query(callback_query_id, text=text)
+        return False  # Callback не устарел
+    except Exception as e:
+        error_str = str(e)
+        error_msg = error_str.lower()
+        if 'too old' in error_msg or 'timeout expired' in error_msg or 'invalid' in error_msg or 'query id is invalid' in error_msg:
+            return True  # Callback устарел
+        # Другие ошибки - не считаем callback устаревшим
         return False
 
 # Основной экземпляр бота для использования во всех handlers и webhook

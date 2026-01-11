@@ -5,12 +5,11 @@ from moviebot.bot.bot_init import bot, BOT_ID
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-
 from moviebot.database.db_operations import log_request
 
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
-from moviebot.states import user_clean_state, clean_votes, clean_unwatched_votes
+from moviebot.states import user_clean_state, user_private_handler_state, clean_unwatched_votes
 
 from datetime import datetime, timedelta
 
@@ -18,6 +17,9 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
+
+# Новое состояние для отслеживания голосований через текстовые сообщения для chat_db
+clean_chat_text_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set(), 'active_members': set()}
 
 
 @bot.message_handler(commands=['clean'])
@@ -35,7 +37,6 @@ def clean_command(message):
     markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
     markup.add(InlineKeyboardButton("🗑️ Удалить все непросмотренные фильмы", callback_data="clean:unwatched_movies"))
     markup.add(InlineKeyboardButton("📥 Удалить импорты с Кинопоиска", callback_data="clean:imported_ratings"))
-    markup.add(InlineKeyboardButton("🧹 Удалить фильмы, добавленные при импорте", callback_data="clean:clean_imported_movies"))
     markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
     
     help_text = (
@@ -59,9 +60,6 @@ def clean_command(message):
         "<b>📥 Удалить импорты с Кинопоиска</b> — удаляет все ваши импортированные оценки из Кинопоиска.\n"
         "• Удаляются только импортированные оценки (is_imported = TRUE)\n"
         "• Ваши обычные оценки и данные других пользователей останутся без изменений\n\n"
-        "<b>🧹 Удалить фильмы, добавленные при импорте</b> — удаляет фильмы, которые были добавлены в базу только из-за импорта оценок.\n"
-        "• Удаляются фильмы с только импортированными оценками\n"
-        "• Фильмы с обычными оценками или в планах останутся\n\n"
         "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
         "Выберите действие:"
     )
@@ -75,10 +73,12 @@ def clean_action_choice(call):
     chat_id = call.message.chat.id
     action = call.data.split(":")[1]
     
+    bot.answer_callback_query(call.id)
+    
     user_clean_state[user_id] = {'action': action}
     
     if action == 'chat_db':
-        # Обнуление базы чата - требует голосования в группах
+        # Обнуление базы чата - требует подтверждения всех активных участников через "ДА, УДАЛИТЬ"
         if call.message.chat.type in ['group', 'supergroup']:
             try:
                 # Получаем список активных участников
@@ -132,19 +132,18 @@ def clean_action_choice(call):
                 msg = bot.send_message(chat_id, 
                     f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено полное обнуление базы данных чата.\n\n"
                     f"Участников в чате: {active_members_count}\n"
-                    f"Для подтверждения все участники должны поставить 👍 (лайк) на это сообщение.\n\n"
-                    f"Если не все проголосуют, база не будет удалена.",
+                    f"Для подтверждения все активные участники должны ответить на это сообщение текстом <b>\"ДА, УДАЛИТЬ\"</b>.\n\n"
+                    f"Если не все участники подтвердят, база не будет удалена.",
                     parse_mode='HTML')
                 
-                from moviebot.states import clean_votes
-                clean_votes[msg.message_id] = {
+                clean_chat_text_votes[msg.message_id] = {
                     'chat_id': chat_id,
                     'members_count': active_members_count,
                     'voted': set(),
                     'active_members': active_members
                 }
                 
-                bot.edit_message_text("✅ Запрос на обнуление базы отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
+                bot.edit_message_text("✅ Запрос на обнуление базы отправлен. Ожидаю подтверждения всех активных участников.", call.message.chat.id, call.message.message_id)
             except Exception as e:
                 logger.error(f"Ошибка при инициировании голосования: {e}", exc_info=True)
                 bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
@@ -167,6 +166,12 @@ def clean_action_choice(call):
             user_clean_state[user_id]['confirm_needed'] = True
             user_clean_state[user_id]['target'] = 'chat'
             user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
+            
+            # Устанавливаем user_private_handler_state для личных чатов
+            user_private_handler_state[user_id] = {
+                'handler': 'clean_chat',
+                'prompt_message_id': call.message.message_id
+            }
     
     elif action == 'user_db':
         # Обнуление базы пользователя - удаляет только данные конкретного пользователя в этом чате
@@ -187,6 +192,13 @@ def clean_action_choice(call):
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'user'
         user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
+        
+        # Устанавливаем user_private_handler_state для личных чатов
+        if call.message.chat.type == 'private':
+            user_private_handler_state[user_id] = {
+                'handler': 'clean_user',
+                'prompt_message_id': call.message.message_id
+            }
     
     elif action == 'unwatched_movies':
         # Удаление непросмотренных фильмов - требует голосования в группах
@@ -288,7 +300,6 @@ def clean_action_choice(call):
                 "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
                 call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
             )
-            # edit_message_text возвращает True/False, а не объект сообщения
             prompt_message_id = call.message.message_id
         except Exception as e:
             logger.error(f"[CLEAN] Ошибка при редактировании сообщения: {e}")
@@ -298,25 +309,13 @@ def clean_action_choice(call):
         user_clean_state[user_id]['target'] = 'imported_ratings'
         user_clean_state[user_id]['prompt_message_id'] = prompt_message_id
         logger.info(f"[CLEAN] Сохранено состояние для imported_ratings: user_id={user_id}, prompt_message_id={prompt_message_id}")
-    
-    elif action == 'clean_imported_movies':
-        # Удаление фильмов, которые были добавлены только из-за импорта
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
-        bot.edit_message_text(
-            "⚠️ <b>Удаление фильмов, добавленных при импорте</b>\n\n"
-            "Это удалит фильмы, которые:\n"
-            "• Были добавлены в базу только из-за импорта оценок\n"
-            "• Имеют только импортированные оценки (is_imported = TRUE)\n"
-            "• Не имеют обычных оценок (is_imported = FALSE или NULL)\n"
-            "• Не находятся в планах\n"
-            "• Не просмотрены (watched = 0)\n\n"
-            "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
-            call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
-        )
-        user_clean_state[user_id]['confirm_needed'] = True
-        user_clean_state[user_id]['target'] = 'clean_imported_movies'
-        user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
+        
+        # Устанавливаем user_private_handler_state для личных чатов
+        if call.message.chat.type == 'private':
+            user_private_handler_state[user_id] = {
+                'handler': 'clean_imported_ratings',
+                'prompt_message_id': prompt_message_id
+            }
     
     elif action == 'cancel':
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
@@ -345,7 +344,6 @@ def clean_back_callback(call):
         markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
         markup.add(InlineKeyboardButton("🗑️ Удалить все непросмотренные фильмы", callback_data="clean:unwatched_movies"))
         markup.add(InlineKeyboardButton("📥 Удалить импорты с Кинопоиска", callback_data="clean:imported_ratings"))
-        markup.add(InlineKeyboardButton("🧹 Удалить фильмы, добавленные при импорте", callback_data="clean:clean_imported_movies"))
         markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
         
         help_text = (
@@ -369,9 +367,6 @@ def clean_back_callback(call):
             "<b>📥 Удалить импорты с Кинопоиска</b> — удаляет все ваши импортированные оценки из Кинопоиска.\n"
             "• Удаляются только импортированные оценки (is_imported = TRUE)\n"
             "• Ваши обычные оценки и данные других пользователей останутся без изменений\n\n"
-            "<b>🧹 Удалить фильмы, добавленные при импорте</b> — удаляет фильмы, которые были добавлены в базу только из-за импорта оценок.\n"
-            "• Удаляются фильмы с только импортированными оценками\n"
-            "• Фильмы с обычными оценками или в планах останутся\n\n"
             "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
             "Выберите действие:"
         )
@@ -385,8 +380,190 @@ def clean_back_callback(call):
             pass
 
 
+def check_clean_reply(message):
+    """Проверка для handler ответа на сообщение об очистке базы"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip().upper() if message.text else ""
+    
+    # Нормализуем текст: убираем пробелы, запятые, приводим к верхнему регистру
+    normalized_text = text.replace(' ', '').replace(',', '').upper()
+    if normalized_text != 'ДАУДАЛИТЬ':
+        return False
+    
+    is_private = message.chat.type == 'private'
+    
+    # Для личных чатов проверяем user_private_handler_state
+    if is_private:
+        if user_id not in user_private_handler_state:
+            return False
+        state = user_private_handler_state[user_id]
+        handler_name = state.get('handler')
+        if handler_name in ['clean_chat', 'clean_user', 'clean_imported_ratings']:
+            return True
+        return False
+    
+    # Для групп:
+    # 1. Проверяем user_clean_state для user_db и imported_ratings
+    if user_id in user_clean_state:
+        state = user_clean_state[user_id]
+        target = state.get('target')
+        if target in ['user', 'imported_ratings']:
+            # Для групп нужен реплай
+            if not message.reply_to_message:
+                return False
+            if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+                return False
+            reply_text = message.reply_to_message.text or ""
+            if target == 'user' and "Обнуление базы данных пользователя" not in reply_text:
+                return False
+            if target == 'imported_ratings' and "Удаление импортированных оценок с Кинопоиска" not in reply_text:
+                return False
+            return True
+    
+    # 2. Проверяем clean_chat_text_votes для chat_db
+    if message.reply_to_message:
+        reply_msg_id = message.reply_to_message.message_id
+        if reply_msg_id in clean_chat_text_votes:
+            vote_state = clean_chat_text_votes[reply_msg_id]
+            if vote_state['chat_id'] == chat_id and user_id in vote_state['active_members']:
+                return True
+    
+    return False
+
+
+@bot.message_handler(func=check_clean_reply)
+def handle_clean_reply(message):
+    """Обработчик ответа на сообщение об очистке базы - ТОЛЬКО для 'ДА, УДАЛИТЬ'"""
+    logger.info(f"[CLEAN REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        text = message.text.strip().upper() if message.text else ""
+        
+        # Нормализуем текст: убираем пробелы, запятые, приводим к верхнему регистру
+        normalized_text = text.replace(' ', '').replace(',', '').upper()
+        if normalized_text != 'ДАУДАЛИТЬ':
+            logger.warning(f"[CLEAN REPLY] Неверный текст подтверждения: '{text}' (нормализовано: '{normalized_text}')")
+            return
+        
+        is_private = message.chat.type == 'private'
+        
+        # Для личных чатов
+        if is_private:
+            if user_id not in user_private_handler_state:
+                logger.warning(f"[CLEAN REPLY] Пользователь {user_id} не в состоянии user_private_handler_state")
+                return
+            
+            state = user_private_handler_state[user_id]
+            handler_name = state.get('handler')
+            
+            if handler_name == 'clean_chat':
+                # Удаляем состояние и вызываем handle_clean_confirm_internal
+                del user_private_handler_state[user_id]
+                from moviebot.bot.handlers.series import handle_clean_confirm_internal
+                handle_clean_confirm_internal(message)
+                logger.info(f"[CLEAN REPLY] ✅ Завершено clean_chat для личного чата")
+                return
+            
+            elif handler_name == 'clean_user':
+                # Удаляем состояние и вызываем handle_clean_confirm_internal
+                del user_private_handler_state[user_id]
+                from moviebot.bot.handlers.series import handle_clean_confirm_internal
+                handle_clean_confirm_internal(message)
+                logger.info(f"[CLEAN REPLY] ✅ Завершено clean_user для личного чата")
+                return
+            
+            elif handler_name == 'clean_imported_ratings':
+                # Удаляем состояние и вызываем handle_clean_confirm_internal
+                del user_private_handler_state[user_id]
+                from moviebot.bot.handlers.series import handle_clean_confirm_internal
+                handle_clean_confirm_internal(message)
+                logger.info(f"[CLEAN REPLY] ✅ Завершено clean_imported_ratings для личного чата")
+                return
+        
+        # Для групп
+        # 1. Проверяем user_clean_state для user_db и imported_ratings
+        if user_id in user_clean_state:
+            state = user_clean_state[user_id]
+            target = state.get('target')
+            
+            if target in ['user', 'imported_ratings']:
+                # Проверяем реплай
+                if not message.reply_to_message:
+                    return
+                if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+                    return
+                reply_text = message.reply_to_message.text or ""
+                if target == 'user' and "Обнуление базы данных пользователя" not in reply_text:
+                    return
+                if target == 'imported_ratings' and "Удаление импортированных оценок с Кинопоиска" not in reply_text:
+                    return
+                
+                # Вызываем handle_clean_confirm_internal
+                from moviebot.bot.handlers.series import handle_clean_confirm_internal
+                handle_clean_confirm_internal(message)
+                logger.info(f"[CLEAN REPLY] ✅ Завершено {target} для группы")
+                return
+        
+        # 2. Обрабатываем голосование для chat_db
+        if message.reply_to_message:
+            reply_msg_id = message.reply_to_message.message_id
+            if reply_msg_id in clean_chat_text_votes:
+                vote_state = clean_chat_text_votes[reply_msg_id]
+                if vote_state['chat_id'] == chat_id and user_id in vote_state['active_members']:
+                    # Добавляем пользователя в список проголосовавших
+                    if user_id not in vote_state['voted']:
+                        vote_state['voted'].add(user_id)
+                        logger.info(f"[CLEAN REPLY] Пользователь {user_id} проголосовал за удаление базы чата. Проголосовало: {len(vote_state['voted'])}/{vote_state['members_count']}")
+                        
+                        # Проверяем, все ли проголосовали
+                        if len(vote_state['voted']) >= vote_state['members_count']:
+                            # Все проголосовали - выполняем удаление
+                            logger.info(f"[CLEAN REPLY] Все участники проголосовали, выполняем удаление базы чата")
+                            
+                            # Создаем FakeMessage для handle_clean_confirm_internal
+                            class FakeMessage:
+                                def __init__(self, chat_id, user_id):
+                                    self.chat = type('obj', (object,), {'id': chat_id})()
+                                    class User:
+                                        def __init__(self, user_id):
+                                            self.id = user_id
+                                    self.from_user = User(user_id)
+                            
+                            fake_msg = FakeMessage(chat_id, user_id)
+                            
+                            # Временно устанавливаем target='chat' в user_clean_state
+                            user_clean_state[user_id] = {'target': 'chat', 'confirm_needed': True}
+                            
+                            # Вызываем handle_clean_confirm_internal
+                            from moviebot.bot.handlers.series import handle_clean_confirm_internal
+                            handle_clean_confirm_internal(fake_msg)
+                            
+                            # Удаляем состояние голосования
+                            del clean_chat_text_votes[reply_msg_id]
+                            
+                            # Отправляем сообщение об успехе
+                            bot.send_message(chat_id, "✅ Все участники подтвердили. База данных чата обнулена.")
+                            logger.info(f"[CLEAN REPLY] ✅ База данных чата обнулена")
+                        else:
+                            # Еще не все проголосовали
+                            remaining = vote_state['members_count'] - len(vote_state['voted'])
+                            bot.reply_to(message, f"✅ Ваш голос учтен. Осталось подтверждений: {remaining}")
+                    else:
+                        bot.reply_to(message, "✅ Вы уже проголосовали.")
+                return
+        
+        logger.warning(f"[CLEAN REPLY] Не найдено соответствующего состояния для user_id={user_id}, chat_id={chat_id}")
+    except Exception as e:
+        logger.error(f"[CLEAN REPLY] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке")
+        except:
+            pass
+
+
 def register_clean_handlers(bot):
     """Регистрирует обработчики команды /clean"""
     # Обработчик уже зарегистрирован через декоратор
     logger.info("Обработчики команды /clean зарегистрированы")
-

@@ -3190,7 +3190,110 @@ def register_payment_callbacks(bot_instance):
                                         if existing_month_price >= selected_price:
                                             covers_selected = True
                             
-                                if covers_selected:
+                                if not covers_selected:
+                                    # Подписка существует, но не покрывает выбранный тариф - предлагаем upgrade
+                                    existing_subscription_id = existing_group_sub.get('id')
+                                    # Перенаправляем на modify flow для этого случая
+                                    # Используем callback modify для показа вариантов оплаты
+                                    callback_data = f"payment:modify:{existing_subscription_id}"
+                                    # Вызываем обработчик modify программно
+                                    from moviebot.bot.callbacks.payment_callbacks import handle_payment_callback
+                                    # Создаем fake call объект для вызова modify
+                                    class FakeCall:
+                                        def __init__(self, call, new_data):
+                                            self.data = new_data
+                                            self.from_user = call.from_user
+                                            self.message = call.message
+                                            self.id = call.id
+                                    fake_call = FakeCall(call, callback_data)
+                                    # Вызываем modify обработчик
+                                    # Но это сложно, поэтому лучше просто перенаправить пользователя на modify
+                                    # или реализовать логику здесь
+                                    
+                                    # Реализуем логику upgrade здесь
+                                    subscription_id = existing_subscription_id
+                                    current_plan_type = existing_plan_type
+                                    current_price = existing_price
+                                    group_size_str = str(group_size) if group_size else '2'
+                                    
+                                    # Вычисляем upgrade_price
+                                    if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                                        # Отдельные функции - только месячная подписка
+                                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                                        current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
+                                        upgrade_price = new_price - current_month_price
+                                        upgrade_period_type = 'month'
+                                    else:
+                                        # Для "all" используем текущий период подписки
+                                        period_type_existing = existing_group_sub.get('period_type', 'month')
+                                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type_existing, 0)
+                                        current_price_db = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type_existing, 0)
+                                        upgrade_price = new_price - current_price_db
+                                        upgrade_period_type = period_type_existing
+                                    
+                                    plan_names = {
+                                        'notifications': '🔔 Уведомления о сериалах',
+                                        'recommendations': '🎯 Персональные рекомендации',
+                                        'tickets': '🎫 Билеты в кино',
+                                        'all': '📦 Все режимы'
+                                    }
+                                    
+                                    period_names = {
+                                        'month': 'месяц',
+                                        '3months': '3 месяца',
+                                        'year': 'год',
+                                        'lifetime': 'навсегда',
+                                        'test': 'тестовый (10 минут)'
+                                    }
+                                    
+                                    text = f"✏️ <b>Изменение подписки</b>\n\n"
+                                    text += f"📋 <b>Текущая подписка:</b>\n"
+                                    text += f"• {plan_names.get(current_plan_type, current_plan_type)}\n"
+                                    text += f"• Сумма: {current_price}₽\n\n"
+                                    
+                                    text += f"📋 <b>Новая подписка:</b>\n"
+                                    text += f"• {plan_names.get(new_plan_type, new_plan_type)}\n"
+                                    text += f"• Сумма: {new_price}₽\n\n"
+                                    
+                                    next_payment_date = existing_group_sub.get('next_payment_date')
+                                    if next_payment_date:
+                                        if isinstance(next_payment_date, datetime):
+                                            next_payment_str = next_payment_date.strftime('%d.%m.%Y')
+                                        else:
+                                            try:
+                                                from dateutil import parser
+                                                next_payment_dt = parser.parse(str(next_payment_date))
+                                                next_payment_str = next_payment_dt.strftime('%d.%m.%Y')
+                                            except:
+                                                next_payment_str = str(next_payment_date)
+                                        text += f"📅 <b>Дата следующего списания:</b> {next_payment_str}\n\n"
+                                    
+                                    markup = InlineKeyboardMarkup(row_width=1)
+                                    
+                                    # Если сумма увеличивается - предлагаем два варианта
+                                    if upgrade_price > 0:
+                                        text += f"💰 <b>Доплата:</b> {upgrade_price}₽\n\n"
+                                        text += "Выберите вариант:\n"
+                                        text += f"1️⃣ <b>Оплатить сейчас и изменить сумму подписки</b> — доплатите {upgrade_price}₽, подписка изменится сразу\n"
+                                        text += "2️⃣ <b>Изменение суммы со следующего платежа</b> — подписка изменится без доплаты со следующего списания\n"
+                                        
+                                        markup.add(InlineKeyboardButton("1️⃣ Оплатить сейчас", callback_data=f"payment:pay_upgrade_now:{subscription_id}:{new_plan_type}"))
+                                        markup.add(InlineKeyboardButton("2️⃣ Со следующего платежа", callback_data=f"payment:change_from_next:{subscription_id}:{new_plan_type}"))
+                                    else:
+                                        # Если сумма уменьшается или не меняется - только изменение со следующего платежа
+                                        text += "Подписка будет изменена со следующего списания.\n"
+                                        markup.add(InlineKeyboardButton("✅ Подтвердить", callback_data=f"payment:change_from_next:{subscription_id}:{new_plan_type}"))
+                                    
+                                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:select_group:{group_size}:{group_chat_id}"))
+                                
+                                    try:
+                                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                    except Exception as e:
+                                        if "message is not modified" not in str(e):
+                                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                                    return
+                                else:
+                                    # Подписка покрывает выбранный тариф
                                     plan_names = {
                                         'notifications': '🔔 Уведомления о сериалах',
                                         'recommendations': '🎯 Персональные рекомендации',
@@ -4287,6 +4390,9 @@ def register_payment_callbacks(bot_instance):
             
                 # payment_chat_id уже установлен выше из payment_data или chat_id
             
+                # Проверяем, является ли это upgrade платежом
+                upgrade_subscription_id = payment_data.get('upgrade_subscription_id') if payment_data else None
+                
                 # Сохраняем информацию о платеже в БД
                 from moviebot.database.db_operations import save_payment
                 save_payment(
@@ -4303,25 +4409,33 @@ def register_payment_callbacks(bot_instance):
                 )
             
                 # Создаем payload для инвойса (должен быть уникальным)
-                invoice_payload = f"stars_{payment_id}"
+                if upgrade_subscription_id:
+                    # Для upgrade платежей используем специальный формат payload
+                    # Формат: upgrade_{payment_id_short} (ограничение 64 символа)
+                    invoice_payload = f"upgrade_{payment_id[:20]}"
+                    logger.info(f"[STARS] Upgrade платеж: subscription_id={upgrade_subscription_id}, payload={invoice_payload}")
+                else:
+                    invoice_payload = f"stars_{payment_id}"
             
-                # Определяем subscription_period для подписок (кроме lifetime)
+                # Определяем subscription_period для подписок (кроме lifetime и upgrade платежей)
                 # Согласно документации: https://core.telegram.org/api/subscriptions#bot-subscriptions
                 # subscription_period определяет интервал автоматического списания
+                # Для upgrade платежей subscription_period = None (разовый платеж)
                 subscription_period = None
-                if period_type == 'month':
-                    # Месячная подписка: списание каждые 30 дней
-                    subscription_period = 30 * 24 * 60 * 60  # 30 дней в секундах
-                elif period_type == '3months':
-                    # Подписка на 3 месяца: списание каждые 90 дней
-                    subscription_period = 90 * 24 * 60 * 60  # 90 дней в секундах
-                elif period_type == 'year':
-                    # Годовая подписка: списание каждые 365 дней
-                    subscription_period = 365 * 24 * 60 * 60  # 365 дней в секундах
-                elif period_type == 'test':
-                    # Тестовая подписка: списание каждые 10 минут
-                    subscription_period = 10 * 60  # 10 минут в секундах
-                # Для lifetime не создаем подписку (subscription_period = None)
+                if not upgrade_subscription_id:
+                    if period_type == 'month':
+                        # Месячная подписка: списание каждые 30 дней
+                        subscription_period = 30 * 24 * 60 * 60  # 30 дней в секундах
+                    elif period_type == '3months':
+                        # Подписка на 3 месяца: списание каждые 90 дней
+                        subscription_period = 90 * 24 * 60 * 60  # 90 дней в секундах
+                    elif period_type == 'year':
+                        # Годовая подписка: списание каждые 365 дней
+                        subscription_period = 365 * 24 * 60 * 60  # 365 дней в секундах
+                    elif period_type == 'test':
+                        # Тестовая подписка: списание каждые 10 минут
+                        subscription_period = 10 * 60  # 10 минут в секундах
+                    # Для lifetime не создаем подписку (subscription_period = None)
                 
                 if subscription_period:
                     logger.info(f"[STARS] Создается подписка с периодом {subscription_period} секунд ({period_type})")
@@ -4417,9 +4531,26 @@ def register_payment_callbacks(bot_instance):
                 subscription_type_name = 'Личная подписка' if sub_type == 'personal' else f'Групповая подписка (на {group_size} участников)'
                 description = f"{subscription_type_name}: {plan_name}, период: {period_name}"
                 
-                # Создаем уникальный ID платежа
+                # Используем payment_id из payment_data, если он есть, иначе создаем новый
                 import uuid as uuid_module
-                payment_id = str(uuid_module.uuid4())
+                payment_id_from_data = payment_data.get('payment_id')
+                # payment_id в payment_data может быть коротким (первые 8 символов) или полным
+                # Проверяем, есть ли полный payment_id где-то еще, или создаем новый
+                if payment_id_from_data and len(payment_id_from_data) >= 36:  # Полный UUID
+                    payment_id = payment_id_from_data
+                elif payment_id_from_data:
+                    # Короткий ID - нужно создать новый полный или найти в состоянии
+                    # Создаем новый полный payment_id
+                    payment_id = str(uuid_module.uuid4())
+                    # Обновляем payment_data с полным payment_id
+                    payment_data['payment_id'] = payment_id
+                    user_payment_state[user_id]['payment_data'] = payment_data
+                    logger.info(f"[YOOKASSA] Создан новый полный payment_id={payment_id} для короткого {payment_id_from_data}")
+                else:
+                    payment_id = str(uuid_module.uuid4())
+                    # Обновляем payment_data с новым payment_id
+                    payment_data['payment_id'] = payment_id
+                    user_payment_state[user_id]['payment_data'] = payment_data
                 
                 return_url = os.getenv('YOOKASSA_RETURN_URL', 'tg://resolve?domain=movie_planner_bot')
                 
@@ -4437,6 +4568,15 @@ def register_payment_callbacks(bot_instance):
                     metadata["group_size"] = str(group_size) if group_size else ""
                     if group_username:
                         metadata["group_username"] = group_username
+                
+                # Проверяем, является ли это upgrade платежом
+                upgrade_subscription_id = payment_data.get('upgrade_subscription_id')
+                upgrade_from_plan = payment_data.get('upgrade_from_plan')
+                if upgrade_subscription_id:
+                    metadata["upgrade_subscription_id"] = upgrade_subscription_id
+                    if upgrade_from_plan:
+                        metadata["upgrade_from_plan"] = upgrade_from_plan
+                    logger.info(f"[YOOKASSA] Upgrade платеж: subscription_id={upgrade_subscription_id}, from={upgrade_from_plan}, to={plan_type}")
                 
                 # Создаем платеж
                 # Для всех подписок кроме lifetime добавляем save_payment_method: True
@@ -4930,28 +5070,74 @@ def register_payment_callbacks(bot_instance):
                 period_type = sub.get('period_type', 'month')
                 group_size = sub.get('group_size')
                 chat_id = sub.get('chat_id')
+                subscription_type = sub.get('subscription_type', 'group')
+                payment_method_id = sub.get('payment_method_id')  # Определяем способ оплаты
+                
+                # Определяем, какой способ оплаты был использован изначально
+                # Если payment_method_id есть - это YooKassa, если нет - Stars
+                was_yookassa = payment_method_id is not None
             
                 # Вычисляем цену для новой подписки
                 group_size_str = str(group_size) if group_size else '2'
+                subscription_type_str = subscription_type if subscription_type else ('group' if group_size else 'personal')
             
                 # Для отдельных функций (notifications, recommendations, tickets) доступна только месячная подписка
                 # Для "all" используем текущий период подписки
                 if new_plan_type in ['notifications', 'recommendations', 'tickets']:
                     # Отдельные функции - только месячная подписка
-                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
-                    current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
+                    new_price = SUBSCRIPTION_PRICES[subscription_type_str][group_size_str if subscription_type_str == 'group' else None][new_plan_type].get('month', 0)
+                    if subscription_type_str == 'group':
+                        current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
+                    else:
+                        current_month_price = SUBSCRIPTION_PRICES['personal'][current_plan_type].get('month', 0)
                     upgrade_price = new_price - current_month_price
                     upgrade_period_type = 'month'
                 else:
                     # Для "all" используем текущий период
-                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
-                    current_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type, 0)
+                    if subscription_type_str == 'group':
+                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
+                        current_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type, 0)
+                    else:
+                        new_price = SUBSCRIPTION_PRICES['personal'][new_plan_type].get(period_type, 0)
+                        current_price = SUBSCRIPTION_PRICES['personal'][current_plan_type].get(period_type, 0)
                     upgrade_price = new_price - current_price
                     upgrade_period_type = period_type
             
                 if upgrade_price <= 0:
                     bot_instance.answer_callback_query(call.id, "Ошибка расчета цены", show_alert=True)
                     return
+                
+                # Сохраняем информацию об upgrade в состояние для использования в pay_stars/pay_yookassa
+                import uuid as uuid_module
+                payment_id = str(uuid_module.uuid4())
+                payment_id_short = payment_id[:8]
+                
+                user_payment_state[user_id] = {
+                    'payment_data': {
+                        'sub_type': subscription_type_str,
+                        'plan_type': new_plan_type,
+                        'period_type': upgrade_period_type,
+                        'amount': upgrade_price,
+                        'group_size': group_size,
+                        'chat_id': chat_id,
+                        'payment_id': payment_id,  # Сохраняем полный payment_id, а не короткий
+                        'upgrade_subscription_id': str(subscription_id),  # Флаг для обновления существующей подписки
+                        'upgrade_from_plan': current_plan_type  # Старый тип подписки
+                    }
+                }
+                
+                # Получаем информацию о группе для групповых подписок
+                group_username = None
+                group_title = None
+                if subscription_type_str == 'group' and chat_id:
+                    try:
+                        chat_info = bot_instance.get_chat(chat_id)
+                        group_username = chat_info.username
+                        group_title = chat_info.title
+                        user_payment_state[user_id]['payment_data']['group_username'] = group_username
+                        user_payment_state[user_id]['payment_data']['group_title'] = group_title
+                    except:
+                        pass
                 
                 # Показываем информацию о подписке перед оплатой
                 next_payment_date = sub.get('next_payment_date')
@@ -4976,18 +5162,270 @@ def register_payment_callbacks(bot_instance):
                         except:
                             next_payment_str = str(next_payment_date)
                     text += f"📅 <b>Дата следующего списания:</b> {next_payment_str}\n"
-                text += f"\n💰 <b>Доплата:</b> {upgrade_price}₽\n\n"
-                text += "После оплаты подписка будет изменена сразу."
+                
+                # Конвертируем рубли в звезды для отображения
+                stars_amount = rubles_to_stars(upgrade_price)
+                
+                text += f"\n💰 <b>Доплата:</b> {upgrade_price}₽ ({stars_amount}⭐)\n\n"
+                text += "После оплаты подписка будет изменена сразу.\n\n"
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("💳 Оплатить", callback_data=f"payment:confirm_upgrade_pay:{subscription_id}:{new_plan_type}:{upgrade_price}"))
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:upgrade_plan:{subscription_id}:{new_plan_type}"))
+                
+                # Проверяем, может ли пользователь использовать безакцептное списание
+                # Условия: user_id совпадает с user_id подписки (это проверено выше) И есть payment_method_id
+                can_use_recurring = (payment_method_id is not None and sub.get('user_id') == user_id and period_type != 'lifetime')
+                
+                if can_use_recurring and was_yookassa:
+                    # Можем предложить безакцептное списание
+                    text += "💳 <b>Выберите способ оплаты:</b>\n\n"
+                    text += "💡 <b>У вас сохранена карта</b> — можно списать сразу без подтверждения\n\n"
+                    
+                    callback_data_recurring = f"payment:pay_upgrade_recurring:{subscription_id}:{new_plan_type}"
+                    markup.add(InlineKeyboardButton("💳 Списать с сохраненной карты", callback_data=callback_data_recurring))
+                    callback_data_yookassa = f"payment:pay_yookassa:{payment_id_short}"
+                    markup.add(InlineKeyboardButton("💳 Оплатить новой картой", callback_data=callback_data_yookassa))
+                    callback_data_stars = f"payment:pay_stars:{subscription_type_str}:{group_size_str if group_size else ''}:{new_plan_type}:{upgrade_period_type}:{payment_id_short}"
+                    markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                else:
+                    # Обычный выбор способа оплаты
+                    text += "💳 <b>Выберите способ оплаты:</b>\n"
+                    
+                    # Показываем кнопки оплаты - приоритет отдаем тому способу, которым была оплачена исходная подписка
+                    if was_yookassa and YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
+                        # Если была оплата через YooKassa - сначала показываем YooKassa
+                        callback_data_yookassa = f"payment:pay_yookassa:{payment_id_short}"
+                        markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
+                        callback_data_stars = f"payment:pay_stars:{subscription_type_str}:{group_size_str if group_size else ''}:{new_plan_type}:{upgrade_period_type}:{payment_id_short}"
+                        markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                    else:
+                        # Если была оплата через Stars или YooKassa недоступна - сначала показываем Stars
+                        callback_data_stars = f"payment:pay_stars:{subscription_type_str}:{group_size_str if group_size else ''}:{new_plan_type}:{upgrade_period_type}:{payment_id_short}"
+                        markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                        if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
+                            callback_data_yookassa = f"payment:pay_yookassa:{payment_id_short}"
+                            markup.add(InlineKeyboardButton("💳 Оплатить картой/ЮMoney", callback_data=callback_data_yookassa))
+                
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:modify:{subscription_id}"))
                 
                 try:
                     bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                return
+            
+            if action.startswith("pay_upgrade_recurring:"):
+                # Безакцептное списание для upgrade подписки (если у пользователя есть привязанная карта)
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                except:
+                    pass
+                
+                # Парсим callback_data: payment:pay_upgrade_recurring:{subscription_id}:{new_plan_type}
+                parts = action.split(":")
+                if len(parts) < 3:
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверный формат", show_alert=True)
+                    return
+                
+                subscription_id = int(parts[1])
+                new_plan_type = parts[2]
+                
+                # Получаем информацию о текущей подписке
+                from moviebot.database.db_operations import get_subscription_by_id
+                sub = get_subscription_by_id(subscription_id)
+                
+                if not sub:
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
+                    return
+                
+                # КРИТИЧЕСКАЯ ПРОВЕРКА: убеждаемся, что пользователь является владельцем подписки
+                if sub.get('user_id') != user_id:
+                    bot_instance.answer_callback_query(call.id, "❌ У вас нет прав для этой операции", show_alert=True)
+                    logger.warning(f"[RECURRING UPGRADE] Попытка списания другим пользователем: sub_user_id={sub.get('user_id')}, request_user_id={user_id}")
+                    return
+                
+                payment_method_id = sub.get('payment_method_id')
+                if not payment_method_id:
+                    bot_instance.answer_callback_query(call.id, "У вас нет привязанной карты", show_alert=True)
+                    return
+                
+                current_plan_type = sub.get('plan_type')
+                period_type = sub.get('period_type', 'month')
+                group_size = sub.get('group_size')
+                chat_id = sub.get('chat_id')
+                subscription_type = sub.get('subscription_type', 'group')
+                
+                # Вычисляем цену для новой подписки
+                group_size_str = str(group_size) if group_size else '2'
+                subscription_type_str = subscription_type if subscription_type else ('group' if group_size else 'personal')
+                
+                # Для отдельных функций (notifications, recommendations, tickets) доступна только месячная подписка
+                # Для "all" используем текущий период подписки
+                if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                    if subscription_type_str == 'group':
+                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                        current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
+                    else:
+                        new_price = SUBSCRIPTION_PRICES['personal'][new_plan_type].get('month', 0)
+                        current_month_price = SUBSCRIPTION_PRICES['personal'][current_plan_type].get('month', 0)
+                    upgrade_price = new_price - current_month_price
+                    upgrade_period_type = 'month'
+                else:
+                    # Для "all" используем текущий период
+                    if subscription_type_str == 'group':
+                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
+                        current_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type, 0)
+                    else:
+                        new_price = SUBSCRIPTION_PRICES['personal'][new_plan_type].get(period_type, 0)
+                        current_price = SUBSCRIPTION_PRICES['personal'][current_plan_type].get(period_type, 0)
+                    upgrade_price = new_price - current_price
+                    upgrade_period_type = period_type
+                
+                if upgrade_price <= 0:
+                    bot_instance.answer_callback_query(call.id, "Ошибка расчета цены", show_alert=True)
+                    return
+                
+                # Создаем безакцептный рекуррентный платеж через YooKassa API напрямую
+                # (так как create_recurring_payment не поддерживает upgrade metadata)
+                if not YOOKASSA_AVAILABLE or not YOOKASSA_SHOP_ID or not YOOKASSA_SECRET_KEY:
+                    bot_instance.answer_callback_query(call.id, "Платежная система недоступна", show_alert=True)
+                    return
+                
+                from yookassa import Configuration, Payment
+                import uuid as uuid_module
+                import os
+                
+                Configuration.account_id = YOOKASSA_SHOP_ID.strip()
+                Configuration.secret_key = YOOKASSA_SECRET_KEY.strip()
+                
+                payment_id = str(uuid_module.uuid4())
+                
+                # Формируем описание
+                period_names = {
+                    'month': 'месяц',
+                    '3months': '3 месяца',
+                    'year': 'год'
+                }
+                period_name = period_names.get(upgrade_period_type, upgrade_period_type)
+                
+                plan_names = {
+                    'notifications': 'Уведомления о сериалах',
+                    'recommendations': 'Персональные рекомендации',
+                    'tickets': 'Билеты в кино',
+                    'all': 'Все режимы'
+                }
+                plan_name = plan_names.get(new_plan_type, new_plan_type)
+                
+                subscription_type_name = 'Личная подписка' if subscription_type_str == 'personal' else f'Групповая подписка (на {group_size} участников)'
+                description = f"Обновление {subscription_type_name}: {plan_name}, период: {period_name}"
+                
+                # Формируем metadata с upgrade информацией
+                metadata = {
+                    "user_id": str(user_id),
+                    "chat_id": str(chat_id),
+                    "subscription_type": subscription_type_str,
+                    "plan_type": new_plan_type,
+                    "period_type": upgrade_period_type,
+                    "payment_id": payment_id,
+                    "upgrade_subscription_id": str(subscription_id),
+                    "upgrade_from_plan": current_plan_type
+                }
+                if group_size:
+                    metadata["group_size"] = str(group_size)
+                if call.from_user.username:
+                    metadata["telegram_username"] = call.from_user.username
+                if subscription_type_str == 'group' and chat_id:
+                    try:
+                        chat_info = bot_instance.get_chat(chat_id)
+                        if chat_info.username:
+                            metadata["group_username"] = chat_info.username
+                    except:
+                        pass
+                
+                # Создаем безакцептный платеж
+                payment_data = {
+                    "amount": {
+                        "value": f"{upgrade_price:.2f}",
+                        "currency": "RUB"
+                    },
+                    "capture": True,
+                    "payment_method_id": payment_method_id,
+                    "description": description,
+                    "metadata": metadata
+                }
+                
+                try:
+                    payment = Payment.create(payment_data)
+                    logger.info(f"[RECURRING UPGRADE] Платеж создан: id={payment.id}, status={payment.status}")
+                except Exception as e:
+                    logger.error(f"[RECURRING UPGRADE] Ошибка создания платежа: {e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
+                    return
+                
+                if not payment:
+                    bot_instance.answer_callback_query(call.id, "❌ Не удалось создать платеж", show_alert=True)
+                    return
+                
+                # Сохраняем платеж в БД (payment_id уже создан выше)
+                from moviebot.database.db_operations import save_payment, update_payment_status, update_subscription_plan_type
+                
+                save_payment(
+                    payment_id=payment_id,
+                    yookassa_payment_id=payment.id,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    subscription_type=subscription_type_str,
+                    plan_type=new_plan_type,
+                    period_type=upgrade_period_type,
+                    group_size=group_size,
+                    amount=upgrade_price,
+                    status='pending'
+                )
+                
+                # Ждем немного и проверяем статус платежа
+                import time
+                time.sleep(2)
+                
+                from yookassa import Payment as YooPayment
+                try:
+                    full_payment = YooPayment.find_one(payment.id)
+                    if full_payment.status == 'succeeded':
+                        # Платеж успешен - обновляем подписку
+                        update_payment_status(payment_id, 'succeeded', subscription_id)
+                        
+                        # Обновляем plan_type и price подписки
+                        update_subscription_plan_type(subscription_id, new_plan_type, new_price)
+                        
+                        bot_instance.answer_callback_query(call.id, "✅ Платеж успешно проведен, подписка обновлена")
+                        
+                        # Показываем подтверждение
+                        plan_names = {
+                            'notifications': '🔔 Уведомления о сериалах',
+                            'recommendations': '🎯 Персональные рекомендации',
+                            'tickets': '🎫 Билеты в кино',
+                            'all': '📦 Все режимы'
+                        }
+                        
+                        text = "✅ <b>Платеж успешно проведен!</b>\n\n"
+                        text += f"📋 Подписка обновлена: {plan_names.get(current_plan_type, current_plan_type)} → {plan_names.get(new_plan_type, new_plan_type)}\n"
+                        text += f"💰 Сумма списания: {upgrade_price}₽\n"
+                        
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current" if subscription_type_str == 'group' else "payment:active:personal"))
+                        
+                        try:
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    else:
+                        # Платеж не успешен
+                        update_payment_status(payment_id, full_payment.status, subscription_id)
+                        bot_instance.answer_callback_query(call.id, f"❌ Платеж не прошел: {full_payment.status}", show_alert=True)
+                except Exception as e:
+                    logger.error(f"[RECURRING UPGRADE] Ошибка проверки статуса платежа: {e}", exc_info=True)
+                    bot_instance.answer_callback_query(call.id, "Ошибка проверки платежа", show_alert=True)
+                
                 return
             
             if action.startswith("confirm_upgrade_pay:"):
