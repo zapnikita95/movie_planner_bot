@@ -438,11 +438,11 @@ def create_web_app(bot):
                         with db_lock:
                             cursor_sub.execute("""
                                 UPDATE subscriptions 
-                                SET payment_method_id = %s, is_recurring = TRUE, updated_at = NOW()
+                                SET payment_method_id = %s
                                 WHERE id = %s
                             """, (saved_pm_id, subscription_id))
                             conn_sub.commit()
-                        logger.info(f"[YOOKASSA] Автоплатёж включён для подписки {subscription_id}")
+                        logger.info(f"[YOOKASSA] Автоплатёж включён для подписки {subscription_id} (payment_method_id={saved_pm_id})")
                     
                     # Создаем чек от самозанятого
                     check_url = None

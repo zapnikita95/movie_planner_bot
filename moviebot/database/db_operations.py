@@ -9,7 +9,6 @@ from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.config import DEFAULT_WATCHED_EMOJIS, KP_TOKEN
-from moviebot.utils.helpers import extract_film_info_from_existing
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -1094,7 +1093,7 @@ def update_subscription_plan_type(subscription_id, new_plan_type, new_price):
     with db_lock:
         cursor.execute("""
             UPDATE subscriptions 
-            SET plan_type = %s, price = %s, updated_at = NOW()
+            SET plan_type = %s, price = %s
             WHERE id = %s
         """, (new_plan_type, new_price, subscription_id))
         conn.commit()
@@ -1447,50 +1446,21 @@ def is_bot_participant(chat_id, user_id):
         logger.error(f"[IS_BOT_PARTICIPANT] Ошибка: {e}")
         return False
 
-def get_user_films_count(user_id: int) -> int:
-    """
-    Возвращает количество фильмов/сериалов в личной базе пользователя.
-    Таблица: user_films
-    """
-    conn = None
-    try:
-        # Вариант 1 — самый вероятный (проверь, есть ли такая функция)
-        conn = get_db_connection()  # ← если есть в db_connection.py
 
-        # Вариант 2 — если get_db_connection нет, используй напрямую
-        # conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT COUNT(*)
-            FROM user_films
-            WHERE user_id = %s
-        """, (user_id,))
-        
-        count = cursor.fetchone()[0]
-        return int(count)
-        
-    except Exception as e:
-        logger.error(f"[DB] Ошибка при подсчёте фильмов пользователя {user_id}: {e}", exc_info=True)
-        return 0
-    finally:
-        if conn:
-            conn.close()
-            
 def add_and_announce(link, chat_id, user_id=None, source='unknown'):
     """Обрабатывает присланную ссылку на фильм/сериал.
-    Показывает соответствующую карточку в зависимости от наличия в базе.
-    НЕ добавляет автоматически в базу."""
+    Показывает соответствующую карточку в зависимости от наличия фильма в базе.
+    НЕ добавляет фильм автоматически в базу при обработке ссылки."""
     
     from moviebot.api.kinopoisk_api import extract_movie_info
     from moviebot.bot.bot_init import bot
-    from moviebot.bot.handlers.series import show_film_info_with_buttons
-    
+    from moviebot.bot.handlers.series import show_film_info_with_buttons, show_film_info_without_adding
+
     info = extract_movie_info(link)
     if not info:
         logger.warning(f"[ADD_AND_ANNOUNCE] Не удалось получить данные о фильме: {link}")
         try:
-            bot.send_message(chat_id, "❌ Не удалось загрузить информацию. Проверьте ссылку.")
+            bot.send_message(chat_id, "❌ Не удалось загрузить информацию о фильме. Проверьте ссылку.")
         except:
             pass
         return False
@@ -1500,76 +1470,44 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
         logger.warning(f"[ADD_AND_ANNOUNCE] kp_id не найден")
         return False
 
-    is_series = info.get('is_series', False)
-    film_type = "сериал" if is_series else "фильм"
+    logger.info(f"[ADD_AND_ANNOUNCE] Обработка kp_id={kp_id}, chat_id={chat_id}")
 
-    logger.info(f"[ADD_AND_ANNOUNCE] Обработка kp_id={kp_id}, chat_id={chat_id}, тип: {film_type}")
-
-    # Проверяем наличие в базе
+    # Проверяем, есть ли фильм в базе
     with db_lock:
-        cursor.execute(
-            'SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s',
-            (chat_id, str(kp_id))
-        )
+        cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
         existing = cursor.fetchone()
-
-    # Проверяем планы (только если уже в базе)
-    has_plan = False
-    plan_type = None
-    if existing:
-        film_id, _ = extract_film_info_from_existing(existing)
-        with db_lock:
-            cursor.execute(
-                'SELECT plan_type FROM plans WHERE film_id = %s AND chat_id = %s LIMIT 1',
-                (film_id, chat_id)
-            )
-            plan_row = cursor.fetchone()
-            if plan_row:
-                has_plan = True
-                plan_type = plan_row[0] if not isinstance(plan_row, dict) else plan_row.get('plan_type')
-
-    # Логи, как ты просил
-    if existing:
-        logger.info(f"обработали ссылку, получили {film_type}, {film_type} в базе")
-        if has_plan:
-            if film_type == "фильм":
-                if plan_type == 'home':
-                    logger.info("обработали ссылку, получили фильм, фильм запланирован к просмотру дома")
-                elif plan_type == 'cinema':
-                    logger.info("обработали ссылку, получили фильм, фильм запланирован к просмотру в кино")
-            else:
-                logger.info("обработали ссылку, получили сериал, сериал запланирован к просмотру")
-    else:
-        logger.info(f"обработали ссылку, получили {film_type}, {film_type} НЕ в базе")
 
     try:
         if existing:
-            film_id, _ = extract_film_info_from_existing(existing)  # watched не нужен здесь
+            # Фильм уже в базе — показываем полную карточку со всеми кнопками
+            film_id = existing[0] if not isinstance(existing, dict) else existing.get('id')
             title = existing[1] if not isinstance(existing, dict) else existing.get('title')
-            
-            logger.info(f"[ADD_AND_ANNOUNCE] {film_type.capitalize()} уже в базе (id={film_id}) — показываем полную карточку")
+            watched = existing[2] if not isinstance(existing, dict) else existing.get('watched')
+
+            logger.info(f"[ADD_AND_ANNOUNCE] Фильм уже в базе (id={film_id}) — показываем полную карточку")
             show_film_info_with_buttons(
                 chat_id=chat_id,
                 user_id=user_id,
                 info=info,
                 link=link,
                 kp_id=kp_id,
-                existing=(film_id, title)  # передаём только id и title
+                existing=(film_id, title, watched)
             )
         else:
-            logger.info(f"[ADD_AND_ANNOUNCE] Новый {film_type} — показываем карточку с кнопкой добавления")
-            show_film_info_with_buttons(
+            # Новый фильм — показываем карточку БЕЗ добавления, с кнопкой "Добавить в базу"
+            logger.info(f"[ADD_AND_ANNOUNCE] Новый фильм — показываем карточку с кнопкой добавления")
+            show_film_info_without_adding(
                 chat_id=chat_id,
                 user_id=user_id,
                 info=info,
                 link=link,
-                kp_id=kp_id,
-                existing=None
+                kp_id=kp_id
             )
     except Exception as e:
         logger.error(f"[ADD_AND_ANNOUNCE] Ошибка при показе карточки: {e}", exc_info=True)
+        # Фолбек — простое сообщение с названием и ссылкой
         try:
-            title = info.get('title', 'Фильм/Сериал')
+            title = info.get('title', 'Фильм')
             bot.send_message(
                 chat_id,
                 f"🎬 <b>{title}</b>\n\n<a href='{link}'>Кинопоиск</a>",
