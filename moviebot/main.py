@@ -361,10 +361,14 @@ app = create_web_app(bot)
 logger.info("[MAIN] Flask app создан на уровне модуля для gunicorn")
 
 # Устанавливаем webhook на уровне модуля (выполняется при импорте gunicorn'ом)
+# И добавляем fallback на polling, если webhook не установлен
 PORT = os.getenv('PORT')
 IS_RAILWAY = PORT is not None and PORT.strip() != ''
 USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
 IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False').lower() == 'true'
+
+# Флаг для отслеживания установки webhook
+_webhook_installed = False
 
 if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
     # Устанавливаем webhook при импорте (для gunicorn)
@@ -380,9 +384,27 @@ if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
             webhook_path = "/webhook"
             full_url = f"{WEBHOOK_URL_ENV}{webhook_path}"
             bot.set_webhook(url=full_url)
-            logger.info(f"[MAIN] Webhook установлен на уровне модуля → {full_url}")
+            _webhook_installed = True
+            logger.info(f"[MAIN] ✅ Webhook установлен на уровне модуля → {full_url}")
         except Exception as e:
-            logger.error(f"[MAIN] Ошибка установки webhook на уровне модуля: {e}", exc_info=True)
+            logger.error(f"[MAIN] ❌ Ошибка установки webhook на уровне модуля: {e}", exc_info=True)
+            _webhook_installed = False
+    
+    # ЗАЩИТА: Если webhook не установлен, запускаем polling в фоне
+    # Это гарантирует, что бот всегда будет получать команды
+    if not _webhook_installed:
+        logger.warning("[MAIN] ⚠️ Webhook не установлен → запускаем polling в фоне как fallback")
+        def run_polling_fallback():
+            try:
+                logger.info("[MAIN] [FALLBACK POLLING] Запуск polling в фоновом потоке...")
+                bot.infinity_polling(none_stop=True, interval=0, timeout=20)
+            except Exception as e:
+                logger.critical(f"[MAIN] [FALLBACK POLLING] ❌ Polling упал: {e}", exc_info=True)
+        
+        import threading
+        polling_thread = threading.Thread(target=run_polling_fallback, daemon=True)
+        polling_thread.start()
+        logger.info("[MAIN] ✅ Fallback polling запущен в фоновом потоке")
 
 if __name__ == "__main__":
     logger.info("=== ЗАПУСК СКРИПТА ===")
@@ -428,23 +450,13 @@ if __name__ == "__main__":
 
     if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
         logger.info("Railway/Production/Webhook режим (прямой запуск)")
-
-        # Webhook уже установлен на уровне модуля, но на всякий случай проверяем
-        if USE_WEBHOOK and WEBHOOK_URL_ENV:
-            logger.info(f"Webhook уже установлен → {WEBHOOK_URL_ENV}/webhook")
+        
+        # Webhook уже установлен на уровне модуля (или fallback polling запущен)
+        # Проверяем через глобальную переменную
+        if _webhook_installed:
+            logger.info(f"✅ Webhook установлен на уровне модуля")
         else:
-            logger.info("Webhook НЕ используется (или URL не найден) → polling в фоне")
-
-            def run_polling():
-                try:
-                    logger.info("Polling запущен в фоновом потоке")
-                    bot.infinity_polling(none_stop=True, interval=0, timeout=20)
-                except Exception as e:
-                    logger.critical("Polling упал", exc_info=True)
-
-            import threading
-            polling_thread = threading.Thread(target=run_polling, daemon=True)
-            polling_thread.start()
+            logger.info("⚠️ Webhook не установлен, используется fallback polling (уже запущен на уровне модуля)")
 
         # Flask в главном потоке — обязателен для Railway health checks и webhook
         port = int(PORT or 8080)
