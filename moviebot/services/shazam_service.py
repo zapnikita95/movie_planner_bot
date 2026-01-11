@@ -186,17 +186,9 @@ def parse_json_list(json_str, key='name', top_n=10):
 def build_tmdb_index():
     global _index, _movies_df
 
-    # ФИКС: Проверяем наличие кеша индекса перед построением
-    # Если индекс существует, загружаем его вместо пересоздания
-    if INDEX_PATH.exists() and DATA_PATH.exists():
-        try:
-            _index = faiss.read_index(str(INDEX_PATH))
-            _movies_df = pd.read_csv(DATA_PATH)
-            logger.info(f"Индекс загружен: {len(_movies_df)} фильмов")
-            return _index, _movies_df
-        except Exception as e:
-            logger.warning(f"Не удалось загрузить индекс: {e} → пересоздаём")
-        
+    # Индекс всегда пересобирается при деплое для актуальности данных
+    logger.info("Начинаем пересборку индекса TMDB...")
+    
     # === СКАЧИВАНИЕ И ПОИСК CSV ФАЙЛА ===
     if not TMDB_CSV_PATH.exists():
         logger.info("TMDB CSV не найден — скачиваем через Kaggle API...")
