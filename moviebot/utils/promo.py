@@ -21,7 +21,8 @@ def create_promocode(code, discount_input, total_uses):
         total_uses: Количество использований
     
     Returns:
-        (success: bool, message: str)
+        При успехе: dict с данными промокода
+        При ошибке: (False, str) — кортеж с сообщением об ошибке
     """
     try:
         # Парсим скидку
@@ -29,13 +30,11 @@ def create_promocode(code, discount_input, total_uses):
         discount_value = None
         
         if '%' in discount_input:
-            # Процентная скидка
             discount_type = 'percent'
             discount_value = float(re.sub(r'%', '', discount_input.strip()))
             if not (0 < discount_value <= 100):
                 return False, "Процентная скидка должна быть от 1% до 100%"
         else:
-            # Фиксированная скидка
             discount_type = 'fixed'
             try:
                 discount_value = float(discount_input.strip())
@@ -52,22 +51,35 @@ def create_promocode(code, discount_input, total_uses):
         except ValueError:
             return False, "Количество использований должно быть целым числом"
         
-        # Проверяем, не существует ли уже такой промокод
+        # Проверяем существование промокода
         with db_lock:
             cursor.execute('SELECT id FROM promocodes WHERE code = %s', (code.upper(),))
-            existing = cursor.fetchone()
-            if existing:
+            if cursor.fetchone():
                 return False, f"Промокод {code.upper()} уже существует"
             
-            # Создаем промокод
+            # Вставляем новый промокод
             cursor.execute('''
-                INSERT INTO promocodes (code, discount_type, discount_value, total_uses, is_active)
-                VALUES (%s, %s, %s, %s, TRUE)
+                INSERT INTO promocodes (code, discount_type, discount_value, total_uses, used_count, is_active)
+                VALUES (%s, %s, %s, %s, 0, TRUE)
+                RETURNING id
             ''', (code.upper(), discount_type, discount_value, total_uses))
+            
+            new_id = cursor.fetchone()[0]
             conn.commit()
         
+        # Формируем и возвращаем словарь (как в других функциях)
         discount_str = f"{discount_value}%" if discount_type == 'percent' else f"{int(discount_value)} руб/звезд"
-        return True, f"Промокод задан: {discount_str} {total_uses}"
+        success_message = f"Промокод {code.upper()} создан: {discount_str}, использований: {total_uses}"
+        
+        return {
+            'id': new_id,
+            'code': code.upper(),
+            'discount_type': discount_type,
+            'discount_value': discount_value,
+            'total_uses': total_uses,
+            'used_count': 0,
+            'is_active': True
+        }, success_message
         
     except Exception as e:
         logger.error(f"Ошибка при создании промокода: {e}", exc_info=True)
