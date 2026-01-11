@@ -1,0 +1,6 @@
+preDeploy:
+  - apt-get update && apt-get install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev pkg-config
+
+buildCommand: pip install -r requirements.txt
+
+startCommand: python3 -m moviebot.main

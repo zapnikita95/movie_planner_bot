@@ -1570,7 +1570,12 @@ def register_series_handlers(bot_param):
                     return
                 
             if mode == 'database':
-                count = get_user_films_count(user_id)
+                # Проверяем количество фильмов в базе для данного chat_id (работает и для личных, и для групповых чатов)
+                with db_lock:
+                    cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
+                    count_row = cursor.fetchone()
+                    count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                
                 if count == 0:
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(
@@ -1585,14 +1590,14 @@ def register_series_handlers(bot_param):
                         message_id=call.message.message_id,
                         text=(
                             "😔 <b>В вашей базе пока нет фильмов</b>\n\n"
-                            "Рандом по своей базе работает только когда в базе есть хотя бы один фильм.\n\n"
+                            "Рандом по своей базе работает только когда в базе есть хотя бы один фильм или сериал.\n\n"
                             "Что делаем дальше?"
                         ),
                         reply_markup=markup,
                         parse_mode='HTML'
                     )
                     bot.answer_callback_query(call.id)
-                    logger.info(f"[RANDOM] Пустая база user_id={user_id} — показываем кнопки в главное меню")
+                    logger.info(f"[RANDOM] Пустая база chat_id={chat_id}, user_id={user_id} — показываем кнопки в главное меню")
                     return
                         
             if user_id not in user_random_state:
@@ -3616,13 +3621,29 @@ def register_series_handlers(bot_param):
                             markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{first_movie_kp_id}"))
                         markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
                     else:
-                        message_text = "😔 Таких фильмов в базе не найдено!"
-                        markup = InlineKeyboardMarkup()
-                        markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
+                        message_text = (
+                            "😔 <b>Таких фильмов в базе не найдено!</b>\n\n"
+                            "Что делаем дальше?"
+                        )
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(
+                            InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search")
+                        )
+                        markup.add(
+                            InlineKeyboardButton("⬅️ Назад к режимам", callback_data="start_menu:random")
+                        )
                 else:
-                    message_text = "😔 Таких фильмов в базе не найдено!"
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
+                    message_text = (
+                        "😔 <b>Таких фильмов в базе не найдено!</b>\n\n"
+                        "Что делаем дальше?"
+                    )
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(
+                        InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search")
+                    )
+                    markup.add(
+                        InlineKeyboardButton("⬅️ Назад к режимам", callback_data="start_menu:random")
+                    )
                 
                 try:
                     bot.edit_message_text(message_text, 
