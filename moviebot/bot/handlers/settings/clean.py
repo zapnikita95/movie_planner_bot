@@ -257,7 +257,6 @@ def clean_action_choice(call):
                     f"Если не все проголосуют, фильмы не будут удалены.",
                     parse_mode='HTML')
                 
-                from moviebot.states import clean_unwatched_votes
                 clean_unwatched_votes[msg.message_id] = {
                     'chat_id': chat_id,
                     'members_count': active_members_count,
