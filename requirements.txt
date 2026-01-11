@@ -18,7 +18,7 @@ torch
 tqdm
 sentencepiece
 vosk
-whisper
+faster-whisper==1.0.3
 emoji
 librosa
 soundfile
