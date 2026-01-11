@@ -16,6 +16,7 @@ pydub
 transformers
 torch
 tqdm
+sentencepiece
 vosk
 whisper
 emoji
