@@ -101,6 +101,14 @@ def extract_movie_info(link_or_id):
         
         data_main = response_main.json()
 
+        # Проверяем поле type в ответе API (более надежный способ определения типа)
+        api_type = data_main.get('type', '').upper()
+        if api_type == 'TV_SERIES':
+            is_series = True
+        elif api_type == 'FILM':
+            is_series = False
+        # Если type не указан, оставляем значение из URL (fallback)
+
         title = data_main.get('nameRu') or data_main.get('nameOriginal') or "Unknown"
         year = data_main.get('year') or "—"
         genres = ', '.join([g['genre'] for g in data_main.get('genres', [])]) or "—"
@@ -143,7 +151,7 @@ def extract_movie_info(link_or_id):
                     actors_list.append(name)
         actors = ', '.join(actors_list) if actors_list else "—"
 
-        logger.info(f"[EXTRACT MOVIE] Успешно: {title} ({year}), режиссёр: {director}")
+        logger.info(f"[EXTRACT MOVIE] Успешно: {title} ({year}), режиссёр: {director}, is_series={is_series} (из API type={api_type})")
 
         result = {
             'kp_id': kp_id,
@@ -156,7 +164,7 @@ def extract_movie_info(link_or_id):
             'is_series': is_series
         }
         
-        logger.info(f"[EXTRACT MOVIE] ===== END: успешно, kp_id={kp_id}, title={title}")
+        logger.info(f"[EXTRACT MOVIE] ===== END: успешно, kp_id={kp_id}, title={title}, is_series={is_series}")
         return result
 
     except Exception as e:

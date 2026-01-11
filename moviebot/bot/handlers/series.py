@@ -4499,10 +4499,24 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM] Query: {query}")
             logger.info(f"[RANDOM] Params: {params}")
             
+            # Используем get_db_cursor() для получения свежего курсора, чтобы избежать проблем с закрытыми курсорами
+            cursor_local = get_db_cursor()
             with db_lock:
-                cursor.execute(query, params)
-                candidates = cursor.fetchall()
-                logger.info(f"[RANDOM] Candidates found: {len(candidates)}")
+                try:
+                    cursor_local.execute(query, params)
+                    candidates = cursor_local.fetchall()
+                    logger.info(f"[RANDOM] Candidates found: {len(candidates)}")
+                except Exception as db_e:
+                    logger.error(f"[RANDOM] Ошибка при запросе фильмов: {db_e}", exc_info=True)
+                    # Пересоздаем курсор при ошибке
+                    cursor_local = get_db_cursor()
+                    try:
+                        cursor_local.execute(query, params)
+                        candidates = cursor_local.fetchall()
+                        logger.info(f"[RANDOM] Candidates found: {len(candidates)} (после пересоздания курсора)")
+                    except Exception as db_e2:
+                        logger.error(f"[RANDOM] Критическая ошибка при запросе фильмов: {db_e2}", exc_info=True)
+                        candidates = []
             
             if not candidates:
                 # Ищем похожие фильмы из запланированных

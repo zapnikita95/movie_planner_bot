@@ -326,12 +326,17 @@ def check_and_send_plan_notifications():
 
         
 
+        # Используем локальное соединение вместо глобального для избежания проблем с закрытыми соединениями
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
         # КРИТИЧЕСКИЙ ФИКС: Добавляем rollback при ошибках транзакции
         try:
             # Сначала делаем rollback на случай если предыдущая транзакция упала
-            from moviebot.database.db_connection import conn
             try:
-                conn.rollback()
+                conn_local.rollback()
             except:
                 pass
         except:
@@ -339,7 +344,7 @@ def check_and_send_plan_notifications():
         
         with db_lock:
             try:
-                cursor.execute('''
+                cursor_local.execute('''
 
                     SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
 
@@ -355,11 +360,11 @@ def check_and_send_plan_notifications():
 
                 ''', (check_start, check_end))
 
-                plans = cursor.fetchall()
+                plans = cursor_local.fetchall()
             except Exception as db_e:
                 logger.error(f"[PLAN CHECK] Ошибка при запросе планов: {db_e}", exc_info=True)
                 try:
-                    conn.rollback()
+                    conn_local.rollback()
                 except:
                     pass
                 plans = []
@@ -1550,9 +1555,10 @@ def process_recurring_payments():
         
         now = datetime.now(pytz.UTC)
         
-        # Создаем локальное соединение для этой функции, чтобы избежать проблем с закрытым глобальным соединением
+        # Используем get_db_connection и get_db_cursor для получения свежих соединений и курсоров
+        from moviebot.database.db_connection import get_db_cursor
         conn_local = get_db_connection()
-        cursor_local = conn_local.cursor()
+        cursor_local = get_db_cursor()
         
         # Находим подписки, у которых next_payment_date наступил и есть payment_method_id
         # Для тестовых подписок проверяем по времени (если прошло 10 минут)
@@ -2335,15 +2341,29 @@ def update_series_status_cache():
     """Фоновая задача: обновляет статусы сериалов раз в день"""
     logger.info("[CACHE] Запуск обновления кэша сериалов")
     
+    # Используем локальное соединение вместо глобального для избежания проблем с закрытыми соединениями
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     with db_lock:
-        cursor.execute("""
-            SELECT DISTINCT kp_id, chat_id
-            FROM movies
-            WHERE is_series = 1
-              AND (last_api_update IS NULL OR last_api_update < NOW() - INTERVAL '1 day')
-            LIMIT 30
-        """)
-        rows = cursor.fetchall()
+        try:
+            cursor_local.execute("""
+                SELECT DISTINCT kp_id, chat_id
+                FROM movies
+                WHERE is_series = 1
+                  AND (last_api_update IS NULL OR last_api_update < NOW() - INTERVAL '1 day')
+                LIMIT 30
+            """)
+            rows = cursor_local.fetchall()
+        except Exception as db_e:
+            logger.error(f"[CACHE] Ошибка при запросе сериалов: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            rows = []
 
     if not rows:
         logger.info("[CACHE] Нет сериалов для обновления кэша")
@@ -2375,15 +2395,22 @@ def update_series_status_cache():
 
             # Обновляем только нужные колонки
             with db_lock:
-                cursor.execute("""
-                    UPDATE movies
-                    SET is_ongoing = %s, 
-                        seasons_count = %s, 
-                        next_episode = %s, 
-                        last_api_update = NOW()
-                    WHERE chat_id = %s AND kp_id = %s
-                """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
-                conn.commit()
+                try:
+                    cursor_local.execute("""
+                        UPDATE movies
+                        SET is_ongoing = %s, 
+                            seasons_count = %s, 
+                            next_episode = %s, 
+                            last_api_update = NOW()
+                        WHERE chat_id = %s AND kp_id = %s
+                    """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
+                    conn_local.commit()
+                except Exception as db_e:
+                    logger.error(f"[CACHE] Ошибка при обновлении сериала {kp_id}: {db_e}", exc_info=True)
+                    try:
+                        conn_local.rollback()
+                    except:
+                        pass
             
             logger.info(f"[CACHE] Обновлён кэш для kp_id={kp_id} (chat_id={chat_id}), seasons={seasons_count}, ongoing={is_airing}")
 

@@ -17,22 +17,57 @@ db_lock = threading.Lock()
 def get_db_connection():
     """Получить подключение к БД"""
     global _conn
-    if _conn is None:
+    if _conn is None or _conn.closed:
         if not DATABASE_URL:
             raise ValueError("DATABASE_URL не задан!")
         try:
+            # Закрываем старое соединение, если оно есть
+            if _conn is not None and not _conn.closed:
+                try:
+                    _conn.close()
+                except:
+                    pass
             _conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
             logger.info("Подключение к PostgreSQL успешно!")
         except Exception as e:
             logger.error(f"Не удалось подключиться к БД: {e}")
+            _conn = None
             raise
     return _conn
 
 def get_db_cursor():
     """Получить курсор БД"""
     global _cursor
+    conn = get_db_connection()
+    # Проверяем, что курсор существует и не закрыт
+    need_new_cursor = False
     if _cursor is None:
-        conn = get_db_connection()
+        need_new_cursor = True
+    else:
+        try:
+            # Проверяем, закрыт ли курсор
+            if _cursor.closed:
+                need_new_cursor = True
+            else:
+                # Проверяем, закрыто ли соединение
+                try:
+                    if conn.closed:
+                        need_new_cursor = True
+                except:
+                    need_new_cursor = True
+        except:
+            # Если произошла ошибка при проверке, пересоздаем курсор
+            need_new_cursor = True
+    
+    if need_new_cursor:
+        try:
+            if _cursor is not None:
+                try:
+                    _cursor.close()
+                except:
+                    pass
+        except:
+            pass
         _cursor = conn.cursor()
     return _cursor
 
