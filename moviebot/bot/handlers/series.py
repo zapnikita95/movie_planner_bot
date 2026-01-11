@@ -1553,6 +1553,12 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            if user_id not in user_random_state:
+                bot.answer_callback_query(call.id)
+                return
+
+            state = user_random_state[user_id]
             mode = call.data.split(":")[1]
             
             logger.info(f"[RANDOM CALLBACK] Mode: {mode}, user_id={user_id}, chat_id={chat_id}")
@@ -1821,6 +1827,13 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== CONTENT TYPE HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+
+            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            if user_id not in user_random_state:
+                bot.answer_callback_query(call.id)
+                return
+
+            state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
             
             if user_id not in user_random_state:
@@ -1893,6 +1906,12 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== PERIOD HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            if user_id not in user_random_state:
+                bot.answer_callback_query(call.id)
+                return
+
+            state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
             
             if user_id not in user_random_state:
@@ -2470,6 +2489,13 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== YEAR HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            if user_id not in user_random_state:
+                bot.answer_callback_query(call.id)
+                return
+
+            state = user_random_state[user_id]
+
             data = call.data.split(":", 1)[1]
             
             if user_id not in user_random_state:
@@ -2545,6 +2571,12 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== GENRE HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            if user_id not in user_random_state:
+                bot.answer_callback_query(call.id)
+                return
+
+            state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
             
             if user_id not in user_random_state:
@@ -2750,6 +2782,12 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== DIRECTOR HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            if user_id not in user_random_state:
+                bot.answer_callback_query(call.id)
+                return
+
+            state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
             
             if user_id not in user_random_state:
@@ -2802,6 +2840,12 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== ACTOR HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK ===
+            if user_id not in user_random_state:
+                bot.answer_callback_query(call.id)
+                return
+
+            state = user_random_state[user_id]
             data = call.data.split(":", 1)[1]
             
             if user_id not in user_random_state:
@@ -2846,9 +2890,9 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] ===== FINAL HANDLER: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-            
-            # Если это кнопка "Найти фильм" из случайных событий и нет состояния
-            if call.data == "rand_final:go" and user_id not in user_random_state:
+
+            # === СПЕЦИАЛЬНЫЙ СЛУЧАЙ: кнопка "Найти фильм" из случайных событий (без состояния) ===
+            if call.data == "rand_final:go":
                 logger.info(f"[RANDOM CALLBACK] Кнопка 'Найти фильм' из случайных событий, запускаем рандом по своей базе")
                 bot.answer_callback_query(call.id)
                 
@@ -2865,20 +2909,17 @@ def register_series_handlers(bot_param):
                 # Переходим к финальному шагу (без фильтров)
                 _random_final(call, chat_id, user_id)
                 return
-            
+
+            # === ЗАЩИТА ОТ УСТАРЕВШИХ CALLBACK (для всех остальных случаев рандома) ===
             if user_id not in user_random_state:
-                logger.warning(f"[RANDOM CALLBACK] State not found for user {user_id}, initializing default state")
-                user_random_state[user_id] = {
-                    'step': 'final',
-                    'mode': 'database',
-                    'periods': [],
-                    'genres': [],
-                    'directors': [],
-                    'actors': []
-                }
-                logger.info(f"[RANDOM CALLBACK] Default state initialized for user {user_id}")
-            
+                bot.answer_callback_query(call.id)
+                return
+
+            state = user_random_state[user_id]
+
+            # Основная логика — просто запускаем финальный поиск
             _random_final(call, chat_id, user_id)
+
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_final: {e}", exc_info=True)
             try:
