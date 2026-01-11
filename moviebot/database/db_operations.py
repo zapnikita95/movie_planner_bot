@@ -1465,7 +1465,7 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
     
     from moviebot.api.kinopoisk_api import extract_movie_info
     from moviebot.bot.bot_init import bot
-    from moviebot.bot.handlers.series import show_film_info_with_buttons, show_film_info_without_adding
+    from moviebot.bot.handlers.series import show_film_info_with_buttons
 
     info = extract_movie_info(link)
     if not info:
