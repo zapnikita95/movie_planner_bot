@@ -7,6 +7,8 @@ import telebot
 import os
 import sys
 import time
+import threading
+
 # Импорт yookassa удален, используется moviebot.api.yookassa_api
 from dotenv import load_dotenv
 from moviebot.services.shazam_service import init_shazam_index
