@@ -1408,43 +1408,81 @@ def check_admin_message(message):
         user_unsubscribe_state, user_add_admin_state, user_promo_admin_state
     )
     user_id = message.from_user.id
+    text = message.text.strip() if message.text else ""
     
-    has_state = (
-        user_id in user_cancel_subscription_state or
-        user_id in user_refund_state or
-        user_id in user_unsubscribe_state or
-        user_id in user_add_admin_state or
-        user_id in user_promo_admin_state
-    )
-    
-    if not has_state:
-        return False
-    
-    if not message.text or not message.text.strip():
-        return False
-    
-    # В личных чатах можно отвечать без реплая (админские команды обычно в личных чатах)
+    # Определяем тип чата
     try:
         chat_info = bot.get_chat(message.chat.id)
         is_private = chat_info.type == 'private'
     except:
         is_private = message.chat.id > 0
     
-    # Для админских команд обычно требуется реплай, но в личных чатах можно без него
+    # Проверяем наличие состояния
+    has_unsubscribe = user_id in user_unsubscribe_state
+    has_add_admin = user_id in user_add_admin_state
+    has_promo_admin = user_id in user_promo_admin_state
+    has_refund = user_id in user_refund_state
+    has_cancel_sub = user_id in user_cancel_subscription_state
+    
+    logger.info(f"[CHECK ADMIN MESSAGE] user_id={user_id}, text='{text[:50]}', is_private={is_private}, "
+                f"has_unsubscribe={has_unsubscribe}, has_add_admin={has_add_admin}, "
+                f"has_promo_admin={has_promo_admin}, has_refund={has_refund}, has_cancel_sub={has_cancel_sub}")
+    
+    if not (has_unsubscribe or has_add_admin or has_promo_admin or has_refund or has_cancel_sub):
+        logger.debug(f"[CHECK ADMIN MESSAGE] Нет админских состояний для user_id={user_id}")
+        return False
+    
+    if not message.text or not text or message.text.startswith('/'):
+        logger.debug(f"[CHECK ADMIN MESSAGE] Нет текста или команда: text='{text}'")
+        return False
+    
+    # В личных чатах принимаем следующее сообщение (как в is_expected_text_in_private)
+    # Без проверки формата - обработаем в handle_admin, там покажем ошибку если формат неверный
     if is_private:
+        logger.info(f"[CHECK ADMIN MESSAGE] ✅ Принимаем сообщение в личке для user_id={user_id}")
         return True
     
-    # В группах проверяем реплай
+    # В группах требуется реплай на бота
     is_reply = (message.reply_to_message and 
                 message.reply_to_message.from_user and 
                 message.reply_to_message.from_user.id == BOT_ID)
-    return is_reply
+    
+    if not is_reply:
+        logger.debug(f"[CHECK ADMIN MESSAGE] В группе требуется реплай, но его нет")
+        return False
+    
+    # В группах также проверяем, что это реплай на правильное сообщение (если есть prompt_message_id)
+    if has_promo_admin:
+        state = user_promo_admin_state[user_id]
+        prompt_message_id = state.get('message_id')
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            logger.debug(f"[CHECK ADMIN MESSAGE] Реплай не на правильное сообщение: prompt_message_id={prompt_message_id}, reply_to={message.reply_to_message.message_id}")
+            return False
+    
+    if has_add_admin:
+        state = user_add_admin_state[user_id]
+        prompt_message_id = state.get('prompt_message_id')
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            logger.debug(f"[CHECK ADMIN MESSAGE] Реплай не на правильное сообщение для add_admin")
+            return False
+    
+    if has_unsubscribe:
+        state = user_unsubscribe_state[user_id]
+        prompt_message_id = state.get('prompt_message_id')
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            logger.debug(f"[CHECK ADMIN MESSAGE] Реплай не на правильное сообщение для unsubscribe")
+            return False
+    
+    logger.info(f"[CHECK ADMIN MESSAGE] ✅ Принимаем сообщение в группе для user_id={user_id}")
+    return True
 
 
+# Обработчик должен быть зарегистрирован ДО main_text_handler
+# Используем более высокий приоритет через content_types
 @bot.message_handler(content_types=['text'], func=check_admin_message)
 def handle_admin(message):
-    """Обработчик для админских функций"""
-    logger.info(f"[ADMIN HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    """Обработчик для админских функций (промокоды, админы, unsubscribe)"""
+    logger.info(f"[ADMIN HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
     try:
         from moviebot.states import (
             user_cancel_subscription_state, user_refund_state,
@@ -1510,24 +1548,46 @@ def handle_admin(message):
             # Отмена подписки по ID
             if user_id in user_unsubscribe_state:
                 state = user_unsubscribe_state[user_id]
+                logger.info(f"[UNSUBSCRIBE] Обработка: text='{text}', state={state}")
                 
-                # Проверяем, что сообщение является реплаем на prompt_message_id
+                # В личке принимаем следующее сообщение, в группах требуется реплай
+                try:
+                    chat_info = bot.get_chat(message.chat.id)
+                    is_private = chat_info.type == 'private'
+                except:
+                    is_private = message.chat.id > 0
+                
                 prompt_message_id = state.get('prompt_message_id')
-                if prompt_message_id:
+                if not is_private and prompt_message_id:
+                    # В группах требуется реплай
                     if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
-                        logger.info(f"[UNSUBSCRIBE] Сообщение не является реплаем на prompt_message_id={prompt_message_id}, игнорируем")
+                        logger.info(f"[UNSUBSCRIBE] В группе требуется реплай на prompt_message_id={prompt_message_id}, игнорируем")
                         return
+                # В личке можно отвечать следующим сообщением или реплаем
                 
                 target_id_str = text.strip()
+                logger.info(f"[UNSUBSCRIBE] Получен target_id_str: '{target_id_str}'")
+                
                 if target_id_str:
                     try:
+                        # Unsubscribe может быть отрицательным числом (для групп)
                         target_id = int(target_id_str)
                         is_group = target_id < 0
+                        logger.info(f"[UNSUBSCRIBE] Парсинг: target_id={target_id}, is_group={is_group}")
                         
                         # Если это группа, отменяем сразу (как раньше)
                         if is_group:
                             from moviebot.bot.handlers.admin import cancel_subscription_by_id
+                            logger.info(f"[UNSUBSCRIBE] Отмена подписки для группы: target_id={target_id}")
                             success, result_message, count = cancel_subscription_by_id(target_id, is_group)
+                            
+                            logger.info(f"[UNSUBSCRIBE] Результат отмены: success={success}, message='{result_message}', count={count}")
+                            
+                            try:
+                                chat_info = bot.get_chat(message.chat.id)
+                                is_private = chat_info.type == 'private'
+                            except:
+                                is_private = message.chat.id > 0
                             
                             if success:
                                 text_result = f"✅ {result_message}\n\n"
@@ -1537,16 +1597,27 @@ def handle_admin(message):
                                 markup = InlineKeyboardMarkup()
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
                                 
-                                bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                                if is_private:
+                                    bot.send_message(message.chat.id, text_result, reply_markup=markup, parse_mode='HTML')
+                                else:
+                                    bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                                logger.info(f"[UNSUBSCRIBE] ✅ Сообщение об успехе отправлено")
                             else:
-                                send_error_message(
-                                    message,
-                                    f"❌ {result_message}",
-                                    state=state,
-                                    back_callback="admin:back"
-                                )
+                                error_text = f"❌ {result_message}"
+                                if is_private:
+                                    bot.send_message(message.chat.id, error_text)
+                                else:
+                                    send_error_message(
+                                        message,
+                                        error_text,
+                                        state=state,
+                                        back_callback="admin:back"
+                                    )
+                                logger.warning(f"[UNSUBSCRIBE] ❌ Ошибка: {result_message}")
                             
-                            del user_unsubscribe_state[user_id]
+                            if user_id in user_unsubscribe_state:
+                                del user_unsubscribe_state[user_id]
+                                logger.info(f"[UNSUBSCRIBE] Состояние очищено")
                         else:
                             # Если это пользователь, показываем меню выбора типа отмены
                             
@@ -1564,20 +1635,43 @@ def handle_admin(message):
                             state['target_id'] = target_id
                             state['prompt_message_id'] = None  # Сбрасываем, так как теперь будем работать через callbacks
                             
-                            bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                chat_info = bot.get_chat(message.chat.id)
+                                is_private = chat_info.type == 'private'
+                            except:
+                                is_private = message.chat.id > 0
+                            
+                            if is_private:
+                                bot.send_message(message.chat.id, text_result, reply_markup=markup, parse_mode='HTML')
+                            else:
+                                bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                            
+                            logger.info(f"[UNSUBSCRIBE] ✅ Меню выбора типа отмены отправлено для target_id={target_id}")
                             # НЕ удаляем user_unsubscribe_state, так как будем обрабатывать через callbacks
                     except ValueError:
-                        send_error_message(
-                            message,
-                            "❌ Неверный формат ID. Введите число.",
-                            state=state,
-                            back_callback="admin:back"
-                        )
+                        error_text = "❌ Неверный формат ID. Введите число (положительное для пользователя, отрицательное для группы)."
+                        logger.warning(f"[UNSUBSCRIBE] Неверный формат ID: '{target_id_str}'")
+                        try:
+                            chat_info = bot.get_chat(message.chat.id)
+                            is_private = chat_info.type == 'private'
+                        except:
+                            is_private = message.chat.id > 0
+                        
+                        if is_private:
+                            bot.send_message(message.chat.id, error_text)
+                        else:
+                            send_error_message(
+                                message,
+                                error_text,
+                                state=state,
+                                back_callback="admin:back"
+                            )
                 return
             
             # Добавление администратора
             if user_id in user_add_admin_state:
                 state = user_add_admin_state[user_id]
+                logger.info(f"[ADD_ADMIN] Обработка: text='{text}', state={state}")
                 
                 # В личке можно отвечать следующим сообщением или реплаем
                 # В группах требуется реплай
@@ -1602,7 +1696,10 @@ def handle_admin(message):
                         admin_id = int(admin_id_str)
                         
                         from moviebot.utils.admin import add_admin
+                        logger.info(f"[ADD_ADMIN] Вызываю add_admin(admin_id={admin_id}, added_by={user_id})")
                         success, result_message = add_admin(admin_id, user_id)
+                        
+                        logger.info(f"[ADD_ADMIN] Результат: success={success}, message='{result_message}'")
                         
                         if success:
                             admin_text = "👑 <b>Вам выдан админский доступ</b>\n\n"
@@ -1617,9 +1714,9 @@ def handle_admin(message):
                             
                             try:
                                 bot.send_message(admin_id, admin_text, parse_mode='HTML')
-                                logger.info(f"[ADMIN HANDLER] Уведомление отправлено новому администратору: {admin_id}")
+                                logger.info(f"[ADD_ADMIN] ✅ Уведомление отправлено новому администратору: {admin_id}")
                             except Exception as e:
-                                logger.warning(f"[ADMIN HANDLER] Не удалось отправить уведомление администратору {admin_id}: {e}")
+                                logger.warning(f"[ADD_ADMIN] ⚠️ Не удалось отправить уведомление администратору {admin_id}: {e}")
                             
                             text_result = f"✅ {result_message}\n\n"
                             text_result += f"ID администратора: <code>{admin_id}</code>\n\n"
@@ -1628,28 +1725,65 @@ def handle_admin(message):
                             markup = InlineKeyboardMarkup()
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back_to_list"))
                             
-                            bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                chat_info = bot.get_chat(message.chat.id)
+                                is_private = chat_info.type == 'private'
+                            except:
+                                is_private = message.chat.id > 0
+                            
+                            if is_private:
+                                bot.send_message(message.chat.id, text_result, reply_markup=markup, parse_mode='HTML')
+                            else:
+                                bot.reply_to(message, text_result, reply_markup=markup, parse_mode='HTML')
+                            
+                            logger.info(f"[ADD_ADMIN] ✅ Сообщение об успехе отправлено")
+                        else:
+                            error_text = f"❌ {result_message}"
+                            try:
+                                chat_info = bot.get_chat(message.chat.id)
+                                is_private = chat_info.type == 'private'
+                            except:
+                                is_private = message.chat.id > 0
+                            
+                            if is_private:
+                                bot.send_message(message.chat.id, error_text)
+                            else:
+                                send_error_message(
+                                    message,
+                                    error_text,
+                                    state=state,
+                                    back_callback="admin:back_to_list"
+                                )
+                            logger.warning(f"[ADD_ADMIN] ❌ Ошибка: {result_message}")
+                        
+                        # Удаляем состояние после обработки (успех или ошибка)
+                        if user_id in user_add_admin_state:
+                            del user_add_admin_state[user_id]
+                            logger.info(f"[ADD_ADMIN] Состояние очищено")
+                    except ValueError:
+                        error_text = "❌ Неверный формат ID. Введите число."
+                        logger.warning(f"[ADD_ADMIN] Неверный формат ID: '{admin_id_str}'")
+                        try:
+                            chat_info = bot.get_chat(message.chat.id)
+                            is_private = chat_info.type == 'private'
+                        except:
+                            is_private = message.chat.id > 0
+                        
+                        if is_private:
+                            bot.send_message(message.chat.id, error_text)
                         else:
                             send_error_message(
                                 message,
-                                f"❌ {result_message}",
+                                error_text,
                                 state=state,
                                 back_callback="admin:back_to_list"
                             )
-                        
-                        del user_add_admin_state[user_id]
-                    except ValueError:
-                        send_error_message(
-                            message,
-                            "❌ Неверный формат ID. Введите число.",
-                            state=state,
-                            back_callback="admin:back_to_list"
-                        )
                 return
             
             # Обработка промокодов (/promo)
             if user_id in user_promo_admin_state:
                 state = user_promo_admin_state[user_id]
+                logger.info(f"[PROMO ADMIN] Обработка: text='{text}', state={state}")
                 
                 # В личке можно отвечать следующим сообщением или реплаем
                 # В группах требуется реплай
@@ -1671,15 +1805,35 @@ def handle_admin(message):
                 # Парсим промокод: КОД СКИДКА КОЛИЧЕСТВО
                 parts = text.strip().split()
                 if len(parts) < 3:
-                    bot.reply_to(message, "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\nПример: NEW2026 20% 100")
+                    logger.warning(f"[PROMO ADMIN] Неверный формат: '{text}', ожидается 'КОД СКИДКА КОЛИЧЕСТВО'")
+                    try:
+                        chat_info = bot.get_chat(message.chat.id)
+                        is_private = chat_info.type == 'private'
+                    except:
+                        is_private = message.chat.id > 0
+                    
+                    if is_private:
+                        bot.send_message(message.chat.id, "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\nПример: NEW2026 20% 100")
+                    else:
+                        bot.reply_to(message, "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\nПример: NEW2026 20% 100")
                     return
                 
                 code = parts[0].upper()
                 discount_input = parts[1]
                 total_uses_str = parts[2]
                 
+                logger.info(f"[PROMO ADMIN] Парсинг: code='{code}', discount='{discount_input}', uses='{total_uses_str}'")
+                
                 from moviebot.utils.promo import create_promocode
                 success, result_message = create_promocode(code, discount_input, total_uses_str)
+                
+                logger.info(f"[PROMO ADMIN] Результат создания: success={success}, message='{result_message}'")
+                
+                try:
+                    chat_info = bot.get_chat(message.chat.id)
+                    is_private = chat_info.type == 'private'
+                except:
+                    is_private = message.chat.id > 0
                 
                 if success:
                     # Перезагружаем список промокодов
@@ -1693,13 +1847,22 @@ def handle_admin(message):
                     fake_msg = FakeMessage(chat_id, user_id)
                     promo_command(fake_msg)
                     
-                    bot.reply_to(message, f"✅ {result_message}")
-                    logger.info(f"[PROMO ADMIN] Промокод создан: {code}, discount={discount_input}, uses={total_uses_str}")
+                    response_text = f"✅ {result_message}"
+                    if is_private:
+                        bot.send_message(message.chat.id, response_text)
+                    else:
+                        bot.reply_to(message, response_text)
+                    logger.info(f"[PROMO ADMIN] ✅ Промокод создан: {code}, discount={discount_input}, uses={total_uses_str}")
                 else:
-                    bot.reply_to(message, f"❌ {result_message}")
-                    logger.warning(f"[PROMO ADMIN] Ошибка создания промокода: {result_message}")
+                    error_text = f"❌ {result_message}"
+                    if is_private:
+                        bot.send_message(message.chat.id, error_text)
+                    else:
+                        bot.reply_to(message, error_text)
+                    logger.warning(f"[PROMO ADMIN] ❌ Ошибка создания промокода: {result_message}")
                 
                 # НЕ удаляем состояние, так как пользователь может создать еще промокоды
+                logger.info(f"[PROMO ADMIN] ✅ Завершено, состояние сохранено")
                 return
                 
         except Exception as e:

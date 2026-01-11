@@ -93,13 +93,28 @@ def unsubscribe_command(message):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
         
-        msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        try:
+            # Проверяем, что message имеет атрибут message_id (не FakeMessage)
+            if hasattr(message, 'message_id') and message.message_id:
+                msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+            else:
+                # Если это FakeMessage или нет message_id, отправляем новое сообщение
+                msg = bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+        except Exception as send_error:
+            logger.error(f"[UNSUBSCRIBE] Ошибка отправки сообщения: {send_error}", exc_info=True)
+            # Пробуем отправить без reply_to
+            try:
+                msg = bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+            except Exception as send_error2:
+                logger.error(f"[UNSUBSCRIBE] Критическая ошибка отправки: {send_error2}", exc_info=True)
+                msg = None
+        
         user_unsubscribe_state[user_id] = {
             'chat_id': message.chat.id,
             'message_id': msg.message_id if msg else None,
             'prompt_message_id': msg.message_id if msg else None
         }
-        logger.info(f"[UNSUBSCRIBE] Ожидаем ввод ID от пользователя {user_id}, prompt_message_id={msg.message_id if msg else None}")
+        logger.info(f"[UNSUBSCRIBE] Состояние установлено: message_id={msg.message_id if msg else None}, chat_id={message.chat.id}, prompt_message_id={msg.message_id if msg else None}")
         
     except Exception as e:
         logger.error(f"[UNSUBSCRIBE] Ошибка в unsubscribe_command: {e}", exc_info=True)
@@ -156,11 +171,28 @@ def add_admin_command(message):
         
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="admin:back"))
         
-        msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+        try:
+            # Проверяем, что message имеет атрибут message_id (не FakeMessage)
+            if hasattr(message, 'message_id') and message.message_id:
+                msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+            else:
+                # Если это FakeMessage или нет message_id, отправляем новое сообщение
+                msg = bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+        except Exception as send_error:
+            logger.error(f"[ADD_ADMIN] Ошибка отправки сообщения: {send_error}", exc_info=True)
+            # Пробуем отправить без reply_to
+            try:
+                msg = bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+            except Exception as send_error2:
+                logger.error(f"[ADD_ADMIN] Критическая ошибка отправки: {send_error2}", exc_info=True)
+                msg = None
+        
         user_add_admin_state[user_id] = {
             'message_id': msg.message_id if msg else None,
-            'prompt_message_id': msg.message_id if msg else None
+            'prompt_message_id': msg.message_id if msg else None,
+            'chat_id': message.chat.id
         }
+        logger.info(f"[ADD_ADMIN] Состояние установлено: message_id={msg.message_id if msg else None}, chat_id={message.chat.id}")
         
     except Exception as e:
         logger.error(f"[ADD_ADMIN] Ошибка в add_admin_command: {e}", exc_info=True)

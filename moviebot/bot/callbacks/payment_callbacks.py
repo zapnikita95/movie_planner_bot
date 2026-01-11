@@ -4079,12 +4079,24 @@ def register_payment_callbacks(bot_instance):
             
                 # Определяем subscription_period для подписок (кроме lifetime)
                 # Согласно документации: https://core.telegram.org/api/subscriptions#bot-subscriptions
-                # subscription_period должен быть 30*24*60*60 (месяц) для подписок
+                # subscription_period определяет интервал автоматического списания
                 subscription_period = None
-                if period_type != 'lifetime':
-                    # Для всех периодических подписок используем месячный период (30 дней)
+                if period_type == 'month':
+                    # Месячная подписка: списание каждые 30 дней
                     subscription_period = 30 * 24 * 60 * 60  # 30 дней в секундах
-                    logger.info(f"[STARS] Создается подписка с периодом {subscription_period} секунд для period_type={period_type}")
+                elif period_type == '3months':
+                    # Подписка на 3 месяца: списание каждые 90 дней
+                    subscription_period = 90 * 24 * 60 * 60  # 90 дней в секундах
+                elif period_type == 'year':
+                    # Годовая подписка: списание каждые 365 дней
+                    subscription_period = 365 * 24 * 60 * 60  # 365 дней в секундах
+                elif period_type == 'test':
+                    # Тестовая подписка: списание каждые 10 минут
+                    subscription_period = 10 * 60  # 10 минут в секундах
+                # Для lifetime не создаем подписку (subscription_period = None)
+                
+                if subscription_period:
+                    logger.info(f"[STARS] Создается подписка с периодом {subscription_period} секунд ({period_type})")
             
                 # Отправляем инвойс через Telegram Stars
                 try:
@@ -5681,32 +5693,79 @@ def handle_successful_payment(message):
         
         logger.info(f"[SUCCESSFUL PAYMENT] Данные платежа: user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}")
         
+        # Получаем username пользователя
+        telegram_username = None
+        if message.from_user:
+            telegram_username = message.from_user.username
+        
         # Создаем/продлеваем подписку (логика из payment_callbacks.py)
         from moviebot.scheduler import send_successful_payment_notification
+        from moviebot.database.db_operations import get_active_subscription, renew_subscription, add_subscription_member
         
-        # Вычисляем даты начала и окончания подписки
-        now = datetime.now(pytz.UTC)
-        if period_type == 'month':
-            end_date = now + timedelta(days=30)
-        elif period_type == '3months':
-            end_date = now + timedelta(days=90)
-        elif period_type == 'year':
-            end_date = now + timedelta(days=365)
-        elif period_type == 'lifetime':
-            end_date = datetime(2099, 12, 31, tzinfo=pytz.UTC)
+        # Проверяем, есть ли уже активная подписка с такими же параметрами
+        existing_sub = get_active_subscription(chat_id, user_id, subscription_type)
+        
+        subscription_id = None
+        if existing_sub and existing_sub.get('id') and existing_sub.get('id') > 0:
+            # Проверяем, совпадают ли параметры подписки
+            existing_plan = existing_sub.get('plan_type')
+            existing_period = existing_sub.get('period_type')
+            existing_group_size = existing_sub.get('group_size')
+            
+            # Если параметры совпадают, продлеваем подписку
+            if (existing_plan == plan_type and 
+                existing_period == period_type and 
+                (subscription_type != 'group' or existing_group_size == group_size)):
+                subscription_id = existing_sub.get('id')
+                # Продлеваем подписку
+                renew_subscription(subscription_id, period_type)
+                logger.info(f"[SUCCESSFUL PAYMENT] Подписка {subscription_id} продлена через Stars")
+            else:
+                # Параметры не совпадают - создаем новую подписку
+                subscription_id = create_subscription(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    subscription_type=subscription_type,
+                    plan_type=plan_type,
+                    period_type=period_type,
+                    price=amount,
+                    telegram_username=telegram_username,
+                    group_username=None,  # Для Stars подписок group_username не нужен
+                    group_size=group_size,
+                    payment_method_id=None  # Для Stars подписок payment_method_id = None (Telegram управляет списаниями)
+                )
+                logger.info(f"[SUCCESSFUL PAYMENT] Создана новая подписка {subscription_id} через Stars")
+                
+                # Автоматически добавляем оплатившего пользователя в групповую подписку
+                if subscription_id and subscription_type == 'group':
+                    try:
+                        add_subscription_member(subscription_id, user_id, telegram_username)
+                        logger.info(f"[SUCCESSFUL PAYMENT] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
+                    except Exception as add_error:
+                        logger.error(f"[SUCCESSFUL PAYMENT] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
         else:
-            end_date = now + timedelta(days=30)
-        
-        # Создаем подписку
-        subscription_id = create_subscription(
-            user_id=user_id,
-            chat_id=chat_id,
-            subscription_type=subscription_type,
-            plan_type=plan_type,
-            period_type=period_type,
-            group_size=group_size,
-            payment_id=payment_id
-        )
+            # Нет активной подписки - создаем новую
+            subscription_id = create_subscription(
+                chat_id=chat_id,
+                user_id=user_id,
+                subscription_type=subscription_type,
+                plan_type=plan_type,
+                period_type=period_type,
+                price=amount,
+                telegram_username=telegram_username,
+                group_username=None,  # Для Stars подписок group_username не нужен
+                group_size=group_size,
+                payment_method_id=None  # Для Stars подписок payment_method_id = None (Telegram управляет списаниями)
+            )
+            logger.info(f"[SUCCESSFUL PAYMENT] Создана новая подписка {subscription_id} через Stars")
+            
+            # Автоматически добавляем оплатившего пользователя в групповую подписку
+            if subscription_id and subscription_type == 'group':
+                try:
+                    add_subscription_member(subscription_id, user_id, telegram_username)
+                    logger.info(f"[SUCCESSFUL PAYMENT] Оплативший пользователь {user_id} (@{telegram_username}) автоматически добавлен в подписку {subscription_id}")
+                except Exception as add_error:
+                    logger.error(f"[SUCCESSFUL PAYMENT] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
         
         if subscription_id:
             logger.info(f"[SUCCESSFUL PAYMENT] ✅ Подписка создана: subscription_id={subscription_id}")

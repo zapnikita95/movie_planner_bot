@@ -94,8 +94,27 @@ def promo_command(message):
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="back_to_start_menu"))
         
         # Устанавливаем состояние для обработки ответа
-        msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
-        user_promo_admin_state[user_id] = {'message_id': msg.message_id}
+        try:
+            # Проверяем, что message имеет атрибут message_id (не FakeMessage)
+            if hasattr(message, 'message_id') and message.message_id:
+                msg = bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+            else:
+                # Если это FakeMessage или нет message_id, отправляем новое сообщение
+                msg = bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+        except Exception as send_error:
+            logger.error(f"[PROMO] Ошибка отправки сообщения: {send_error}", exc_info=True)
+            # Пробуем отправить без reply_to
+            try:
+                msg = bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+            except Exception as send_error2:
+                logger.error(f"[PROMO] Критическая ошибка отправки: {send_error2}", exc_info=True)
+                msg = None
+        
+        user_promo_admin_state[user_id] = {
+            'message_id': msg.message_id if msg else None,
+            'chat_id': message.chat.id
+        }
+        logger.info(f"[PROMO] Состояние установлено: message_id={msg.message_id if msg else None}, chat_id={message.chat.id}")
         
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_command: {e}", exc_info=True)

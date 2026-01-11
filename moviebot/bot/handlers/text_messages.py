@@ -1202,53 +1202,8 @@ def handle_search_reply_direct(message):
         logger.error(f"[SEARCH REPLY DIRECT] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
 
 
-def check_admin_commands_reply(message):
-    """Проверка для обработчика админских команд (refund_stars, unsubscribe, add_admin)"""
-    if not message.text or message.text.startswith('/'):
-        return False
-    
-    if not message.reply_to_message or message.reply_to_message.from_user.id != BOT_ID:
-        return False
-    
-    user_id = message.from_user.id
-    from moviebot.states import user_refund_state, user_unsubscribe_state, user_add_admin_state
-    
-    # Проверяем, что пользователь в одном из админских состояний
-    if user_id not in user_refund_state and user_id not in user_unsubscribe_state and user_id not in user_add_admin_state:
-        return False
-    
-    # Проверяем, что сообщение является реплаем на prompt_message_id
-    if user_id in user_refund_state:
-        state = user_refund_state.get(user_id)
-        if state:
-            prompt_message_id = state.get('prompt_message_id')
-            if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
-                return True
-    
-    if user_id in user_unsubscribe_state:
-        state = user_unsubscribe_state[user_id]
-        prompt_message_id = state.get('prompt_message_id')
-        if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
-            return True
-    
-    if user_id in user_add_admin_state:
-        state = user_add_admin_state[user_id]
-        prompt_message_id = state.get('prompt_message_id')
-        if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
-            return True
-    
-    return False
-
-
-@bot.message_handler(func=check_admin_commands_reply)
-def handle_admin_commands_reply(message):
-    """Обработчик реплаев для админских команд (refund_stars, unsubscribe, add_admin)"""
-    logger.info(f"[ADMIN COMMANDS REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
-    
-    # Импортируем обработчик из state_handlers, который уже содержит всю логику
-    from moviebot.bot.handlers.state_handlers import handle_admin
-    handle_admin(message)
-    logger.info(f"[ADMIN COMMANDS REPLY] ===== END: обработано через state_handlers.handle_admin")
+# УДАЛЕНО: check_admin_commands_reply - теперь все обрабатывается через check_admin_message в state_handlers.py
+# Оставляем пустую функцию для совместимости, но она больше не используется
 
 def check_rate_reply(message):
     """Проверка для handler ответа на запрос оценки (реплай или следующее сообщение в личке)"""
@@ -1640,9 +1595,9 @@ def main_text_handler(message):
         user_ticket_state, user_search_state, user_import_state,
         user_edit_state, user_settings_state, user_plan_state,
         user_clean_state, user_promo_state, user_promo_admin_state,
-        user_cancel_subscription_state, user_view_film_state
-        # НЕ включаем админские состояния (user_refund_state, user_unsubscribe_state, user_add_admin_state) - 
-        # они обрабатываются через отдельный обработчик handle_admin_commands_reply
+        user_cancel_subscription_state, user_view_film_state,
+        user_refund_state, user_unsubscribe_state, user_add_admin_state
+        # Админские состояния обрабатываются через handle_admin в state_handlers.py
     )
     
     # Пропускаем ответные сообщения об импорте - у них есть отдельный handler
@@ -1658,7 +1613,8 @@ def main_text_handler(message):
         user_id in user_settings_state or user_id in user_plan_state or
         user_id in user_clean_state or user_id in user_promo_state or 
         user_id in user_promo_admin_state or user_id in user_cancel_subscription_state or
-        user_id in user_view_film_state):
+        user_id in user_view_film_state or user_id in user_refund_state or
+        user_id in user_unsubscribe_state or user_id in user_add_admin_state):
         logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в состоянии, пропускаем (обработает специализированный handler)")
         return
     
