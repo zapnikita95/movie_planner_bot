@@ -1609,36 +1609,94 @@ def process_recurring_payments():
                         period_type=period_type
                     )
                 else:
-                    logger.warning(f"[RECURRING PAYMENT] Платеж {payment.id} не успешен, статус: {payment.status}")
+                    # Платеж не успешен - проверяем причину
+                    has_cancellation_details = hasattr(payment, 'cancellation_details') and payment.cancellation_details
+                    cancellation_reason = None
+                    if has_cancellation_details:
+                        cancellation_reason = getattr(payment.cancellation_details, 'reason', None) or \
+                                             (payment.cancellation_details.get('reason') if isinstance(payment.cancellation_details, dict) else None)
                     
-                    # Планируем следующую попытку на следующий день в 9:00 МСК
-                    from dateutil.relativedelta import relativedelta
-                    tomorrow = now + timedelta(days=1)
-                    # Устанавливаем время на 9:00 МСК (PLANS_TZ)
-                    next_attempt = PLANS_TZ.localize(
-                        datetime.combine(tomorrow.date(), datetime.min.time().replace(hour=9, minute=0))
-                    ).astimezone(pytz.UTC)
+                    logger.warning(f"[RECURRING PAYMENT] Платеж {payment.id} не успешен, статус: {payment.status}, cancellation_details: {has_cancellation_details}, reason: {cancellation_reason}")
                     
-                    # Обновляем next_payment_date в БД
-                    from moviebot.database.db_operations import update_subscription_next_payment
-                    update_subscription_next_payment(subscription_id, next_attempt)
-                    
-                    # Отправляем уведомление об ошибке с кнопками
-                    text = "🚨 <b>Оплата не прошла!</b>\n\n"
-                    text += "Пожалуйста, обеспечьте наличие средств на карте для проведения списания, следующее списание будет завтра. Также, вы можете инициировать списание по кнопке ниже."
-                    
-                    markup = InlineKeyboardMarkup(row_width=1)
-                    markup.add(InlineKeyboardButton("Провести платеж", callback_data=f"payment:retry_payment:{subscription_id}"))
-                    markup.add(InlineKeyboardButton("Изменить тариф", callback_data=f"payment:modify:{subscription_id}"))
-                    markup.add(InlineKeyboardButton("Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
-                    
-                    # Для личных подписок отправляем в личку, для групповых - в групповой чат
-                    target_chat_id = user_id if subscription_type == 'personal' else chat_id
+                    # Подсчитываем количество неудачных попыток за последние 7 дней
+                    from moviebot.database.db_operations import get_db_connection, get_db_cursor, db_lock
+                    conn_retry = get_db_connection()
+                    cursor_retry = conn_retry.cursor()
+                    retry_count = 0
                     try:
-                        bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
-                        logger.info(f"[RECURRING PAYMENT] Уведомление об ошибке отправлено для подписки {subscription_id}, следующая попытка: {next_attempt}")
+                        seven_days_ago = now - timedelta(days=7)
+                        with db_lock:
+                            cursor_retry.execute("""
+                                SELECT COUNT(*) 
+                                FROM payments 
+                                WHERE subscription_id = %s 
+                                AND status IN ('canceled', 'pending', 'waiting_for_capture')
+                                AND created_at >= %s
+                            """, (subscription_id, seven_days_ago))
+                            retry_count_result = cursor_retry.fetchone()
+                            retry_count = retry_count_result[0] if retry_count_result and isinstance(retry_count_result, tuple) else \
+                                         (retry_count_result.get('count') if isinstance(retry_count_result, dict) else 0)
                     except Exception as e:
-                        logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления об ошибке: {e}")
+                        logger.error(f"[RECURRING PAYMENT] Ошибка подсчета попыток: {e}")
+                    
+                    # Если есть cancellation_details или это одна из первых 5 попыток - планируем повтор
+                    if has_cancellation_details and retry_count < 5:
+                        # Планируем следующую попытку через день в 9:00 МСК
+                        tomorrow = now + timedelta(days=1)
+                        next_attempt = PLANS_TZ.localize(
+                            datetime.combine(tomorrow.date(), datetime.min.time().replace(hour=9, minute=0))
+                        ).astimezone(pytz.UTC)
+                        
+                        # Обновляем next_payment_date в БД
+                        from moviebot.database.db_operations import update_subscription_next_payment
+                        update_subscription_next_payment(subscription_id, next_attempt)
+                        
+                        # Отправляем уведомление об ошибке с кнопками
+                        text = "🚨 <b>Оплата не прошла!</b>\n\n"
+                        if retry_count < 4:
+                            text += f"Попытка {retry_count + 1} из 5. Следующая попытка списания будет через день. Пожалуйста, обеспечьте наличие средств на карте."
+                        else:
+                            text += f"Попытка {retry_count + 1} из 5. Это последняя автоматическая попытка. Если списание не пройдет, подписка будет приостановлена."
+                        text += "\n\nВы также можете инициировать списание по кнопке ниже."
+                        
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("Провести платеж", callback_data=f"payment:retry_payment:{subscription_id}"))
+                        markup.add(InlineKeyboardButton("Изменить тариф", callback_data=f"payment:modify:{subscription_id}"))
+                        markup.add(InlineKeyboardButton("Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
+                        
+                        # Для личных подписок отправляем в личку, для групповых - в групповой чат
+                        target_chat_id = user_id if subscription_type == 'personal' else chat_id
+                        try:
+                            bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
+                            logger.info(f"[RECURRING PAYMENT] Уведомление об ошибке отправлено для подписки {subscription_id}, попытка {retry_count + 1}/5, следующая попытка: {next_attempt}")
+                        except Exception as e:
+                            logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления об ошибке: {e}")
+                    else:
+                        # Превышен лимит попыток или нет cancellation_details - отключаем автоплатежи
+                        if retry_count >= 5:
+                            logger.warning(f"[RECURRING PAYMENT] Превышен лимит попыток (5) для подписки {subscription_id}, отключаем автоплатежи")
+                            # Обнуляем payment_method_id, чтобы прекратить автоплатежи
+                            with db_lock:
+                                cursor_retry.execute("""
+                                    UPDATE subscriptions 
+                                    SET payment_method_id = NULL
+                                    WHERE id = %s
+                                """, (subscription_id,))
+                                conn_retry.commit()
+                            
+                            # Отправляем уведомление о приостановке автоплатежей
+                            text = "⛔ <b>Автоплатежи приостановлены</b>\n\n"
+                            text += "После 5 неудачных попыток автоплатежи были приостановлены. Вы можете возобновить подписку, оплатив её вручную."
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            markup.add(InlineKeyboardButton("Оплатить подписку", callback_data="payment:tariffs"))
+                            markup.add(InlineKeyboardButton("Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
+                            
+                            target_chat_id = user_id if subscription_type == 'personal' else chat_id
+                            try:
+                                bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
+                            except Exception as e:
+                                logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления о приостановке: {e}")
                 
             except Exception as e:
                 logger.error(f"[RECURRING PAYMENT] Ошибка обработки подписки {subscription_id}: {e}", exc_info=True)

@@ -1355,25 +1355,33 @@ def check_clean_message(message):
 @bot.message_handler(content_types=['text'], func=check_clean_message)
 def handle_clean(message):
     """Обработчик для очистки"""
-    logger.info(f"[CLEAN HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    logger.info(f"[CLEAN HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text}'")
     try:
         from moviebot.states import user_clean_state
         user_id = message.from_user.id
-        text = message.text.strip().upper() if message.text else ""
+        text = message.text.strip() if message.text else ""
+        text_upper = text.upper()
         
         if user_id not in user_clean_state:
+            logger.warning(f"[CLEAN HANDLER] Пользователь {user_id} не в состоянии user_clean_state")
             return
         
         state = user_clean_state[user_id]
+        target = state.get('target')
+        logger.info(f"[CLEAN HANDLER] Пользователь {user_id} в состоянии, target={target}")
         
         try:
             # Нормализуем текст: убираем пробелы, запятые, приводим к верхнему регистру
-            normalized_text = text.replace(' ', '').replace(',', '').upper()
+            normalized_text = text_upper.replace(' ', '').replace(',', '').replace('.', '')
+            logger.info(f"[CLEAN HANDLER] Нормализованный текст: '{normalized_text}'")
+            
             # Проверяем различные варианты написания "ДА, УДАЛИТЬ"
             if normalized_text == 'ДАУДАЛИТЬ':
+                logger.info(f"[CLEAN HANDLER] Подтверждение получено, вызываю handle_clean_confirm_internal для target={target}")
                 from moviebot.bot.handlers.series import handle_clean_confirm_internal
                 handle_clean_confirm_internal(message)
             else:
+                logger.warning(f"[CLEAN HANDLER] Текст не соответствует 'ДА, УДАЛИТЬ': '{text}' (нормализовано: '{normalized_text}')")
                 send_error_message(
                     message,
                     "❌ Для подтверждения удаления введите: ДА, УДАЛИТЬ",
@@ -1439,7 +1447,7 @@ def check_admin_message(message):
     # В личных чатах принимаем следующее сообщение (как в is_expected_text_in_private)
     # Без проверки формата - обработаем в handle_admin, там покажем ошибку если формат неверный
     if is_private:
-        logger.info(f"[CHECK ADMIN MESSAGE] ✅ Принимаем сообщение в личке для user_id={user_id}")
+        logger.info(f"[CHECK ADMIN MESSAGE] ✅ Принимаем сообщение в личке для user_id={user_id} (любой текст)")
         return True
     
     # В группах требуется реплай на бота
@@ -1451,28 +1459,8 @@ def check_admin_message(message):
         logger.debug(f"[CHECK ADMIN MESSAGE] В группе требуется реплай, но его нет")
         return False
     
-    # В группах также проверяем, что это реплай на правильное сообщение (если есть prompt_message_id)
-    if has_promo_admin:
-        state = user_promo_admin_state[user_id]
-        prompt_message_id = state.get('message_id')
-        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
-            logger.debug(f"[CHECK ADMIN MESSAGE] Реплай не на правильное сообщение: prompt_message_id={prompt_message_id}, reply_to={message.reply_to_message.message_id}")
-            return False
-    
-    if has_add_admin:
-        state = user_add_admin_state[user_id]
-        prompt_message_id = state.get('prompt_message_id')
-        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
-            logger.debug(f"[CHECK ADMIN MESSAGE] Реплай не на правильное сообщение для add_admin")
-            return False
-    
-    if has_unsubscribe:
-        state = user_unsubscribe_state[user_id]
-        prompt_message_id = state.get('prompt_message_id')
-        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
-            logger.debug(f"[CHECK ADMIN MESSAGE] Реплай не на правильное сообщение для unsubscribe")
-            return False
-    
+    # В группах проверяем, что это реплай на правильное сообщение (если есть prompt_message_id)
+    # Но для промокодов, unsubscribe и add_admin в личке можно без реплая - уже обработано выше
     logger.info(f"[CHECK ADMIN MESSAGE] ✅ Принимаем сообщение в группе для user_id={user_id}")
     return True
 
@@ -1550,21 +1538,24 @@ def handle_admin(message):
                 state = user_unsubscribe_state[user_id]
                 logger.info(f"[UNSUBSCRIBE] Обработка: text='{text}', state={state}")
                 
-                # В личке принимаем следующее сообщение, в группах требуется реплай
+                # В личке принимаем следующее сообщение (любой текст)
+                # В группах требуется реплай на бота
                 try:
                     chat_info = bot.get_chat(message.chat.id)
                     is_private = chat_info.type == 'private'
                 except:
                     is_private = message.chat.id > 0
                 
-                prompt_message_id = state.get('prompt_message_id')
-                if not is_private and prompt_message_id:
-                    # В группах требуется реплай
-                    if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
-                        logger.info(f"[UNSUBSCRIBE] В группе требуется реплай на prompt_message_id={prompt_message_id}, игнорируем")
+                if not is_private:
+                    # В группах требуется реплай на бота
+                    is_reply = (message.reply_to_message and 
+                                message.reply_to_message.from_user and 
+                                message.reply_to_message.from_user.id == BOT_ID)
+                    if not is_reply:
+                        logger.info(f"[UNSUBSCRIBE] В группе требуется реплай, но его нет, игнорируем")
                         return
-                # В личке можно отвечать следующим сообщением или реплаем
                 
+                # Парсим chat_id: число или отрицательное число
                 target_id_str = text.strip()
                 logger.info(f"[UNSUBSCRIBE] Получен target_id_str: '{target_id_str}'")
                 
@@ -1673,23 +1664,24 @@ def handle_admin(message):
                 state = user_add_admin_state[user_id]
                 logger.info(f"[ADD_ADMIN] Обработка: text='{text}', state={state}")
                 
-                # В личке можно отвечать следующим сообщением или реплаем
-                # В группах требуется реплай
+                # В личке можно отвечать следующим сообщением (любой текст)
+                # В группах требуется реплай на бота
                 try:
                     chat_info = bot.get_chat(message.chat.id)
                     is_private = chat_info.type == 'private'
                 except:
                     is_private = message.chat.id > 0
                 
-                prompt_message_id = state.get('prompt_message_id')
                 if not is_private:
-                    # В группах требуется реплай
-                    if prompt_message_id:
-                        if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
-                            logger.info(f"[ADD_ADMIN] В группе требуется реплай на prompt_message_id={prompt_message_id}, игнорируем")
-                            return
-                # В личке можно отвечать следующим сообщением или реплаем
+                    # В группах требуется реплай на бота
+                    is_reply = (message.reply_to_message and 
+                                message.reply_to_message.from_user and 
+                                message.reply_to_message.from_user.id == BOT_ID)
+                    if not is_reply:
+                        logger.info(f"[ADD_ADMIN] В группе требуется реплай, но его нет, игнорируем")
+                        return
                 
+                # Парсим user_id: число
                 admin_id_str = text.strip()
                 if admin_id_str:
                     try:
@@ -1785,27 +1777,28 @@ def handle_admin(message):
                 state = user_promo_admin_state[user_id]
                 logger.info(f"[PROMO ADMIN] Обработка: text='{text}', state={state}")
                 
-                # В личке можно отвечать следующим сообщением или реплаем
-                # В группах требуется реплай
+                # В личке можно отвечать следующим сообщением (любой текст)
+                # В группах требуется реплай на бота
                 try:
                     chat_info = bot.get_chat(message.chat.id)
                     is_private = chat_info.type == 'private'
                 except:
                     is_private = message.chat.id > 0
                 
-                prompt_message_id = state.get('message_id')
                 if not is_private:
-                    # В группах требуется реплай
-                    if prompt_message_id:
-                        if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
-                            logger.info(f"[PROMO ADMIN] В группе требуется реплай на message_id={prompt_message_id}, игнорируем")
-                            return
-                # В личке можно отвечать следующим сообщением или реплаем
+                    # В группах требуется реплай на бота
+                    is_reply = (message.reply_to_message and 
+                                message.reply_to_message.from_user and 
+                                message.reply_to_message.from_user.id == BOT_ID)
+                    if not is_reply:
+                        logger.info(f"[PROMO ADMIN] В группе требуется реплай, но его нет, игнорируем")
+                        return
                 
                 # Парсим промокод: КОД СКИДКА КОЛИЧЕСТВО
+                # Формат: *символы любые* пробел *число или процент* пробел *число*
                 parts = text.strip().split()
                 if len(parts) < 3:
-                    logger.warning(f"[PROMO ADMIN] Неверный формат: '{text}', ожидается 'КОД СКИДКА КОЛИЧЕСТВО'")
+                    logger.warning(f"[PROMO ADMIN] Неверный формат: '{text}', ожидается 'КОД СКИДКА КОЛИЧЕСТВО' (минимум 3 части через пробел)")
                     try:
                         chat_info = bot.get_chat(message.chat.id)
                         is_private = chat_info.type == 'private'

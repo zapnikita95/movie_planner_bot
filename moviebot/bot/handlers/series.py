@@ -5429,53 +5429,91 @@ def handle_clean_confirm_internal(message):
     conn = get_db_connection()
     cursor = get_db_cursor()
     
+    logger.info(f"[CLEAN CONFIRM] ===== START: user_id={user_id}, target={target}, chat_id={chat_id}")
+    
     if target == 'user':
         # Удаление всех данных пользователя
+        logger.info(f"[CLEAN CONFIRM] Начало удаления данных пользователя: user_id={user_id}, chat_id={chat_id}")
         with db_lock:
             # Удаляем оценки пользователя (но не импортированные - они удаляются отдельной командой)
             cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, user_id))
             ratings_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено оценок: {ratings_deleted}")
             
             # Удаляем планы пользователя
             cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
             plans_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено планов: {plans_deleted}")
             
             # Удаляем отметки просмотра пользователя
             cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
             watched_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено отметок просмотра: {watched_deleted}")
             
             # Удаляем статистику пользователя
             cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
             stats_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено статистики: {stats_deleted}")
             
             # Удаляем настройки пользователя
             cursor.execute('DELETE FROM settings WHERE chat_id = %s AND key LIKE %s', (user_id, 'user_%'))
             settings_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено настроек: {settings_deleted}")
             
             conn.commit()
         
-        bot.reply_to(message, 
-            f"✅ Ваши данные удалены:\n"
-            f"• Оценок: {ratings_deleted}\n"
-            f"• Планов: {plans_deleted}\n"
-            f"• Отметок просмотра: {watched_deleted}\n"
-            f"• Статистики: {stats_deleted}\n"
-            f"• Настроек: {settings_deleted}")
+        action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Обнуление базы данных пользователя"
+        result_text = f"{action_text}\n\nУдалено:\n"
+        result_text += f"• Оценок: {ratings_deleted}\n"
+        result_text += f"• Планов: {plans_deleted}\n"
+        result_text += f"• Отметок просмотра: {watched_deleted}\n"
+        result_text += f"• Статистики: {stats_deleted}\n"
+        result_text += f"• Настроек: {settings_deleted}"
+        
+        try:
+            chat_info = bot.get_chat(message.chat.id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = message.chat.id > 0
+        
+        if is_private:
+            bot.send_message(message.chat.id, result_text)
+        else:
+            bot.reply_to(message, result_text)
+        
+        logger.info(f"[CLEAN CONFIRM] ✅ Завершено удаление данных пользователя: user_id={user_id}, chat_id={chat_id}")
         del user_clean_state[user_id]
     
     elif target == 'imported_ratings':
         # Удаление импортированных оценок пользователя
+        logger.info(f"[CLEAN CONFIRM] Начало удаления импортированных оценок: user_id={user_id}, chat_id={chat_id}")
         with db_lock:
             cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s AND is_imported = TRUE', (chat_id, user_id))
             imported_deleted = cursor.rowcount
             conn.commit()
+            logger.info(f"[CLEAN CONFIRM] Удалено импортированных оценок: {imported_deleted}")
         
-        bot.reply_to(message, f"✅ Удалено импортированных оценок: {imported_deleted}")
+        action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Удаление импортированных оценок с Кинопоиска"
+        result_text = f"{action_text}\n\nУдалено импортированных оценок: {imported_deleted}"
+        
+        try:
+            chat_info = bot.get_chat(message.chat.id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = message.chat.id > 0
+        
+        if is_private:
+            bot.send_message(message.chat.id, result_text)
+        else:
+            bot.reply_to(message, result_text)
+        
+        logger.info(f"[CLEAN CONFIRM] ✅ Завершено удаление импортированных оценок: user_id={user_id}, chat_id={chat_id}")
         del user_clean_state[user_id]
     
     elif target == 'clean_imported_movies':
         # Удаление фильмов, которые были добавлены только из-за импорта
         # Удаляем фильмы, у которых есть только импортированные оценки и нет обычных
+        logger.info(f"[CLEAN CONFIRM] Начало удаления фильмов, добавленных при импорте: user_id={user_id}, chat_id={chat_id}")
         with db_lock:
             # Находим фильмы, которые имеют только импортированные оценки
             cursor.execute('''
@@ -5506,61 +5544,117 @@ def handle_clean_confirm_internal(message):
             movies_to_delete = cursor.fetchall()
             
             if not movies_to_delete:
-                bot.reply_to(message, "✅ Нет фильмов для удаления. Все фильмы либо имеют обычные оценки, либо находятся в планах.")
+                action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Удаление фильмов, добавленных при импорте"
+                result_text = f"{action_text}\n\nНет фильмов для удаления. Все фильмы либо имеют обычные оценки, либо находятся в планах."
+                try:
+                    chat_info = bot.get_chat(message.chat.id)
+                    is_private = chat_info.type == 'private'
+                except:
+                    is_private = message.chat.id > 0
+                if is_private:
+                    bot.send_message(message.chat.id, result_text)
+                else:
+                    bot.reply_to(message, result_text)
+                logger.info(f"[CLEAN CONFIRM] Нет фильмов для удаления")
                 del user_clean_state[user_id]
                 return
             
             movie_ids = [row.get('id') if isinstance(row, dict) else row[0] for row in movies_to_delete]
             movies_count = len(movie_ids)
+            logger.info(f"[CLEAN CONFIRM] Найдено фильмов для удаления: {movies_count}")
             
             # Удаляем связанные данные
             cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = ANY(%s)', (chat_id, movie_ids))
             ratings_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено оценок: {ratings_deleted}")
             
             cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND film_id = ANY(%s)', (chat_id, movie_ids))
             watched_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено отметок просмотра: {watched_deleted}")
             
             # Удаляем сами фильмы
             cursor.execute('DELETE FROM movies WHERE chat_id = %s AND id = ANY(%s)', (chat_id, movie_ids))
             movies_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено фильмов: {movies_deleted}")
             
             conn.commit()
         
-        bot.reply_to(message, 
-            f"✅ Удалено фильмов, добавленных при импорте: {movies_deleted}\n"
-            f"• Удалено оценок: {ratings_deleted}\n"
-            f"• Удалено отметок просмотра: {watched_deleted}")
+        action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Удаление фильмов, добавленных при импорте"
+        result_text = f"{action_text}\n\nУдалено:\n"
+        result_text += f"• Фильмов: {movies_deleted}\n"
+        result_text += f"• Оценок: {ratings_deleted}\n"
+        result_text += f"• Отметок просмотра: {watched_deleted}"
+        
+        try:
+            chat_info = bot.get_chat(message.chat.id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = message.chat.id > 0
+        
+        if is_private:
+            bot.send_message(message.chat.id, result_text)
+        else:
+            bot.reply_to(message, result_text)
+        
+        logger.info(f"[CLEAN CONFIRM] ✅ Завершено удаление фильмов, добавленных при импорте: user_id={user_id}, chat_id={chat_id}")
         del user_clean_state[user_id]
     
     elif target == 'chat':
         # Удаление всех данных чата (требует голосования в группах)
+        logger.info(f"[CLEAN CONFIRM] Начало обнуления базы данных чата: chat_id={chat_id}")
         with db_lock:
             cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
             ratings_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено оценок: {ratings_deleted}")
+            
             cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
             plans_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено планов: {plans_deleted}")
+            
             cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s', (chat_id,))
             watched_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено отметок просмотра: {watched_deleted}")
+            
             cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
             movies_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено фильмов: {movies_deleted}")
+            
             cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
             stats_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено статистики: {stats_deleted}")
+            
             cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
             settings_deleted = cursor.rowcount
+            logger.info(f"[CLEAN CONFIRM] Удалено настроек: {settings_deleted}")
+            
             conn.commit()
         
-        bot.reply_to(message, 
-            f"✅ База данных чата обнулена:\n"
-            f"• Фильмов: {movies_deleted}\n"
-            f"• Оценок: {ratings_deleted}\n"
-            f"• Планов: {plans_deleted}\n"
-            f"• Отметок просмотра: {watched_deleted}\n"
-            f"• Статистики: {stats_deleted}\n"
-            f"• Настроек: {settings_deleted}")
+        action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Обнуление базы данных чата"
+        result_text = f"{action_text}\n\nУдалено:\n"
+        result_text += f"• Фильмов: {movies_deleted}\n"
+        result_text += f"• Оценок: {ratings_deleted}\n"
+        result_text += f"• Планов: {plans_deleted}\n"
+        result_text += f"• Отметок просмотра: {watched_deleted}\n"
+        result_text += f"• Статистики: {stats_deleted}\n"
+        result_text += f"• Настроек: {settings_deleted}"
+        
+        try:
+            chat_info = bot.get_chat(message.chat.id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = message.chat.id > 0
+        
+        if is_private:
+            bot.send_message(message.chat.id, result_text)
+        else:
+            bot.reply_to(message, result_text)
+        
+        logger.info(f"[CLEAN CONFIRM] ✅ Завершено обнуление базы данных чата: chat_id={chat_id}")
         del user_clean_state[user_id]
     
     elif target == 'unwatched_movies':
         # Удаление непросмотренных фильмов
+        logger.info(f"[CLEAN CONFIRM] Начало удаления непросмотренных фильмов: user_id={user_id}, chat_id={chat_id}")
         with db_lock:
             cursor.execute('''
                 DELETE FROM movies 
@@ -5571,8 +5665,23 @@ def handle_clean_confirm_internal(message):
             ''', (chat_id, chat_id, chat_id))
             movies_deleted = cursor.rowcount
             conn.commit()
+            logger.info(f"[CLEAN CONFIRM] Удалено непросмотренных фильмов: {movies_deleted}")
         
-        bot.reply_to(message, f"✅ Удалено непросмотренных фильмов: {movies_deleted}")
+        action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Удаление непросмотренных фильмов"
+        result_text = f"{action_text}\n\nУдалено непросмотренных фильмов: {movies_deleted}"
+        
+        try:
+            chat_info = bot.get_chat(message.chat.id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = message.chat.id > 0
+        
+        if is_private:
+            bot.send_message(message.chat.id, result_text)
+        else:
+            bot.reply_to(message, result_text)
+        
+        logger.info(f"[CLEAN CONFIRM] ✅ Завершено удаление непросмотренных фильмов: user_id={user_id}, chat_id={chat_id}")
         del user_clean_state[user_id]
     
     else:

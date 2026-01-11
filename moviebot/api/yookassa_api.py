@@ -112,7 +112,7 @@ def create_payment(
             # Для всех рекуррентных подписок (кроме lifetime) — просим сохранить карту
             if save_payment_method or is_recurring:
                 payment_data["save_payment_method"] = True
-                logger.info("[YOOKASSA] save_payment_method=True — просим сохранить карту для автоплатежей")
+                logger.info(f"[YOOKASSA] save_payment_method=True — просим сохранить карту для автоплатежей (save_payment_method={save_payment_method}, is_recurring={is_recurring})")
         
         payment = Payment.create(payment_data)
         logger.info(f"[YOOKASSA] Платеж создан: id={payment.id}, status={payment.status}")
