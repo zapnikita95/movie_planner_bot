@@ -324,11 +324,34 @@ def build_tmdb_index():
 
 def get_index_and_movies():
     global _index, _movies_df
-
-    with _index_lock:  # ← Только один worker может войти сюда одновременно
-        if _index is None or _movies_df is None:
-            _index, _movies_df = build_tmdb_index()
+    
+    logger.info("[GET INDEX] Проверка состояния индекса...")
+    
+    # Сначала проверяем без блокировки, если индекс уже загружен
+    if _index is not None and _movies_df is not None:
+        logger.info(f"[GET INDEX] Индекс уже загружен в памяти, фильмов: {len(_movies_df)}")
         return _index, _movies_df
+    
+    logger.info("[GET INDEX] Индекс не в памяти, пытаемся загрузить...")
+    
+    with _index_lock:  # ← Только один worker может войти сюда одновременно
+        logger.info("[GET INDEX] Получена блокировка для загрузки индекса...")
+        # Двойная проверка - возможно, другой поток уже загрузил индекс
+        if _index is not None and _movies_df is not None:
+            logger.info(f"[GET INDEX] Индекс уже загружен другим потоком, фильмов: {len(_movies_df)}")
+            return _index, _movies_df
+        
+        logger.info("[GET INDEX] Загружаем индекс через build_tmdb_index()...")
+        try:
+            _index, _movies_df = build_tmdb_index()
+            if _index is not None and _movies_df is not None:
+                logger.info(f"[GET INDEX] Индекс успешно загружен, фильмов: {len(_movies_df)}")
+            else:
+                logger.warning("[GET INDEX] build_tmdb_index() вернул None")
+            return _index, _movies_df
+        except Exception as e:
+            logger.error(f"[GET INDEX] Ошибка при загрузке индекса: {e}", exc_info=True)
+            return None, None
 
 def search_movies(query, top_k=5):
     try:
