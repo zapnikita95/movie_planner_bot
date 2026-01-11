@@ -1,6 +1,6 @@
 """
 Сервис для поиска фильмов по описанию (КиноШазам)
-Использует TMDB датасет (оффлайн), semantic search, переводчик и whisper-tiny
+Использует TMDB датасет (оффлайн), semantic search, переводчик и whisper
 """
 import os
 import logging
@@ -68,32 +68,6 @@ def init_shazam_index():
                 logger.error(f"Ошибка инициализации индекса при старте: {e}", exc_info=True)
 
 
-# Функция get_whisper (восстановить оригинал или чуть упрощённый)
-def get_whisper():
-    global _whisper
-    if _whisper is None:
-        logger.info(f"Загрузка whisper-tiny (кэш: {CACHE_DIR})...")
-        try:
-            whisper_cache = CACHE_DIR / 'whisper'
-            whisper_cache.mkdir(parents=True, exist_ok=True)
-            
-            model = whisper.load_model("tiny", download_root=str(whisper_cache))
-            
-            class WhisperWrapper:
-                def __init__(self, model):
-                    self.model = model
-                
-                def __call__(self, audio_path):
-                    result = self.model.transcribe(str(audio_path), language="ru")
-                    return {"text": result.get("text", "").strip()}
-            
-            _whisper = WhisperWrapper(model)
-            logger.info("whisper-tiny успешно загружен")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки whisper-tiny: {e}", exc_info=True)
-            _whisper = False
-    return _whisper
-
 def get_model():
     global _model
     if _model is None:
@@ -127,13 +101,12 @@ def get_translator():
 def get_whisper():
     global _whisper
     if _whisper is None:
-        logger.info(f"Загрузка whisper-tiny (кэш: {CACHE_DIR})...")
+        logger.info(f"Загрузка whisper (кэш: {CACHE_DIR})...")
         try:
             whisper_cache = CACHE_DIR / 'whisper'
             whisper_cache.mkdir(parents=True, exist_ok=True)
             
-            # Самое важное — tiny вместо base!
-            model = whisper.load_model("tiny", download_root=str(whisper_cache))
+            model = whisper.load_model("base", download_root=str(whisper_cache))
             
             class WhisperWrapper:
                 def __init__(self, model):
@@ -144,9 +117,9 @@ def get_whisper():
                     return {"text": result.get("text", "").strip()}
             
             _whisper = WhisperWrapper(model)
-            logger.info("whisper-tiny успешно загружен")
+            logger.info("whisper успешно загружен")
         except Exception as e:
-            logger.error(f"Ошибка загрузки whisper-tiny: {e}", exc_info=True)
+            logger.error(f"Ошибка загрузки whisper: {e}", exc_info=True)
             _whisper = False
     return _whisper
 
@@ -167,23 +140,23 @@ def translate_to_english(text):
 
 
 def transcribe_voice(audio_path):
-    """Whisper-tiny — единственный вариант распознавания"""
+    """Whisper — распознавание речи"""
     logger.info(f"[TRANSCRIBE] Файл: {audio_path}")
     
     whisper_model = get_whisper()
     if not whisper_model:
-        logger.error("Whisper-tiny не загрузился")
+        logger.error("Whisper не загрузился")
         return None
         
     try:
         result = whisper_model(audio_path)
         text = result.get("text", "").strip()
         if text:
-            logger.info(f"[WHISPER-tiny] Распознано: {text[:120]}...")
+            logger.info(f"[WHISPER] Распознано: {text[:120]}...")
             return text
         logger.warning("[WHISPER] Пустой результат")
     except Exception as e:
-        logger.error(f"Whisper-tiny ошибка: {e}", exc_info=True)
+        logger.error(f"Whisper ошибка: {e}", exc_info=True)
     
     return None
 
