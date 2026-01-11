@@ -40,10 +40,14 @@ def register_start_handlers(bot):
                 pass
             return
 
+        # Определяем переменные для удобства и фикса NameError
+        chat_id = message.chat.id
+        user_id = message.from_user.id
+
         # Информация о подписке
         subscription_info = ""
         if message.chat.type == 'private':
-            sub = get_active_subscription(message.chat.id, message.from_user.id, 'personal')
+            sub = get_active_subscription(chat_id, user_id, 'personal')
             if sub:
                 plan_type = sub.get('plan_type', 'all')
                 plan_names = {
@@ -57,7 +61,7 @@ def register_start_handlers(bot):
             else:
                 subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
         else:
-            group_sub = get_active_group_subscription_by_chat_id(message.chat.id)
+            group_sub = get_active_group_subscription_by_chat_id(chat_id)
             if group_sub:
                 plan_type = group_sub.get('plan_type', 'all')
                 plan_names = {
@@ -79,34 +83,31 @@ def register_start_handlers(bot):
 Выберите раздел из меню ниже ⬇
         """.strip()
 
-
-
         try:
-            # В back_to_start_menu_callback (аналогично, внутри try после markup = InlineKeyboardMarkup())
             markup = InlineKeyboardMarkup()
 
             has_shazam_access = has_recommendations_access(chat_id, user_id)
             has_tickets = has_tickets_access(chat_id, user_id)
 
-            # Строка 1
+            # Строка 1: Сериалы / Премьеры
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
 
-            # Строка 2
+            # Строка 2: Рандом
             markup.row(
                 InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random")
             )
 
-            # Строка 3
+            # Строка 3: Нативный поиск / Поиск
             shazam_text = "🔮 Нативный поиск" if has_shazam_access else "🔒 Нативный поиск"
             markup.row(
                 InlineKeyboardButton(shazam_text, callback_data="shazam:start"),
                 InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
             )
 
-            # Строка 4
+            # Строка 4: Расписание / Билеты
             tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
             tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
             markup.row(
@@ -114,13 +115,20 @@ def register_start_handlers(bot):
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
             )
 
-            # Строка 5
+            # Строка 5: Оплата / Настройки / Помощь (только эмодзи)
             markup.row(
                 InlineKeyboardButton("💰", callback_data="start_menu:payment"),
                 InlineKeyboardButton("⚙️", callback_data="start_menu:settings"),
                 InlineKeyboardButton("❓", callback_data="start_menu:help")
             )
-            logger.info(f"✅ Ответ на /start отправлен пользователю {message.from_user.id}")
+
+            bot.send_message(
+                chat_id,
+                welcome_text,
+                parse_mode='HTML',
+                reply_markup=markup
+            )
+            logger.info(f"✅ Ответ на /start отправлен пользователю {user_id}")
 
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке меню: {e}", exc_info=True)
@@ -276,7 +284,7 @@ def register_start_handlers(bot):
             chat_id = call.message.chat.id
             message_id = call.message.message_id
 
-            # Та же логика подписки, что и в /start
+            # Та же логика подписки, что и в /start (теперь с группой)
             subscription_info = ""
             if call.message.chat.type == 'private':
                 sub = get_active_subscription(chat_id, user_id, 'personal')
@@ -292,6 +300,20 @@ def register_start_handlers(bot):
                     subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
                 else:
                     subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+            else:
+                group_sub = get_active_group_subscription_by_chat_id(chat_id)
+                if group_sub:
+                    plan_type = group_sub.get('plan_type', 'all')
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
+                else:
+                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
 
             welcome_text = f"""
 🎬 <b>Главное меню</b>{subscription_info}
@@ -301,29 +323,43 @@ def register_start_handlers(bot):
 Выберите раздел из меню ниже ⬇
             """.strip()
 
-            markup = InlineKeyboardMarkup(row_width=1)
+            markup = InlineKeyboardMarkup()
+
             has_shazam_access = has_recommendations_access(chat_id, user_id)
+            has_tickets = has_tickets_access(chat_id, user_id)
 
-            markup.add(InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"))
-            markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
-            markup.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
+            # Строка 1: Сериалы / Премьеры
+            markup.row(
+                InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
+                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
+            )
 
-            if has_shazam_access:
-                markup.add(InlineKeyboardButton("🔮 Нативный поиск", callback_data="shazam:start"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Нативный поиск", callback_data="shazam:start"))
+            # Строка 2: Рандом
+            markup.row(
+                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random")
+            )
 
-            markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
-            markup.add(InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"))
+            # Строка 3: Нативный поиск / Поиск
+            shazam_text = "🔮 Нативный поиск" if has_shazam_access else "🔒 Нативный поиск"
+            markup.row(
+                InlineKeyboardButton(shazam_text, callback_data="shazam:start"),
+                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
+            )
 
-            if has_tickets_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("🎫 Билеты", callback_data="start_menu:tickets"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Билеты", callback_data="start_menu:tickets_locked"))
+            # Строка 4: Расписание / Билеты
+            tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
+            tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
+            markup.row(
+                InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"),
+                InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
+            )
 
-            markup.add(InlineKeyboardButton("💳 Оплата", callback_data="start_menu:payment"))
-            markup.add(InlineKeyboardButton("⚙️ Настройки", callback_data="start_menu:settings"))
-            markup.add(InlineKeyboardButton("❓ Помощь", callback_data="start_menu:help"))
+            # Строка 5: Оплата / Настройки / Помощь (только эмодзи)
+            markup.row(
+                InlineKeyboardButton("💰", callback_data="start_menu:payment"),
+                InlineKeyboardButton("⚙️", callback_data="start_menu:settings"),
+                InlineKeyboardButton("❓", callback_data="start_menu:help")
+            )
 
             bot.edit_message_text(
                 text=welcome_text,
