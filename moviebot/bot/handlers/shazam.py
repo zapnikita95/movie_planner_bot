@@ -68,8 +68,8 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
             pass
     
     try:
-        # Ищем фильмы (results уже с OMDB данными)
-        results = search_movies(query, top_k=5)
+        # Ищем фильмы (получаем больше кандидатов для фильтрации)
+        results = search_movies(query, top_k=15)
         
         # === RERANKING по актёрам из OMDB ===
         query_lower = query.lower()
@@ -126,8 +126,40 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
         # Собираем кнопки отдельно
         markup = InlineKeyboardMarkup(row_width=1)
         
+        # Фильтруем результаты: оставляем только те, у которых есть kp_id (найдены в Кинопоиске)
+        # И ограничиваем до 5 для отображения
+        valid_results = []
+        for result in results:
+            imdb_id_raw = result.get('imdb_id')
+            if imdb_id_raw:
+                try:
+                    film_info = get_film_by_imdb_id(imdb_id_raw)
+                    if film_info and film_info.get('kp_id'):
+                        result['kp_id'] = film_info.get('kp_id')
+                        result['kp_title'] = film_info.get('title')
+                        result['kp_year'] = film_info.get('year')
+                        valid_results.append(result)
+                        if len(valid_results) >= 5:
+                            break
+                except Exception as e:
+                    logger.warning(f"[SHAZAM TEXT] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
+                    continue
+        
+        if not valid_results:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
+            
+            bot.edit_message_text(
+                "❌ Не удалось найти подходящие фильмы на Кинопоиске.\nПопробуйте описать по-другому.",
+                loading_msg.chat.id,
+                loading_msg.message_id,
+                reply_markup=markup
+            )
+            shazam_state.pop(user_id, None)
+            return
+        
         # Отправляем каждый фильм карточкой
-        for i, result in enumerate(results[:5], 1):
+        for i, result in enumerate(valid_results, 1):
             # Данные из OMDB по умолчанию
             omdb_title = result['title']
             omdb_year = result.get('year', '')
@@ -136,24 +168,10 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
             rating = result.get('imdb_rating', '')
             poster_url = result.get('poster_url')
             
-            # Пробуем взять русское название и kp_id из Кинопоиска
-            kp_title = None
-            kp_year = None
-            kp_id = None
-            imdb_id_raw = result.get('imdb_id')
-            if imdb_id_raw:
-                # imdb_id уже должен быть в формате tt1234567
-                try:
-                    film_info = get_film_by_imdb_id(imdb_id_raw)
-                    if film_info:
-                        kp_id = film_info.get('kp_id')
-                        kp_title = film_info.get('title')
-                        kp_year = film_info.get('year')
-                        logger.info(f"[SHAZAM TEXT] Найден в Кинопоиске: {kp_title} (kp_id={kp_id}) для imdb_id={imdb_id_raw}")
-                    else:
-                        logger.warning(f"[SHAZAM TEXT] Фильм с IMDB ID {imdb_id_raw} не найден в Кинопоиске")
-                except Exception as e:
-                    logger.warning(f"[SHAZAM TEXT] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
+            # Данные из Кинопоиска уже получены при фильтрации
+            kp_id = result.get('kp_id')
+            kp_title = result.get('kp_title')
+            kp_year = result.get('kp_year')
             
             # Что показываем
             display_title = kp_title or omdb_title
@@ -304,9 +322,9 @@ def process_shazam_voice_async(message, loading_msg):
         except Exception as e:
             logger.warning(f"[SHAZAM VOICE ASYNC] Не удалось обновить сообщение: {e}, продолжаем...")
         
-        # Ищем фильмы
+        # Ищем фильмы (получаем больше кандидатов для фильтрации)
         logger.info(f"[SHAZAM VOICE ASYNC] Начинаем поиск фильмов по запросу: '{text}'")
-        results = search_movies(text, top_k=5)
+        results = search_movies(text, top_k=15)
 
         # === RERANKING по актёрам из OMDB ===
         query_lower = text.lower()
@@ -342,7 +360,7 @@ def process_shazam_voice_async(message, loading_msg):
         # === КОНЕЦ RERANKING ===
 
         logger.info(f"[SHAZAM VOICE ASYNC] Поиск завершен, найдено результатов: {len(results)}")
-        
+
         if not results:
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
@@ -365,8 +383,40 @@ def process_shazam_voice_async(message, loading_msg):
         # Кнопки
         markup = InlineKeyboardMarkup(row_width=1)
         
+        # Фильтруем результаты: оставляем только те, у которых есть kp_id (найдены в Кинопоиске)
+        # И ограничиваем до 5 для отображения
+        valid_results = []
+        for result in results:
+            imdb_id_raw = result.get('imdb_id')
+            if imdb_id_raw:
+                try:
+                    film_info = get_film_by_imdb_id(imdb_id_raw)
+                    if film_info and film_info.get('kp_id'):
+                        result['kp_id'] = film_info.get('kp_id')
+                        result['kp_title'] = film_info.get('title')
+                        result['kp_year'] = film_info.get('year')
+                        valid_results.append(result)
+                        if len(valid_results) >= 5:
+                            break
+                except Exception as e:
+                    logger.warning(f"[SHAZAM VOICE] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
+                    continue
+        
+        if not valid_results:
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="shazam:start"))
+            
+            bot.edit_message_text(
+                "❌ Не удалось найти подходящие фильмы на Кинопоиске.\nПопробуйте описать по-другому.",
+                loading_msg.chat.id,
+                loading_msg.message_id,
+                reply_markup=markup
+            )
+            shazam_state.pop(user_id, None)
+            return
+        
         # Отправляем карточки
-        for i, result in enumerate(results[:5], 1):
+        for i, result in enumerate(valid_results, 1):
             omdb_title = result['title']
             omdb_year = result.get('year', '')
             director = result.get('director', '')
@@ -374,23 +424,10 @@ def process_shazam_voice_async(message, loading_msg):
             rating = result.get('imdb_rating', '')
             poster_url = result.get('poster_url')
             
-            kp_title = None
-            kp_year = None
-            kp_id = None
-            imdb_id_raw = result.get('imdb_id')
-            if imdb_id_raw:
-                # imdb_id уже должен быть в формате tt1234567
-                try:
-                    film_info = get_film_by_imdb_id(imdb_id_raw)
-                    if film_info:
-                        kp_id = film_info.get('kp_id')
-                        kp_title = film_info.get('title')
-                        kp_year = film_info.get('year')
-                        logger.info(f"[SHAZAM VOICE] Найден в Кинопоиске: {kp_title} (kp_id={kp_id}) для imdb_id={imdb_id_raw}")
-                    else:
-                        logger.warning(f"[SHAZAM VOICE] Фильм с IMDB ID {imdb_id_raw} не найден в Кинопоиске")
-                except Exception as e:
-                    logger.warning(f"[SHAZAM VOICE] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
+            # Данные из Кинопоиска уже получены при фильтрации
+            kp_id = result.get('kp_id')
+            kp_title = result.get('kp_title')
+            kp_year = result.get('kp_year')
             
             display_title = kp_title or omdb_title
             display_year = f" ({kp_year or omdb_year})" if (kp_year or omdb_year) else ""
