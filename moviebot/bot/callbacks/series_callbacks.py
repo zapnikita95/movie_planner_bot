@@ -990,17 +990,70 @@ def handle_episodes_back_to_seasons(call):
         except:
             pass
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
-def rate_film_callback(call):
-    """Обработчик кнопки 'Оценить'"""
+@bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_seasons:"))
+def handle_episodes_back_to_seasons(call):
+    """Обработчик возврата к списку сезонов из эпизодов"""
     try:
         # Сразу отвечаем на callback, чтобы убрать "часики"
         try:
             bot.answer_callback_query(call.id)
         except Exception as ans_e:
-            logger.warning(f"[RATE FILM] Не удалось ответить на callback сразу: {ans_e}")
+            logger.warning(f"[EPISODES BACK] Не удалось ответить на callback (возможно истёк): {ans_e}")
 
         # ── Безопасный парсинг kp_id ─────────────────────────────────────────────
+        parts = call.data.split(":")
+        if len(parts) < 2:
+            logger.error(f"[EPISODES BACK] Нет kp_id в callback_data: {call.data}")
+            bot.answer_callback_query(call.id, "Ошибка кнопки, попробуй заново", show_alert=True)
+            return
+
+        kp_id_raw = parts[1].strip()
+        try:
+            kp_id = str(int(kp_id_raw))  # делаем чистую строку-число
+        except ValueError:
+            logger.error(f"[EPISODES BACK] kp_id не число: '{kp_id_raw}' → {call.data}")
+            bot.answer_callback_query(call.id, "Неверный ID сериала", show_alert=True)
+            return
+
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+
+        logger.info(f"[EPISODES BACK] Возврат к сезонам: kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
+
+        # ── Здесь должен быть вызов функции показа сезонов ───────────────────────
+        from moviebot.bot.callbacks.series_callbacks import series_track_callback
+
+        # Формируем фейковый call с нужным callback_data
+        fake_call = types.CallbackQuery(
+            id=call.id,
+            from_user=call.from_user,
+            message=call.message,
+            chat_instance=call.chat_instance,
+            data=f"series_track:{kp_id}"
+        )
+
+        # Вызываем обработчик списка сезонов
+        series_track_callback(fake_call)
+
+        logger.info(f"[EPISODES BACK] Успешно вызван series_track для kp_id={kp_id}")
+
+    except Exception as e:
+        logger.error(f"[EPISODES BACK] Критическая ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Не удалось вернуться к сезонам", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
+def rate_film_callback(call):
+    """Обработчик кнопки 'Оценить'"""
+    try:
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception as ans_e:
+            logger.warning(f"[RATE FILM] Не удалось ответить на callback сразу: {ans_e}")
+
         parts = call.data.split(":")
         if len(parts) < 2:
             logger.error(f"[RATE FILM] Нет kp_id в callback_data: {call.data}")
@@ -1009,7 +1062,7 @@ def rate_film_callback(call):
 
         kp_id_raw = parts[1].strip()
         try:
-            kp_id = str(int(kp_id_raw))  # чистая строка-число без лишних нулей
+            kp_id = str(int(kp_id_raw))
         except ValueError:
             logger.error(f"[RATE FILM] kp_id не число: '{kp_id_raw}' в {call.data}")
             bot.answer_callback_query(call.id, "Неверный ID фильма", show_alert=True)
@@ -1020,67 +1073,74 @@ def rate_film_callback(call):
 
         logger.info(f"[RATE FILM] Пользователь {user_id} хочет оценить kp_id={kp_id}")
 
-        # Проверяем, есть ли фильм в базе (kp_id хранится как строка)
         film_id = None
+        title = 'Фильм'
+        is_series = False
+
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+            cursor.execute('''
+                SELECT id, title, is_series 
+                FROM movies 
+                WHERE chat_id = %s AND kp_id = %s
+            ''', (chat_id, kp_id))
             row = cursor.fetchone()
 
         if row:
             film_id = row[0] if isinstance(row, tuple) else row.get('id')
             title = row[1] if isinstance(row, tuple) else row.get('title', 'Фильм')
+            is_series_db = row[2] if isinstance(row, tuple) else row.get('is_series', 0)
+            is_series = bool(is_series_db)
+
+        if is_series:
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
         else:
-            title = 'Фильм'
+            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
 
         if not film_id:
-            # Фильма нет в базе — получаем инфу с Кинопоиска
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/" if not is_series else f"https://www.kinopoisk.ru/series/{kp_id}/"
-            
             info = extract_movie_info(link)
             title = info.get('title', f'Фильм {kp_id}') if info else f'Фильм {kp_id}'
 
-            # Отправляем сообщение с просьбой оценить — теперь название всегда будет!
             msg = bot.reply_to(
                 call.message,
-                f"💬 Чтобы оценить *{title}*, ответьте на это сообщение числом от 1 до 10.\n\nФильм будет добавлен в базу при оценке.",
+                f"💬 Чтобы оценить *{title}*, ответьте на это сообщение числом от 1 до 10.\n\n"
+                f"Фильм/сериал будет добавлен в базу при оценке.",
                 parse_mode='Markdown'
             )
 
-            # Добавляем в базу заранее (если info есть — используем его, иначе пустой dict)
             film_id, _ = ensure_movie_in_database(chat_id, kp_id, link, info or {}, user_id)
 
             if film_id:
                 rating_messages[msg.message_id] = film_id
                 logger.info(f"[RATE FILM] Добавлено в rating_messages: msg_id={msg.message_id} → film_id={film_id}")
             else:
-                logger.warning(f"[RATE FILM] Не удалось добавить фильм в базу для kp_id={kp_id}")
+                logger.warning(f"[RATE FILM] Не удалось добавить в базу kp_id={kp_id}")
             return
 
-        # Фильм уже в базе — проверяем, есть ли оценка
         with db_lock:
             cursor.execute('''
                 SELECT rating FROM ratings 
-                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                AND (is_imported = FALSE OR is_imported IS NULL)
             ''', (chat_id, film_id, user_id))
             existing = cursor.fetchone()
 
         if existing:
             rating = existing[0] if isinstance(existing, tuple) else existing.get('rating')
-            msg = bot.reply_to(
+            bot.reply_to(
                 call.message,
-                f"✅ Вы уже оценили *{title}*: {rating}/10\n\nЧтобы изменить — ответьте на это сообщение числом от 1 до 10."
-            )
-        else:
-            # Отправляем сообщение с просьбой оценить — теперь название всегда будет!
-            msg = bot.reply_to(
-                call.message,
-                f"💬 Чтобы оценить *{title}*, ответьте на это сообщение числом от 1 до 10.\n\nФильм будет добавлен в базу при оценке.",
+                f"✅ Вы уже оценили *{title}*: {rating}/10\n\n"
+                f"Чтобы изменить — ответьте на это сообщение числом от 1 до 10.",
                 parse_mode='Markdown'
             )
-
-        # Сохраняем сообщение для последующей обработки ответа
-        rating_messages[msg.message_id] = film_id
-        logger.info(f"[RATE FILM] rating_messages обновлено: msg_id={msg.message_id} → film_id={film_id}")
+        else:
+            msg = bot.reply_to(
+                call.message,
+                f"💬 Чтобы оценить *{title}*, ответьте на это сообщение числом от 1 до 10.\n\n"
+                f"Фильм/сериал будет добавлен в базу при оценке.",
+                parse_mode='Markdown'
+            )
+            rating_messages[msg.message_id] = film_id
+            logger.info(f"[RATE FILM] rating_messages обновлено: msg_id={msg.message_id} → film_id={film_id}")
 
     except Exception as e:
         logger.error(f"[RATE FILM] Критическая ошибка: {e}", exc_info=True)
@@ -1088,7 +1148,7 @@ def rate_film_callback(call):
             bot.answer_callback_query(call.id, "❌ Ошибка при обработке оценки", show_alert=True)
         except:
             pass
-
+        
     @bot.callback_query_handler(func=lambda call: call.data.startswith("show_facts:") or call.data.startswith("facts:"))
     def facts_callback(call):
         """Обработчик кнопки 'Интересные факты'"""
