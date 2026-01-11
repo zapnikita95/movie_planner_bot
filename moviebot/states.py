@@ -62,8 +62,8 @@ user_promo_admin_state = {}  # user_id: {} - состояние ожидания
 user_unsubscribe_state = {}  # user_id: {'message_id': int} - состояние ожидания ввода ID для /unsubscribe
 user_add_admin_state = {}  # user_id: {'message_id': int} - состояние ожидания ввода ID для /add_admin
 
-# Состояния КиноШазам
-shazam_state = {}  # user_id: {'mode': 'text' or 'voice', 'chat_id': int} - состояние ожидания запроса для КиноШазам
+# Состояния Элиас
+shazam_state = {}  # user_id: {'mode': 'text' or 'voice', 'chat_id': int} - состояние ожидания запроса для Элиас
 
 # Состояние для личных чатов - ожидание следующего сообщения после промпта handler'а
 user_private_handler_state = {}  # user_id: {'handler': str, 'prompt_message_id': int, 'handler_func': callable}
