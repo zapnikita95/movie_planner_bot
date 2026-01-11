@@ -7,6 +7,7 @@ import json
 import math
 from datetime import datetime, date, timedelta
 import psycopg2
+import telebot
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -407,36 +408,16 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
             'parse_mode': 'HTML',
             'disable_web_page_preview': True
         }
+
         if message_thread_id is not None:
             common_kwargs['message_thread_id'] = message_thread_id
 
         if message_id:
-            common_kwargs['message_id'] = message_id
             edit_kwargs = common_kwargs.copy()
             edit_kwargs.pop('message_thread_id', None)  # ← убираем то, что edit не жрёт
-            bot.edit_message_text(**edit_kwargs)
-        else:
-            bot.send_message(**common_kwargs)
-
-    except Exception as e:
-        logger.error(f"[SHOW_SEASONS_LIST] Ошибка отправки: {e}", exc_info=True)
-
-    try:
-        common_kwargs = {
-            'text': text,
-            'chat_id': chat_id,
-            'reply_markup': markup,
-            'parse_mode': 'HTML',
-            'disable_web_page_preview': True
-        }
-
-        if message_thread_id is not None:
-            common_kwargs['message_thread_id'] = message_thread_id
-
-        if message_id:
-            common_kwargs['message_id'] = message_id
+            edit_kwargs['message_id'] = message_id
             try:
-                bot.edit_message_text(**common_kwargs)
+                bot.edit_message_text(**edit_kwargs)
             except telebot.apihelper.ApiTelegramException as api_exc:
                 if api_exc.error_code == 400 and "message is not modified" in str(api_exc).lower():
                     logger.debug("[SHOW_SEASONS_LIST] Сообщение не изменилось — пропускаем")
@@ -450,6 +431,8 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
     except Exception as e:
         logger.error(f"[SHOW_SEASONS_LIST] Ошибка редактирования/отправки: {e}", exc_info=True)
         # Фоллбек — отправляем новое сообщение, если редактирование совсем сломалось
+        if not message_id:  # Если это было send_message, не отправляем фоллбек
+            return
         try:
             send_kwargs = {
                 'text': text,
@@ -699,7 +682,6 @@ def handle_seasons_command(message):
 
 def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 10):
     """Возвращает страницу сериалов пользователя с пагинацией"""
-    offset = (page - 1) * page_size
     items = []
     total_count = 0
     total_pages = 1
@@ -708,15 +690,8 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
         with db_lock:
             cursor = conn.cursor()
 
-            # Считаем количество
-            cursor.execute("""
-                SELECT COUNT(DISTINCT m.id) AS total_count
-                FROM movies m
-                WHERE m.chat_id = %s AND m.is_series = 1
-            """, (chat_id,))
-            count_row = cursor.fetchone()
-            total_count = count_row[0] if count_row else 0
-            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+            # Сначала получаем все данные для правильной сортировки
+            # Количество посчитаем после получения всех элементов
 
             # Основной большой запрос
             cursor.execute("""
@@ -744,14 +719,8 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     AND ss.user_id = %s
                 WHERE m.chat_id = %s AND m.is_series = 1
                 GROUP BY m.id
-                ORDER BY
-                    (m.is_ongoing = TRUE AND BOOL_OR(ss.subscribed = TRUE)) DESC,
-                    (m.is_ongoing = TRUE) DESC,
-                    (COUNT(st.id) > 0 AND BOOL_OR(ss.subscribed = TRUE)) DESC,
-                    (COUNT(st.id) > 0) DESC,
-                    m.added_date DESC
-                LIMIT %s OFFSET %s
-            """, (chat_id, user_id, chat_id, user_id, chat_id, page_size, offset))
+                ORDER BY m.added_date DESC
+            """, (chat_id, user_id, chat_id, user_id, chat_id))
 
             rows = cursor.fetchall()
 
@@ -779,6 +748,43 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                 })
 
             cursor.close()
+            
+            # Сортировка по приоритету:
+            # 1. 🟢 +🔔 +⏳ (is_ongoing=True, has_subscription=True, watched_count=0)
+            # 2. 🟢 +🔕 +⏳ (is_ongoing=True, has_subscription=False, watched_count=0)
+            # 3. 🟢 +🔔 (is_ongoing=True, has_subscription=True, watched_count>0)
+            # 4. 🔴 +🔔 +⏳ (is_ongoing=False, has_subscription=True, watched_count=0)
+            # 5. 🔴 +🔕 +⏳ (is_ongoing=False, has_subscription=False, watched_count=0)
+            # 6. Остальные (🔴 +🔕 или другие комбинации)
+            def get_sort_priority(item):
+                is_ongoing = item['is_ongoing'] or False
+                has_subscription = item['has_subscription'] or False
+                watched_count = item['watched_count'] or 0
+                is_watching = watched_count == 0  # ⏳ если watched_count=0
+                
+                if is_ongoing and has_subscription and is_watching:
+                    return 1  # 🟢 +🔔 +⏳
+                elif is_ongoing and not has_subscription and is_watching:
+                    return 2  # 🟢 +🔕 +⏳
+                elif is_ongoing and has_subscription and not is_watching:
+                    return 3  # 🟢 +🔔
+                elif not is_ongoing and has_subscription and is_watching:
+                    return 4  # 🔴 +🔔 +⏳
+                elif not is_ongoing and not has_subscription and is_watching:
+                    return 5  # 🔴 +🔕 +⏳
+                else:
+                    return 6  # Остальные
+            
+            # Сортировка по приоритету
+            items.sort(key=get_sort_priority)
+            
+            # Подсчитываем общее количество после получения всех элементов
+            total_count = len(items)
+            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+            
+            # Применяем пагинацию после сортировки
+            offset = (page - 1) * page_size
+            items = items[offset:offset + page_size]
 
     except psycopg2.InterfaceError as e:
         logger.error(f"[GET_USER_SERIES_PAGE] Cursor error: {e}")
