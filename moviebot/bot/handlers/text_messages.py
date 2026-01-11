@@ -1102,6 +1102,37 @@ def handle_group_search_reply(message):
     process_search_query(message, query, reply_to_message=message.reply_to_message)
 
 
+# ==================== ОБРАБОТЧИК ДЛЯ ПРИВАТНЫХ ЧАТОВ: SHAZAM ТЕКСТ (REPLY) ====================
+@bot.message_handler(func=lambda m: m.chat.type == 'private' and
+                                      m.reply_to_message and
+                                      m.reply_to_message.from_user.id == BOT_ID and
+                                      m.text and
+                                      "Опишите, что есть в фильме?" in (m.reply_to_message.text or ""))
+def handle_private_shazam_text_reply(message):
+    """Обработчик текстового запроса Shazam в приватных чатах - reply на сообщение бота"""
+    from moviebot.states import user_expected_text
+    user_id = message.from_user.id
+    
+    # Удаляем ожидание через user_expected_text, если оно есть (чтобы избежать двойной обработки)
+    if user_id in user_expected_text:
+        if user_expected_text[user_id].get('expected_for') == 'shazam_text':
+            del user_expected_text[user_id]
+    
+    query = message.text.strip()
+    if not query:
+        bot.reply_to(message, "❌ Пустое описание.")
+        return
+    
+    # Проверяем длину (до 300 символов)
+    if len(query) > 300:
+        bot.reply_to(message, f"❌ Описание слишком длинное ({len(query)} символов). Максимум: 300 символов.")
+        return
+    
+    logger.info(f"[PRIVATE SHAZAM TEXT REPLY] Получен запрос от {user_id}: '{query[:50]}'")
+    from moviebot.bot.handlers.shazam import process_shazam_text_query
+    process_shazam_text_query(message, query, reply_to_message=message.reply_to_message)
+
+
 # ==================== ОБРАБОТЧИК ДЛЯ ГРУПП: SHAZAM ТЕКСТ (REPLY) ====================
 @bot.message_handler(func=lambda m: m.chat.type in ['group', 'supergroup'] and
                                       m.reply_to_message and

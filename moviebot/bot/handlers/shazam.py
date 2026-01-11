@@ -292,7 +292,7 @@ def process_shazam_voice_async(message, loading_msg):
         
         def actor_score(result):
             score = 0
-            query_lower = query.lower()  # или text.lower()
+            query_lower = text.lower()  # используем text, не query
             
             for field in ['actors', 'director']:  # добавили director
                 names_str = result.get(field, '')
@@ -556,7 +556,7 @@ def register_shazam_handlers(bot):
     # ==================== ОБРАБОТЧИКИ ГОЛОСОВЫХ СООБЩЕНИЙ ====================
     
     def is_shazam_voice_in_private(message):
-        """Проверка для обработчика голосового сообщения Shazam в ЛС"""
+        """Проверка для обработчика голосового сообщения Shazam в ЛС - принимает ЛИБО reply ЛИБО следующее сообщение"""
         if message.chat.type != 'private':
             return False
         user_id = message.from_user.id
@@ -566,34 +566,44 @@ def register_shazam_handlers(bot):
             return False
         if not message.voice:
             return False
+        # Принимаем как reply, так и следующее сообщение (не проверяем reply_to_message)
         return True
     
     @bot.message_handler(content_types=['voice'], func=is_shazam_voice_in_private)
     def handle_shazam_voice_in_private(message):
-        """Обработчик голосового запроса Shazam в ЛС - принимает первое голосовое сообщение"""
+        """Обработчик голосового запроса Shazam в ЛС - принимает ЛИБО reply ЛИБО следующее голосовое сообщение"""
         user_id = message.from_user.id
         chat_id = message.chat.id
         
-        logger.info(f"[SHAZAM VOICE PRIVATE] ===== START: user_id={user_id}, chat_id={chat_id}, duration={message.voice.duration if message.voice else 'N/A'}")
+        logger.info(f"[SHAZAM VOICE PRIVATE] ===== START: user_id={user_id}, chat_id={chat_id}, is_reply={message.reply_to_message is not None}, duration={message.voice.duration if message.voice else 'N/A'}")
         
         try:
             # Проверяем доступ
             if not has_recommendations_access(chat_id, user_id):
                 logger.warning(f"[SHAZAM VOICE PRIVATE] Нет доступа для user_id={user_id}")
-                bot.send_message(chat_id, "❌ Нет доступа к этой функции")
+                if message.reply_to_message:
+                    bot.reply_to(message, "❌ Нет доступа к этой функции")
+                else:
+                    bot.send_message(chat_id, "❌ Нет доступа к этой функции")
                 shazam_state.pop(user_id, None)
                 return
             
             # Проверяем длину голосового (Telegram max 1 мин = 60 сек)
             if message.voice.duration > 60:
                 logger.warning(f"[SHAZAM VOICE PRIVATE] Голосовое слишком длинное: {message.voice.duration} сек")
-                bot.send_message(chat_id, "❌ Голосовое сообщение слишком длинное (максимум 1 минута)")
+                if message.reply_to_message:
+                    bot.reply_to(message, "❌ Голосовое сообщение слишком длинное (максимум 1 минута)")
+                else:
+                    bot.send_message(chat_id, "❌ Голосовое сообщение слишком длинное (максимум 1 минута)")
                 shazam_state.pop(user_id, None)
                 return
             
             # Показываем анимацию загрузки и запускаем асинхронную обработку
             logger.info(f"[SHAZAM VOICE PRIVATE] Отправляем сообщение о распознавании и запускаем асинхронную обработку...")
-            loading_msg = bot.send_message(chat_id, "⏳ Минуту, идёт поиск")
+            if message.reply_to_message:
+                loading_msg = bot.reply_to(message, "⏳ Минуту, идёт поиск")
+            else:
+                loading_msg = bot.send_message(chat_id, "⏳ Минуту, идёт поиск")
             logger.info(f"[SHAZAM VOICE PRIVATE] Сообщение отправлено, message_id={loading_msg.message_id}, запускаем поток")
             
             # Очищаем состояние сразу, чтобы следующее голосовое не обрабатывалось
@@ -608,7 +618,10 @@ def register_shazam_handlers(bot):
         except Exception as e:
             logger.error(f"[SHAZAM VOICE PRIVATE] ===== CRITICAL ERROR: {e}", exc_info=True)
             try:
-                bot.send_message(chat_id, f"❌ Критическая ошибка: {str(e)[:100]}")
+                if message.reply_to_message:
+                    bot.reply_to(message, f"❌ Критическая ошибка: {str(e)[:100]}")
+                else:
+                    bot.send_message(chat_id, f"❌ Критическая ошибка: {str(e)[:100]}")
             except:
                 pass
             shazam_state.pop(user_id, None)
