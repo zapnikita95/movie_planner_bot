@@ -151,6 +151,7 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     # Проверяем доступ к билетам для кнопки "Добавить билеты" (только для планов в кино)
     from moviebot.utils.helpers import has_tickets_access
     markup = InlineKeyboardMarkup()
+    sources = None  # Инициализируем переменную для источников
     
     if plan_type == 'cinema' and plan_id:
         if has_tickets_access(chat_id, user_id):
@@ -175,13 +176,16 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
                     ''', (sources_json, plan_id))
                     conn.commit()
                 
-                markup = InlineKeyboardMarkup(row_width=2)
-                for platform, url in sources[:6]:
-                    markup.add(InlineKeyboardButton(platform, callback_data=f"streaming_select:{plan_id}:{platform}"))
-                markup.add(InlineKeyboardButton("✅ Завершить", callback_data=f"streaming_done:{plan_id}"))
+                # Создаем markup с URL-кнопками для источников
+                markup = InlineKeyboardMarkup(row_width=1)
+                for platform, url in sources[:10]:  # Максимум 10 источников
+                    markup.add(InlineKeyboardButton(platform, url=url))
+                
+                logger.info(f"[PROCESS PLAN] Найдено {len(sources)} источников для kp_id={kp_id}")
             else:
                 # Если источники не найдены, создаем пустую разметку для кнопки "Перейти к описанию"
                 markup = InlineKeyboardMarkup()
+                logger.info(f"[PROCESS PLAN] Источники не найдены для kp_id={kp_id}")
         except Exception as e:
             logger.warning(f"[PROCESS PLAN] Не удалось получить онлайн-кинотеатры: {e}", exc_info=True)
             # При ошибке создаем пустую разметку для кнопки "Перейти к описанию"
@@ -204,8 +208,8 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
             logger.warning(f"[PROCESS PLAN] Не удалось преобразовать kp_id в int: {kp_id}, ошибка: {e}")
     
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
-    if plan_type == 'home' and markup.keyboard and any(btn.callback_data.startswith("streaming_select:") for row in markup.keyboard for btn in row):
-        text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
+    if plan_type == 'home' and sources:
+        text += f"\n\n📺 <b>Онлайн-кинотеатры для просмотра:</b>"
     
     bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
@@ -2099,6 +2103,70 @@ def handle_edit_plan_datetime_internal(message, state):
         logger.error(f"[EDIT PLAN DATETIME INTERNAL] Ошибка: {e}", exc_info=True)
         try:
             bot.reply_to(message, "❌ Произошла ошибка при обработке.")
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("stream_sel:"))
+def stream_sel_callback(call):
+    """Обработчик кнопки 'Выбрать онлайн-кинотеатр' для фильма/сериала (не запланированного)"""
+    try:
+        # Проверяем устаревший callback
+        callback_is_old = False
+        try:
+            bot.answer_callback_query(call.id, "⏳ Загружаю...")
+        except Exception as answer_error:
+            error_str = str(answer_error)
+            if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+                callback_is_old = True
+                logger.warning(f"[STREAM SEL] Callback query устарел, пропускаем: {answer_error}")
+        
+        if callback_is_old:
+            return
+        
+        kp_id = int(call.data.split(":")[1])
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
+        
+        logger.info(f"[STREAM SEL] Показать источники для kp_id={kp_id}")
+        
+        # Получаем источники из API
+        from moviebot.api.kinopoisk_api import get_external_sources
+        sources = get_external_sources(kp_id)
+        
+        if not sources:
+            bot.edit_message_text(
+                "😔 Не найдено онлайн-кинотеатров для просмотра.",
+                chat_id, message_id,
+                message_thread_id=message_thread_id,
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton("◀️ Назад", callback_data=f"back_to_film:{kp_id}")
+                )
+            )
+            return
+        
+        # Формируем список кнопок с онлайн-кинотеатрами
+        markup = InlineKeyboardMarkup(row_width=1)
+        for platform, url in sources[:10]:  # Максимум 10 источников
+            markup.add(InlineKeyboardButton(
+                platform,
+                url=url  # Прямая ссылка на платформу
+            ))
+        
+        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}"))
+        
+        bot.edit_message_text(
+            "📺 <b>Онлайн-кинотеатры для просмотра:</b>\n\nВыберите платформу:",
+            chat_id, message_id,
+            message_thread_id=message_thread_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+        
+    except Exception as e:
+        logger.error(f"[STREAM SEL] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
         except:
             pass
 

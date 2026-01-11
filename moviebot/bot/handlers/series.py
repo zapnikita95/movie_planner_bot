@@ -1384,7 +1384,7 @@ def help_command(message):
 Приятного просмотра! 🍿
 
 Если у вас возникли сложности с ботом или оплатой, напишите нам:
-@zap\\\_nikita
+@zapnikita95
 movie-planner-bot@yandex.com"""
 
     markup = InlineKeyboardMarkup(row_width=1)
