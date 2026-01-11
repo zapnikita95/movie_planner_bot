@@ -1198,7 +1198,15 @@ def back_to_film_description(call):
     message_thread_id = getattr(call.message, 'message_thread_id', None)
 
     try:
-        bot.answer_callback_query(call.id, text="⏳ Загружаю...")
+        # Пытаемся ответить на callback, но игнорируем ошибку если callback устарел
+        try:
+            bot.answer_callback_query(call.id, text="⏳ Загружаю...")
+        except Exception as answer_error:
+            # Игнорируем ошибку устаревшего callback query
+            if "query is too old" in str(answer_error) or "query ID is invalid" in str(answer_error):
+                logger.warning(f"[BACK TO FILM] Callback query устарел, продолжаем без answer: {answer_error}")
+            else:
+                logger.error(f"[BACK TO FILM] Ошибка answer_callback_query: {answer_error}", exc_info=True)
 
         kp_id_str = call.data.split(":", 1)[1].strip()
         try:

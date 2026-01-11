@@ -41,6 +41,11 @@ def edit_command(message):
     from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
     if from_settings:
         markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
+    else:
+        # Если from_settings не установлен, устанавливаем False
+        if user_id not in user_edit_state:
+            user_edit_state[user_id] = {}
+        user_edit_state[user_id]['from_settings'] = False
     
     help_text = (
         "✏️ <b>Что вы хотите изменить?</b>\n\n"
@@ -227,10 +232,13 @@ def edit_plan_datetime_callback(call):
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
         
+        # Сохраняем from_settings, если он был установлен
+        from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
         user_edit_state[user_id] = {
             'action': 'edit_plan_datetime',
             'plan_id': plan_id,
-            'prompt_message_id': call.message.message_id
+            'prompt_message_id': call.message.message_id,
+            'from_settings': from_settings
         }
         
         markup = InlineKeyboardMarkup()
@@ -405,9 +413,12 @@ def edit_rating_callback(call):
         chat_id = call.message.chat.id
         film_id = int(call.data.split(":")[1])
         
+        # Сохраняем from_settings, если он был установлен
+        from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
         user_edit_state[user_id] = {
             'action': 'edit_rating',
-            'film_id': film_id
+            'film_id': film_id,
+            'from_settings': from_settings
         }
         
         bot.edit_message_text(

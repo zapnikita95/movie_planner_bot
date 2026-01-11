@@ -11,27 +11,44 @@ logger = logging.getLogger(__name__)
 # 1. Основной хэндлер — нажатие "Добавить билеты" после планирования
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_ticket:"))
 def add_ticket_from_plan_callback(call):
-    logger.info(f"[TICKET CALLBACK] 🔥 add_ticket сработал: data='{call.data}', user_id={call.from_user.id}")
+    logger.info(f"[TICKET CALLBACK] 🔥 add_ticket сработал: data='{call.data}', user_id={call.from_user.id}, chat_id={call.message.chat.id}")
 
     try:
-        bot.answer_callback_query(call.id, "Открываю загрузку билетов...")  # видимый тултип
-
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         message_id = call.message.message_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
+        
+        try:
+            bot.answer_callback_query(call.id, "Открываю загрузку билетов...")  # видимый тултип
+        except Exception as answer_error:
+            # Игнорируем ошибку устаревшего callback query
+            if "query is too old" in str(answer_error) or "query ID is invalid" in str(answer_error):
+                logger.warning(f"[TICKET CALLBACK] Callback query устарел, продолжаем без answer: {answer_error}")
+            else:
+                logger.error(f"[TICKET CALLBACK] Ошибка answer_callback_query: {answer_error}", exc_info=True)
 
         try:
             plan_id = int(call.data.split(":")[1])
-        except:
-            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            logger.info(f"[TICKET CALLBACK] Обработка plan_id={plan_id}")
+        except Exception as parse_error:
+            logger.error(f"[TICKET CALLBACK] Ошибка парсинга plan_id: {parse_error}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            except:
+                pass
             return
 
         if not has_tickets_access(chat_id, user_id):
-            bot.answer_callback_query(
-                call.id,
-                "🎫 Загрузка билетов доступна только с подпиской «Билеты» или «Все режимы».\nПодключите через /payment",
-                show_alert=True
-            )
+            logger.warning(f"[TICKET CALLBACK] У пользователя {user_id} нет доступа к билетам")
+            try:
+                bot.answer_callback_query(
+                    call.id,
+                    "🎫 Загрузка билетов доступна только с подпиской «Билеты» или «Все режимы».\nПодключите через /payment",
+                    show_alert=True
+                )
+            except:
+                pass
             return
 
         # Состояние
@@ -45,20 +62,35 @@ def add_ticket_from_plan_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_ticket_upload:{plan_id}"))
 
-        bot.edit_message_text(
-            chat_id=chat_id,
-            message_id=message_id,
-            text="🎟️ <b>Загрузка билетов</b>\n\n"
-                 "Отправьте фото или файл с билетом(ами).",
-            parse_mode='HTML',
-            reply_markup=markup
-        )
+        text = "🎟️ <b>Загрузка билетов</b>\n\nОтправьте фото или файл с билетом(ами)."
+        
+        try:
+            bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=text,
+                parse_mode='HTML',
+                reply_markup=markup
+            )
+        except Exception as edit_error:
+            logger.error(f"[TICKET CALLBACK] Ошибка редактирования сообщения: {edit_error}", exc_info=True)
+            # Пытаемся отправить новое сообщение
+            try:
+                send_kwargs = {'text': text, 'chat_id': chat_id, 'reply_markup': markup, 'parse_mode': 'HTML'}
+                if message_thread_id is not None:
+                    send_kwargs['message_thread_id'] = message_thread_id
+                bot.send_message(**send_kwargs)
+            except Exception as send_error:
+                logger.error(f"[TICKET CALLBACK] Критическая ошибка отправки сообщения: {send_error}", exc_info=True)
 
-        logger.info(f"[TICKET] Начато добавление билетов к plan_id={plan_id}")
+        logger.info(f"[TICKET CALLBACK] Начато добавление билетов к plan_id={plan_id}, user_id={user_id}, chat_id={chat_id}")
 
     except Exception as e:
-        logger.error(f"[TICKET CALLBACK] Ошибка в add_ticket: {e}", exc_info=True)
-        bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
+        logger.error(f"[TICKET CALLBACK] Критическая ошибка в add_ticket: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
+        except:
+            pass
 
 
 # 2. Кнопка "Добавить ещё билет"

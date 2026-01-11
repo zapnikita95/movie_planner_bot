@@ -1078,6 +1078,63 @@ def handle_timezone_callback(call):
             pass
 
 
+@bot.callback_query_handler(func=lambda call: call.data == "cancel_action")
+def settings_cancel_action_callback(call):
+    """Обработчик cancel_action для настроек - возвращает в настройки"""
+    logger.info(f"[SETTINGS CANCEL ACTION] ===== START: callback_id={call.id}, user_id={call.from_user.id}")
+    try:
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot, call.id)
+        
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Очищаем все состояния
+        from moviebot.states import (
+            user_ticket_state, user_search_state, user_import_state,
+            user_edit_state, user_settings_state, user_plan_state,
+            user_clean_state, user_promo_state, user_promo_admin_state,
+            user_cancel_subscription_state, user_refund_state,
+            user_unsubscribe_state, user_add_admin_state, user_view_film_state
+        )
+        
+        states_to_clear = [
+            user_ticket_state, user_search_state, user_import_state,
+            user_edit_state, user_settings_state, user_plan_state,
+            user_clean_state, user_promo_state, user_promo_admin_state,
+            user_cancel_subscription_state, user_refund_state,
+            user_unsubscribe_state, user_add_admin_state, user_view_film_state
+        ]
+        
+        for state_dict in states_to_clear:
+            if user_id in state_dict:
+                del state_dict[user_id]
+        
+        # Возвращаемся в настройки
+        from moviebot.bot.handlers.settings import settings_command
+        class FakeMessage:
+            def __init__(self, call):
+                self.from_user = call.from_user
+                self.chat = call.message.chat
+                self.text = '/settings'
+        
+        fake_message = FakeMessage(call)
+        settings_command(fake_message)
+        
+        # Удаляем старое сообщение
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
+    except Exception as e:
+        logger.error(f"[SETTINGS CANCEL ACTION] Ошибка: {e}", exc_info=True)
+        try:
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot, call.id, "❌ Ошибка", show_alert=True)
+        except:
+            pass
+
+
 def register_settings_handlers(bot_param):
     """Регистрирует обработчики команды /settings"""
     logger.info("Регистрация обработчиков команды /settings")

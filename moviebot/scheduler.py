@@ -1552,6 +1552,7 @@ def process_recurring_payments():
                     WHERE is_active = TRUE
                     AND next_payment_date IS NOT NULL
                     AND payment_method_id IS NOT NULL
+                    AND period_type != 'lifetime'
                     AND (
                         -- Тестовые подписки: проверяем по времени (если прошло 10 минут)
                         (period_type = 'test' AND next_payment_date <= %s)

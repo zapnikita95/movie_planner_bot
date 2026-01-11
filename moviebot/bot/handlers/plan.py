@@ -498,7 +498,7 @@ def show_schedule(message):
                 
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"film_desc:{int(kp_id)}"))
+                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
             
             if not home_plans:
                 cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
@@ -518,7 +518,7 @@ def show_schedule(message):
                 button_text = f"{title} | {date_str}"
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"film_desc:{int(kp_id)}"))
+                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
             
             home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
             
@@ -1540,11 +1540,13 @@ def edit_plan_callback(call):
         from moviebot.database.db_operations import get_user_timezone_or_default
         
         # Очищаем состояние редактирования при возврате к меню
+        from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
         if user_id in user_edit_state and user_edit_state[user_id].get('action') == 'edit_plan_datetime':
             # Оставляем только базовую информацию для меню редактирования
             user_edit_state[user_id] = {
                 'action': 'edit_plan',
-                'plan_id': plan_id
+                'plan_id': plan_id,
+                'from_settings': from_settings
             }
         
         # Получаем информацию о плане
@@ -1586,11 +1588,14 @@ def edit_plan_callback(call):
         else:
             date_str = "не указана"
         
+        # Сохраняем from_settings, если он был установлен
+        from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
         user_edit_state[user_id] = {
             'action': 'edit_plan',
             'plan_id': plan_id,
             'plan_type': plan_type,
-            'kp_id': kp_id  # Сохраняем kp_id для возврата к описанию
+            'kp_id': kp_id,  # Сохраняем kp_id для возврата к описанию
+            'from_settings': from_settings
         }
         
         markup = InlineKeyboardMarkup(row_width=1)

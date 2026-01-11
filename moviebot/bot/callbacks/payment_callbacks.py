@@ -1795,7 +1795,7 @@ def register_payment_callbacks(bot_instance):
                 if is_private:
                     from moviebot.database.db_operations import get_user_groups
                     
-                    user_groups = get_user_groups(user_id)
+                    user_groups = get_user_groups(user_id, bot)
                     
                     # Самая надёжная дедупликация
                     unique_groups = []

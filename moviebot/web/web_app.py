@@ -685,8 +685,9 @@ def create_web_app(bot):
                                 
                             elif subscription_type == 'group':
                                 from moviebot.database.db_operations import get_active_group_users, get_subscription_members
+                                from moviebot.bot.bot_init import BOT_ID
                                 
-                                members_dict = get_subscription_members(subscription_id, BOT_ID) if subscription_id else {}
+                                members_dict = get_subscription_members(subscription_id) if subscription_id else {}
                                 members_count = len(members_dict) if members_dict else 0
                                 active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
                                 active_count = len(active_users) if active_users else 0
@@ -852,8 +853,9 @@ def create_web_app(bot):
                                 
                                 elif subscription_type == 'group':
                                     from moviebot.database.db_operations import get_active_group_users, get_subscription_members
+                                    from moviebot.bot.bot_init import BOT_ID
                                     
-                                    members_dict = get_subscription_members(subscription_id_from_payment, BOT_ID) if subscription_id_from_payment else {}
+                                    members_dict = get_subscription_members(subscription_id_from_payment) if subscription_id_from_payment else {}
                                     members_count = len(members_dict) if members_dict else 0
                                     active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
                                     active_count = len(active_users) if active_users else 0

@@ -1757,13 +1757,18 @@ def main_file_handler(message):
         
         if step == 'upload_ticket':
             plan_id = state.get('plan_id')
+            chat_id_state = state.get('chat_id', message.chat.id)
+            logger.info(f"[TICKET UPLOAD] Начало загрузки билета: plan_id={plan_id}, user_id={user_id}, chat_id={chat_id_state}")
+            
             if not plan_id:
+                logger.error(f"[TICKET UPLOAD] plan_id не найден в состоянии")
                 bot.reply_to(message, "❌ Ошибка: план не найден.")
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
                 return
 
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
+            logger.info(f"[TICKET UPLOAD] Получен file_id={file_id}, тип: {'photo' if message.photo else 'document'}")
 
             conn = get_db_connection()  # ФИКС: создаём в начале блока
             cursor = get_db_cursor()    # ФИКС: создаём в начале блока
@@ -1788,27 +1793,55 @@ def main_file_handler(message):
                 
                 cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
                 conn.commit()
+                logger.info(f"[TICKET UPLOAD] Билет сохранен в БД для plan_id={plan_id}")
 
             total_tickets = len(existing_tickets)
             was_first = total_tickets == 1
+            logger.info(f"[TICKET UPLOAD] Всего билетов: {total_tickets}, первый билет: {was_first}")
 
             if was_first:
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("➕ Добавить ещё билет", callback_data=f"add_more_tickets:{plan_id}"))
                 markup.add(InlineKeyboardButton("⬅️ К списку мероприятий", callback_data="ticket_new"))
 
-                bot.reply_to(
-                    message,
-                    f"✅ Билет добавлен! (Всего: {total_tickets})\n\n"
-                    f"Можете добавить ещё или вернуться к списку.",
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
+                # В группах используем reply, в личке - следующее сообщение
+                try:
+                    chat_info = bot.get_chat(message.chat.id)
+                    is_private = chat_info.type == 'private'
+                except:
+                    is_private = message.chat.id > 0
+                
+                if is_private:
+                    bot.send_message(
+                        message.chat.id,
+                        f"✅ Билет добавлен! (Всего: {total_tickets})\n\n"
+                        f"Можете добавить ещё или вернуться к списку.",
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                else:
+                    bot.reply_to(
+                        message,
+                        f"✅ Билет добавлен! (Всего: {total_tickets})\n\n"
+                        f"Можете добавить ещё или вернуться к списку.",
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 state['step'] = 'add_more_tickets'
             else:
-                bot.reply_to(message, f"✅ Билет добавлен! (Всего: {total_tickets})")
+                # В группах используем reply, в личке - следующее сообщение
+                try:
+                    chat_info = bot.get_chat(message.chat.id)
+                    is_private = chat_info.type == 'private'
+                except:
+                    is_private = message.chat.id > 0
+                
+                if is_private:
+                    bot.send_message(message.chat.id, f"✅ Билет добавлен! (Всего: {total_tickets})")
+                else:
+                    bot.reply_to(message, f"✅ Билет добавлен! (Всего: {total_tickets})")
 
-            logger.info(f"[TICKET UPLOAD] Билет добавлен к plan_id={plan_id}, всего: {total_tickets}")
+            logger.info(f"[TICKET UPLOAD] ✅ Завершено: билет добавлен к plan_id={plan_id}, всего: {total_tickets}")
             return
                 
         if step == 'waiting_ticket_file':
