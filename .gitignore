@@ -20,3 +20,4 @@ cache/
 text# Игнорируем тяжёлые IMDB файлы
 data/imdb_raw/*.tsv.gz
 data/imdb_raw/*.tsv
+cache/
