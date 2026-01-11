@@ -186,7 +186,6 @@ def build_tmdb_index():
         try:
             import kaggle
             
-            # Настройка kaggle API
             kaggle_username = os.getenv("KAGGLE_USERNAME")
             kaggle_key = os.getenv("KAGGLE_KEY")
             
@@ -194,7 +193,6 @@ def build_tmdb_index():
                 logger.error("KAGGLE_USERNAME и KAGGLE_KEY не установлены в переменных окружения")
                 return None, None
             
-            # Настройка kaggle API credentials
             kaggle_dir = Path("/root/.kaggle")
             kaggle_dir.mkdir(parents=True, exist_ok=True)
             kaggle_json = kaggle_dir / "kaggle.json"
@@ -203,32 +201,25 @@ def build_tmdb_index():
                 with open(kaggle_json, "w") as f:
                     f.write(f'{{"username":"{kaggle_username}","key":"{kaggle_key}"}}')
                 os.chmod(kaggle_json, 0o600)
-                # Устанавливаем переменные окружения для kaggle API
                 os.environ['KAGGLE_USERNAME'] = kaggle_username
                 os.environ['KAGGLE_KEY'] = kaggle_key
             
-            # Скачиваем датасет через Kaggle API
             logger.info("Скачиваем датасет через Kaggle API...")
             kaggle.api.dataset_download_files(
-                "asaniczka/tmdb-movies-dataset-2023-930k-movies",
+                "alanvourch/tmdb-movies-daily-updates",  # ← Изменено здесь!
                 path=str(CACHE_DIR),
                 unzip=True
             )
             
-            # Ищем файл по паттерну (на случай смены версии v11 → v12 и т.д.)
-            possible_files = list(CACHE_DIR.glob("TMDB_movie_dataset_v*.csv"))
-            if not possible_files:
-                # Проверяем также без префикса версии
-                possible_files = list(CACHE_DIR.glob("*movie*.csv"))
-                if not possible_files:
-                    logger.error("CSV файл TMDB_movie_dataset_v*.csv не найден после распаковки")
-                    logger.info(f"Содержимое CACHE_DIR: {list(CACHE_DIR.iterdir())}")
-                    return None, None
+            # В новом датасете главный файл — TMDB_all_movies.csv
+            actual_csv = CACHE_DIR / "TMDB_all_movies.csv"
+            if not actual_csv.exists():
+                logger.error("TMDB_all_movies.csv не найден после скачивания")
+                logger.info(f"Содержимое CACHE_DIR: {list(CACHE_DIR.iterdir())}")
+                return None, None
             
-            actual_csv = possible_files[0]
             logger.info(f"Найден главный файл: {actual_csv.name} (размер: {actual_csv.stat().st_size / 1e6:.1f} MB)")
             
-            # Копируем в финальный путь (используем copy вместо move для безопасности)
             import shutil
             shutil.copy(actual_csv, TMDB_CSV_PATH)
             logger.info(f"TMDB CSV успешно скопирован: {TMDB_CSV_PATH}")
@@ -245,7 +236,6 @@ def build_tmdb_index():
     try:
         df = pd.read_csv(TMDB_CSV_PATH, low_memory=False)
         logger.info(f"Загружено {len(df)} записей")
-        # Добавляем отладку — очень полезно на Railway
         logger.info(f"Колонки в датасете: {', '.join(df.columns.tolist())}")
     except Exception as e:
         logger.error(f"Ошибка чтения CSV файла: {e}", exc_info=True)
@@ -260,10 +250,21 @@ def build_tmdb_index():
     df['genres_str'] = df['genres'].apply(lambda x: parse_json_list(x, 'name'))
     df['keywords_str'] = df['keywords'].apply(lambda x: parse_json_list(x, 'name', top_n=15))
     
-    # ← Главное исправление здесь
-    df['actors_str'] = df['cast_names'].apply(lambda x: str(x) if pd.notna(x) else "")
+    # Актёры — в новом датасете поле 'cast' это JSON-строка
+    df['actors_str'] = df['cast'].apply(lambda x: parse_json_list(x, 'name', top_n=10))
     
-    df['director_str'] = df['crew'].apply(lambda x: parse_json_list(x, 'name', top_n=3) if pd.notna(x) else '')
+    # Режиссёры — ищем в 'crew' только с job == "Director"
+    def get_directors(crew_json):
+        if pd.isna(crew_json) or crew_json == '[]':
+            return ''
+        try:
+            items = json.loads(crew_json)
+            directors = [item['name'] for item in items if item.get('job') == 'Director']
+            return ', '.join(directors[:3])
+        except:
+            return ''
+    
+    df['director_str'] = df['crew'].apply(get_directors)
     
     df['description'] = df.apply(
         lambda row: f"{row['title']} ({row['year']}) {row['genres_str']}. "
@@ -304,7 +305,6 @@ def build_tmdb_index():
     
     logger.info(f"Готово! Создан индекс на {len(processed)} фильмов")
     return index, processed
-
 
 def get_index_and_movies():
     global _index, _movies_df
