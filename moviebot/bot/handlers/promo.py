@@ -375,8 +375,6 @@ def handle_promo_admin_text(message):
         user_promo_admin_state.pop(user_id, None)
         return
 
-    # Ожидаемый формат: КОД СКИДКА КОЛИЧЕСТВО
-    # Примеры: DIM 95% 1    SALE 500 50
     try:
         parts = text.split(maxsplit=2)
         if len(parts) != 3:
@@ -399,25 +397,37 @@ def handle_promo_admin_text(message):
         if discount_value <= 0:
             raise ValueError("Скидка должна быть больше 0")
 
-        # Создаём промокод (используем существующую функцию)
-        new_promo = create_promocode(
+        # Создаём промокод
+        result = create_promocode(
             code=code,
             discount_input=f"{discount_value}{'%' if discount_type == 'percent' else ''}",
             total_uses=total_uses
         )
 
-        discount_display = f"{new_promo['discount_value']}%" if new_promo['discount_type'] == 'percent' else f"{int(new_promo['discount_value'])} ₽"
+        # Проверяем результат
+        if isinstance(result[0], bool) and not result[0]:
+            raise ValueError(result[1])
+
+        promo_data, success_message = result
+
+        # Формируем отображение скидки
+        discount_display = (
+            f"{promo_data['discount_value']}%"
+            if promo_data['discount_type'] == 'percent'
+            else f"{int(promo_data['discount_value'])} ₽"
+        )
 
         response = (
             "✅ Промокод успешно создан!\n\n"
-            f"Код: <code>{new_promo['code']}</code>\n"
+            f"Код: <code>{promo_data['code']}</code>\n"
             f"Скидка: {discount_display}\n"
-            f"Количество использований: {new_promo['total_uses']}"
+            f"Количество использований: {promo_data['total_uses']}\n\n"
+            f"{success_message}"
         )
 
         bot.reply_to(message, response, parse_mode='HTML')
 
-        # Удаляем состояние после успешного создания
+        # Удаляем состояние после успеха
         user_promo_admin_state.pop(user_id, None)
 
     except ValueError as ve:
@@ -426,14 +436,12 @@ def handle_promo_admin_text(message):
             f"❌ Неверный формат.\n\n{str(ve)}\n\n"
             "Пример правильного ввода:\n"
             "<code>DIM 95% 1</code>\n"
-            "<code>SALE 500 50</code>\n\n"
-            "Или напишите 'отмена'",
+            "<code>SALE 500 50</code>\n\n",
             parse_mode='HTML'
         )
     except Exception as e:
         logger.error(f"[PROMO ADMIN TEXT] Ошибка при создании: {e}", exc_info=True)
         bot.reply_to(message, "❌ Ошибка при создании промокода. Попробуйте позже.")
-
 def register_promo_handlers(bot):
     """
     Регистрация всех handlers из promo.py
