@@ -184,13 +184,9 @@ def build_tmdb_index():
     if not TMDB_CSV_PATH.exists():
         logger.info("TMDB CSV не найден — скачиваем через Kaggle API...")
         try:
-            import subprocess
+            import kaggle
             
-            # Настройка kaggle.json
-            kaggle_dir = Path("/root/.kaggle")
-            kaggle_dir.mkdir(parents=True, exist_ok=True)
-            kaggle_json = kaggle_dir / "kaggle.json"
-            
+            # Настройка kaggle API
             kaggle_username = os.getenv("KAGGLE_USERNAME")
             kaggle_key = os.getenv("KAGGLE_KEY")
             
@@ -198,17 +194,26 @@ def build_tmdb_index():
                 logger.error("KAGGLE_USERNAME и KAGGLE_KEY не установлены в переменных окружения")
                 return None, None
             
+            # Настройка kaggle API credentials
+            kaggle_dir = Path("/root/.kaggle")
+            kaggle_dir.mkdir(parents=True, exist_ok=True)
+            kaggle_json = kaggle_dir / "kaggle.json"
+            
             if not kaggle_json.exists():
                 with open(kaggle_json, "w") as f:
                     f.write(f'{{"username":"{kaggle_username}","key":"{kaggle_key}"}}')
                 os.chmod(kaggle_json, 0o600)
+                # Устанавливаем переменные окружения для kaggle API
+                os.environ['KAGGLE_USERNAME'] = kaggle_username
+                os.environ['KAGGLE_KEY'] = kaggle_key
             
-            # Скачиваем и распаковываем
-            logger.info("Скачиваем датасет через Kaggle CLI...")
-            subprocess.check_call([
-                "kaggle", "datasets", "download", "-d", "asaniczka/tmdb-movies-dataset-2023-930k-movies",
-                "-p", str(CACHE_DIR), "--unzip"
-            ])
+            # Скачиваем датасет через Kaggle API
+            logger.info("Скачиваем датасет через Kaggle API...")
+            kaggle.api.dataset_download_files(
+                "asaniczka/tmdb-movies-dataset-2023-930k-movies",
+                path=str(CACHE_DIR),
+                unzip=True
+            )
             
             # Ищем файл по паттерну (на случай смены версии v11 → v12 и т.д.)
             possible_files = list(CACHE_DIR.glob("TMDB_movie_dataset_v*.csv"))
@@ -228,8 +233,8 @@ def build_tmdb_index():
             shutil.copy(actual_csv, TMDB_CSV_PATH)
             logger.info(f"TMDB CSV успешно скопирован: {TMDB_CSV_PATH}")
             
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Ошибка скачивания через Kaggle CLI: {e}", exc_info=True)
+        except ImportError as e:
+            logger.error(f"Библиотека kaggle не установлена: {e}. Установите через: pip install kaggle", exc_info=True)
             return None, None
         except Exception as e:
             logger.error(f"Ошибка обработки TMDB датасета: {e}", exc_info=True)

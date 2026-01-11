@@ -4468,6 +4468,7 @@ def register_series_handlers(bot_param):
                         conn.commit()
                     
                     logger.info(f"[DICE GAME] Пользователь {user_id} ({username}) бросил кубик в чате {chat_id}, message_id={dice_msg.message_id}")
+                    logger.info(f"[DICE GAME] Текущее состояние dice_game_state[{chat_id}]: participants={list(game_state.get('participants', {}).keys())}, dice_messages={list(game_state.get('dice_messages', {}).keys())}")
                     
                     # Обновляем сообщение с результатами
                     message_id_to_update = game_state.get('message_id', message_id)
@@ -4484,14 +4485,25 @@ def register_series_handlers(bot_param):
             except:
                 pass
 
-    @bot.message_handler(content_types=['dice'])
+    @bot.message_handler(func=lambda m: m.dice is not None)
     def handle_dice_result(message):
         """Обработчик получения значения кубика (первое сообщение, value обычно None)"""
         # В Telegram API кубик сначала приходит с value=None, а финальное значение приходит через edited_message
         # Поэтому этот обработчик должен только логировать, а основная логика в handle_dice_result_edited
         try:
-            if message.dice and message.dice.value is not None and message.dice.emoji == '🎲':
-                logger.info(f"[DICE GAME RESULT] Получено сообщение с кубиком (value={message.dice.value}), но обрабатываем через edited_message_handler")
+            logger.info(f"[DICE GAME RESULT] ===== START: message_id={message.message_id}, chat_id={message.chat.id}, user_id={message.from_user.id if message.from_user else None}")
+            logger.info(f"[DICE GAME RESULT] message.dice={message.dice}, message.dice.value={message.dice.value if message.dice else None}, message.dice.emoji={message.dice.emoji if message.dice else None}")
+            
+            if message.dice:
+                if message.dice.value is not None and message.dice.emoji == '🎲':
+                    logger.info(f"[DICE GAME RESULT] ⚠️ Получено сообщение с кубиком (value={message.dice.value}), но финальное значение придет через edited_message_handler")
+                elif message.dice.value is None:
+                    logger.info(f"[DICE GAME RESULT] Кубик еще крутится (value=None), ожидаем edited_message")
+                else:
+                    logger.info(f"[DICE GAME RESULT] Кубик с другим эмодзи: {message.dice.emoji}, value={message.dice.value}")
+            else:
+                logger.warning(f"[DICE GAME RESULT] Сообщение {message.message_id} не содержит dice")
+            logger.info(f"[DICE GAME RESULT] ===== END =====")
         except Exception as e:
             logger.error(f"[DICE GAME RESULT] ❌ Ошибка в handle_dice_result: {e}", exc_info=True)
         # Пропускаем, так как финальное значение придет через edited_message
@@ -4507,26 +4519,35 @@ def register_series_handlers(bot_param):
             from datetime import datetime, timedelta
             
             logger.info(f"[DICE GAME RESULT EDITED] ===== START: message_id={message.message_id}, chat_id={message.chat.id}, user_id={message.from_user.id if message.from_user else None}")
+            logger.info(f"[DICE GAME RESULT EDITED] message.dice={message.dice}")
             
             # Проверяем наличие dice и эмодзи
             if not message.dice:
-                logger.warning(f"[DICE GAME RESULT EDITED] Сообщение {message.message_id} не содержит dice")
+                logger.warning(f"[DICE GAME RESULT EDITED] ❌ Сообщение {message.message_id} не содержит dice - ПРОПУСК")
                 return
             
-            logger.info(f"[DICE GAME RESULT EDITED] dice.emoji={message.dice.emoji}, dice.value={message.dice.value}")
+            logger.info(f"[DICE GAME RESULT EDITED] dice.emoji={message.dice.emoji}, dice.value={message.dice.value}, type(dice.value)={type(message.dice.value)}")
             
             if message.dice.emoji != '🎲':
-                logger.info(f"[DICE GAME RESULT EDITED] Пропуск: эмодзи {message.dice.emoji} не является 🎲")
+                logger.info(f"[DICE GAME RESULT EDITED] ⚠️ Пропуск: эмодзи {message.dice.emoji} не является 🎲")
                 return
             
             # Проверяем, что значение кубика уже определено (не None)
             if message.dice.value is None:
-                logger.info(f"[DICE GAME RESULT EDITED] Пропуск: dice.value еще None (кубик еще крутится)")
+                logger.info(f"[DICE GAME RESULT EDITED] ⚠️ Пропуск: dice.value еще None (кубик еще крутится) - ПРОДОЛЖАЕМ ОЖИДАНИЕ")
+                return
+            
+            # Проверяем, что значение кубика валидно (1-6 для 🎲)
+            if not (1 <= message.dice.value <= 6):
+                logger.warning(f"[DICE GAME RESULT EDITED] ❌ Неверное значение кубика: {message.dice.value} (ожидается 1-6)")
                 return
             
             chat_id = message.chat.id
+            logger.info(f"[DICE GAME RESULT EDITED] Проверка dice_game_state для chat_id={chat_id}, keys={list(dice_game_state.keys())}")
+            
             if chat_id not in dice_game_state:
-                logger.warning(f"[DICE GAME RESULT EDITED] Чат {chat_id} не найден в dice_game_state")
+                logger.warning(f"[DICE GAME RESULT EDITED] ❌ Чат {chat_id} не найден в dice_game_state - ПРОПУСК")
+                logger.info(f"[DICE GAME RESULT EDITED] Доступные chat_id в dice_game_state: {list(dice_game_state.keys())}")
                 return
             
             game_state = dice_game_state[chat_id]
@@ -4580,14 +4601,23 @@ def register_series_handlers(bot_param):
                 username = game_state['participants'][user_id].get('username', f'user_{user_id}')
                 logger.info(f"[DICE GAME RESULT EDITED] ✅ Сохранено значение кубика для {username} (user_id={user_id}): {dice_value} (было: {old_value})")
                 
+                # Логируем итоговый результат
+                participants_count = len(game_state.get('participants', {}))
+                participants_with_results = sum(1 for p in game_state.get('participants', {}).values() if 'value' in p and p.get('value') is not None)
+                logger.info(f"[DICE GAME RESULT EDITED] 📊 Итоговый результат: {participants_with_results}/{participants_count} участников имеют результаты")
+                
                 # Обновляем сообщение с результатами
                 if 'message_id' in game_state:
                     logger.info(f"[DICE GAME RESULT EDITED] Обновление сообщения с результатами, message_id={game_state['message_id']}")
-                    update_dice_game_message(chat_id, game_state, game_state['message_id'], BOT_ID)
+                    try:
+                        update_dice_game_message(chat_id, game_state, game_state['message_id'], BOT_ID)
+                        logger.info(f"[DICE GAME RESULT EDITED] ✅ Сообщение с результатами успешно обновлено")
+                    except Exception as update_e:
+                        logger.error(f"[DICE GAME RESULT EDITED] ❌ Ошибка при обновлении сообщения с результатами: {update_e}", exc_info=True)
                 else:
-                    logger.warning(f"[DICE GAME RESULT EDITED] message_id не найден в game_state")
+                    logger.warning(f"[DICE GAME RESULT EDITED] ⚠️ message_id не найден в game_state")
             else:
-                logger.warning(f"[DICE GAME RESULT EDITED] user_id={user_id} не найден в participants")
+                logger.warning(f"[DICE GAME RESULT EDITED] ❌ user_id={user_id} не найден в participants. participants keys: {list(game_state.get('participants', {}).keys())}")
                 
             logger.info(f"[DICE GAME RESULT EDITED] ===== END =====")
         except Exception as e:

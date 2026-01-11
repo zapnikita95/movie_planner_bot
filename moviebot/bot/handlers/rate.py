@@ -500,38 +500,92 @@ def handle_rating_internal(message, rating):
                     except Exception as update_e:
                         logger.warning(f"[RATE INTERNAL] Не удалось обновить сообщение с описанием фильма: {update_e}", exc_info=True)
                 
-                # Отправляем похожие фильмы после оценки 10
-                if rating == 10 and kp_id:
+                # Отправляем похожие фильмы после высокой оценки
+                if kp_id:
                     try:
                         from moviebot.utils.helpers import has_recommendations_access
                         if has_recommendations_access(chat_id, user_id):
-                            from moviebot.api.kinopoisk_api import get_similars
-
-                            similars = get_similars(kp_id)
-                            if similars:
-                                rec_text = "🔥 Поскольку вы поставили 10/10, вот похожие фильмы, которые могут понравиться:\n\n"
-                                rec_markup = InlineKeyboardMarkup(row_width=1)
-
-                                for film_id_sim, name, is_series_sim in similars:
-                                    short_name = (name[:50] + '...') if len(name) > 50 else name
-                                    button_text = f"{'📺' if is_series_sim else '🎬'} {short_name}"
-                                    rec_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{film_id_sim}"))
-
-                                rec_markup.add(InlineKeyboardButton("✅ Готово", callback_data="delete_this_message"))
-
-                                bot.send_message(
-                                    chat_id,
-                                    rec_text,
-                                    reply_markup=rec_markup,
-                                    parse_mode='HTML'
-                                )
-                                logger.info(f"[RATE INTERNAL] Похожие фильмы отправлены после оценки 10 для kp_id={kp_id}")
+                            # Определяем, является ли чат групповым
+                            is_group = chat_id < 0 or (hasattr(message.chat, 'type') and message.chat.type in ['group', 'supergroup'])
+                            
+                            should_send_similars = False
+                            rec_text = ""
+                            
+                            if is_group:
+                                # Для групповых чатов: проверяем среднюю оценку > 8.5 И хотя бы 65% активных участников оценили
+                                with db_lock:
+                                    # Получаем среднюю оценку (уже рассчитана выше, но пересчитаем для ясности)
+                                    cursor.execute('''
+                                        SELECT AVG(rating) as avg_rating 
+                                        FROM ratings 
+                                        WHERE chat_id = %s AND film_id = %s 
+                                        AND (is_imported = FALSE OR is_imported IS NULL)
+                                    ''', (chat_id, film_id))
+                                    avg_result = cursor.fetchone()
+                                    avg_rating = None
+                                    if avg_result:
+                                        avg_val = avg_result.get('avg_rating') if isinstance(avg_result, dict) else avg_result[0]
+                                        avg_rating = float(avg_val) if avg_val is not None else None
+                                    
+                                    # Получаем активных участников группы
+                                    cursor.execute('''
+                                        SELECT DISTINCT user_id
+                                        FROM stats
+                                        WHERE chat_id = %s AND user_id IS NOT NULL
+                                    ''', (chat_id,))
+                                    active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                                    
+                                    # Получаем пользователей, которые оценили этот фильм
+                                    cursor.execute('''
+                                        SELECT DISTINCT user_id 
+                                        FROM ratings
+                                        WHERE chat_id = %s AND film_id = %s 
+                                        AND (is_imported = FALSE OR is_imported IS NULL)
+                                    ''', (chat_id, film_id))
+                                    rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                                
+                                if avg_rating is not None and avg_rating > 8.5 and active_users:
+                                    # Вычисляем процент оценивших
+                                    rated_percentage = len(rated_users) / len(active_users) if active_users else 0
+                                    if rated_percentage >= 0.65:
+                                        should_send_similars = True
+                                        rec_text = f"🔥 Поскольку средняя оценка фильма {avg_rating:.1f}/10 и {len(rated_users)} из {len(active_users)} активных участников ({rated_percentage*100:.0f}%) оценили его, вот похожие фильмы, которые могут понравиться:\n\n"
+                                        logger.info(f"[RATE INTERNAL] Групповой чат: средняя={avg_rating:.1f}, оценили={len(rated_users)}/{len(active_users)} ({rated_percentage*100:.1f}%)")
+                                else:
+                                    logger.info(f"[RATE INTERNAL] Групповой чат: условия не выполнены (средняя={avg_rating}, активных={len(active_users)}, оценили={len(rated_users)})")
                             else:
-                                logger.info("[RATE INTERNAL] Похожих фильмов не найдено после оценки 10")
+                                # Для личных чатов: если оценка >= 9
+                                if rating >= 9:
+                                    should_send_similars = True
+                                    rec_text = f"🔥 Поскольку вы поставили {rating}/10, вот похожие фильмы, которые могут понравиться:\n\n"
+                                    logger.info(f"[RATE INTERNAL] Личный чат: оценка={rating}")
+                            
+                            if should_send_similars:
+                                from moviebot.api.kinopoisk_api import get_similars
+                                similars = get_similars(kp_id)
+                                if similars:
+                                    rec_markup = InlineKeyboardMarkup(row_width=1)
+
+                                    for film_id_sim, name, is_series_sim in similars:
+                                        short_name = (name[:50] + '...') if len(name) > 50 else name
+                                        button_text = f"{'📺' if is_series_sim else '🎬'} {short_name}"
+                                        rec_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{film_id_sim}"))
+
+                                    rec_markup.add(InlineKeyboardButton("✅ Готово", callback_data="delete_this_message"))
+
+                                    bot.send_message(
+                                        chat_id,
+                                        rec_text,
+                                        reply_markup=rec_markup,
+                                        parse_mode='HTML'
+                                    )
+                                    logger.info(f"[RATE INTERNAL] Похожие фильмы отправлены для kp_id={kp_id}, is_group={is_group}")
+                                else:
+                                    logger.info("[RATE INTERNAL] Похожих фильмов не найдено")
                         else:
-                            logger.info("[RATE INTERNAL] Нет доступа к рекомендациям после оценки 10")
+                            logger.info("[RATE INTERNAL] Нет доступа к рекомендациям")
                     except Exception as rec_e:
-                        logger.warning(f"[RATE INTERNAL] Ошибка при отправке похожих фильмов после оценки 10: {rec_e}", exc_info=True)
+                        logger.warning(f"[RATE INTERNAL] Ошибка при отправке похожих фильмов: {rec_e}", exc_info=True)
         except Exception as e:
             logger.error(f"[RATE INTERNAL] Ошибка при сохранении оценки: {e}", exc_info=True)
             bot.reply_to(message, "❌ Произошла ошибка при сохранении оценки.")

@@ -224,15 +224,13 @@ def handle_settings_callback(call):
             
             if example_type == "with_user":
                 # Пример события с участником (выбор случайного участника)
-                if BOT_ID is None:
-                    try:
-                        bot_info = bot.get_me()
-                        current_bot_id = bot_info.id
-                    except:
-                        current_bot_id = None
-                else:
-                    current_bot_id = BOT_ID
-                
+                current_bot_id = None
+                try:
+                    bot_info = bot.get_me()
+                    current_bot_id = bot_info.id
+                except Exception as e:
+                    logger.warning(f"Не удалось получить информацию о боте: {e}")
+
                 with db_lock:
                     if current_bot_id:
                         cursor.execute('''
