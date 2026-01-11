@@ -1768,7 +1768,14 @@ def register_series_handlers(bot_param):
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
             
             bot.answer_callback_query(call.id)
-            text = f"{mode_description}\n\n🎲 <b>Шаг 1/4: Выберите период</b>\n\n(можно выбрать несколько или пропустить)"
+            # Определяем номер шага в зависимости от режима
+            if mode in ['my_votes', 'group_votes']:
+                step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
+            elif mode == 'kinopoisk':
+                step_text = "🎲 <b>Шаг 1/3: Выберите период</b>"
+            else:
+                step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
+            text = f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько или пропустить)"
             bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             logger.info(f"[RANDOM CALLBACK] ✅ Mode selected: {mode}, moving to period selection, user_id={user_id}")
         except Exception as e:
@@ -1986,11 +1993,11 @@ def register_series_handlers(bot_param):
                     mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм на Кинопоиске по заданным фильтрам.'
                     text = f"{mode_description}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                 elif mode == 'group_votes':
-                    step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
+                    step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
                     mode_description = '👥 <b>По оценкам в базе (7.5+)</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.'
                     text = f"{mode_description}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                 elif mode == 'my_votes':
-                    step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
+                    step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
                     mode_description = '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.'
                     text = f"{mode_description}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                 else:
@@ -2064,15 +2071,70 @@ def register_series_handlers(bot_param):
             params = []
             
             if mode == 'my_votes':
-                # Жанры из импортированных фильмов пользователя с оценкой 9-10
+                # Жанры из импортированных оценок пользователя с оценкой 9-10
+                # Используем UNION для объединения жанров из фильмов в базе группы и импортированных оценок
                 base_query = """
-                    SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
-                    FROM movies m
-                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                    WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                    AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                    SELECT DISTINCT genre FROM (
+                        SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
+                        FROM movies m
+                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                        WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                        AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
                 """
                 params = [chat_id, user_id]
+                
+                # Добавляем фильтр по периодам для фильмов из базы группы
+                if periods:
+                    period_conditions = []
+                    for p in periods:
+                        if p == "До 1980":
+                            period_conditions.append("m.year < 1980")
+                        elif p == "1980–1990":
+                            period_conditions.append("(m.year >= 1980 AND m.year <= 1990)")
+                        elif p == "1990–2000":
+                            period_conditions.append("(m.year >= 1990 AND m.year <= 2000)")
+                        elif p == "2000–2010":
+                            period_conditions.append("(m.year >= 2000 AND m.year <= 2010)")
+                        elif p == "2010–2020":
+                            period_conditions.append("(m.year >= 2010 AND m.year <= 2020)")
+                        elif p == "2020–сейчас":
+                            period_conditions.append("m.year >= 2020")
+                    if period_conditions:
+                        base_query += " AND (" + " OR ".join(period_conditions) + ")"
+                
+                base_query += """
+                        UNION ALL
+                        SELECT DISTINCT TRIM(UNNEST(string_to_array(r.genres, ', '))) as genre
+                        FROM ratings r
+                        WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                        AND r.film_id IS NULL AND r.genres IS NOT NULL AND r.genres != '' AND r.genres != '—'
+                """
+                params.append(chat_id)
+                params.append(user_id)
+                
+                # Добавляем фильтр по периодам для импортированных оценок (используем сохраненный year)
+                if periods:
+                    period_conditions = []
+                    for p in periods:
+                        if p == "До 1980":
+                            period_conditions.append("r.year < 1980")
+                        elif p == "1980–1990":
+                            period_conditions.append("(r.year >= 1980 AND r.year <= 1990)")
+                        elif p == "1990–2000":
+                            period_conditions.append("(r.year >= 1990 AND r.year <= 2000)")
+                        elif p == "2000–2010":
+                            period_conditions.append("(r.year >= 2000 AND r.year <= 2010)")
+                        elif p == "2010–2020":
+                            period_conditions.append("(r.year >= 2010 AND r.year <= 2020)")
+                        elif p == "2020–сейчас":
+                            period_conditions.append("r.year >= 2020")
+                    if period_conditions:
+                        base_query += " AND (" + " OR ".join(period_conditions) + ")"
+                
+                base_query += """
+                    ) AS all_genres
+                    WHERE genre IS NOT NULL AND genre != ''
+                """
                 
             elif mode == 'group_votes':
                 # Жанры из фильмов со средней оценкой группы >= 7.5
@@ -2102,7 +2164,9 @@ def register_series_handlers(bot_param):
                 params = [chat_id]
             
             # --------------------- Фильтр по периодам ---------------------
-            if periods:
+            # Для my_votes фильтр по периодам уже применен в запросе выше
+            # Для остальных режимов применяем фильтр здесь
+            if periods and mode != 'my_votes':
                 period_conditions = []
                 for p in periods:
                     if p == "До 1980":
@@ -2157,7 +2221,13 @@ def register_series_handlers(bot_param):
             # Текст с выбранными жанрами
             selected_text = f"\n\nВыбрано: {', '.join(selected_genres)}" if selected_genres else ""
             
-            text = f"🎬 <b>Шаг 2/4: Выберите жанр</b>\n\n(можно выбрать несколько){selected_text}"
+            # Определяем номер шага в зависимости от режима
+            if mode in ['my_votes', 'group_votes']:
+                step_text = "🎬 <b>Шаг 2/2: Выберите жанр</b>"
+            else:
+                step_text = "🎬 <b>Шаг 2/4: Выберите жанр</b>"
+            
+            text = f"{step_text}\n\n(можно выбрать несколько){selected_text}"
             
             try:
                 bot.edit_message_text(text, chat_id, call.message.message_id,
@@ -2422,16 +2492,18 @@ def register_series_handlers(bot_param):
             genres = state.get('genres', [])
             
             # Получаем список kp_id фильмов с оценками 9-10, которые соответствуют периодам и жанрам
+            # Используем UNION для объединения фильмов из базы группы и импортированных оценок
             base_query = """
-                SELECT DISTINCT m.kp_id
-                FROM movies m
-                JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                AND m.kp_id IS NOT NULL
+                SELECT DISTINCT kp_id FROM (
+                    SELECT m.kp_id
+                    FROM movies m
+                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                    WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                    AND m.kp_id IS NOT NULL
             """
             params = [chat_id, user_id]
             
-            # Добавляем фильтр по периодам, если они выбраны
+            # Добавляем фильтр по периодам для фильмов из базы группы
             if periods:
                 period_conditions = []
                 for p in periods:
@@ -2450,7 +2522,7 @@ def register_series_handlers(bot_param):
                 if period_conditions:
                     base_query += " AND (" + " OR ".join(period_conditions) + ")"
             
-            # Добавляем фильтр по жанрам, если они выбраны
+            # Добавляем фильтр по жанрам для фильмов из базы группы
             if genres:
                 genre_conditions = []
                 for genre in genres:
@@ -2458,6 +2530,37 @@ def register_series_handlers(bot_param):
                     params.append(f"%{genre}%")
                 if genre_conditions:
                     base_query += " AND (" + " OR ".join(genre_conditions) + ")"
+            
+            base_query += """
+                    UNION ALL
+                    SELECT r.kp_id
+                    FROM ratings r
+                    WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                    AND r.film_id IS NULL AND r.kp_id IS NOT NULL
+            """
+            params.append(chat_id)
+            params.append(user_id)
+            
+            # Добавляем фильтр по периодам для импортированных оценок (используем сохраненный year)
+            if periods:
+                period_conditions = []
+                for p in periods:
+                    if p == "До 1980":
+                        period_conditions.append("r.year < 1980")
+                    elif p == "1980–1990":
+                        period_conditions.append("(r.year >= 1980 AND r.year <= 1990)")
+                    elif p == "1990–2000":
+                        period_conditions.append("(r.year >= 1990 AND r.year <= 2000)")
+                    elif p == "2000–2010":
+                        period_conditions.append("(r.year >= 2000 AND r.year <= 2010)")
+                    elif p == "2010–2020":
+                        period_conditions.append("(r.year >= 2010 AND r.year <= 2020)")
+                    elif p == "2020–сейчас":
+                        period_conditions.append("r.year >= 2020")
+                if period_conditions:
+                    base_query += " AND (" + " OR ".join(period_conditions) + ")"
+            
+            base_query += ") AS all_films"
             
             # Ограничиваем количество фильмов для производительности
             base_query += " LIMIT 50"
@@ -3365,7 +3468,7 @@ def register_series_handlers(bot_param):
                     
                     selected = ', '.join(periods) if periods else 'ничего'
                     mode_description = '👥 <b>По оценкам в базе (7.5+)</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.'
-                    text = f"{mode_description}\n\n🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
+                    text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                     
                     try:
                         bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -3409,7 +3512,7 @@ def register_series_handlers(bot_param):
                     
                     selected = ', '.join(periods) if periods else 'ничего'
                     mode_description = '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.'
-                    text = f"{mode_description}\n\n🎲 <b>Шаг 1/4: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
+                    text = f"{mode_description}\n\n🎲 <b>Шаг 1/2: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                     
                     try:
                         bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -3940,16 +4043,24 @@ def register_series_handlers(bot_param):
                     message_id = None
                 
                 # Получаем до 5 случайных фильмов с импортированной оценкой 9-10
+                # Используем UNION для объединения фильмов из базы группы и импортированных оценок
                 with db_lock:
                     cursor.execute("""
-                        SELECT DISTINCT m.kp_id, m.id
+                        (SELECT r.kp_id, NULL::integer as id
+                        FROM ratings r
+                        WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                        AND r.film_id IS NULL AND r.kp_id IS NOT NULL
+                        ORDER BY RANDOM()
+                        LIMIT 5)
+                        UNION ALL
+                        (SELECT m.kp_id, m.id
                         FROM movies m
                         JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
                         WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
                         AND m.kp_id IS NOT NULL
                         ORDER BY RANDOM()
-                        LIMIT 5
-                    """, (chat_id, user_id))
+                        LIMIT 5)
+                    """, (chat_id, user_id, chat_id, user_id))
                     favorite_films = cursor.fetchall()
                 
                 if not favorite_films:
@@ -5975,6 +6086,11 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 if not user_rating or user_rating < 1 or user_rating > 10:
                     continue
                 
+                # Получаем год и жанры из данных импорта
+                film_year = item.get('year')
+                film_genres_list = item.get('genres', [])
+                film_genres_str = ', '.join([g.get('genre', '') for g in film_genres_list if g.get('genre')]) if film_genres_list else None
+                
                 link = f"https://kinopoisk.ru/film/{kp_id}/"
                 
                 # Импортированные оценки НЕ добавляют фильмы в базу группы
@@ -6008,10 +6124,10 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             
                             # Добавляем импортированную оценку для существующего фильма
                             cursor.execute('''
-                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id)
-                                VALUES (%s, %s, %s, %s, TRUE, %s)
-                                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE, kp_id = EXCLUDED.kp_id
-                            ''', (chat_id, film_id, user_id, user_rating, kp_id))
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id, year, genres)
+                                VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s)
+                                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE, kp_id = EXCLUDED.kp_id, year = EXCLUDED.year, genres = EXCLUDED.genres
+                            ''', (chat_id, film_id, user_id, user_rating, kp_id, film_year, film_genres_str))
                             conn.commit()
                             
                             imported_count += 1
@@ -6037,9 +6153,9 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             
                             # Добавляем импортированную оценку БЕЗ film_id (film_id = NULL)
                             cursor.execute('''
-                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id)
-                                VALUES (%s, NULL, %s, %s, TRUE, %s)
-                            ''', (chat_id, user_id, user_rating, kp_id))
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id, year, genres)
+                                VALUES (%s, NULL, %s, %s, TRUE, %s, %s, %s)
+                            ''', (chat_id, user_id, user_rating, kp_id, film_year, film_genres_str))
                             conn.commit()
                             
                             imported_count += 1

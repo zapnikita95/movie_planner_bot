@@ -141,68 +141,19 @@ def register_random_callbacks(bot):
                 if mode == 'my_votes':
                     # Для режима "по моим оценкам" - получаем годы из импортированных фильмов с оценкой 9-10
                     # Используем UNION для объединения:
-                    # 1. Фильмы из базы группы (film_id IS NOT NULL)
-                    # 2. Импортированные оценки без film_id (film_id IS NULL) - для них используем API
-                    years = set()
-                    
-                    # 1. Получаем годы из фильмов, которые уже в базе группы
+                    # 1. Годы из фильмов, которые уже в базе группы (film_id IS NOT NULL)
+                    # 2. Годы из импортированных оценок без film_id (film_id IS NULL) - используем сохраненный year
                     cursor.execute("""
-                        SELECT DISTINCT m.year
-                        FROM movies m
-                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                        WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND m.year IS NOT NULL
-                        ORDER BY m.year
+                        SELECT DISTINCT COALESCE(m.year, r.year) as year
+                        FROM ratings r
+                        LEFT JOIN movies m ON m.id = r.film_id AND m.chat_id = r.chat_id
+                        WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                        AND (m.year IS NOT NULL OR r.year IS NOT NULL)
+                        ORDER BY year
                     """, (chat_id, user_id))
                     years_rows = cursor.fetchall()
-                    for row in years_rows:
-                        year = row.get('year') if isinstance(row, dict) else row[0]
-                        if year:
-                            years.add(year)
+                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row and (row.get('year') if isinstance(row, dict) else row[0])]
                     
-                    # 2. Получаем kp_id из импортированных оценок без film_id и получаем годы через API
-                    cursor.execute("""
-                        SELECT DISTINCT r.kp_id
-                        FROM ratings r
-                        WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND r.film_id IS NULL AND r.kp_id IS NOT NULL
-                        LIMIT 50
-                    """, (chat_id, user_id))
-                    kp_ids_rows = cursor.fetchall()
-                    
-                    if kp_ids_rows:
-                        from moviebot.api.kinopoisk_api import extract_movie_info
-                        import time
-                        request_count = 0
-                        max_requests_per_second = 5
-                        last_request_time = time.time()
-                        
-                        for row in kp_ids_rows:
-                            kp_id = row.get('kp_id') if isinstance(row, dict) else row[0]
-                            if not kp_id:
-                                continue
-                            
-                            # Ограничиваем скорость запросов (не более 5 в секунду)
-                            current_time = time.time()
-                            if request_count >= max_requests_per_second:
-                                elapsed = current_time - last_request_time
-                                if elapsed < 1.0:
-                                    time.sleep(1.0 - elapsed)
-                                request_count = 0
-                                last_request_time = time.time()
-                            
-                            try:
-                                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-                                film_info = extract_movie_info(link)
-                                request_count += 1
-                                
-                                if film_info and film_info.get('year'):
-                                    years.add(film_info['year'])
-                            except Exception as e:
-                                logger.warning(f"[RANDOM CALLBACK] Error getting year for kp_id={kp_id}: {e}")
-                                continue
-                    
-                    years = sorted(list(years))
                     logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode")
                     
                     # Определяем доступные периоды на основе найденных годов
