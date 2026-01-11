@@ -62,16 +62,18 @@ def add_ticket_from_plan_callback(call):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_ticket_upload:{plan_id}"))
 
-        text = "🎟️ <b>Загрузка билетов</b>\n\nОтправьте фото или файл с билетом(ами)."
+        text = "🎟️ <b>Загрузка билетов</b>\n\nОтправьте фото или файл с билетом(ами).\n\n💡 В группе отправьте в ответ на это сообщение, в личке можно отправить следующим сообщением."
         
         try:
-            bot.edit_message_text(
+            sent_msg = bot.edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=text,
                 parse_mode='HTML',
                 reply_markup=markup
             )
+            # Сохраняем message_id для проверки реплаев в групповых чатах
+            user_ticket_state[user_id]['prompt_message_id'] = message_id
         except Exception as edit_error:
             logger.error(f"[TICKET CALLBACK] Ошибка редактирования сообщения: {edit_error}", exc_info=True)
             # Пытаемся отправить новое сообщение
@@ -79,7 +81,10 @@ def add_ticket_from_plan_callback(call):
                 send_kwargs = {'text': text, 'chat_id': chat_id, 'reply_markup': markup, 'parse_mode': 'HTML'}
                 if message_thread_id is not None:
                     send_kwargs['message_thread_id'] = message_thread_id
-                bot.send_message(**send_kwargs)
+                sent_msg = bot.send_message(**send_kwargs)
+                # Сохраняем message_id для проверки реплаев в групповых чатах
+                if sent_msg:
+                    user_ticket_state[user_id]['prompt_message_id'] = sent_msg.message_id
             except Exception as send_error:
                 logger.error(f"[TICKET CALLBACK] Критическая ошибка отправки сообщения: {send_error}", exc_info=True)
 
@@ -115,13 +120,34 @@ def add_more_tickets_from_plan(call):
         'chat_id': chat_id
     }
 
-    bot.edit_message_text(
-        chat_id=chat_id,
-        message_id=call.message.message_id,
-        text="➕ <b>Добавляем ещё билеты</b>\n\n"
-             "Отправьте дополнительные фото или файлы с билетами.",
-        parse_mode='HTML'
-    )
+    try:
+        sent_msg = bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=call.message.message_id,
+            text="➕ <b>Добавляем ещё билеты</b>\n\n"
+                 "Отправьте дополнительные фото или файлы с билетами.\n\n💡 В группе отправьте в ответ на это сообщение, в личке можно отправить следующим сообщением.",
+            parse_mode='HTML'
+        )
+        # Сохраняем message_id для проверки реплаев в групповых чатах
+        user_ticket_state[user_id]['prompt_message_id'] = call.message.message_id
+    except Exception as edit_error:
+        logger.error(f"[TICKET CALLBACK] Ошибка редактирования сообщения в add_more_tickets: {edit_error}", exc_info=True)
+        # Пытаемся отправить новое сообщение
+        try:
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
+            send_kwargs = {
+                'text': "➕ <b>Добавляем ещё билеты</b>\n\nОтправьте дополнительные фото или файлы с билетами.\n\n💡 В группе отправьте в ответ на это сообщение, в личке можно отправить следующим сообщением.",
+                'chat_id': chat_id,
+                'parse_mode': 'HTML'
+            }
+            if message_thread_id is not None:
+                send_kwargs['message_thread_id'] = message_thread_id
+            sent_msg = bot.send_message(**send_kwargs)
+            # Сохраняем message_id для проверки реплаев в групповых чатах
+            if sent_msg:
+                user_ticket_state[user_id]['prompt_message_id'] = sent_msg.message_id
+        except Exception as send_error:
+            logger.error(f"[TICKET CALLBACK] Критическая ошибка отправки сообщения в add_more_tickets: {send_error}", exc_info=True)
 
     logger.info(f"[TICKET] Перешли в режим add_more_tickets для plan_id={plan_id}")
 

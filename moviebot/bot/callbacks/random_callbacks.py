@@ -174,7 +174,7 @@ def register_random_callbacks(bot):
                             if any(y >= 2020 for y in years):
                                 available_periods.append(period)
                 elif mode == 'group_votes':
-                    # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 9
+                    # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 7.5
                     cursor.execute("""
                         SELECT DISTINCT m.year
                         FROM movies m
@@ -183,7 +183,7 @@ def register_random_callbacks(bot):
                             SELECT 1 FROM ratings r 
                             WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
                             GROUP BY r.film_id, r.chat_id 
-                            HAVING AVG(r.rating) >= 9
+                            HAVING AVG(r.rating) >= 7.5
                         )
                         ORDER BY m.year
                     """, (chat_id,))
@@ -301,11 +301,12 @@ def register_random_callbacks(bot):
                 for period in available_periods:
                     markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
             
             bot.answer_callback_query(call.id)
-            # Для режимов group_votes показываем Шаг 1/2, для остальных - Шаг 1/4
+            # Для режимов group_votes показываем Шаг 1/4 (изменилось), для остальных - Шаг 1/4
             if mode == 'group_votes':
-                step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
+                step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
             else:
                 step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
             text = f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько или пропустить)"
@@ -346,6 +347,57 @@ def register_random_callbacks(bot):
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in random_mode_locked_handler: {e}", exc_info=True)
     
     logger.info("✅ Random callbacks registered")
+    
+    @bot.callback_query_handler(func=lambda call: call.data == "rand_mode:back")
+    def handle_rand_mode_back(call):
+        """Обработчик возврата к выбору режима рандома"""
+        try:
+            logger.info(f"[RANDOM CALLBACK] ===== MODE BACK: user_id={call.from_user.id}")
+            bot.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            # Очищаем состояние (или сбрасываем шаг на mode)
+            if user_id in user_random_state:
+                user_random_state[user_id]['step'] = 'mode'
+                user_random_state[user_id]['mode'] = None
+                user_random_state[user_id]['periods'] = []
+                user_random_state[user_id]['genres'] = []
+                user_random_state[user_id]['directors'] = []
+                user_random_state[user_id]['actors'] = []
+            
+            # Показываем выбор режима (используем код из random_start)
+            from moviebot.utils.helpers import has_recommendations_access
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+            
+            has_rec_access = has_recommendations_access(chat_id, user_id)
+            
+            if has_rec_access:
+                markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+                markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
+                markup.add(InlineKeyboardButton("🔒 По оценкам в базе", callback_data="rand_mode_locked:group_votes"))
+            
+            if has_rec_access:
+                markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
+            
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            try:
+                bot.edit_message_text("🎲 <b>Выберите режим рандома:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                logger.warning(f"[RANDOM MODE BACK] Edit failed, sending new message: {e}")
+                bot.send_message(chat_id, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_mode_back: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка обработки")
+            except:
+                pass
 
     @bot.callback_query_handler(func=lambda call: call.data == "start_search")
     def handle_start_search_callback(call):

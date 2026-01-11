@@ -995,49 +995,7 @@ def plan_type_callback(call):
             logger.info(f"[PLAN FROM ADDED] ===== КОНЕЦ ОБРАБОТКИ =====")
 
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("add_ticket:"))
-    def add_ticket_from_plan_callback(call):
-        """Обработчик кнопки 'Добавить билеты' из подтверждения /plan"""
-        try:
-            from moviebot.utils.helpers import has_tickets_access
-            from moviebot.states import user_ticket_state
-            
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            plan_id = int(call.data.split(":")[1])
-            
-            # Проверяем доступ к функциям билетов
-            if not has_tickets_access(chat_id, user_id):
-                bot.answer_callback_query(
-                    call.id, 
-                    "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment", 
-                    show_alert=True
-                )
-                return
-            
-            user_ticket_state[user_id] = {
-                'step': 'waiting_ticket_file',
-                'plan_id': plan_id,
-                'chat_id': chat_id
-            }
-            
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
-            
-            bot.answer_callback_query(call.id, "Загрузите билеты в чат")
-            bot.send_message(
-                chat_id,
-                "🎟️ <b>Загрузите билеты в чат</b>\n\n"
-                "Отправьте фото или файл с билетами в следующем сообщении.",
-                reply_markup=markup, parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"[ADD TICKET] Ошибка: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
-
+    # Обработчик add_ticket: перенесен в ticket_callbacks.py
     # TODO: Добавить остальные callback handlers:
     # - plan_detail
     # - remove_from_calendar

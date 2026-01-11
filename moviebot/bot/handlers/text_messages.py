@@ -1807,6 +1807,27 @@ def main_file_handler(message):
                 if user_id in user_ticket_state:
                     del user_ticket_state[user_id]
                 return
+            
+            # Проверка реплаев в групповых чатах
+            try:
+                chat_info = bot.get_chat(message.chat.id)
+                is_private = chat_info.type == 'private'
+            except:
+                is_private = message.chat.id > 0
+            
+            if not is_private:
+                # В групповых чатах требуем реплай на сообщение бота
+                if not message.reply_to_message:
+                    logger.info(f"[TICKET UPLOAD] В групповом чате требуется реплай на сообщение бота")
+                    return
+                if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+                    logger.info(f"[TICKET UPLOAD] Реплай не на сообщение бота")
+                    return
+                # Проверяем prompt_message_id, если сохранён
+                prompt_message_id = state.get('prompt_message_id')
+                if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                    logger.info(f"[TICKET UPLOAD] Реплай не на правильное сообщение (ожидаемый id={prompt_message_id}, получен {message.reply_to_message.message_id})")
+                    return
 
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
             logger.info(f"[TICKET UPLOAD] Получен file_id={file_id}, тип: {'photo' if message.photo else 'document'}")
@@ -1938,6 +1959,27 @@ def main_file_handler(message):
                     del user_ticket_state[user_id]
                 return
             
+            # Проверка реплаев в групповых чатах
+            try:
+                chat_info = bot.get_chat(message.chat.id)
+                is_private = chat_info.type == 'private'
+            except:
+                is_private = message.chat.id > 0
+            
+            if not is_private:
+                # В групповых чатах требуем реплай на сообщение бота
+                if not message.reply_to_message:
+                    logger.info(f"[TICKET ADD MORE] В групповом чате требуется реплай на сообщение бота")
+                    return
+                if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+                    logger.info(f"[TICKET ADD MORE] Реплай не на сообщение бота")
+                    return
+                # Проверяем prompt_message_id, если сохранён
+                prompt_message_id = state.get('prompt_message_id')
+                if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                    logger.info(f"[TICKET ADD MORE] Реплай не на правильное сообщение (ожидаемый id={prompt_message_id}, получен {message.reply_to_message.message_id})")
+                    return
+            
             file_id = message.photo[-1].file_id if message.photo else message.document.file_id
             
             # Получаем существующие билеты и добавляем новый
@@ -1966,7 +2008,17 @@ def main_file_handler(message):
                 cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
                 conn.commit()
             
-            bot.reply_to(message, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
+            # В группах используем reply, в личке - следующее сообщение
+            try:
+                chat_info = bot.get_chat(message.chat.id)
+                is_private = chat_info.type == 'private'
+            except:
+                is_private = message.chat.id > 0
+            
+            if is_private:
+                bot.send_message(message.chat.id, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
+            else:
+                bot.reply_to(message, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
             return
         
         # Сохраняем file_id для последующей обработки

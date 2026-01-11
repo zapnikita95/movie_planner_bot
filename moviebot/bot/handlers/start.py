@@ -100,11 +100,11 @@ def register_start_handlers(bot):
                 InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random")
             )
 
-            # Строка 3: Нативный поиск / Поиск
-            shazam_text = "🔮 Нативный поиск" if has_shazam_access else "🔒 Нативный поиск"
+            # Строка 3: Поиск / Элиас
+            elias_text = "🔮 Элиас" if has_shazam_access else "🔒 Элиас"
             markup.row(
-                InlineKeyboardButton(shazam_text, callback_data="shazam:start"),
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
+                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
+                InlineKeyboardButton(elias_text, callback_data="shazam:start")
             )
 
             # Строка 4: Расписание / Билеты
@@ -339,13 +339,13 @@ def register_start_handlers(bot):
                 InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random")
             )
 
-            # Строка 3: Нативный поиск / Поиск
-            shazam_text = "🔮 Нативный поиск" if has_shazam_access else "🔒 Нативный поиск"
+            # Строка 3: Поиск / Элиас
+            elias_text = "🔮 Элиас" if has_shazam_access else "🔒 Элиас"
             markup.row(
-                InlineKeyboardButton(shazam_text, callback_data="shazam:start"),
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
+                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
+                InlineKeyboardButton(elias_text, callback_data="shazam:start")
             )
-
+            
             # Строка 4: Расписание / Билеты
             tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
             tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
