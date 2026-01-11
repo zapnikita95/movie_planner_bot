@@ -1405,7 +1405,7 @@ def check_admin_message(message):
     """Проверяет, является ли сообщение ответом в админском состоянии"""
     from moviebot.states import (
         user_cancel_subscription_state, user_refund_state,
-        user_unsubscribe_state, user_add_admin_state
+        user_unsubscribe_state, user_add_admin_state, user_promo_admin_state
     )
     user_id = message.from_user.id
     
@@ -1413,7 +1413,8 @@ def check_admin_message(message):
         user_id in user_cancel_subscription_state or
         user_id in user_refund_state or
         user_id in user_unsubscribe_state or
-        user_id in user_add_admin_state
+        user_id in user_add_admin_state or
+        user_id in user_promo_admin_state
     )
     
     if not has_state:
@@ -1447,7 +1448,7 @@ def handle_admin(message):
     try:
         from moviebot.states import (
             user_cancel_subscription_state, user_refund_state,
-            user_unsubscribe_state, user_add_admin_state
+            user_unsubscribe_state, user_add_admin_state, user_promo_admin_state
         )
         user_id = message.from_user.id
         chat_id = message.chat.id
@@ -1578,12 +1579,22 @@ def handle_admin(message):
             if user_id in user_add_admin_state:
                 state = user_add_admin_state[user_id]
                 
-                # Проверяем, что сообщение является реплаем на prompt_message_id
+                # В личке можно отвечать следующим сообщением или реплаем
+                # В группах требуется реплай
+                try:
+                    chat_info = bot.get_chat(message.chat.id)
+                    is_private = chat_info.type == 'private'
+                except:
+                    is_private = message.chat.id > 0
+                
                 prompt_message_id = state.get('prompt_message_id')
-                if prompt_message_id:
-                    if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
-                        logger.info(f"[ADD_ADMIN] Сообщение не является реплаем на prompt_message_id={prompt_message_id}, игнорируем")
-                        return
+                if not is_private:
+                    # В группах требуется реплай
+                    if prompt_message_id:
+                        if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
+                            logger.info(f"[ADD_ADMIN] В группе требуется реплай на prompt_message_id={prompt_message_id}, игнорируем")
+                            return
+                # В личке можно отвечать следующим сообщением или реплаем
                 
                 admin_id_str = text.strip()
                 if admin_id_str:
@@ -1634,6 +1645,61 @@ def handle_admin(message):
                             state=state,
                             back_callback="admin:back_to_list"
                         )
+                return
+            
+            # Обработка промокодов (/promo)
+            if user_id in user_promo_admin_state:
+                state = user_promo_admin_state[user_id]
+                
+                # В личке можно отвечать следующим сообщением или реплаем
+                # В группах требуется реплай
+                try:
+                    chat_info = bot.get_chat(message.chat.id)
+                    is_private = chat_info.type == 'private'
+                except:
+                    is_private = message.chat.id > 0
+                
+                prompt_message_id = state.get('message_id')
+                if not is_private:
+                    # В группах требуется реплай
+                    if prompt_message_id:
+                        if not message.reply_to_message or message.reply_to_message.message_id != prompt_message_id:
+                            logger.info(f"[PROMO ADMIN] В группе требуется реплай на message_id={prompt_message_id}, игнорируем")
+                            return
+                # В личке можно отвечать следующим сообщением или реплаем
+                
+                # Парсим промокод: КОД СКИДКА КОЛИЧЕСТВО
+                parts = text.strip().split()
+                if len(parts) < 3:
+                    bot.reply_to(message, "❌ Неверный формат. Используйте: КОД СКИДКА КОЛИЧЕСТВО\nПример: NEW2026 20% 100")
+                    return
+                
+                code = parts[0].upper()
+                discount_input = parts[1]
+                total_uses_str = parts[2]
+                
+                from moviebot.utils.promo import create_promocode
+                success, result_message = create_promocode(code, discount_input, total_uses_str)
+                
+                if success:
+                    # Перезагружаем список промокодов
+                    from moviebot.bot.handlers.promo import promo_command
+                    class FakeMessage:
+                        def __init__(self, chat_id, user_id):
+                            self.chat = type('obj', (object,), {'id': chat_id, 'type': 'private'})()
+                            self.from_user = type('obj', (object,), {'id': user_id})()
+                            self.text = '/promo'
+                    
+                    fake_msg = FakeMessage(chat_id, user_id)
+                    promo_command(fake_msg)
+                    
+                    bot.reply_to(message, f"✅ {result_message}")
+                    logger.info(f"[PROMO ADMIN] Промокод создан: {code}, discount={discount_input}, uses={total_uses_str}")
+                else:
+                    bot.reply_to(message, f"❌ {result_message}")
+                    logger.warning(f"[PROMO ADMIN] Ошибка создания промокода: {result_message}")
+                
+                # НЕ удаляем состояние, так как пользователь может создать еще промокоды
                 return
                 
         except Exception as e:

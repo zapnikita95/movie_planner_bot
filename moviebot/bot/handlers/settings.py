@@ -540,6 +540,12 @@ def handle_settings_callback(call):
                     self._original_message = call.message
             
             try:
+                # Устанавливаем флаг from_settings перед вызовом edit_command
+                from moviebot.states import user_edit_state
+                if user_id not in user_edit_state:
+                    user_edit_state[user_id] = {}
+                user_edit_state[user_id]['from_settings'] = True
+                
                 fake_message = FakeMessage(call)
                 logger.info(f"[SETTINGS CALLBACK] Вызов edit_command для user_id={user_id}, chat_id={chat_id}")
                 edit_command(fake_message)

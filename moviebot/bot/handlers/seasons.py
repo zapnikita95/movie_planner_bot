@@ -268,11 +268,18 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
     series_data = get_user_series_page(chat_id, user_id, page=page)
 
     if not series_data['items']:
-        text = "У тебя пока нет сериалов в списке.\nДобавь их через поиск!"
+        text = "У вас пока нет сериалов в списке.\nДобавьте их через поиск!"
+        
+        # Создаем кнопки как в примере
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
+        markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="start_menu:seasons"))
+        
         try:
             common_kwargs = {
                 'text': text,
                 'chat_id': chat_id,
+                'reply_markup': markup,
                 'parse_mode': 'HTML'
             }
             if message_thread_id is not None:

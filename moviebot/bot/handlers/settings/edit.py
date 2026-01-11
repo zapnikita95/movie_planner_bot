@@ -36,7 +36,11 @@ def edit_command(message):
     markup.add(InlineKeyboardButton("👁️ Удалить просмотр", callback_data="edit:delete_watched"))
     markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="edit:delete_plan"))
     markup.add(InlineKeyboardButton("🎬 Удалить фильм из базы", callback_data="edit:delete_movie"))
-    markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
+    
+    # Проверяем, вызван ли из настроек
+    from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
+    if from_settings:
+        markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
     
     help_text = (
         "✏️ <b>Что вы хотите изменить?</b>\n\n"
@@ -128,14 +132,42 @@ def edit_action_callback(call):
             bot.edit_message_text("⭐ <b>Выберите фильм для изменения оценки:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         
         elif action == "cancel":
-            # Проверяем, есть ли kp_id в состоянии для возврата к описанию
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot, call.id)
+            
+            # Проверяем, откуда пришли (из настроек или из обычного редактирования)
+            from_settings = False
             kp_id = None
             if user_id in user_edit_state:
                 state = user_edit_state[user_id]
+                from_settings = state.get('from_settings', False)
                 kp_id = state.get('kp_id')
                 del user_edit_state[user_id]
             
-            # Если есть kp_id, возвращаемся к описанию фильма/сериала
+            # Если пришли из настроек, возвращаемся в настройки
+            if from_settings:
+                try:
+                    from moviebot.bot.handlers.settings import settings_command
+                    # Создаем fake message для settings_command
+                    class FakeMessage:
+                        def __init__(self, call):
+                            self.from_user = call.from_user
+                            self.chat = call.message.chat
+                            self.text = '/settings'
+                    
+                    fake_message = FakeMessage(call)
+                    settings_command(fake_message)
+                    # Удаляем старое сообщение
+                    try:
+                        bot.delete_message(chat_id, call.message.message_id)
+                    except:
+                        pass
+                except Exception as e:
+                    logger.error(f"[EDIT CANCEL] Ошибка при возврате в настройки: {e}", exc_info=True)
+                    bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
+                return
+            
+            # Если есть kp_id и не из настроек, возвращаемся к описанию фильма/сериала
             if kp_id:
                 try:
                     from moviebot.bot.handlers.series import show_film_info_with_buttons

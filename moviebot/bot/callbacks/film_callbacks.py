@@ -69,7 +69,10 @@ def add_to_database_callback(call):
                 row = cursor.fetchone()
 
                 if row:
-                    existing = (row[0], row[1], row[2])
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title_db = row.get('title') if isinstance(row, dict) else row[1]
+                    watched = row.get('watched') if isinstance(row, dict) else row[2]
+                    existing = (film_id, title_db, watched)
                     logger.info(f"[ADD TO DB] Уже существует → existing={existing}")
                     conn.commit()
                 else:
@@ -102,7 +105,10 @@ def add_to_database_callback(call):
 
                     result = cursor.fetchone()
                     if result:
-                        existing = (result[0], result[1], result[2])
+                        film_id = result.get('id') if isinstance(result, dict) else result[0]
+                        title_db = result.get('title') if isinstance(result, dict) else result[1]
+                        watched = result.get('watched') if isinstance(result, dict) else result[2]
+                        existing = (film_id, title_db, watched)
                     conn.commit()
 
                     logger.info(f"[ADD TO DB] Добавлен/обновлён → existing={existing}")
@@ -1250,15 +1256,26 @@ def back_to_film_description(call):
                         row = cursor.fetchone()
                         if row:
                             info = info or {}
-                            info.update({
-                                'title': row[0],
-                                'year': row[1],
-                                'genres': row[2],
-                                'description': row[3],
-                                'director': row[4],
-                                'actors': row[5],
-                                'is_series': bool(row[6])
-                            })
+                            if isinstance(row, dict):
+                                info.update({
+                                    'title': row.get('title'),
+                                    'year': row.get('year'),
+                                    'genres': row.get('genres'),
+                                    'description': row.get('description'),
+                                    'director': row.get('director'),
+                                    'actors': row.get('actors'),
+                                    'is_series': bool(row.get('is_series', 0))
+                                })
+                            else:
+                                info.update({
+                                    'title': row[0] if len(row) > 0 else None,
+                                    'year': row[1] if len(row) > 1 else None,
+                                    'genres': row[2] if len(row) > 2 else None,
+                                    'description': row[3] if len(row) > 3 else None,
+                                    'director': row[4] if len(row) > 4 else None,
+                                    'actors': row[5] if len(row) > 5 else None,
+                                    'is_series': bool(row[6]) if len(row) > 6 else False
+                                })
                             is_series = info['is_series']
                     except Exception as e:
                         logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")

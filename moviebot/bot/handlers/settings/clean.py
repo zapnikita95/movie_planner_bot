@@ -1,4 +1,4 @@
-from moviebot.bot.bot_init import bot
+from moviebot.bot.bot_init import bot, BOT_ID
 """
 Обработчики команды /clean - очистка базы данных
 """
@@ -36,6 +36,7 @@ def clean_command(message):
     markup.add(InlineKeyboardButton("🗑️ Удалить все непросмотренные фильмы", callback_data="clean:unwatched_movies"))
     markup.add(InlineKeyboardButton("📥 Удалить импорты с Кинопоиска", callback_data="clean:imported_ratings"))
     markup.add(InlineKeyboardButton("🧹 Удалить фильмы, добавленные при импорте", callback_data="clean:clean_imported_movies"))
+    markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
     
     help_text = (
         "🧹 <b>Массовое удаление данных</b>\n\n"
@@ -314,6 +315,67 @@ def clean_action_choice(call):
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
         if user_id in user_clean_state:
             del user_clean_state[user_id]
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data == "clean:back")
+def clean_back_callback(call):
+    """Обработчик возврата к меню очистки из настроек"""
+    logger.info(f"[CLEAN BACK] ===== START: callback_id={call.id}, user_id={call.from_user.id}")
+    try:
+        from moviebot.bot.bot_init import safe_answer_callback_query
+        safe_answer_callback_query(bot, call.id)
+        
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Очищаем состояние
+        if user_id in user_clean_state:
+            del user_clean_state[user_id]
+        
+        # Показываем меню очистки
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("💥 Обнулить базу чата", callback_data="clean:chat_db"))
+        markup.add(InlineKeyboardButton("👤 Обнулить базу пользователя", callback_data="clean:user_db"))
+        markup.add(InlineKeyboardButton("🗑️ Удалить все непросмотренные фильмы", callback_data="clean:unwatched_movies"))
+        markup.add(InlineKeyboardButton("📥 Удалить импорты с Кинопоиска", callback_data="clean:imported_ratings"))
+        markup.add(InlineKeyboardButton("🧹 Удалить фильмы, добавленные при импорте", callback_data="clean:clean_imported_movies"))
+        markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
+        
+        help_text = (
+            "🧹 <b>Массовое удаление данных</b>\n\n"
+            "<b>💥 Обнулить базу чата</b> — удаляет <b>ВСЕ данные чата</b>:\n"
+            "• Все фильмы\n"
+            "• Все оценки всех пользователей\n"
+            "• Все планы и расписание всех пользователей\n"
+            "• Все билеты\n"
+            "• Все настройки\n\n"
+            "<b>👤 Обнулить базу пользователя</b> — удаляет <b>только ваши данные в этом чате</b>:\n"
+            "• Ваши оценки\n"
+            "• Ваши планы и расписание\n"
+            "• Ваши билеты\n"
+            "• Ваша статистика\n"
+            "• Ваши настройки (включая часовой пояс)\n\n"
+            "<b>🗑️ Удалить все непросмотренные фильмы</b> — удаляет фильмы, которые:\n"
+            "• Не находятся в расписании\n"
+            "• У которых нет билетов\n"
+            "• Которые не участвуют ни в каких активностях\n\n"
+            "<b>📥 Удалить импорты с Кинопоиска</b> — удаляет все ваши импортированные оценки из Кинопоиска.\n"
+            "• Удаляются только импортированные оценки (is_imported = TRUE)\n"
+            "• Ваши обычные оценки и данные других пользователей останутся без изменений\n\n"
+            "<b>🧹 Удалить фильмы, добавленные при импорте</b> — удаляет фильмы, которые были добавлены в базу только из-за импорта оценок.\n"
+            "• Удаляются фильмы с только импортированными оценками\n"
+            "• Фильмы с обычными оценками или в планах останутся\n\n"
+            "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
+            "Выберите действие:"
+        )
+        bot.edit_message_text(help_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[CLEAN BACK] Ошибка: {e}", exc_info=True)
+        try:
+            from moviebot.bot.bot_init import safe_answer_callback_query
+            safe_answer_callback_query(bot, call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 
 def register_clean_handlers(bot):
