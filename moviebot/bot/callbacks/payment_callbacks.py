@@ -979,7 +979,7 @@ def register_payment_callbacks(bot_instance):
                             button_text = button_text[:47] + "..."
                         markup.add(InlineKeyboardButton(
                             button_text,
-                            callback_data=f"payment:add_member:{user_id_member}:{subscription_id}"
+                            callback_data=f"payment:add_member:{subscription_id}:{user_id_member}"
                         ))
                 
                 elif group_size and members_count >= group_size:
@@ -1050,80 +1050,153 @@ def register_payment_callbacks(bot_instance):
                     get_subscription_members, get_active_group_users
                 )
                 
-                # Проверяем, что подписка существует и принадлежит этому чату
+                # Получаем информацию о подписке
                 sub = get_subscription_by_id(subscription_id)
-                if not sub or sub.get('chat_id') != chat_id:
+                if not sub:
                     bot_instance.answer_callback_query(call.id, "❌ Подписка не найдена", show_alert=True)
                     return
                 
+                group_chat_id = sub.get('chat_id')
+                group_size = sub.get('group_size')
+                
+                # Если в личке, используем chat_id из подписки
+                if is_private:
+                    chat_id = group_chat_id
+                
                 # Проверяем, что целевой пользователь в группе
-                active_users = get_active_group_users(chat_id, BOT_ID)
+                active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
                 if target_user_id not in active_users:
                     bot_instance.answer_callback_query(call.id, "❌ Пользователь не найден в группе", show_alert=True)
                     return
                 
                 # Проверяем, что пользователь еще не в подписке
                 members = get_subscription_members(subscription_id)
+                if BOT_ID and BOT_ID in members:
+                    members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
                 if target_user_id in members:
                     bot_instance.answer_callback_query(call.id, "✅ Этот пользователь уже в подписке")
+                    return
+                
+                # Проверяем лимит участников
+                if group_size and len(members) >= group_size:
+                    bot_instance.answer_callback_query(call.id, f"❌ Достигнут лимит участников ({group_size})", show_alert=True)
                     return
                 
                 # Добавляем участника
                 target_username = active_users.get(target_user_id, f"user_{target_user_id}")
                 add_subscription_member(subscription_id, target_user_id, target_username)
                 
-                bot_instance.answer_callback_query(call.id, f"✅ {target_username} добавлен в подписку")
+                bot_instance.answer_callback_query(call.id, f"✅ @{target_username} добавлен в подписку")
                 
-                # Обновляем сообщение, удаляя кнопку добавленного участника
+                # Возвращаемся к списку участников (первая страница)
                 try:
                     # Получаем обновленный список участников
                     members = get_subscription_members(subscription_id)
                     if BOT_ID and BOT_ID in members:
                         members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
                     
-                    active_users = get_active_group_users(chat_id, BOT_ID)
-                    not_in_subscription = []
-                    for uid, uname in active_users.items():
-                        if uid not in members:
-                            not_in_subscription.append({
-                                'user_id': uid,
-                                'username': uname
-                            })
+                    active_users = get_active_group_users(chat_id, bot_id=BOT_ID)
+                    if active_users and BOT_ID:
+                        active_users = {uid: uname for uid, uname in active_users.items() if uid != BOT_ID}
                     
-                    # Обновляем текст сообщения
-                    message_text = call.message.text or ""
-                    # Удаляем старую часть с участниками, если есть
-                    if "В вашей группе есть участники" in message_text:
-                        message_text = message_text.split("В вашей группе есть участники")[0].strip()
+                    # Пагинация: 10 пользователей на страницу
+                    items_per_page = 10
+                    active_users_list = list(active_users.items())
+                    total_users = len(active_users_list)
+                    page = 0  # Возвращаемся на первую страницу
+                    total_pages = (total_users + items_per_page - 1) // items_per_page
+                    start_idx = page * items_per_page
+                    end_idx = min(start_idx + items_per_page, total_users)
                     
-                    markup = InlineKeyboardMarkup()
-                    
-                    # Если еще есть участники для добавления, показываем их
-                    if not_in_subscription:
-                        message_text += "\n\n"
-                        message_text += "👥 <b>В вашей группе есть участники, которых можно добавить в подписку:</b>\n\n"
+                    text = "👥 <b>Список участников</b>\n\n"
+                    text += "💸 - участник в подписке\n\n"
+                
+                    if active_users_list:
+                        for user_id_member, username in active_users_list[start_idx:end_idx]:
+                            is_member = user_id_member in members
+                            emoji = "💸" if is_member else "⬜"
+                            text += f"{emoji} @{username}\n"
                         
-                        for member in not_in_subscription[:10]:
-                            display_name = member['username'] if member['username'].startswith('user_') else f"@{member['username']}"
-                            button_text = f"➕ {display_name}"
+                        if total_pages > 1:
+                            text += f"\nСтраница {page + 1} из {total_pages}"
+                    else:
+                        text += "Нет активных участников"
+                
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    
+                    # Кнопки добавления участников (если есть места)
+                    members_count = len(members) if members else 0
+                    if group_size and members_count < group_size:
+                        # Есть места для добавления участников
+                        not_in_subscription = []
+                        for user_id_member, username in active_users_list[start_idx:end_idx]:
+                            if user_id_member not in members:
+                                not_in_subscription.append((user_id_member, username))
+                        
+                        # Добавляем кнопки для добавления участников на текущей странице
+                        for user_id_member, username in not_in_subscription:
+                            button_text = f"➕ @{username}"
                             if len(button_text) > 50:
                                 button_text = button_text[:47] + "..."
-                            markup.add(InlineKeyboardButton(button_text, callback_data=f"payment:add_member:{subscription_id}:{member['user_id']}"))
-                        
-                        if len(not_in_subscription) > 10:
-                            message_text += f"\n... и еще {len(not_in_subscription) - 10} участник(ов)"
+                            markup.add(InlineKeyboardButton(
+                                button_text,
+                                callback_data=f"payment:add_member:{subscription_id}:{user_id_member}"
+                            ))
                     
-                    markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))
+                    elif group_size and members_count >= group_size:
+                        # Места закончились - показываем кнопки расширения
+                        current_size = group_size
+                        plan_type_sub = sub.get('plan_type')
+                        period_type_sub = sub.get('period_type')
+                        
+                        if current_size == 2:
+                            current_price = SUBSCRIPTION_PRICES['group']['2'][plan_type_sub].get(period_type_sub, 0)
+                            price_5 = SUBSCRIPTION_PRICES['group']['5'][plan_type_sub].get(period_type_sub, 0)
+                            price_10 = SUBSCRIPTION_PRICES['group']['10'][plan_type_sub].get(period_type_sub, 0)
+                            diff_5 = price_5 - current_price
+                            diff_10 = price_10 - current_price
+                            
+                            from moviebot.database.db_operations import get_user_personal_subscriptions
+                            personal_subs = get_user_personal_subscriptions(user_id)
+                            if personal_subs:
+                                diff_5 = int(diff_5 * 0.5)
+                                diff_10 = int(price_10 * 0.5) - current_price
+                            
+                            markup.add(InlineKeyboardButton(f"📈 Расширить до 5 (+{diff_5}₽)", callback_data=f"payment:expand:5:{subscription_id}"))
+                            markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
+                        elif current_size == 5:
+                            current_price = SUBSCRIPTION_PRICES['group']['5'][plan_type_sub].get(period_type_sub, 0)
+                            price_10 = SUBSCRIPTION_PRICES['group']['10'][plan_type_sub].get(period_type_sub, 0)
+                            diff_10 = price_10 - current_price
+                            
+                            from moviebot.database.db_operations import get_user_personal_subscriptions
+                            personal_subs = get_user_personal_subscriptions(user_id)
+                            if personal_subs:
+                                diff_10 = int(price_10 * 0.5) - current_price
+                            
+                            markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
+                    
+                    # Кнопки пагинации
+                    nav_buttons = []
+                    if page > 0:
+                        nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_members:{subscription_id}:{page-1}"))
+                    if page < total_pages - 1:
+                        nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"payment:group_members:{subscription_id}:{page+1}"))
+                    
+                    if nav_buttons:
+                        markup.add(*nav_buttons)
+                    
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                     
                     bot_instance.edit_message_text(
-                        message_text,
+                        text,
                         call.message.chat.id,
                         call.message.message_id,
                         reply_markup=markup,
                         parse_mode='HTML'
                     )
                 except Exception as e:
-                    logger.error(f"[PAYMENT ADD MEMBER] Ошибка обновления сообщения: {e}")
+                    logger.error(f"[PAYMENT ADD MEMBER] Ошибка обновления сообщения: {e}", exc_info=True)
                 return
             
             if action == "success_ok":
@@ -2862,11 +2935,30 @@ def register_payment_callbacks(bot_instance):
                         return
                     
                     # Обычная подписка — предлагаем изменить
+                    # Определяем названия тарифов
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    
+                    # Определяем названия периодов
+                    period_names = {
+                        'month': 'месяц',
+                        '3months': '3 месяца',
+                        'year': 'год',
+                        'lifetime': 'навсегда'
+                    }
+                    
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    period_name = period_names.get(period_type, period_type)
+                    
                     text = f"✏️ <b>Изменить { 'личную' if subscription_type == 'personal' else 'групповую' } подписку</b>\n\n"
-                    text += f"Текущий тариф: {plan_type}\n"
-                    text += f"Период: {period_type}\n"
+                    text += f"Текущий тариф: <b>{plan_name}</b>\n"
+                    text += f"Период: <b>{period_name}</b>\n"
                     if group_size:
-                        text += f"Размер: {group_size} человек\n"
+                        text += f"Размер: <b>{group_size} человек</b>\n"
                     text += "\nВыберите действие:\n"
                     
                     markup = InlineKeyboardMarkup(row_width=1)
@@ -2875,10 +2967,60 @@ def register_payment_callbacks(bot_instance):
                     tariffs_callback = f"payment:tariffs:{subscription_type}:{subscription_id}"
                     markup.add(InlineKeyboardButton("💰 Изменить тариф/период", callback_data=tariffs_callback))
                     
+                    # Для группы — возможность докупить другие тарифы
+                    if subscription_type == 'group' and plan_type != 'all':
+                        group_size_str = str(group_size) if group_size else '2'
+                        # Определяем, какие тарифы отсутствуют
+                        missing_functions = []
+                        if plan_type != 'notifications':
+                            missing_functions.append(('notifications', '🔔 Уведомления о сериалах', SUBSCRIPTION_PRICES['group'][group_size_str]['notifications'].get('month', 0)))
+                        if plan_type != 'recommendations':
+                            missing_functions.append(('recommendations', '🎯 Рекомендации', SUBSCRIPTION_PRICES['group'][group_size_str]['recommendations'].get('month', 0)))
+                        if plan_type != 'tickets':
+                            missing_functions.append(('tickets', '🎫 Билеты', SUBSCRIPTION_PRICES['group'][group_size_str]['tickets'].get('month', 0)))
+                        
+                        # Предлагаем докупить недостающие тарифы или обновить до "Все режимы"
+                        if missing_functions:
+                            current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get('month', 0)
+                            all_month_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get('month', 0)
+                            upgrade_price = all_month_price - current_month_price
+                            if upgrade_price > 0:
+                                markup.add(InlineKeyboardButton(f"📦 Все режимы (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
+                            
+                            # Предлагаем докупить отдельные функции (если их 1-2)
+                            if len(missing_functions) <= 2:
+                                for func_type, func_name, func_price in missing_functions:
+                                    add_price = func_price - current_month_price if func_price > current_month_price else func_price
+                                    if add_price > 0:
+                                        markup.add(InlineKeyboardButton(f"{func_name} (+{add_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
+                    
                     # Для группы — расширение размера (expand)
                     if subscription_type == 'group' and group_size and group_size < 10:
                         next_size = 5 if group_size == 2 else 10
-                        markup.add(InlineKeyboardButton(f"🔼 Расширить до {next_size}", callback_data=f"payment:expand:{next_size}:{subscription_id}"))
+                        plan_type_sub = sub.get('plan_type')
+                        period_type_sub = sub.get('period_type')
+                        current_price = SUBSCRIPTION_PRICES['group'][str(group_size)][plan_type_sub].get(period_type_sub, 0)
+                        if next_size == 5:
+                            price_5 = SUBSCRIPTION_PRICES['group']['5'][plan_type_sub].get(period_type_sub, 0)
+                            diff_5 = price_5 - current_price
+                            from moviebot.database.db_operations import get_user_personal_subscriptions
+                            personal_subs = get_user_personal_subscriptions(user_id)
+                            if personal_subs:
+                                diff_5 = int(diff_5 * 0.5)
+                            markup.add(InlineKeyboardButton(f"📈 Расширить до 5 (+{diff_5}₽)", callback_data=f"payment:expand:5:{subscription_id}"))
+                            price_10 = SUBSCRIPTION_PRICES['group']['10'][plan_type_sub].get(period_type_sub, 0)
+                            diff_10 = price_10 - current_price
+                            if personal_subs:
+                                diff_10 = int(price_10 * 0.5) - current_price
+                            markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
+                        elif next_size == 10:
+                            price_10 = SUBSCRIPTION_PRICES['group']['10'][plan_type_sub].get(period_type_sub, 0)
+                            diff_10 = price_10 - current_price
+                            from moviebot.database.db_operations import get_user_personal_subscriptions
+                            personal_subs = get_user_personal_subscriptions(user_id)
+                            if personal_subs:
+                                diff_10 = int(price_10 * 0.5) - current_price
+                            markup.add(InlineKeyboardButton(f"📈 Расширить до 10 (+{diff_10}₽)", callback_data=f"payment:expand:10:{subscription_id}"))
                     
                     markup.add(InlineKeyboardButton("❌ Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
                     back_callback = "payment:active:personal" if subscription_type == 'personal' else "payment:active:group"
@@ -3916,20 +4058,23 @@ def register_payment_callbacks(bot_instance):
                             metadata["telegram_username"] = telegram_username
             
                 # Создаем платеж
+                payment_data = {
+                    "amount": {
+                        "value": f"{final_price:.2f}",
+                        "currency": "RUB"
+                    },
+                    "confirmation": {
+                        "type": "redirect",
+                        "return_url": return_url
+                    },
+                    "capture": True,
+                    "description": description,
+                    "metadata": metadata,
+                    "save_payment_method": True
+                }
+                
                 try:
-                    payment = Payment.create({
-                        "amount": {
-                            "value": f"{final_price:.2f}",
-                            "currency": "RUB"
-                        },
-                        "confirmation": {
-                            "type": "redirect",
-                            "return_url": return_url
-                        },
-                        "capture": True,
-                        "description": description,
-                        "metadata": metadata
-                    })
+                    payment = Payment.create(payment_data)
                 
                     # Сохраняем информацию о платеже в БД
                     from moviebot.database.db_operations import save_payment
@@ -4261,20 +4406,23 @@ def register_payment_callbacks(bot_instance):
                         metadata["group_username"] = group_username
                 
                 # Создаем платеж
+                payment_data = {
+                    "amount": {
+                        "value": f"{final_price:.2f}",
+                        "currency": "RUB"
+                    },
+                    "confirmation": {
+                        "type": "redirect",
+                        "return_url": return_url
+                    },
+                    "capture": True,
+                    "description": description,
+                    "metadata": metadata,
+                    "save_payment_method": True
+                }
+                
                 try:
-                    payment = Payment.create({
-                        "amount": {
-                            "value": f"{final_price:.2f}",
-                            "currency": "RUB"
-                        },
-                        "confirmation": {
-                            "type": "redirect",
-                            "return_url": return_url
-                        },
-                        "capture": True,
-                        "description": description,
-                        "metadata": metadata
-                    })
+                    payment = Payment.create(payment_data)
                     
                     # Сохраняем информацию о платеже в БД
                     from moviebot.database.db_operations import save_payment
@@ -4892,7 +5040,7 @@ def register_payment_callbacks(bot_instance):
                 
                     description = f"Обновление групповой подписки (на {group_size} участников): {plan_names.get(new_plan_type, new_plan_type)}, период: {period_type}"
                 
-                    payment = Payment.create({
+                    payment_data = {
                         "amount": {
                             "value": f"{upgrade_price:.2f}",
                             "currency": "RUB"
@@ -4903,8 +5051,11 @@ def register_payment_callbacks(bot_instance):
                         },
                         "capture": True,
                         "description": description,
-                        "metadata": metadata
-                    }, str(uuid_module.uuid4()))
+                        "metadata": metadata,
+                        "save_payment_method": True
+                    }
+                    
+                    payment = Payment.create(payment_data, str(uuid_module.uuid4()))
                 
                     # Сохраняем платеж в БД
                     from moviebot.database.db_operations import save_payment

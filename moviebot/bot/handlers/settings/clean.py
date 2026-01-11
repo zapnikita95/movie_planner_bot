@@ -166,6 +166,7 @@ def clean_action_choice(call):
             )
             user_clean_state[user_id]['confirm_needed'] = True
             user_clean_state[user_id]['target'] = 'chat'
+            user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
     
     elif action == 'user_db':
         # Обнуление базы пользователя - удаляет только данные конкретного пользователя в этом чате
@@ -185,6 +186,7 @@ def clean_action_choice(call):
         )
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'user'
+        user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
     
     elif action == 'unwatched_movies':
         # Удаление непросмотренных фильмов - требует голосования в группах
@@ -270,6 +272,7 @@ def clean_action_choice(call):
             )
             user_clean_state[user_id]['confirm_needed'] = True
             user_clean_state[user_id]['target'] = 'unwatched_movies'
+            user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
     
     elif action == 'imported_ratings':
         # Удаление импортированных оценок пользователя
@@ -293,15 +296,8 @@ def clean_action_choice(call):
         
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'imported_ratings'
-        
-        # Для личных чатов сохраняем состояние ожидания следующего сообщения
-        if call.message.chat.type == 'private':
-            from moviebot.states import user_private_handler_state
-            user_private_handler_state[user_id] = {
-                'handler': 'clean_imported_ratings',
-                'prompt_message_id': prompt_message_id
-            }
-            logger.info(f"[CLEAN] Сохранено состояние для личного чата: user_id={user_id}, prompt_message_id={prompt_message_id}")
+        user_clean_state[user_id]['prompt_message_id'] = prompt_message_id
+        logger.info(f"[CLEAN] Сохранено состояние для imported_ratings: user_id={user_id}, prompt_message_id={prompt_message_id}")
     
     elif action == 'clean_imported_movies':
         # Удаление фильмов, которые были добавлены только из-за импорта
@@ -320,6 +316,7 @@ def clean_action_choice(call):
         )
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'clean_imported_movies'
+        user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
     
     elif action == 'cancel':
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)

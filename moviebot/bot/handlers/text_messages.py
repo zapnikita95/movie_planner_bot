@@ -1565,28 +1565,9 @@ def main_text_handler(message):
             logger.info(f"[MAIN TEXT HANDLER] Личный чат: найдено ожидающее состояние handler='{handler_name}', prompt_message_id={prompt_message_id}")
             
             # Обрабатываем через соответствующий handler
-            if handler_name == 'clean_imported_ratings':
-                # Создаем fake reply_to_message для совместимости
-                class FakeReplyMessage:
-                    def __init__(self, message_id):
-                        self.message_id = message_id
-                        self.from_user = type('User', (), {'id': BOT_ID})()
-                        self.text = "⚠️ Удаление импортированных оценок с Кинопоиска"
-                
-                # Сохраняем оригинальный reply_to_message, если он есть
-                original_reply = getattr(message, 'reply_to_message', None)
-                message.reply_to_message = FakeReplyMessage(prompt_message_id)
-                
-                # Вызываем handler
-                handle_clean_imported_ratings_reply(message)
-                
-                # Восстанавливаем оригинальный reply_to_message
-                if original_reply:
-                    message.reply_to_message = original_reply
-                else:
-                    message.reply_to_message = None
-                
-                return
+            # clean_imported_ratings теперь обрабатывается через handle_clean, не используем user_private_handler_state
+            # if handler_name == 'clean_imported_ratings':
+            #     ... (удалено, теперь обрабатывается через handle_clean)
             
             # Для других handlers можно добавить аналогичную логику
             # После обработки состояние очищается в самом handler'е
