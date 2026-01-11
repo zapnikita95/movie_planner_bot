@@ -36,11 +36,8 @@ _whisper = None
 _index = None
 _movies_df = None
 
-# Пути — важно для Railway volume!
-DATA_DIR = Path('/app/data/shazam')
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-
-CACHE_DIR = Path('/app/cache')
+# Пути — относительные для локального запуска, на Railway работает так же
+CACHE_DIR = Path('cache')
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Кэш для huggingface моделей
@@ -48,7 +45,7 @@ os.environ['HF_HOME'] = str(CACHE_DIR / 'huggingface')
 os.environ['TRANSFORMERS_CACHE'] = str(CACHE_DIR / 'huggingface' / 'transformers')
 os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sentence_transformers')
 
-TMDB_CSV_PATH = CACHE_DIR / 'tmdb_movies.csv'  # Финальный путь после скачивания
+TMDB_CSV_PATH = CACHE_DIR / 'tmdb_movies.csv'  # 'cache/tmdb_movies.csv' локально
 INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'
 DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'
 
