@@ -57,35 +57,30 @@ def create_promocode(code, discount_input, total_uses):
             if cursor.fetchone():
                 return False, f"Промокод {code.upper()} уже существует"
             
-            # Вставляем новый промокод
+            # Вставляем новый промокод + возвращаем все поля как dict
             cursor.execute('''
                 INSERT INTO promocodes (code, discount_type, discount_value, total_uses, used_count, is_active)
                 VALUES (%s, %s, %s, %s, 0, TRUE)
-                RETURNING id
+                RETURNING id, code, discount_type, discount_value, total_uses, used_count, is_active
             ''', (code.upper(), discount_type, discount_value, total_uses))
             
-            new_id = cursor.fetchone()[0]
+            new_promo = cursor.fetchone()  # ← здесь dict!
+            
+            if not new_promo:
+                raise Exception("Не удалось получить данные созданного промокода")
+            
             conn.commit()
         
-        # Формируем и возвращаем словарь (как в других функциях)
-        discount_str = f"{discount_value}%" if discount_type == 'percent' else f"{int(discount_value)} руб/звезд"
-        success_message = f"Промокод {code.upper()} создан: {discount_str}, использований: {total_uses}"
+        # Формируем сообщение успеха
+        discount_str = f"{new_promo['discount_value']}%" if new_promo['discount_type'] == 'percent' else f"{int(new_promo['discount_value'])} руб/звезд"
+        success_message = f"Промокод {new_promo['code']} создан: {discount_str}, использований: {new_promo['total_uses']}"
         
-        return {
-            'id': new_id,
-            'code': code.upper(),
-            'discount_type': discount_type,
-            'discount_value': discount_value,
-            'total_uses': total_uses,
-            'used_count': 0,
-            'is_active': True
-        }, success_message
+        return new_promo, success_message
         
     except Exception as e:
         logger.error(f"Ошибка при создании промокода: {e}", exc_info=True)
         conn.rollback()
         return False, f"Ошибка при создании промокода: {e}"
-
 
 def get_all_promocodes():
     """
