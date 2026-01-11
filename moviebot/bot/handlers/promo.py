@@ -357,3 +357,82 @@ def promo_back_to_list_callback(call):
     except Exception as e:
         logger.error(f"[PROMO] Ошибка в promo_back_to_list_callback: {e}", exc_info=True)
         bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+
+# ────────────────────────────────────────────────────────────────
+# Добавляем в конец файла promo.py (после всех существующих функций)
+
+@bot.message_handler(func=lambda m: m.from_user.id in user_promo_admin_state)
+def handle_promo_admin_text(message):
+    """
+    Обрабатывает текст после команды /promo (создание промокода)
+    """
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = message.text.strip()
+
+    logger.info(f"[PROMO ADMIN TEXT] Получен от {user_id}: '{text}'")
+
+    # Выход по отмене
+    if text.lower() in ['отмена', 'cancel', 'выход', '/cancel']:
+        bot.reply_to(message, "Ввод промокода отменён.")
+        user_promo_admin_state.pop(user_id, None)
+        return
+
+    # Ожидаемый формат: КОД СКИДКА КОЛИЧЕСТВО
+    # Примеры: DIM 95% 1    SALE 500 50
+    try:
+        parts = text.split(maxsplit=2)
+        if len(parts) != 3:
+            raise ValueError("Нужно ровно 3 части: КОД СКИДКА КОЛИЧЕСТВО")
+
+        code = parts[0].strip().upper()
+        discount_str = parts[1].strip()
+        total_uses_str = parts[2].strip()
+
+        total_uses = int(total_uses_str)
+
+        # Парсинг скидки
+        if discount_str.endswith('%'):
+            discount_type = 'percent'
+            discount_value = float(discount_str[:-1])
+        else:
+            discount_type = 'fixed'
+            discount_value = float(discount_str)
+
+        if discount_value <= 0:
+            raise ValueError("Скидка должна быть больше 0")
+
+        # Создаём промокод (используем существующую функцию)
+        new_promo = create_promocode(
+            code=code,
+            discount_input=f"{discount_value}{'%' if discount_type == 'percent' else ''}",
+            total_uses=total_uses
+        )
+
+        discount_display = f"{new_promo['discount_value']}%" if new_promo['discount_type'] == 'percent' else f"{int(new_promo['discount_value'])} ₽"
+
+        response = (
+            "✅ Промокод успешно создан!\n\n"
+            f"Код: <code>{new_promo['code']}</code>\n"
+            f"Скидка: {discount_display}\n"
+            f"Количество использований: {new_promo['total_uses']}"
+        )
+
+        bot.reply_to(message, response, parse_mode='HTML')
+
+        # Удаляем состояние после успешного создания
+        user_promo_admin_state.pop(user_id, None)
+
+    except ValueError as ve:
+        bot.reply_to(
+            message,
+            f"❌ Неверный формат.\n\n{str(ve)}\n\n"
+            "Пример правильного ввода:\n"
+            "<code>DIM 95% 1</code>\n"
+            "<code>SALE 500 50</code>\n\n"
+            "Или напишите 'отмена'",
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"[PROMO ADMIN TEXT] Ошибка при создании: {e}", exc_info=True)
+        bot.reply_to(message, "❌ Ошибка при создании промокода. Попробуйте позже.")

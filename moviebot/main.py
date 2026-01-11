@@ -234,6 +234,13 @@ from moviebot.bot.handlers.settings.join import register_join_handlers
 register_join_handlers(bot)
 logger.info("✅ join handlers зарегистрированы")
 
+try:
+    from moviebot.bot.handlers.state_handlers import register_admin_text_handlers
+    register_admin_text_handlers(bot)
+    logger.info("✅ admin text states handlers (high priority) зарегистрированы")
+except ImportError as e:
+    logger.error(f"❌ Не удалось импортировать state_handlers: {e}")
+    
 from moviebot.bot.handlers.shazam import register_shazam_handlers
 register_shazam_handlers(bot)
 logger.info("✅ shazam handlers зарегистрированы")
