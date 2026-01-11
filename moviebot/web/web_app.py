@@ -1242,9 +1242,6 @@ def create_web_app(bot):
     thread.start()
     logger.info("[WEB APP] ✅ Фоновый поток для инициализации индекса шазама запущен")
 
-    # Инициализация индекса шазама синхронно при запуске приложения
-    logger.info("[WEB APP] Запуск синхронной инициализации индекса шазама...")
-    logger.info("[WEB APP] ✅ Индекс шазама полностью готов")
 
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
