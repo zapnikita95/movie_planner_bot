@@ -372,27 +372,40 @@ def handle_plan_datetime_reply(message):
             logger.info(f"[PLAN DATETIME REPLY] Нет активного состояния планирования/редактирования для user_id={user_id}")
             return
 
+        # КРИТИЧЕСКИЙ ФИКС: В личке принимаем следующее сообщение, в группах - только реплай
+        try:
+            chat_info = bot.get_chat(message.chat.id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = message.chat.id > 0
+        
         # Проверяем, что ответ именно на наш промпт (по message_id)
         prompt_message_id = state.get('prompt_message_id')
-        is_reply_to_prompt = (
-            message.reply_to_message and 
-            message.reply_to_message.message_id == prompt_message_id
-        )
-
-        if not is_reply_to_prompt:
-            logger.info(f"[PLAN DATETIME REPLY] Не ответ на промпт (ожидаемый id={prompt_message_id}), игнорируем")
-            return
+        
+        if not is_private:
+            # В группах требуется реплай на правильный промпт
+            is_reply_to_prompt = (
+                message.reply_to_message and 
+                message.reply_to_message.message_id == prompt_message_id
+            )
+            if not is_reply_to_prompt:
+                logger.info(f"[PLAN DATETIME REPLY] В группе не ответ на промпт (ожидаемый id={prompt_message_id}), игнорируем")
+                return
+        else:
+            # В личке: если это реплай, проверяем что на правильный промпт; если не реплай - принимаем как следующее сообщение
+            if message.reply_to_message:
+                # Если это реплай, проверяем что на правильный промпт
+                if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                    logger.info(f"[PLAN DATETIME REPLY] В личке реплай не на правильный промпт (ожидаемый id={prompt_message_id}), игнорируем")
+                    return
+            # Если не реплай, но состояние активно - принимаем как следующее сообщение
+            logger.info(f"[PLAN DATETIME REPLY] В личке принято следующее сообщение без реплая")
 
         # Вызываем общую функцию обработки даты/времени
+        # get_plan_day_or_date_internal сам управляет состоянием:
+        # - очищает его при успешном планировании
+        # - оставляет его при ошибке для повторного ввода
         result = get_plan_day_or_date_internal(message, state)
-
-        # Очищаем правильное состояние
-        if is_edit and user_id in user_edit_state:
-            del user_edit_state[user_id]
-            logger.info(f"[PLAN DATETIME REPLY] Состояние редактирования очищено для user_id={user_id}")
-        elif user_id in user_plan_state:
-            del user_plan_state[user_id]
-            logger.info(f"[PLAN DATETIME REPLY] Обычное состояние планирования очищено для user_id={user_id}")
 
         logger.info(f"[PLAN DATETIME REPLY] ✅ Завершено")
 

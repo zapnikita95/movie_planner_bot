@@ -1280,7 +1280,7 @@ def get_plan_day_or_date_internal(message, state):
     if not plan_dt:
         target_weekday = None
         for phrase, wd in days_full.items():
-            if phrase in text:
+            if phrase in text_lower:
                 target_weekday = wd
                 logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
                 break
@@ -1307,7 +1307,7 @@ def get_plan_day_or_date_internal(message, state):
             logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата по дню недели: {plan_dt}")
         else:
             # Обработка специальных форматов: "сегодня", "завтра", "следующая неделя"
-            if 'сегодня' in text:
+            if 'сегодня' in text_lower:
                 plan_date = now.date()
                 # Используем извлеченное время, если есть, иначе стандартное
                 if extracted_time:
@@ -1321,7 +1321,7 @@ def get_plan_day_or_date_internal(message, state):
                 plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
                 plan_dt = user_tz.localize(plan_dt)
                 logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'сегодня': {plan_dt}")
-            elif 'завтра' in text:
+            elif 'завтра' in text_lower:
                 plan_date = (now.date() + timedelta(days=1))
                 # Используем извлеченное время, если есть, иначе стандартное
                 if extracted_time:
@@ -1335,7 +1335,8 @@ def get_plan_day_or_date_internal(message, state):
                 plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
                 plan_dt = user_tz.localize(plan_dt)
                 logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'завтра': {plan_dt}")
-            elif 'следующая неделя' in text or 'след неделя' in text or 'след. неделя' in text or 'на следующей неделе' in text:
+                
+            elif 'следующая неделя' in text_lower or 'след неделя' in text_lower or 'след. неделя' in text_lower or 'на следующей неделе' in text_lower:
                 if plan_type == 'home':
                     # Для дома - суббота следующей недели в 10:00
                     current_wd = now.weekday()
@@ -1360,29 +1361,31 @@ def get_plan_day_or_date_internal(message, state):
                     plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
                     plan_dt = user_tz.localize(plan_dt)
                     logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (кино): {plan_dt}")
-            else:
-                # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
-                # Сначала пробуем формат с временем: "15 января 17:00" или "10 января 20:30"
-                date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2}):(\d{2})', text)
-                if date_time_match:
-                    day_num = int(date_time_match.group(1))
-                    month_str = date_time_match.group(2)
-                    hour = int(date_time_match.group(3))
-                    minute = int(date_time_match.group(4))
-                    month = months_map.get(month_str.lower())
-                    if month:
-                        try:
-                            year = now.year
-                            candidate = user_tz.localize(datetime(year, month, day_num, hour, minute))
-                            if candidate < now:
-                                year += 1
-                            plan_dt = user_tz.localize(datetime(year, month, day_num, hour, minute))
-                            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата с временем: {plan_dt}")
-                        except ValueError as e:
-                            logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга даты с временем: {e}")
+
+            # ← УБРАН лишний else — теперь это просто следующий блок логики
+            # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
+            # Сначала пробуем формат с временем: "15 января 17:00" или "10 января 20:30"
+            date_time_match = re.search(r'(\d{1,2})\s+([а-яё]+)\s+(\d{1,2}):(\d{2})', text_lower)
+            if date_time_match:
+                day_num = int(date_time_match.group(1))
+                month_str = date_time_match.group(2)
+                hour = int(date_time_match.group(3))
+                minute = int(date_time_match.group(4))
+                month = months_map.get(month_str.lower())
+                if month:
+                    try:
+                        year = now.year
+                        candidate = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                        if candidate < now:
+                            year += 1
+                        plan_dt = user_tz.localize(datetime(year, month, day_num, hour, minute))
+                        logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата с временем: {plan_dt}")
+                    except ValueError as e:
+                        logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга даты с временем: {e}")
+
                 else:
                     # Парсинг "15 января" или "14 апреля"
-                    date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text)
+                    date_match = re.search(r'(\d{1,2})\s+([а-яё]+)', text_lower)
                     if date_match:
                         day = int(date_match.group(1))
                         month_str = date_match.group(2).lower()
@@ -1409,7 +1412,7 @@ def get_plan_day_or_date_internal(message, state):
                     else:
                         # Парсинг "10.01" или "06.01", возможно с временем "10.01 20:30"
                         # Сначала пробуем формат с временем: "10.01 20:30"
-                        date_time_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\s+(\d{1,2}):(\d{2})', text)
+                        date_time_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\s+(\d{1,2}):(\d{2})', text_lower)
                         if date_time_match:
                             day_num = int(date_time_match.group(1))
                             month_num = int(date_time_match.group(2))
@@ -1434,7 +1437,7 @@ def get_plan_day_or_date_internal(message, state):
                                     logger.warning(f"[PLAN DAY/DATE INTERNAL] Ошибка парсинга числовой даты с временем: {e}")
                         else:
                             # Парсинг "10.01" или "06.01" без времени
-                            date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text)
+                            date_match = re.search(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?', text_lower)
                             if date_match:
                                 day_num = int(date_match.group(1))
                                 month_num = int(date_match.group(2))
@@ -1489,19 +1492,36 @@ def get_plan_day_or_date_internal(message, state):
         ))
         
         # Отправляем сообщение об ошибке и ВОЗОБНОВЛЯЕМ состояние планирования
-        error_msg = bot.reply_to(
-            message,
-            "Не понял дату/время 😔\n\n"
-            "Попробуй ещё раз. Примеры:\n"
-            "• сегодня 21:00\n"
-            "• завтра 19:30\n"
-            "• пт 18:45\n"
-            "• 15 января 20:00\n"
-            "• 22.01 22:30\n"
-            "• в субботу 19:00",
-            reply_markup=markup,
-            parse_mode='HTML'
-        )
+        # В личке используем send_message, в группах - reply_to
+        try:
+            chat_info = bot.get_chat(message.chat.id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = message.chat.id > 0
+        
+        error_text = "Не понял дату/время 😔\n\n" \
+                    "Попробуй ещё раз. Примеры:\n" \
+                    "• сегодня 21:00\n" \
+                    "• завтра 19:30\n" \
+                    "• пт 18:45\n" \
+                    "• 15 января 20:00\n" \
+                    "• 22.01 22:30\n" \
+                    "• в субботу 19:00"
+        
+        if is_private:
+            error_msg = bot.send_message(
+                message.chat.id,
+                error_text,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        else:
+            error_msg = bot.reply_to(
+                message,
+                error_text,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
         
         # ВАЖНО: Сохраняем message_id ошибки в состояние, чтобы пользователь мог ответить на него
         state['prompt_message_id'] = error_msg.message_id
