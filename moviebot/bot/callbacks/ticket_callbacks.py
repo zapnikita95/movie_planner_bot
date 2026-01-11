@@ -152,24 +152,68 @@ def add_more_tickets_from_plan(call):
     logger.info(f"[TICKET] Перешли в режим add_more_tickets для plan_id={plan_id}")
 
 
-# 3. Кнопка "⬅️ К списку мероприятий"
-@bot.callback_query_handler(func=lambda call: call.data == "ticket_new")
-def back_to_ticket_list(call):
-    logger.info(f"[TICKET CALLBACK] ticket_new (возврат к списку) сработал, user_id={call.from_user.id}")
-
-    bot.answer_callback_query(call.id)
-
-    user_id = call.from_user.id
-    chat_id = call.message.chat.id
-
-    if user_id in user_ticket_state:
-        del user_ticket_state[user_id]
-        logger.info(f"[TICKET] Состояние очищено при возврате к списку")
-
-    # Ленивый импорт — безопасно, без цикла
-    from moviebot.bot.handlers.series import show_cinema_sessions
-
-    show_cinema_sessions(chat_id, user_id, None)
+# 3. Кнопка "➕ Добавить новое событие" - показывает меню выбора типа события
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
+def ticket_new_callback(call):
+    """Обработчик кнопки 'Добавить новое событие' - показывает выбор типа билета"""
+    logger.info(f"[TICKET CALLBACK] ticket_new (выбор типа события) сработал, user_id={call.from_user.id}, data={call.data}")
+    
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        if not has_tickets_access(chat_id, user_id):
+            try:
+                bot.edit_message_text(
+                    "🎫 <b>Билеты в кино</b>\n\n"
+                    "Вы можете загружать билеты и получать их в боте прямо перед событием с подпиской <b>\"Билеты\"</b>.\n\n"
+                    "Используйте /payment для оформления подписки.",
+                    chat_id,
+                    call.message.message_id,
+                    parse_mode='HTML'
+                )
+            except:
+                pass
+            return
+        
+        # Парсим file_id, если есть (формат: ticket_new:file_id)
+        parts = call.data.split(":")
+        file_id = parts[1] if len(parts) > 1 else None
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("➕ Добавить фильм", callback_data=f"ticket_new_film:{file_id}" if file_id else "ticket_new_film"))
+        markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+        
+        try:
+            bot.edit_message_text(
+                "🎫 <b>Добавление билета</b>\n\n"
+                "Выберите тип билета:",
+                chat_id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        except Exception as edit_e:
+            logger.error(f"[TICKET NEW] Ошибка при редактировании сообщения: {edit_e}", exc_info=True)
+            try:
+                bot.send_message(
+                    chat_id,
+                    "🎫 <b>Добавление билета</b>\n\n"
+                    "Выберите тип билета:",
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+            except Exception as send_e:
+                logger.error(f"[TICKET NEW] Ошибка при отправке сообщения: {send_e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[TICKET NEW] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 
 # 4. Заблокированная кнопка

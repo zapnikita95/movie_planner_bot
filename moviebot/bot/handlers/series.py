@@ -1446,15 +1446,15 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
             if file_id:
                 # Если есть файл, но нет сеансов, предлагаем создать новый
                 markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data=f"ticket_new:{file_id}"))
+                markup.add(InlineKeyboardButton("➕ Добавить новое событие", callback_data=f"ticket_new:{file_id}"))
                 markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
-                bot.send_message(chat_id, "❌ Нет запланированных сеансов в кино.\n\n📎 Файл готов к добавлению. Создайте новый сеанс.", reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, "❌ Нет запланированных событий.\n\n📎 Файл готов к добавлению. Создайте новое событие.", reply_markup=markup, parse_mode='HTML')
             else:
                 # Нет файла и нет сеансов
                 markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data="ticket_new"))
+                markup.add(InlineKeyboardButton("➕ Добавить новое событие", callback_data="ticket_new"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                bot.send_message(chat_id, "❌ Нет запланированных сеансов в кино.", reply_markup=markup, parse_mode='HTML')
+                bot.send_message(chat_id, "❌ Нет запланированных событий.", reply_markup=markup, parse_mode='HTML')
             return
         
         user_tz = get_user_timezone_or_default(user_id)
@@ -1497,23 +1497,23 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
                 markup.add(InlineKeyboardButton(button_text, callback_data=callback_data))
         
         if file_id:
-            markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data=f"ticket_new:{file_id}"))
+            markup.add(InlineKeyboardButton("➕ Добавить новое событие", callback_data=f"ticket_new:{file_id}"))
         else:
-            markup.add(InlineKeyboardButton("➕ Добавить новый сеанс", callback_data="ticket_new"))
+            markup.add(InlineKeyboardButton("➕ Добавить новое событие", callback_data="ticket_new"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
-        text = "🎟️ <b>Выберите сеанс:</b>\n\n"
+        text = "🎟️ <b>Выберите событие:</b>\n\n"
         if file_id:
-            text += "📎 Файл готов к добавлению. Выберите сеанс или создайте новый."
+            text += "📎 Файл готов к добавлению. Выберите событие или создайте новое."
         else:
-            text += "Выберите сеанс для просмотра билетов или добавления новых."
+            text += "Выберите событие для просмотра билетов или добавления новых."
         
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         logger.info(f"[SHOW SESSIONS] Сообщение с сеансами отправлено пользователю {user_id}")
     except Exception as e:
         logger.error(f"[SHOW SESSIONS] Ошибка: {e}", exc_info=True)
         try:
-            bot.send_message(chat_id, "❌ Произошла ошибка при загрузке сеансов.")
+            bot.send_message(chat_id, "❌ Произошла ошибка при загрузке событий.")
         except:
             pass
 
@@ -4820,7 +4820,7 @@ def register_series_handlers(bot_param):
             if not has_tickets_access(chat_id, user_id):
                 bot.edit_message_text(
                     "🎫 <b>Билеты в кино</b>\n\n"
-                    "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
+                    "Вы можете загружать билеты и получать их в боте прямо перед мероприятием с подпиской <b>\"Билеты\"</b>.\n\n"
                     "Используйте /payment для оформления подписки.",
                     chat_id,
                     call.message.message_id,
@@ -4879,13 +4879,13 @@ def register_series_handlers(bot_param):
             
             if ticket_file_id:
                 text += "🎟️ <b>Билеты загружены</b>\n\n"
-                text += "Билеты будут отправлены вам перед сеансом."
+                text += "Билеты будут отправлены вам перед событием."
                 markup.add(InlineKeyboardButton("📎 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
                 markup.add(InlineKeyboardButton("➕ Добавить ещё билеты", callback_data=f"add_more_tickets:{plan_id}"))
                 markup.add(InlineKeyboardButton("🔄 Заменить билеты", callback_data=f"add_ticket:{plan_id}"))
             else:
                 text += "🎟️ <b>Билеты не загружены</b>\n\n"
-                text += "Загрузите билеты, чтобы получать их перед сеансом."
+                text += "Загрузите билеты, чтобы получать их перед событием."
                 markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
             
             # Добавляем кнопку "✏️ Изменить" для изменения времени сеанса
@@ -4908,7 +4908,7 @@ def register_series_handlers(bot_param):
                 }
                 text += "\n\n📎 Файл готов к добавлению. Нажмите '➕ Добавить билеты' для продолжения."
             
-            markup.add(InlineKeyboardButton("⬅️ Назад к сеансам", callback_data="ticket_new"))
+            markup.add(InlineKeyboardButton("⬅️ Назад к событиям", callback_data="ticket_new"))
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
             
             # Показываем информацию о сеансе
@@ -4941,65 +4941,6 @@ def register_series_handlers(bot_param):
             except:
                 pass
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
-    def ticket_new_callback(call):
-        """Обработчик кнопки 'Добавить новый сеанс' - показывает выбор типа билета"""
-        try:
-            from moviebot.states import user_ticket_state
-            from moviebot.utils.helpers import has_tickets_access
-            
-            bot.answer_callback_query(call.id)
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            
-            if not has_tickets_access(chat_id, user_id):
-                bot.edit_message_text(
-                    "🎫 <b>Билеты в кино</b>\n\n"
-                    "Вы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\n"
-                    "Используйте /payment для оформления подписки.",
-                    chat_id,
-                    call.message.message_id,
-                    parse_mode='HTML'
-                )
-                return
-            
-            parts = call.data.split(":")
-            file_id = parts[1] if len(parts) > 1 else None
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("➕ Добавить фильм", callback_data=f"ticket_new_film:{file_id}" if file_id else "ticket_new_film"))
-            markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))  # ← НОВАЯ КНОПКА
-            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
-            
-            try:
-                bot.edit_message_text(
-                    "🎫 <b>Добавление билета</b>\n\n"
-                    "Выберите тип билета:",
-                    chat_id,
-                    call.message.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-            except Exception as edit_e:
-                logger.error(f"[TICKET NEW] Ошибка при редактировании сообщения: {edit_e}", exc_info=True)
-                # Пробуем отправить новое сообщение
-                try:
-                    bot.send_message(
-                        chat_id,
-                        "🎫 <b>Добавление билета</b>\n\n"
-                        "Выберите тип билета:",
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                except Exception as send_e:
-                    logger.error(f"[TICKET NEW] Ошибка при отправке сообщения: {send_e}", exc_info=True)
-        except Exception as e:
-            logger.error(f"[TICKET NEW] Ошибка: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
     @bot.callback_query_handler(func=lambda call: call.data == "ticket:add_event")
     def ticket_add_event_callback(call):
         """Обработчик кнопки 'Добавить билет' - начинает флоу добавления билета на мероприятие"""

@@ -2293,16 +2293,6 @@ def add_more_tickets_from_plan(call):
         parse_mode='HTML'
     )
 
-@bot.callback_query_handler(func=lambda call: call.data == "ticket_new")
-def back_to_ticket_list(call):
-    bot.answer_callback_query(call.id)
-    user_id = call.from_user.id
-    if user_id in user_ticket_state:
-        del user_ticket_state[user_id]
-
-    # Вызываем твою функцию показа списка билетов/мероприятий
-    from moviebot.bot.handlers.series import show_cinema_sessions  # или какая у тебя функция для /tickets
-    show_cinema_sessions(call.message.chat.id, user_id, call.message.message_id)  # адаптируй под свою функцию
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_emoji:"))
 def add_emoji_callback(call):

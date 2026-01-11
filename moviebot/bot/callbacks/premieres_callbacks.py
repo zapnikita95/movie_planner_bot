@@ -775,17 +775,45 @@ def premiere_notify_handler(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("show_film_description:"))
 def premiere_show_description(call):
     try:
-        bot.answer_callback_query(call.id, "Загружаю описание...")
+        # Проверяем, не устарел ли callback, но продолжаем выполнение даже если устарел
+        callback_is_old = False
+        try:
+            bot.answer_callback_query(call.id, "Загружаю описание...")
+        except Exception as answer_error:
+            error_str = str(answer_error)
+            if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+                callback_is_old = True
+                logger.warning(f"[PREMIERE DESC] Callback query устарел, но продолжаем выполнение: {answer_error}")
+            else:
+                logger.error(f"[PREMIERE DESC] Ошибка answer_callback_query: {answer_error}", exc_info=True)
         
         kp_id = call.data.split(":", 1)[1]
         chat_id = call.message.chat.id
         user_id = call.from_user.id
+        message_id = call.message.message_id if not callback_is_old else None
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
         
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
         info = extract_movie_info(link)
         
         if not info:
-            bot.answer_callback_query(call.id, "❌ Не удалось загрузить", show_alert=True)
+            if not callback_is_old:
+                try:
+                    bot.answer_callback_query(call.id, "❌ Не удалось загрузить", show_alert=True)
+                except:
+                    pass
+            else:
+                # Если callback устарел, отправляем новое сообщение об ошибке
+                try:
+                    send_kwargs = {
+                        'text': "❌ Не удалось загрузить информацию о фильме",
+                        'chat_id': chat_id
+                    }
+                    if message_thread_id is not None:
+                        send_kwargs['message_thread_id'] = message_thread_id
+                    bot.send_message(**send_kwargs)
+                except:
+                    pass
             return
         
         # Проверяем наличие в базе
@@ -802,15 +830,18 @@ def premiere_show_description(call):
             link=link,
             kp_id=kp_id,
             existing=existing,
-            message_id=call.message.message_id,
-            message_thread_id=getattr(call.message, 'message_thread_id', None)
+            message_id=message_id,
+            message_thread_id=message_thread_id
         )
         
         logger.info(f"[PREMIERE DESC] Описание показано: kp_id={kp_id}")
         
     except Exception as e:
         logger.error(f"[PREMIERE DESC] Ошибка: {e}", exc_info=True)
-        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except:
+            pass
 
 
 # Обработчик "Отменить" (если ещё не работает — замени полностью)
@@ -898,38 +929,7 @@ def premieres_back_handler(call):
         except:
             pass
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("show_film_description:"))
-def handle_premiere_description(call):
-    try:
-        bot.answer_callback_query(call.id)
-        
-        kp_id = call.data.split(":", 1)[1]
-        chat_id = call.message.chat.id
-        user_id = call.from_user.id
-        
-        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        info = extract_movie_info(link)
-        
-        if not info:
-            bot.answer_callback_query(call.id, "❌ Не удалось загрузить фильм", show_alert=True)
-            return
-        
-        show_film_info_with_buttons(
-            chat_id=chat_id,
-            user_id=user_id,
-            info=info,
-            link=link,
-            kp_id=kp_id,
-            existing=None,
-            message_id=call.message.message_id,
-            message_thread_id=getattr(call.message, 'message_thread_id', None)
-        )
-        
-        logger.info(f"[PREMIERE DESC] Показал описание kp_id={kp_id}")
-        
-    except Exception as e:
-        logger.error(f"[PREMIERE DESC] Ошибка: {e}", exc_info=True)
-        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+# Дублирующий обработчик удален - используется premiere_show_description выше
 
 def register_premieres_callbacks(bot):
     """Регистрирует обработчики премьер (уже зарегистрированы через декораторы)"""
