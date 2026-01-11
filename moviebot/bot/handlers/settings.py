@@ -356,7 +356,9 @@ def handle_settings_callback(call):
             separate = notify_settings.get('separate_weekdays', 'true') == 'true'
             
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("📅 Разделять будни/выходные", callback_data="settings:notify:separate_toggle"))
+            # Обновляем текст кнопки в зависимости от статуса
+            separate_button_text = "✅ Разделять будни/выходные" if separate else "❌ Разделять будни/выходные"
+            markup.add(InlineKeyboardButton(separate_button_text, callback_data="settings:notify:separate_toggle"))
             markup.add(InlineKeyboardButton("🏠 Домашний просмотр", callback_data="settings:notify:home"))
             markup.add(InlineKeyboardButton("🎬 Просмотр в кино", callback_data="settings:notify:cinema"))
             markup.add(InlineKeyboardButton("🎫 Билеты на сеанс", callback_data="settings:notify:tickets"))
@@ -839,6 +841,7 @@ def handle_settings_callback(call):
                     user_settings_state[user_id] = {}
                 user_settings_state[user_id]['waiting_notify_time'] = 'home'
                 user_settings_state[user_id]['notify_separate'] = separate
+                user_settings_state[user_id]['prompt_message_id'] = call.message.message_id
                 return
             
             elif sub_action.startswith("home:"):
@@ -848,14 +851,18 @@ def handle_settings_callback(call):
                     user_settings_state[user_id] = {}
                 user_settings_state[user_id]['waiting_notify_time'] = f'home_{time_type}'
                 user_settings_state[user_id]['notify_separate'] = True
+                user_settings_state[user_id]['prompt_message_id'] = call.message.message_id
                 
                 bot.answer_callback_query(call.id)
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notify:home"))
                 bot.edit_message_text(
                     f"🏠 <b>Настройка времени для домашнего просмотра</b>\n\n"
                     f"📅 {'Будни' if time_type == 'weekday' else 'Выходные'}\n\n"
                     f"Отправьте время в формате ЧЧ:ММ (например, 19:00 или 09:00)",
                     call.message.chat.id,
                     call.message.message_id,
+                    reply_markup=markup,
                     parse_mode='HTML'
                 )
                 return
@@ -893,6 +900,7 @@ def handle_settings_callback(call):
                     user_settings_state[user_id] = {}
                 user_settings_state[user_id]['waiting_notify_time'] = 'cinema'
                 user_settings_state[user_id]['notify_separate'] = separate
+                user_settings_state[user_id]['prompt_message_id'] = call.message.message_id
                 return
             
             elif sub_action.startswith("cinema:"):
@@ -902,14 +910,18 @@ def handle_settings_callback(call):
                     user_settings_state[user_id] = {}
                 user_settings_state[user_id]['waiting_notify_time'] = f'cinema_{time_type}'
                 user_settings_state[user_id]['notify_separate'] = True
+                user_settings_state[user_id]['prompt_message_id'] = call.message.message_id
                 
                 bot.answer_callback_query(call.id)
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notify:cinema"))
                 bot.edit_message_text(
                     f"🎬 <b>Настройка времени для просмотра в кино</b>\n\n"
                     f"📅 {'Будни' if time_type == 'weekday' else 'Выходные'}\n\n"
                     f"Отправьте время в формате ЧЧ:ММ (например, 09:00)",
                     call.message.chat.id,
                     call.message.message_id,
+                    reply_markup=markup,
                     parse_mode='HTML'
                 )
                 return
@@ -980,6 +992,114 @@ def handle_settings_callback(call):
             pass
     finally:
         logger.info(f"[SETTINGS CALLBACK] ===== КОНЕЦ ОБРАБОТКИ =====")
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("reminder:"))
+def handle_reminder_callback(call):
+    """Обработчик callback для включения/отключения напоминаний"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        action_parts = call.data.split(":")
+        if len(action_parts) < 3:
+            bot.answer_callback_query(call.id, "Ошибка обработки", show_alert=True)
+            return
+        
+        reminder_action = action_parts[1]  # "disable" или "enable"
+        reminder_type = action_parts[2]  # "weekend_films", "cinema_premieres", "random_events"
+        
+        logger.info(f"[REMINDER CALLBACK] action={reminder_action}, type={reminder_type}, chat_id={chat_id}, user_id={user_id}")
+        
+        # Определяем ключ в БД для каждого типа напоминания
+        if reminder_type == "weekend_films":
+            setting_key = 'reminder_weekend_films_disabled'
+            new_value = 'true' if reminder_action == 'disable' else 'false'
+            success_text = "Фильмы на выходных отменены" if reminder_action == 'disable' else "Фильмы на выходных включены"
+        elif reminder_type == "cinema_premieres":
+            setting_key = 'reminder_cinema_premieres_disabled'
+            new_value = 'true' if reminder_action == 'disable' else 'false'
+            success_text = "Премьеры в кино отменены" if reminder_action == 'disable' else "Премьеры в кино включены"
+        elif reminder_type == "random_events":
+            setting_key = 'random_events_enabled'
+            new_value = 'true' if reminder_action == 'enable' else 'false'
+            success_text = "Случайные события включены" if reminder_action == 'enable' else "Случайные события отменены"
+        else:
+            bot.answer_callback_query(call.id, "Неизвестный тип напоминания", show_alert=True)
+            return
+        
+        # Сохраняем настройку в БД
+        with db_lock:
+            cursor.execute("""
+                INSERT INTO settings (chat_id, key, value)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (chat_id, setting_key, new_value))
+            conn.commit()
+        
+        logger.info(f"[REMINDER CALLBACK] Настройка сохранена: {setting_key}={new_value}")
+        
+        # Обновляем меню регулярных напоминаний
+        with db_lock:
+            cursor.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
+            reminder_rows = cursor.fetchall()
+            
+            reminders_status = {}
+            for row in reminder_rows:
+                key = row.get('key') if isinstance(row, dict) else row[0]
+                value = row.get('value') if isinstance(row, dict) else row[1]
+                reminders_status[key] = value
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Напоминание о фильмах на выходных
+        weekend_films_disabled = reminders_status.get('reminder_weekend_films_disabled', 'false') == 'true'
+        if weekend_films_disabled:
+            markup.add(InlineKeyboardButton("⏰ Включить: Фильмы на выходных", callback_data="reminder:enable:weekend_films"))
+        else:
+            markup.add(InlineKeyboardButton("❌ Отменить: Фильмы на выходных", callback_data="reminder:disable:weekend_films"))
+        
+        # Напоминание о премьерах в кино
+        cinema_premieres_disabled = reminders_status.get('reminder_cinema_premieres_disabled', 'false') == 'true'
+        if cinema_premieres_disabled:
+            markup.add(InlineKeyboardButton("⏰ Включить: Премьеры в кино", callback_data="reminder:enable:cinema_premieres"))
+        else:
+            markup.add(InlineKeyboardButton("❌ Отменить: Премьеры в кино", callback_data="reminder:disable:cinema_premieres"))
+        
+        # Случайные события (все сразу)
+        random_events_enabled = reminders_status.get('random_events_enabled', 'true') == 'true'
+        if not random_events_enabled:
+            markup.add(InlineKeyboardButton("⏰ Включить: Случайные события", callback_data="reminder:enable:random_events"))
+        else:
+            markup.add(InlineKeyboardButton("❌ Отменить: Случайные события", callback_data="reminder:disable:random_events"))
+        
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:notifications"))
+        
+        text = "📋 <b>Регулярные напоминания</b>\n\n"
+        text += "Управление регулярными напоминаниями бота:\n\n"
+        text += "• <b>Фильмы на выходных</b> — напоминание каждую субботу, если нет планов\n"
+        text += "• <b>Премьеры в кино</b> — напоминание о премьерах, если давно не добавляли фильмы в кино\n"
+        text += "• <b>Случайные события</b> — все случайные события (выбор участника, игра в кубик и т.д.)"
+        
+        try:
+            bot.edit_message_text(
+                text,
+                call.message.chat.id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            bot.answer_callback_query(call.id, success_text)
+        except Exception as e:
+            logger.error(f"[REMINDER CALLBACK] Ошибка обновления сообщения: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, success_text)
+    except Exception as e:
+        logger.error(f"[REMINDER CALLBACK] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("timezone:"))

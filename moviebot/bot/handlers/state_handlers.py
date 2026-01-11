@@ -1174,9 +1174,45 @@ def check_settings_message(message):
         # Ожидаем время в формате ЧЧ:ММ
         if not message.text or not message.text.strip():
             return False
+        
+        # Проверяем формат времени
         time_str = message.text.strip()
-        if ':' in time_str:
-            return True
+        if ':' not in time_str:
+            return False
+        
+        # Проверяем реплай для групповых чатов
+        try:
+            chat_info = bot.get_chat(message.chat.id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = message.chat.id > 0
+        
+        if not is_private:
+            # В группах требуется реплай
+            if not message.reply_to_message:
+                return False
+            # Проверяем, что реплай на сообщение бота
+            if not message.reply_to_message.from_user:
+                return False
+            if message.reply_to_message.from_user.id != BOT_ID:
+                return False
+            # Проверяем, что реплай на правильное сообщение (если есть prompt_message_id)
+            prompt_message_id = state.get('prompt_message_id')
+            if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                return False
+        
+        # Проверяем формат времени ЧЧ:ММ
+        try:
+            parts = time_str.split(':')
+            if len(parts) == 2:
+                hour = int(parts[0])
+                minute = int(parts[1])
+                if 0 <= hour <= 23 and 0 <= minute <= 59:
+                    return True
+        except:
+            pass
+        
+        return False
     
     if state.get('adding_reactions'):
         # Ожидаем эмодзи - может быть только эмодзи, без текста

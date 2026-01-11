@@ -243,8 +243,10 @@ def build_tmdb_index():
     # === Чтение и обработка CSV ===
     logger.info("Загружаем TMDB датасет из CSV...")
     try:
-        df = pd.read_csv(TMDB_CSV_PATH)
+        df = pd.read_csv(TMDB_CSV_PATH, low_memory=False)
         logger.info(f"Загружено {len(df)} записей")
+        # Добавляем отладку — очень полезно на Railway
+        logger.info(f"Колонки в датасете: {', '.join(df.columns.tolist())}")
     except Exception as e:
         logger.error(f"Ошибка чтения CSV файла: {e}", exc_info=True)
         return None, None
@@ -257,7 +259,10 @@ def build_tmdb_index():
     
     df['genres_str'] = df['genres'].apply(lambda x: parse_json_list(x, 'name'))
     df['keywords_str'] = df['keywords'].apply(lambda x: parse_json_list(x, 'name', top_n=15))
-    df['actors_str'] = df['cast'].apply(lambda x: parse_json_list(x, 'name', top_n=10))
+    
+    # ← Главное исправление здесь
+    df['actors_str'] = df['cast_names'].apply(lambda x: str(x) if pd.notna(x) else "")
+    
     df['director_str'] = df['crew'].apply(lambda x: parse_json_list(x, 'name', top_n=3) if pd.notna(x) else '')
     
     df['description'] = df.apply(

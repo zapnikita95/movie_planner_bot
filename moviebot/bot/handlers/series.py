@@ -1338,8 +1338,7 @@ def help_command(message):
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/help', message.chat.id)
     logger.info(f"Команда /help от пользователя {message.from_user.id}")
-
-    text = r"""🎬 Помощь по командам бота:
+    text = """🎬 Помощь по командам бота:
 
 /list — Показать список непросмотренных фильмов
 /random — Выбрать случайный непросмотренный фильм с фильтрами (год, жанр, режиссёр)
@@ -1383,7 +1382,7 @@ def help_command(message):
 Приятного просмотра! 🍿
 
 Если у вас возникли сложности с ботом или оплатой, напишите нам:
-@zap\\\_nikita
+@zap\_nikita
 movie-planner-bot@yandex.com"""
     
     markup = InlineKeyboardMarkup(row_width=1)
@@ -2846,22 +2845,9 @@ def register_series_handlers(bot_param):
                 logger.info(f"[RANDOM CALLBACK] Кнопка 'Найти фильм' из случайных событий, запускаем рандом по своей базе")
                 bot.answer_callback_query(call.id)
                 
-                # Создаем фиктивное сообщение для вызова random_start
-                class FakeMessage:
-                    def __init__(self, call):
-                        self.from_user = call.from_user
-                        self.chat = call.message.chat
-                        self.text = '/random'
-                
-                    def reply_to(self, text, **kwargs):
-                        return bot.send_message(self.chat.id, text, **kwargs)
-                
-                fake_message = FakeMessage(call)
-                random_start(fake_message)
-                
                 # Инициализируем состояние для рандома по своей базе
                 user_random_state[user_id] = {
-                    'step': 'mode',
+                    'step': 'final',
                     'mode': 'database',
                     'periods': [],
                     'genres': [],
@@ -2869,8 +2855,7 @@ def register_series_handlers(bot_param):
                     'actors': []
                 }
                 
-                # Автоматически переходим к финальному шагу (без фильтров)
-                user_random_state[user_id]['step'] = 'final'
+                # Переходим к финальному шагу (без фильтров)
                 _random_final(call, chat_id, user_id)
                 return
             
