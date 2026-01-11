@@ -4,7 +4,7 @@ Callback handlers для карточки фильма (add_to_database, plan_fr
 """
 import logging
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock, db_semaphore
+from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.api.kinopoisk_api import get_facts
 from moviebot.api.kinopoisk_api import get_external_sources  # Добавил это для фикса NameError
 from moviebot.utils.helpers import extract_film_info_from_existing
@@ -225,8 +225,7 @@ def plan_from_added_callback(call):
         watched = 0  # дефолт для нового фильма
         existing = None
         try:
-            with db_semaphore:
-                with db_lock:
+            with db_lock:
                     cur_add = conn.cursor(cursor_factory=RealDictCursor)
                     # Проверяем наличие + сразу берём нужные поля
                     cur_add.execute(
@@ -390,8 +389,7 @@ def handle_plan_type(call):
         chat_id = call.message.chat.id
 
         # Ищем в БД film_id, link, title, watched (чтобы existing был готов)
-        with db_semaphore:
-            with db_lock:
+        with db_lock:
                 cursor.execute('''
                     SELECT id, title, watched, link 
                     FROM movies 
