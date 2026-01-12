@@ -405,6 +405,86 @@ def old_function():
 
 Если функция вызывает другую функцию, работающую с БД, убедитесь, что каждая создает свое соединение.
 
+## Дедлоки (Deadlocks)
+
+### Проблема: Вложенные вызовы функций с db_lock
+
+**ОПАСНО:** Если функция A использует `with db_lock:` и вызывает функцию B, которая тоже использует `with db_lock:`, может возникнуть дедлок.
+
+### Пример дедлока
+
+```python
+# ❌ НЕПРАВИЛЬНО - может вызвать дедлок
+def function_a():
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    try:
+        with db_lock:  # Захватываем lock
+            cursor_local.execute("SELECT ...")
+            function_b()  # Вызывает функцию, которая тоже пытается захватить lock
+            # ДЕДЛОК! function_b ждет освобождения lock, но мы его держим
+    finally:
+        # закрытие
+
+def function_b():
+    conn_b = get_db_connection()
+    cursor_b = get_db_cursor()
+    try:
+        with db_lock:  # Пытается захватить lock, но он уже захвачен function_a
+            cursor_b.execute("SELECT ...")
+    finally:
+        # закрытие
+```
+
+### Решение: Вызывать функции с db_lock ВНЕ критической секции
+
+```python
+# ✅ ПРАВИЛЬНО - вызываем функцию ВНЕ db_lock
+def function_a():
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    try:
+        with db_lock:
+            cursor_local.execute("SELECT ...")
+            data = cursor_local.fetchone()
+        
+        # Вызываем функцию ВНЕ db_lock
+        function_b()  # Теперь безопасно - lock уже освобожден
+        
+        # Продолжаем работу с данными
+        process_data(data)
+    finally:
+        # закрытие
+```
+
+### Реальный пример из проекта
+
+**Проблема:** `get_film_current_state` вызывала `get_user_timezone_or_default` внутри `with db_lock:`, а `get_user_timezone` тоже использует `db_lock`.
+
+**Решение:** Сохранить данные плана внутри `db_lock`, затем обработать их (включая вызов `get_user_timezone_or_default`) ВНЕ `db_lock`:
+
+```python
+# ✅ ПРАВИЛЬНО
+def get_film_current_state(chat_id, kp_id, user_id):
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    try:
+        with db_lock:
+            # Получаем данные из БД
+            cursor_local.execute("SELECT ...")
+            plan_row = cursor_local.fetchone()
+            plan_data = extract_plan_data(plan_row)  # Сохраняем данные
+        
+        # Обрабатываем данные ВНЕ db_lock
+        if plan_data and user_id:
+            # Вызываем get_user_timezone_or_default ВНЕ db_lock
+            user_tz = get_user_timezone_or_default(user_id)  # Безопасно!
+            # Форматируем дату
+            date_str = format_date(plan_data['datetime'], user_tz)
+    finally:
+        # закрытие
+```
+
 ## Частые ошибки и их решения
 
 ### Ошибка 1: "cursor already closed" в scheduler
@@ -424,6 +504,12 @@ def old_function():
 **Причина:** Ошибка в функции получения подписки прерывает выполнение.
 
 **Решение:** Обернуть вызовы в `try-except` и продолжать выполнение при ошибке.
+
+### Ошибка 4: Функция зависает без ошибок
+
+**Причина:** Дедлок - функция A держит `db_lock` и вызывает функцию B, которая тоже пытается захватить `db_lock`.
+
+**Решение:** Вызывать функции, использующие `db_lock`, ВНЕ критической секции.
 
 ## Импорты
 
