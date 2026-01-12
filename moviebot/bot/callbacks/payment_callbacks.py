@@ -3508,14 +3508,16 @@ def register_payment_callbacks(bot_instance):
                                     text += f"Экономия: {abs(diff)}₽/мес\n"
                             
                             text += "Выберите способ:\n\n"
-                            text += "1️⃣ Отменить текущие и оформить новую сразу\n"
+                            text += "1️⃣ <b>Оплатить сейчас и перейти</b> — доплатите разницу, подписка изменится сразу\n"
                             
                             markup = InlineKeyboardMarkup(row_width=1)
-                            markup.add(InlineKeyboardButton("1️⃣ Отменить сейчас и оформить", callback_data=f"payment:combine:upgrade_to_all:{period_type}"))
+                            markup.add(InlineKeyboardButton("1️⃣ Оплатить сейчас и перейти", callback_data=f"payment:combine:upgrade_to_all:{period_type}"))
                             
-                            if period_type == 'month' and next_payment_date:
-                                text += f"2️⃣ Увеличить со следующего списания ({new_price}₽) — дата: {next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else next_payment_date}\n"
-                                markup.add(InlineKeyboardButton("2️⃣ Увеличить со следующего", callback_data=f"payment:combine:add_to_next:all:{period_type}"))
+                            # Предлагаем второй вариант для всех периодов (кроме lifetime), если есть next_payment_date
+                            if period_type != 'lifetime' and next_payment_date:
+                                next_payment_str = next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else str(next_payment_date)
+                                text += f"2️⃣ <b>Перейти со следующей даты списания</b> — подписка изменится без доплаты с {next_payment_str}\n"
+                                markup.add(InlineKeyboardButton("2️⃣ Перейти со следующего списания", callback_data=f"payment:combine:add_to_next:all:{period_type}"))
                             
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             

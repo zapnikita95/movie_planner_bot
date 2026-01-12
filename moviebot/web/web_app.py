@@ -238,6 +238,45 @@ def create_web_app(bot):
                                 update_subscription_next_payment(sub_id, next_payment)
                                 logger.info(f"[YOOKASSA] Обновлена дата следующего списания для подписки {sub_id} на {next_payment}")
                         
+                        # Для lifetime подписок: отменяем все активные подписки и отключаем автосписания
+                        if period_type == 'lifetime':
+                            from moviebot.database.db_connection import get_db_connection, db_lock
+                            from datetime import datetime
+                            import pytz
+                            
+                            conn_lifetime = get_db_connection()
+                            cursor_lifetime = conn_lifetime.cursor()
+                            try:
+                                with db_lock:
+                                    if subscription_type == 'personal':
+                                        cursor_lifetime.execute("""
+                                            UPDATE subscriptions 
+                                            SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                            WHERE user_id = %s AND subscription_type = 'personal' AND is_active = TRUE
+                                        """, (datetime.now(pytz.UTC), user_id))
+                                    else:
+                                        cursor_lifetime.execute("""
+                                            UPDATE subscriptions 
+                                            SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                            WHERE chat_id = %s AND subscription_type = 'group' AND is_active = TRUE
+                                        """, (datetime.now(pytz.UTC), chat_id))
+                                    conn_lifetime.commit()
+                                    cancelled_count = cursor_lifetime.rowcount
+                                    if cancelled_count > 0:
+                                        logger.info(f"[YOOKASSA LIFETIME] Отменено {cancelled_count} активных подписок для {subscription_type} (user_id={user_id}, chat_id={chat_id})")
+                            finally:
+                                try:
+                                    cursor_lifetime.close()
+                                except:
+                                    pass
+                                try:
+                                    conn_lifetime.close()
+                                except:
+                                    pass
+                        
+                        # Для lifetime подписок payment_method_id должен быть NULL (отключаем автосписания)
+                        final_payment_method_id = None if period_type == 'lifetime' else payment_method_id
+                        
                         # Создаем новую подписку
                         try:
                             subscription_id = create_subscription(
@@ -250,7 +289,7 @@ def create_web_app(bot):
                                 telegram_username=telegram_username,
                                 group_username=group_username,
                                 group_size=group_size,
-                                payment_method_id=payment_method_id
+                                payment_method_id=final_payment_method_id
                             )
                             logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id} (объединенный платеж)")
                             
@@ -275,6 +314,47 @@ def create_web_app(bot):
                                 cancel_subscription(sub_id, user_id)
                                 logger.info(f"[YOOKASSA] Отменена подписка {sub_id} при переходе на 'Все режимы'")
                         
+                        # Для lifetime подписок: отменяем все активные подписки и отключаем автосписания
+                        # (дополнительно к уже отмененным через existing_subs_ids)
+                        if period_type == 'lifetime':
+                            from moviebot.database.db_connection import get_db_connection, db_lock
+                            from datetime import datetime
+                            import pytz
+                            
+                            conn_lifetime = get_db_connection()
+                            cursor_lifetime = conn_lifetime.cursor()
+                            try:
+                                with db_lock:
+                                    # Отменяем все оставшиеся активные подписки пользователя/группы и отключаем автосписания
+                                    if subscription_type == 'personal':
+                                        cursor_lifetime.execute("""
+                                            UPDATE subscriptions 
+                                            SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                            WHERE user_id = %s AND subscription_type = 'personal' AND is_active = TRUE
+                                        """, (datetime.now(pytz.UTC), user_id))
+                                    else:
+                                        cursor_lifetime.execute("""
+                                            UPDATE subscriptions 
+                                            SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                            WHERE chat_id = %s AND subscription_type = 'group' AND is_active = TRUE
+                                        """, (datetime.now(pytz.UTC), chat_id))
+                                    conn_lifetime.commit()
+                                    cancelled_count = cursor_lifetime.rowcount
+                                    if cancelled_count > 0:
+                                        logger.info(f"[YOOKASSA LIFETIME] Дополнительно отменено {cancelled_count} активных подписок для {subscription_type} (user_id={user_id}, chat_id={chat_id})")
+                            finally:
+                                try:
+                                    cursor_lifetime.close()
+                                except:
+                                    pass
+                                try:
+                                    conn_lifetime.close()
+                                except:
+                                    pass
+                        
+                        # Для lifetime подписок payment_method_id должен быть NULL (отключаем автосписания)
+                        final_payment_method_id = None if period_type == 'lifetime' else payment_method_id
+                        
                         # Создаем новую подписку "Все режимы"
                         try:
                             subscription_id = create_subscription(
@@ -287,7 +367,7 @@ def create_web_app(bot):
                                 telegram_username=telegram_username,
                                 group_username=group_username,
                                 group_size=group_size,
-                                payment_method_id=payment_method_id
+                                payment_method_id=final_payment_method_id
                             )
                             logger.info(f"[YOOKASSA] Создана новая подписка 'Все режимы' {subscription_id}")
                             
@@ -389,6 +469,47 @@ def create_web_app(bot):
                                 
                             else:
                                 # Параметры не совпадают - создаем новую подписку
+                                # Для lifetime подписок: отменяем все активные подписки пользователя/группы и отключаем автосписания
+                                if period_type == 'lifetime':
+                                    from moviebot.database.db_connection import get_db_connection, db_lock
+                                    from datetime import datetime
+                                    import pytz
+                                    
+                                    conn_lifetime = get_db_connection()
+                                    cursor_lifetime = conn_lifetime.cursor()
+                                    try:
+                                        with db_lock:
+                                            # Отменяем все активные подписки пользователя/группы и отключаем автосписания
+                                            if subscription_type == 'personal':
+                                                # Для личных подписок отменяем все личные подписки пользователя
+                                                cursor_lifetime.execute("""
+                                                    UPDATE subscriptions 
+                                                    SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                                    WHERE user_id = %s AND subscription_type = 'personal' AND is_active = TRUE
+                                                """, (datetime.now(pytz.UTC), user_id))
+                                            else:
+                                                # Для групповых подписок отменяем все групповые подписки группы
+                                                cursor_lifetime.execute("""
+                                                    UPDATE subscriptions 
+                                                    SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                                    WHERE chat_id = %s AND subscription_type = 'group' AND is_active = TRUE
+                                                """, (datetime.now(pytz.UTC), chat_id))
+                                            conn_lifetime.commit()
+                                            cancelled_count = cursor_lifetime.rowcount
+                                            logger.info(f"[YOOKASSA LIFETIME] Отменено {cancelled_count} активных подписок для {subscription_type} (user_id={user_id}, chat_id={chat_id})")
+                                    finally:
+                                        try:
+                                            cursor_lifetime.close()
+                                        except:
+                                            pass
+                                        try:
+                                            conn_lifetime.close()
+                                        except:
+                                            pass
+                                
+                                # Для lifetime подписок payment_method_id должен быть NULL (отключаем автосписания)
+                                final_payment_method_id = None if period_type == 'lifetime' else payment_method_id
+                                
                                 try:
                                     subscription_id = create_subscription(
                                         chat_id=chat_id,
@@ -400,7 +521,7 @@ def create_web_app(bot):
                                         telegram_username=telegram_username,
                                         group_username=group_username,
                                         group_size=group_size,
-                                        payment_method_id=payment_method_id
+                                        payment_method_id=final_payment_method_id
                                     )
                                     logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
                                     
@@ -417,6 +538,47 @@ def create_web_app(bot):
                                     subscription_id = None
                         else:
                             # Нет активной подписки - создаем новую
+                            # Для lifetime подписок: отменяем все активные подписки пользователя/группы и отключаем автосписания
+                            if period_type == 'lifetime':
+                                from moviebot.database.db_connection import get_db_connection, db_lock
+                                from datetime import datetime
+                                import pytz
+                                
+                                conn_lifetime = get_db_connection()
+                                cursor_lifetime = conn_lifetime.cursor()
+                                try:
+                                    with db_lock:
+                                        # Отменяем все активные подписки пользователя/группы и отключаем автосписания
+                                        if subscription_type == 'personal':
+                                            # Для личных подписок отменяем все личные подписки пользователя
+                                            cursor_lifetime.execute("""
+                                                UPDATE subscriptions 
+                                                SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                                WHERE user_id = %s AND subscription_type = 'personal' AND is_active = TRUE
+                                            """, (datetime.now(pytz.UTC), user_id))
+                                        else:
+                                            # Для групповых подписок отменяем все групповые подписки группы
+                                            cursor_lifetime.execute("""
+                                                UPDATE subscriptions 
+                                                SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                                WHERE chat_id = %s AND subscription_type = 'group' AND is_active = TRUE
+                                            """, (datetime.now(pytz.UTC), chat_id))
+                                        conn_lifetime.commit()
+                                        cancelled_count = cursor_lifetime.rowcount
+                                        logger.info(f"[YOOKASSA LIFETIME] Отменено {cancelled_count} активных подписок для {subscription_type} (user_id={user_id}, chat_id={chat_id})")
+                                finally:
+                                    try:
+                                        cursor_lifetime.close()
+                                    except:
+                                        pass
+                                    try:
+                                        conn_lifetime.close()
+                                    except:
+                                        pass
+                            
+                            # Для lifetime подписок payment_method_id должен быть NULL (отключаем автосписания)
+                            final_payment_method_id = None if period_type == 'lifetime' else payment_method_id
+                            
                             try:
                                 subscription_id = create_subscription(
                                     chat_id=chat_id,
@@ -428,7 +590,7 @@ def create_web_app(bot):
                                     telegram_username=telegram_username,
                                     group_username=group_username,
                                     group_size=group_size,
-                                    payment_method_id=payment_method_id
+                                    payment_method_id=final_payment_method_id
                                 )
                                 logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
                                 
@@ -628,6 +790,45 @@ def create_web_app(bot):
                         telegram_username = metadata.get('telegram_username')
                         group_username = metadata.get('group_username')
                         
+                        # Для lifetime подписок: отменяем все активные подписки и отключаем автосписания
+                        if period_type == 'lifetime':
+                            from moviebot.database.db_connection import get_db_connection, db_lock
+                            from datetime import datetime
+                            import pytz
+                            
+                            conn_lifetime = get_db_connection()
+                            cursor_lifetime = conn_lifetime.cursor()
+                            try:
+                                with db_lock:
+                                    if subscription_type == 'personal':
+                                        cursor_lifetime.execute("""
+                                            UPDATE subscriptions 
+                                            SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                            WHERE user_id = %s AND subscription_type = 'personal' AND is_active = TRUE
+                                        """, (datetime.now(pytz.UTC), user_id))
+                                    else:
+                                        cursor_lifetime.execute("""
+                                            UPDATE subscriptions 
+                                            SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                                            WHERE chat_id = %s AND subscription_type = 'group' AND is_active = TRUE
+                                        """, (datetime.now(pytz.UTC), chat_id))
+                                    conn_lifetime.commit()
+                                    cancelled_count = cursor_lifetime.rowcount
+                                    if cancelled_count > 0:
+                                        logger.info(f"[YOOKASSA LIFETIME] Отменено {cancelled_count} активных подписок для {subscription_type} (user_id={user_id}, chat_id={chat_id})")
+                            finally:
+                                try:
+                                    cursor_lifetime.close()
+                                except:
+                                    pass
+                                try:
+                                    conn_lifetime.close()
+                                except:
+                                    pass
+                        
+                        # Для lifetime подписок payment_method_id должен быть NULL (отключаем автосписания)
+                        final_payment_method_id = None if period_type == 'lifetime' else payment_method_id
+                        
                         # Создаем подписку
                         subscription_id = None
                         try:
@@ -641,7 +842,7 @@ def create_web_app(bot):
                                 telegram_username=telegram_username,
                                 group_username=group_username,
                                 group_size=group_size,
-                                payment_method_id=payment_method_id
+                                payment_method_id=final_payment_method_id
                             )
                             logger.info(f"[YOOKASSA] Создана подписка {subscription_id} для уже обработанного платежа")
                             
