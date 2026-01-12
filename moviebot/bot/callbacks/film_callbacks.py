@@ -1272,29 +1272,79 @@ def back_to_film_description(call):
             # Если нет в БД, используем базовую ссылку (будет использована для API)
             link = f"https://www.kinopoisk.ru/series/{kp_id_int}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_int}/"
         
-        # 3. Получаем данные из API с правильной ссылкой
-        try:
-            from moviebot.api.kinopoisk_api import extract_movie_info
-            info = extract_movie_info(link)
-            if info and info.get('title'):
-                logger.info(f"[BACK TO FILM] API успех: {info['title']}")
-                # ВАЖНО: Если is_series уже получен из БД, используем его, а не из API
-                if not link_from_db:  # Только если фильм не в БД, используем is_series из API
-                    is_series = info.get('is_series', False)
-                    # Обновляем link на основе is_series из API
-                    if is_series:
-                        link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"
-                    else:
-                        link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"
-        except Exception as e:
-            logger.warning(f"[BACK TO FILM] API не сработал: {e}")
-
-        # 4. Получаем актуальное состояние через get_film_current_state
+        # 3. Получаем актуальное состояние через get_film_current_state (ОДИН РАЗ!)
         from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
         current_state = get_film_current_state(chat_id, kp_id_int, user_id)
         existing = current_state['existing']
         
-        # 5. Если фильм в базе, но API не дал данных, получаем из БД
+        # 4. ОПТИМИЗАЦИЯ: Если фильм уже в базе, используем данные из БД вместо API
+        # Это экономит 1-3 секунды на запросах к API
+        if existing:
+            # Фильм в базе - получаем данные из БД (быстро!)
+            with db_lock:
+                try:
+                    cursor_local.execute("""
+                        SELECT title, year, genres, description, director, actors, is_series, link
+                        FROM movies
+                        WHERE chat_id = %s AND kp_id = %s
+                    """, (chat_id, kp_id_db))
+                    row = cursor_local.fetchone()
+                    if row:
+                        info = {}
+                        if isinstance(row, dict):
+                            info = {
+                                'title': row.get('title'),
+                                'year': row.get('year'),
+                                'genres': row.get('genres'),
+                                'description': row.get('description'),
+                                'director': row.get('director'),
+                                'actors': row.get('actors'),
+                                'is_series': bool(row.get('is_series', 0))
+                            }
+                            if not link_from_db:
+                                link_from_db = row.get('link')
+                        else:
+                            info = {
+                                'title': row[0] if len(row) > 0 else None,
+                                'year': row[1] if len(row) > 1 else None,
+                                'genres': row[2] if len(row) > 2 else None,
+                                'description': row[3] if len(row) > 3 else None,
+                                'director': row[4] if len(row) > 4 else None,
+                                'actors': row[5] if len(row) > 5 else None,
+                                'is_series': bool(row[6]) if len(row) > 6 else False
+                            }
+                            if not link_from_db and len(row) > 7:
+                                link_from_db = row[7]
+                        # Используем is_series из БД
+                        is_series = info['is_series']
+                        if link_from_db:
+                            link = link_from_db
+                        logger.info(f"[BACK TO FILM] Данные получены из БД (быстро!): {info.get('title')}")
+                except Exception as e:
+                    logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}", exc_info=True)
+                    info = None
+        
+        # 5. Если фильм НЕ в базе или БД не дала данных, запрашиваем API
+        # ВАЖНО: Это медленная операция (1-3 секунды), но необходима для фильмов не в базе
+        if not info or not info.get('title'):
+            try:
+                from moviebot.api.kinopoisk_api import extract_movie_info
+                logger.info(f"[BACK TO FILM] Фильм не в базе или данных нет - запрашиваем API (может занять 1-3 сек)")
+                info = extract_movie_info(link)
+                if info and info.get('title'):
+                    logger.info(f"[BACK TO FILM] API успех: {info['title']}")
+                    # ВАЖНО: Если is_series уже получен из БД, используем его, а не из API
+                    if not link_from_db:  # Только если фильм не в БД, используем is_series из API
+                        is_series = info.get('is_series', False)
+                        # Обновляем link на основе is_series из API
+                        if is_series:
+                            link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"
+                        else:
+                            link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+            except Exception as e:
+                logger.warning(f"[BACK TO FILM] API не сработал: {e}")
+        
+        # 6. Если фильм в базе, но API не дал данных, получаем из БД (fallback)
         # Используем локальные соединение и курсор (уже определены выше)
         if existing and (not info or not info.get('title')):
             with db_lock:
