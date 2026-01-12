@@ -870,7 +870,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
             conn_local.rollback()
         except:
             pass
-        return {'items': [], 'total_pages': 1, 'total_count': 0, 'current_page': page}
+        return {'items': [], 'total_pages': 1, 'total_count': 0, 'unwatched_count': 0, 'current_page': page}
 
     except Exception as e:
         logger.error(f"[GET_USER_SERIES_PAGE] Ошибка: {e}", exc_info=True)
@@ -878,7 +878,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
             conn_local.rollback()
         except:
             pass
-        return {'items': [], 'total_pages': 1, 'total_count': 0, 'current_page': page}
+        return {'items': [], 'total_pages': 1, 'total_count': 0, 'unwatched_count': 0, 'current_page': page}
     finally:
         try:
             cursor_local.close()
@@ -889,10 +889,15 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
         except:
             pass
 
+    # Вычисляем unwatched_count если его еще нет (для случая ошибок)
+    if 'unwatched_count' not in locals():
+        unwatched_count = len([i for i in items if not i.get('all_watched', False)]) if items else 0
+    
     return {
         'items': items,
         'total_pages': total_pages,
         'total_count': total_count,
+        'unwatched_count': unwatched_count,
         'current_page': page
     }
 

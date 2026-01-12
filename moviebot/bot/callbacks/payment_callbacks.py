@@ -770,9 +770,17 @@ def register_payment_callbacks(bot_instance):
                         group_title = "Группа"
                         group_username = None
                     
+                    # Определяем названия подписок
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    
                     text = f"👥 <b>Групповая подписка</b>\n\n"
-                    if plan_type == 'all':
-                        text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
+                    text += f"📋 <b>Название подписки:</b> {plan_name}\n\n"
                     text += f"Группа: <b>{group_title}</b>\n"
                     if group_username:
                         text += f"@{group_username}\n"
@@ -1819,9 +1827,17 @@ def register_payment_callbacks(bot_instance):
                     plan_type = sub.get('plan_type', 'all')
                     period_type = sub.get('period_type', 'lifetime')
                 
+                    # Определяем названия подписок
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    
                     text = f"👥 <b>Групповая подписка</b>\n\n"
-                    if plan_type == 'all':
-                        text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
+                    text += f"📋 <b>Название подписки:</b> {plan_name}\n\n"
                     text += f"Группа: <b>{group_title}</b>\n"
                     if group_username:
                         text += f"@{group_username}\n"
@@ -3352,9 +3368,8 @@ def register_payment_callbacks(bot_instance):
                         elif plan_type == 'tickets' and has_tickets:
                             need_expansion = True
                             expansion_text = "🎫 Билеты в кино уже включены в вашу подписку."
-                        elif plan_type == 'all' and has_notifications and has_recommendations and has_tickets:
-                            need_expansion = True
-                            expansion_text = "📦 Все режимы уже включены в вашу подписку."
+                        # Убираем проверку для plan_type == 'all', чтобы всегда разрешать upgrade на "Все режимы"
+                        # Вместо этого, upgrade на "Все режимы" обрабатывается в блоке ниже (строка 3504)
                     
                         if need_expansion:
                             text = "✅ <b>Ваша подписка оформлена, но вы можете ее расширить:</b>\n\n"
@@ -6493,7 +6508,7 @@ def handle_successful_payment(message):
                 subscription_id = existing_sub.get('id')
                 # Продлеваем подписку
                 renew_subscription(subscription_id, period_type)
-                logger.info(f"[SUCCESSFUL PAYMENT] Подписка {subscription_id} продлена через Stars")
+                logger.info(f"[SUCCESSFUL PAYMENT] Подписка продлена через Stars: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={existing_plan}, period_type={period_type}")
             else:
                 # Параметры не совпадают - создаем новую подписку
                 subscription_id = create_subscription(
@@ -6508,7 +6523,7 @@ def handle_successful_payment(message):
                     group_size=group_size,
                     payment_method_id=None  # Для Stars подписок payment_method_id = None (Telegram управляет списаниями)
                 )
-                logger.info(f"[SUCCESSFUL PAYMENT] Создана новая подписка {subscription_id} через Stars")
+                logger.info(f"[SUCCESSFUL PAYMENT] Создана подписка через Stars: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}, price={amount}₽")
                 
                 # Автоматически добавляем оплатившего пользователя в групповую подписку
                 if subscription_id and subscription_type == 'group':
@@ -6542,7 +6557,7 @@ def handle_successful_payment(message):
                     logger.error(f"[SUCCESSFUL PAYMENT] Ошибка при автоматическом добавлении оплатившего пользователя: {add_error}", exc_info=True)
         
         if subscription_id:
-            logger.info(f"[SUCCESSFUL PAYMENT] ✅ Подписка создана: subscription_id={subscription_id}")
+            logger.info(f"[SUCCESSFUL PAYMENT] ✅ Подписка создана: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}")
             
             # Отправляем уведомление об успешной оплате
             send_successful_payment_notification(

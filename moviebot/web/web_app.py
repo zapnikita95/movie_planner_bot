@@ -291,7 +291,7 @@ def create_web_app(bot):
                                 group_size=group_size,
                                 payment_method_id=final_payment_method_id
                             )
-                            logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id} (объединенный платеж)")
+                            logger.info(f"[YOOKASSA] Создана подписка: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}, price={amount}₽ (объединенный платеж)")
                             
                             # Автоматически добавляем оплатившего пользователя в групповую подписку
                             if subscription_id and subscription_type == 'group':
@@ -369,7 +369,7 @@ def create_web_app(bot):
                                 group_size=group_size,
                                 payment_method_id=final_payment_method_id
                             )
-                            logger.info(f"[YOOKASSA] Создана новая подписка 'Все режимы' {subscription_id}")
+                            logger.info(f"[YOOKASSA] Создана подписка 'Все режимы': subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type=all, period_type={period_type}, price={amount}₽")
                             
                             # Автоматически добавляем оплатившего пользователя в групповую подписку
                             if subscription_id and subscription_type == 'group':
@@ -463,7 +463,7 @@ def create_web_app(bot):
                                 subscription_id = existing_sub.get('id')
                                 # Продлеваем подписку
                                 renew_subscription(subscription_id, period_type)
-                                logger.info(f"[YOOKASSA] Подписка {subscription_id} продлена")
+                                logger.info(f"[YOOKASSA] Подписка продлена: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={existing_plan}, period_type={period_type}")
                                 
                                 # payment_method_id будет обновлен позже, если карта сохранена
                                 
@@ -523,7 +523,7 @@ def create_web_app(bot):
                                         group_size=group_size,
                                         payment_method_id=final_payment_method_id
                                     )
-                                    logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                                    logger.info(f"[YOOKASSA] Создана подписка: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}, price={amount}₽")
                                     
                                     # Автоматически добавляем оплатившего пользователя в групповую подписку
                                     if subscription_id and subscription_type == 'group':
@@ -592,7 +592,7 @@ def create_web_app(bot):
                                     group_size=group_size,
                                     payment_method_id=final_payment_method_id
                                 )
-                                logger.info(f"[YOOKASSA] Создана новая подписка {subscription_id}")
+                                logger.info(f"[YOOKASSA] Создана подписка: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}, price={amount}₽")
                                 
                                 # Автоматически добавляем оплатившего пользователя в групповую подписку
                                 if subscription_id and subscription_type == 'group':
@@ -844,7 +844,7 @@ def create_web_app(bot):
                                 group_size=group_size,
                                 payment_method_id=final_payment_method_id
                             )
-                            logger.info(f"[YOOKASSA] Создана подписка {subscription_id} для уже обработанного платежа")
+                            logger.info(f"[YOOKASSA] Создана подписка для уже обработанного платежа: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}, price={amount}₽")
                             
                             # Обновляем платеж с subscription_id
                             update_payment_status(payment_data['payment_id'], 'succeeded', subscription_id)

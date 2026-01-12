@@ -1543,7 +1543,9 @@ def send_successful_payment_notification(
         
         try:
             bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
-            logger.info(f"[SUCCESSFUL PAYMENT] Уведомление отправлено для подписки {subscription_id} (check={'ДА' if check_url else 'НЕТ'})")
+            user_id_log = sub.get('user_id', 'N/A')
+            chat_id_log = sub.get('chat_id', 'N/A')
+            logger.info(f"[SUCCESSFUL PAYMENT] Уведомление отправлено: subscription_id={subscription_id}, user_id={user_id_log}, chat_id={chat_id_log}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type} (check={'ДА' if check_url else 'НЕТ'})")
         except Exception as e:
             logger.error(f"[SUCCESSFUL PAYMENT] Ошибка отправки уведомления: {e}")
     except Exception as e:
