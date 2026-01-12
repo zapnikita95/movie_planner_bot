@@ -379,7 +379,7 @@ def check_and_send_plan_notifications():
 
                     SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
 
-                           m.title, m.link, p.notification_sent, p.ticket_notification_sent
+                           m.title, m.link, p.notification_sent, p.ticket_notification_sent, p.ticket_file_id
 
                     FROM plans p
 
@@ -436,6 +436,8 @@ def check_and_send_plan_notifications():
 
                 ticket_notification_sent = plan.get('ticket_notification_sent', False)
 
+                ticket_file_id = plan.get('ticket_file_id')
+
             else:
 
                 plan_id = plan[0]
@@ -457,6 +459,8 @@ def check_and_send_plan_notifications():
                 notification_sent = plan[8] if len(plan) > 8 else False
 
                 ticket_notification_sent = plan[9] if len(plan) > 9 else False
+
+                ticket_file_id = plan[10] if len(plan) > 10 else None
 
             
 
@@ -592,15 +596,7 @@ def check_and_send_plan_notifications():
 
                 
 
-                # Проверяем наличие билетов (используем ticket_file_id из plans)
-
-                with db_lock:
-
-                    cursor_local.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
-
-                    ticket_row = cursor_local.fetchone()
-
-                    ticket_file_id = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else (ticket_row[0] if ticket_row else None)
+                # ticket_file_id уже получен из основного запроса выше
 
                 
 
