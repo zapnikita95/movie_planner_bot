@@ -73,75 +73,91 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     kp_id = match.group(2) if match else None
     is_series_from_link = match.group(1) == 'series' if match else False
     
-    with db_lock:
-        if kp_id:
-            cursor.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
-        else:
-            cursor.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
-        row = cursor.fetchone()
-        if not row:
-            # При планировании фильма автоматически добавляем его в базу
-            info = extract_movie_info(link)
-            if info:
-                is_series_val = 1 if info.get('is_series') else 0
-                kp_id_from_info = str(info.get('kp_id', kp_id))
-                # Обновляем kp_id из info, если он есть
-                if kp_id_from_info:
-                    kp_id = kp_id_from_info
-                cursor.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series', 
-                             (chat_id, link, kp_id, info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors'], is_series_val))
-                conn.commit()
-                cursor.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
-                row = cursor.fetchone()
-                if row:
-                    film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    title = row.get('title') if isinstance(row, dict) else row[1]
-                    is_series_db = bool(row.get('is_series') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0))
-                    logger.info(f"[PROCESS_PLAN] Фильм автоматически добавлен в базу при планировании: kp_id={kp_id}, film_id={film_id}, is_series={is_series_db}")
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            if kp_id:
+                cursor_local.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+            else:
+                cursor_local.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND link = %s', (chat_id, link))
+            row = cursor_local.fetchone()
+            if not row:
+                # При планировании фильма автоматически добавляем его в базу
+                info = extract_movie_info(link)
+                if info:
+                    is_series_val = 1 if info.get('is_series') else 0
+                    kp_id_from_info = str(info.get('kp_id', kp_id))
+                    # Обновляем kp_id из info, если он есть
+                    if kp_id_from_info:
+                        kp_id = kp_id_from_info
+                    cursor_local.execute('INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series', 
+                                 (chat_id, link, kp_id, info['title'], info['year'], info['genres'], info['description'], info['director'], info['actors'], is_series_val))
+                    conn_local.commit()
+                    cursor_local.execute('SELECT id, title, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                    row = cursor_local.fetchone()
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
+                        is_series_db = bool(row.get('is_series') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0))
+                        logger.info(f"[PROCESS_PLAN] Фильм автоматически добавлен в базу при планировании: kp_id={kp_id}, film_id={film_id}, is_series={is_series_db}")
+                    else:
+                        bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
+                        return False
                 else:
-                    bot.send_message(chat_id, "Не удалось добавить фильм в базу.")
+                    bot.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
                     return False
             else:
-                bot.send_message(chat_id, "Не удалось извлечь информацию о фильме.")
-                return False
-        else:
-            film_id = row.get('id') if isinstance(row, dict) else row[0]
-            title = row.get('title') if isinstance(row, dict) else row[1]
-            is_series_db = bool(row.get('is_series') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0))
-            # Получаем kp_id из базы, если он еще не был извлечен из ссылки
-            if not kp_id:
-                cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                kp_row = cursor.fetchone()
-                if kp_row:
-                    kp_id = str(kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0])
-        
-        # TODO: Добавить обработку сериалов (episode_info) из moviebot.py строки 23196-23274
-        
-        plan_utc = plan_dt.astimezone(pytz.utc)
-        cursor.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s) RETURNING id',
-                      (chat_id, film_id, plan_type, plan_utc, user_id))
-        plan_id_row = cursor.fetchone()
-        plan_id = plan_id_row.get('id') if isinstance(plan_id_row, dict) else plan_id_row[0] if plan_id_row else None
-        
-        # ВАЖНО: Получаем kp_id из базы, чтобы быть уверенными, что он правильный
-        if film_id:
-            cursor.execute('SELECT kp_id, is_series FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            movie_row = cursor.fetchone()
-            if movie_row:
-                kp_id_from_db = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
-                is_series_db = bool(movie_row.get('is_series') if isinstance(movie_row, dict) else (movie_row[1] if len(movie_row) > 1 else 0))
-                if kp_id_from_db:
-                    kp_id = str(kp_id_from_db)
-                    logger.info(f"[PROCESS PLAN] kp_id получен из базы: {kp_id}, is_series={is_series_db}")
-                elif not kp_id:
-                    logger.warning(f"[PROCESS PLAN] kp_id не найден в базе для film_id={film_id}")
-            else:
-                logger.warning(f"[PROCESS PLAN] Фильм не найден в базе для film_id={film_id}")
-        
-        conn.commit()
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                title = row.get('title') if isinstance(row, dict) else row[1]
+                is_series_db = bool(row.get('is_series') if isinstance(row, dict) else (row[2] if len(row) > 2 else 0))
+                # Получаем kp_id из базы, если он еще не был извлечен из ссылки
+                if not kp_id:
+                    cursor_local.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    kp_row = cursor_local.fetchone()
+                    if kp_row:
+                        kp_id = str(kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0])
+            
+            # TODO: Добавить обработку сериалов (episode_info) из moviebot.py строки 23196-23274
+            
+            plan_utc = plan_dt.astimezone(pytz.utc)
+            cursor_local.execute('INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id) VALUES (%s, %s, %s, %s, %s) RETURNING id',
+                          (chat_id, film_id, plan_type, plan_utc, user_id))
+            plan_id_row = cursor_local.fetchone()
+            plan_id = plan_id_row.get('id') if isinstance(plan_id_row, dict) else plan_id_row[0] if plan_id_row else None
+            
+            # ВАЖНО: Получаем kp_id из базы, чтобы быть уверенными, что он правильный
+            if film_id:
+                cursor_local.execute('SELECT kp_id, is_series FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                movie_row = cursor_local.fetchone()
+                if movie_row:
+                    kp_id_from_db = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+                    is_series_db = bool(movie_row.get('is_series') if isinstance(movie_row, dict) else (movie_row[1] if len(movie_row) > 1 else 0))
+                    if kp_id_from_db:
+                        kp_id = str(kp_id_from_db)
+                        logger.info(f"[PROCESS PLAN] kp_id получен из базы: {kp_id}, is_series={is_series_db}")
+                    elif not kp_id:
+                        logger.warning(f"[PROCESS PLAN] kp_id не найден в базе для film_id={film_id}")
+                else:
+                    logger.warning(f"[PROCESS PLAN] Фильм не найден в базе для film_id={film_id}")
+            
+            conn_local.commit()
         
         # Успешное планирование - фильм уже в базе (film_id получен выше)
         logger.info(f"[PLAN] Успешное планирование: plan_id={plan_id}, film_id={film_id}, kp_id={kp_id}, plan_type={plan_type}, plan_datetime={plan_utc}")
+    except Exception as e:
+        logger.error(f"[PROCESS_PLAN] Ошибка при планировании: {e}", exc_info=True)
+        return False
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
     
     # Если нужно уточнить часовой пояс, показываем выбор, но текущее планирование уже завершено
     if needs_tz_check:
@@ -184,13 +200,26 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
                     # Сохраняем источники в базу для будущего использования
                     sources_dict = {platform: url for platform, url in sources[:6]}
                     sources_json = json.dumps(sources_dict, ensure_ascii=False)
-                    with db_lock:
-                        cursor.execute('''
-                            UPDATE plans 
-                            SET ticket_file_id = %s 
-                            WHERE id = %s
-                        ''', (sources_json, plan_id))
-                        conn.commit()
+                    # Используем отдельное соединение для фонового потока
+                    conn_sources = get_db_connection()
+                    cursor_sources = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_sources.execute('''
+                                UPDATE plans 
+                                SET ticket_file_id = %s 
+                                WHERE id = %s
+                            ''', (sources_json, plan_id))
+                            conn_sources.commit()
+                    finally:
+                        try:
+                            cursor_sources.close()
+                        except:
+                            pass
+                        try:
+                            conn_sources.close()
+                        except:
+                            pass
                     logger.info(f"[PROCESS PLAN] Найдено {len(sources)} источников для kp_id={kp_id} (загружено в фоне)")
                 else:
                     logger.info(f"[PROCESS PLAN] Источники не найдены для kp_id={kp_id}")
