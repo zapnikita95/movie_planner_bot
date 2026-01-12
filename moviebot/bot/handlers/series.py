@@ -6853,7 +6853,6 @@ def add_film_from_search_callback(call):
         finally:
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
 
-
 def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
     """
     Добавляет фильм/сериал в базу, если его еще нет.
@@ -6868,7 +6867,7 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
             with db_lock:
                 logger.info(f"[ENSURE MOVIE] db_lock получен, проверяю существование фильма")
                 # Проверяем, существует ли фильм
-                cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                 row = cursor_local.fetchone()
                 
                 if row:
@@ -6917,9 +6916,6 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
             
     except Exception as e:
         logger.error(f"[ENSURE MOVIE] КРИТИЧЕСКАЯ ОШИБКА при добавлении фильма в базу: {e}", exc_info=True)
-            logger.info(f"[ENSURE MOVIE] rollback выполнен")
-        except Exception as rollback_e:
-            logger.error(f"[ENSURE MOVIE] Ошибка при rollback: {rollback_e}")
         logger.info(f"[ENSURE MOVIE] ===== END (ошибка) =====")
         return None, False
 
