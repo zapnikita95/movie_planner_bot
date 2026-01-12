@@ -403,13 +403,18 @@ def handle_plan_type(call):
         chat_id = call.message.chat.id
 
         # Ищем в БД film_id, link, title, watched (чтобы existing был готов)
-        with db_lock:
-                cursor.execute('''
+        # ВАЖНО: Используем локальные соединения вместо глобальных
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        try:
+            with db_lock:
+                cursor_local.execute('''
                     SELECT id, title, watched, link 
                     FROM movies 
                     WHERE chat_id = %s AND kp_id = %s
                 ''', (chat_id, str(kp_id)))
-                row = cursor.fetchone()
+                row = cursor_local.fetchone()
                 
                 if not row:
                     bot.send_message(chat_id, "❌ Фильм не найден в базе. Попробуйте заново.")
@@ -426,6 +431,23 @@ def handle_plan_type(call):
                     link = row.get('link')
                 else:  # tuple
                     link = row[3] if len(row) > 3 else None
+        except Exception as db_e:
+            logger.error(f"[PLAN TYPE] Ошибка БД: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            bot.send_message(chat_id, "❌ Ошибка при получении данных из базы. Попробуйте заново.")
+            return
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Сохраняем состояние с step=3
         user_plan_state[user_id] = {
@@ -494,52 +516,73 @@ def mark_watched_from_description_callback(call):
         logger.info(f"[MARK WATCHED] film_id={film_id}, user_id={user_id}, chat_id={chat_id}, message_id={message_id}")
         
         # Получаем информацию о фильме из БД
-        with db_lock:
-            cursor.execute('''
-                SELECT id, title, watched, link, kp_id, year, genres, description, director, actors, is_series
-                FROM movies WHERE id = %s AND chat_id = %s
-            ''', (film_id, chat_id))
-            row = cursor.fetchone()
-            
-            if not row:
-                logger.error(f"[MARK WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
-                try:
+        # ВАЖНО: Используем локальные соединения вместо глобальных
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT id, title, watched, link, kp_id, year, genres, description, director, actors, is_series
+                    FROM movies WHERE id = %s AND chat_id = %s
+                ''', (film_id, chat_id))
+                row = cursor_local.fetchone()
+                
+                if not row:
+                    logger.error(f"[MARK WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
                     try:
-                        bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                        try:
+                            bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                        except Exception as e:
+                            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
                     except Exception as e:
                         logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-                except Exception as e:
-                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-                return
-            
-            # Извлекаем данные
-            if isinstance(row, dict):
-                title = row.get('title')
-                watched = row.get('watched')
-                link = row.get('link')
-                kp_id = row.get('kp_id')
-                year = row.get('year')
-                genres = row.get('genres')
-                description = row.get('description')
-                director = row.get('director')
-                actors = row.get('actors')
-                is_series = bool(row.get('is_series', 0))
-            else:
-                title = row[1]
-                watched = row[2]
-                link = row[3]
-                kp_id = row[4]
-                year = row[5]
-                genres = row[6]
-                description = row[7]
-                director = row[8]
-                actors = row[9]
-                is_series = bool(row[10] if len(row) > 10 else 0)
-            
-            # Отмечаем фильм как просмотренный
-            cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            conn.commit()
-            logger.info(f"[MARK WATCHED] Фильм {film_id} отмечен как просмотренный")
+                    return
+                
+                # Извлекаем данные
+                if isinstance(row, dict):
+                    title = row.get('title')
+                    watched = row.get('watched')
+                    link = row.get('link')
+                    kp_id = row.get('kp_id')
+                    year = row.get('year')
+                    genres = row.get('genres')
+                    description = row.get('description')
+                    director = row.get('director')
+                    actors = row.get('actors')
+                    is_series = bool(row.get('is_series', 0))
+                else:
+                    title = row[1]
+                    watched = row[2]
+                    link = row[3]
+                    kp_id = row[4]
+                    year = row[5]
+                    genres = row[6]
+                    description = row[7]
+                    director = row[8]
+                    actors = row[9]
+                    is_series = bool(row[10] if len(row) > 10 else 0)
+                
+                # Отмечаем фильм как просмотренный
+                cursor_local.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                conn_local.commit()
+                logger.info(f"[MARK WATCHED] Фильм {film_id} отмечен как просмотренный")
+        except Exception as db_e:
+            logger.error(f"[MARK WATCHED] Ошибка БД: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            return
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Формируем словарь info из данных БД (без API запроса)
         info = {
@@ -747,13 +790,33 @@ def streaming_done_callback(call):
     chat_id = call.message.chat.id
     
     # Ставим streaming_done = True и убираем приписку + кнопки
-    with db_lock:
-        cursor.execute('''
-            UPDATE plans 
-            SET streaming_done = TRUE
-            WHERE id = %s AND chat_id = %s
-        ''', (plan_id, chat_id))
-        conn.commit()
+    # ВАЖНО: Используем локальные соединения вместо глобальных
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute('''
+                UPDATE plans 
+                SET streaming_done = TRUE
+                WHERE id = %s AND chat_id = %s
+            ''', (plan_id, chat_id))
+            conn_local.commit()
+    except Exception as db_e:
+        logger.error(f"[STREAMING DONE] Ошибка БД: {db_e}", exc_info=True)
+        try:
+            conn_local.rollback()
+        except:
+            pass
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
     
     # Убираем текст "Выберите..." и кнопки
     original_text = call.message.text.split("\n\n📺")[0].strip()
@@ -818,10 +881,30 @@ def mark_watched_from_description_kp_callback(call):
             return
 
         # Отмечаем фильм как просмотренный
-        with db_lock:
-            cursor.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            conn.commit()
-            logger.info(f"[MARK WATCHED KP] Фильм {film_id} добавлен в базу и отмечен как просмотренный")
+        # ВАЖНО: Используем локальные соединения вместо глобальных
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        try:
+            with db_lock:
+                cursor_local.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                conn_local.commit()
+                logger.info(f"[MARK WATCHED KP] Фильм {film_id} добавлен в базу и отмечен как просмотренный")
+        except Exception as db_e:
+            logger.error(f"[MARK WATCHED KP] Ошибка БД: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Обновляем existing (теперь watched=1)
         existing = (film_id, info.get('title'), True)
@@ -885,52 +968,73 @@ def toggle_watched_from_description_callback(call):
         logger.info(f"[TOGGLE WATCHED] film_id={film_id}, user_id={user_id}, chat_id={chat_id}, message_id={message_id}")
         
         # Получаем информацию о фильме из БД
-        with db_lock:
-            cursor.execute('''
-                SELECT id, title, watched, link, kp_id, year, genres, description, director, actors, is_series
-                FROM movies WHERE id = %s AND chat_id = %s
-            ''', (film_id, chat_id))
-            row = cursor.fetchone()
-            
-            if not row:
-                logger.error(f"[TOGGLE WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
-                try:
+        # ВАЖНО: Используем локальные соединения вместо глобальных
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT id, title, watched, link, kp_id, year, genres, description, director, actors, is_series
+                    FROM movies WHERE id = %s AND chat_id = %s
+                ''', (film_id, chat_id))
+                row = cursor_local.fetchone()
+                
+                if not row:
+                    logger.error(f"[TOGGLE WATCHED] Фильм не найден: film_id={film_id}, chat_id={chat_id}")
                     try:
-                        bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                        try:
+                            bot.answer_callback_query(call.id, "❌ Фильм не найден", show_alert=True)
+                        except Exception as e:
+                            logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
                     except Exception as e:
                         logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-                except Exception as e:
-                    logger.warning(f"[CALLBACK] Не удалось ответить на callback (query too old или ошибка): {e}")
-                return
-            
-            # Извлекаем данные
-            if isinstance(row, dict):
-                title = row.get('title')
-                watched = row.get('watched')
-                link = row.get('link')
-                kp_id = row.get('kp_id')
-                year = row.get('year')
-                genres = row.get('genres')
-                description = row.get('description')
-                director = row.get('director')
-                actors = row.get('actors')
-                is_series = bool(row.get('is_series', 0))
-            else:
-                title = row[1]
-                watched = row[2]
-                link = row[3]
-                kp_id = row[4]
-                year = row[5]
-                genres = row[6]
-                description = row[7]
-                director = row[8]
-                actors = row[9]
-                is_series = bool(row[10] if len(row) > 10 else 0)
-            
-            # Снимаем отметку просмотра
-            cursor.execute('UPDATE movies SET watched = 0 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            conn.commit()
-            logger.info(f"[TOGGLE WATCHED] Фильм {film_id} - отметка просмотра снята")
+                    return
+                
+                # Извлекаем данные
+                if isinstance(row, dict):
+                    title = row.get('title')
+                    watched = row.get('watched')
+                    link = row.get('link')
+                    kp_id = row.get('kp_id')
+                    year = row.get('year')
+                    genres = row.get('genres')
+                    description = row.get('description')
+                    director = row.get('director')
+                    actors = row.get('actors')
+                    is_series = bool(row.get('is_series', 0))
+                else:
+                    title = row[1]
+                    watched = row[2]
+                    link = row[3]
+                    kp_id = row[4]
+                    year = row[5]
+                    genres = row[6]
+                    description = row[7]
+                    director = row[8]
+                    actors = row[9]
+                    is_series = bool(row[10] if len(row) > 10 else 0)
+                
+                # Снимаем отметку просмотра
+                cursor_local.execute('UPDATE movies SET watched = 0 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                conn_local.commit()
+                logger.info(f"[TOGGLE WATCHED] Фильм {film_id} - отметка просмотра снята")
+        except Exception as db_e:
+            logger.error(f"[TOGGLE WATCHED] Ошибка БД: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            return
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Формируем словарь info из данных БД (без API запроса)
         info = {
@@ -999,9 +1103,31 @@ def remove_from_database_prompt(call):
         user_id = call.from_user.id
 
         # Получаем название фильма для подтверждения
-        with db_lock:
-            cursor.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
-            row = cursor.fetchone()
+        # ВАЖНО: Используем локальные соединения вместо глобальных
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
+                row = cursor_local.fetchone()
+        except Exception as db_e:
+            logger.error(f"[CONFIRM REMOVE] Ошибка БД: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            bot.edit_message_text("❌ Ошибка при получении данных из базы.", chat_id, message_id)
+            return
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
         if not row:
             bot.edit_message_text(
@@ -1064,29 +1190,51 @@ def confirm_remove_from_database(call):
         message_id = call.message.message_id
         user_id = call.from_user.id
 
-        with db_lock:
-            cursor.execute("""
-                SELECT id, title 
-                FROM movies 
-                WHERE chat_id = %s AND kp_id = %s
-            """, (chat_id, kp_id_str))
-            film = cursor.fetchone()
+        # ВАЖНО: Используем локальные соединения вместо глобальных
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        try:
+            with db_lock:
+                cursor_local.execute("""
+                    SELECT id, title 
+                    FROM movies 
+                    WHERE chat_id = %s AND kp_id = %s
+                """, (chat_id, kp_id_str))
+                film = cursor_local.fetchone()
 
-            if not film:
-                bot.edit_message_text(
-                    "Фильм уже удалён или не найден.",
-                    chat_id, message_id
-                )
-                return
+                if not film:
+                    bot.edit_message_text(
+                        "Фильм уже удалён или не найден.",
+                        chat_id, message_id
+                    )
+                    return
 
-            film_id = film[0] if isinstance(film, tuple) else film.get('id')
-            title = film[1] if isinstance(film, tuple) else film.get('title', f"ID {kp_id}")
+                film_id = film[0] if isinstance(film, tuple) else film.get('id')
+                title = film[1] if isinstance(film, tuple) else film.get('title', f"ID {kp_id}")
 
-            # Удаляем всё связанное
-            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            conn.commit()
+                # Удаляем всё связанное
+                cursor_local.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                cursor_local.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                cursor_local.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                conn_local.commit()
+        except Exception as db_e:
+            logger.error(f"[REMOVE FILM] Ошибка БД: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            bot.edit_message_text("❌ Ошибка при удалении фильма.", chat_id, message_id)
+            return
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
         # Получаем информацию о фильме через API для показа описания
         from moviebot.api.kinopoisk_api import extract_movie_info
@@ -1156,28 +1304,50 @@ def confirm_remove(call):
         chat_id = call.message.chat.id
         message_id = call.message.message_id
 
-        with db_lock:
-            # Сначала получаем название (чтобы показать нормальное сообщение)
-            cursor.execute("""
-                SELECT id, title 
-                FROM movies 
-                WHERE chat_id = %s AND kp_id = %s
-            """, (chat_id, kp_id_str))
-            row = cursor.fetchone()
+        # ВАЖНО: Используем локальные соединения вместо глобальных
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        try:
+            with db_lock:
+                # Сначала получаем название (чтобы показать нормальное сообщение)
+                cursor_local.execute("""
+                    SELECT id, title 
+                    FROM movies 
+                    WHERE chat_id = %s AND kp_id = %s
+                """, (chat_id, kp_id_str))
+                row = cursor_local.fetchone()
 
-            if not row:
-                bot.edit_message_text(
-                    "Фильм уже удалён или не найден.",
-                    chat_id, message_id
-                )
-                return
+                if not row:
+                    bot.edit_message_text(
+                        "Фильм уже удалён или не найден.",
+                        chat_id, message_id
+                    )
+                    return
 
-            film_id = row[0] if isinstance(row, tuple) else row.get('id')
-            title = row[1] if isinstance(row, tuple) else row.get('title', f"ID {kp_id}")
+                film_id = row[0] if isinstance(row, tuple) else row.get('id')
+                title = row[1] if isinstance(row, tuple) else row.get('title', f"ID {kp_id}")
 
-            # Удаляем
-            cursor.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
-            conn.commit()
+                # Удаляем
+                cursor_local.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
+                conn_local.commit()
+        except Exception as db_e:
+            logger.error(f"[CONFIRM REMOVE] Ошибка БД: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            bot.edit_message_text("❌ Ошибка при удалении фильма.", chat_id, message_id)
+            return
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
         # Кнопка "Вернуться к описанию"
         markup = InlineKeyboardMarkup()
@@ -1198,7 +1368,7 @@ def confirm_remove(call):
 
     except Exception as e:
         logger.error(f"[CONFIRM REMOVE] Ошибка: {e}", exc_info=True)
-        conn.rollback()
+        # Не используем глобальный conn, так как используем локальные соединения
         try:
             bot.edit_message_text(
                 "Произошла ошибка при удалении.",

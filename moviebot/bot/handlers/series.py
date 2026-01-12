@@ -42,6 +42,9 @@ from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_select
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
 cursor = get_db_cursor()
+
+# Жанры, которые нужно исключать из режимов рандома
+EXCLUDED_GENRES = ['музыка', 'короткометражка', 'реальное тв', 'церемония', 'концерт', 'ток-шоу']
 random_plan_data = {}  # user_id → данные для планирования рандомного фильма
 
 # Обработчик выбора типа поиска (фильм/сериал) - НА ВЕРХНЕМ УРОВНЕ МОДУЛЯ
@@ -2514,6 +2517,9 @@ def register_series_handlers(bot_param):
                     if genre and genre.strip():
                         genres.append(genre.strip())
             
+            # Исключаем нежелательные жанры
+            genres = [g for g in genres if g.lower() not in [eg.lower() for eg in EXCLUDED_GENRES]]
+            
             logger.info(f"[RANDOM] Genres found: {len(genres)}")
             
             # --------------------- Формируем клавиатуру ---------------------
@@ -3121,6 +3127,13 @@ def register_series_handlers(bot_param):
     
     def check_film_matches_criteria(film_info, periods, genres, directors, actors):
         """Проверяет, соответствует ли фильм критериям"""
+        # Проверка на исключаемые жанры
+        film_genres_str = film_info.get('genres', '')
+        film_genres_lower = str(film_genres_str).lower() if film_genres_str else ""
+        for excluded_genre in EXCLUDED_GENRES:
+            if excluded_genre.lower() in film_genres_lower:
+                return False
+        
         # Проверка периода (года)
         if periods:
             film_year = film_info.get('year')
@@ -3268,6 +3281,9 @@ def register_series_handlers(bot_param):
                 ]
             else:
                 all_genres = api_genres
+            
+            # Исключаем нежелательные жанры
+            all_genres = [g for g in all_genres if g.get('genre', '').lower() not in [eg.lower() for eg in EXCLUDED_GENRES]]
             
             # Ограничиваем до 3 выбранных жанров
             max_selected = 3
@@ -4259,12 +4275,16 @@ def register_series_handlers(bot_param):
                     del user_random_state[user_id]
                     return
                 
-                # Фильтруем фильмы: исключаем те, что уже в базе
+                # Фильтруем фильмы: исключаем те, что уже в базе и с нежелательными жанрами
                 filtered_films = []
                 for film in all_films:
                     kp_id_film = str(film.get('kinopoiskId', ''))
                     if kp_id_film and kp_id_film not in exclude_kp_ids:
-                        filtered_films.append(film)
+                        # Проверяем жанры фильма
+                        film_genres = [g.get('genre', '').lower() for g in film.get('genres', [])]
+                        has_excluded_genre = any(eg.lower() in [fg.lower() for fg in film_genres] for eg in EXCLUDED_GENRES)
+                        if not has_excluded_genre:
+                            filtered_films.append(film)
                 
                 if not filtered_films:
                     bot.edit_message_text("😔 Все найденные фильмы уже есть в вашей базе.", chat_id, call.message.message_id)
@@ -4295,17 +4315,78 @@ def register_series_handlers(bot_param):
                 kp_id_result = str(selected_film.get('kinopoiskId', ''))
                 
                 if kp_id_result:
-                    # Получаем полную информацию о фильме
-                    link = f"https://www.kinopoisk.ru/film/{kp_id_result}/"
-                    movie_info = extract_movie_info(link)
+                    # Пытаемся найти фильм без исключаемых жанров (максимум 10 попыток)
+                    max_attempts = 10
+                    attempt = 0
+                    found_valid_film = False
                     
-                    if movie_info:
-                        # Используем show_film_info_with_buttons для отображения (там уже есть все нужные кнопки, включая "Выбрать онлайн-кинотеатр")
-                        from moviebot.bot.handlers.series import show_film_info_with_buttons
-                        show_film_info_with_buttons(
-                            chat_id, user_id, movie_info, link, kp_id_result,
-                            existing=None, message_id=call.message.message_id
-                        )
+                    while attempt < max_attempts and not found_valid_film:
+                        # Получаем полную информацию о фильме
+                        link = f"https://www.kinopoisk.ru/film/{kp_id_result}/"
+                        movie_info = extract_movie_info(link)
+                        
+                        if movie_info:
+                            # Проверяем, что фильм не содержит исключаемые жанры
+                            film_genres_str = movie_info.get('genres', '')
+                            film_genres_lower = str(film_genres_str).lower() if film_genres_str else ""
+                            has_excluded_genre = any(eg.lower() in film_genres_lower for eg in EXCLUDED_GENRES)
+                            
+                            if not has_excluded_genre:
+                                # Фильм подходит, используем его
+                                found_valid_film = True
+                                from moviebot.bot.handlers.series import show_film_info_with_buttons
+                                show_film_info_with_buttons(
+                                    chat_id, user_id, movie_info, link, kp_id_result,
+                                    existing=None, message_id=call.message.message_id
+                                )
+                                bot.answer_callback_query(call.id)
+                                del user_random_state[user_id]
+                                return
+                            else:
+                                # Фильм содержит исключаемый жанр, выбираем другой
+                                logger.info(f"[RANDOM KINOPOISK] Фильм {kp_id_result} содержит исключаемый жанр, пробуем другой")
+                                filtered_films.remove(selected_film)
+                                if priority_films and selected_film in priority_films:
+                                    priority_films.remove(selected_film)
+                                if selected_film in regular_films:
+                                    regular_films.remove(selected_film)
+                                
+                                if not filtered_films:
+                                    break
+                                
+                                # Выбираем следующий фильм
+                                if priority_films:
+                                    selected_film = random.choice(priority_films)
+                                elif regular_films:
+                                    selected_film = random.choice(regular_films)
+                                else:
+                                    break
+                                
+                                kp_id_result = str(selected_film.get('kinopoiskId', ''))
+                                attempt += 1
+                        else:
+                            # Не удалось получить информацию, пробуем другой фильм
+                            filtered_films.remove(selected_film)
+                            if priority_films and selected_film in priority_films:
+                                priority_films.remove(selected_film)
+                            if selected_film in regular_films:
+                                regular_films.remove(selected_film)
+                            
+                            if not filtered_films:
+                                break
+                            
+                            if priority_films:
+                                selected_film = random.choice(priority_films)
+                            elif regular_films:
+                                selected_film = random.choice(regular_films)
+                            else:
+                                break
+                            
+                            kp_id_result = str(selected_film.get('kinopoiskId', ''))
+                            attempt += 1
+                    
+                    if not found_valid_film:
+                        bot.edit_message_text("😔 Не удалось найти фильм по заданным критериям на Кинопоиске.", chat_id, call.message.message_id)
                         bot.answer_callback_query(call.id)
                         del user_random_state[user_id]
                         return
