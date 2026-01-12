@@ -618,11 +618,11 @@ def streaming_select_callback(call):
             bot.edit_message_text(
                 "😔 Для этого фильма/сериала нет доступных онлайн-платформ в России.\n"
                 "Можно поискать на торрентах или зарубежных сервисах (VPN).\n\n"
-                "◀️ Назад к описанию",
+                "◀️ Вернуться к описанию",
                 chat_id,
                 message_id,
                 reply_markup=InlineKeyboardMarkup().add(
-                    InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}")
+                    InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{kp_id}")
                 )
             )
             return
@@ -637,7 +637,7 @@ def streaming_select_callback(call):
             callback_data = f"sel:{kp_id}:{idx}"
             markup.add(InlineKeyboardButton(platform, callback_data=callback_data))
 
-        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}"))
+        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{kp_id}"))
 
         bot.edit_message_text(
             "Выберите онлайн-кинотеатр:",
@@ -1119,8 +1119,8 @@ def confirm_remove_from_database(call):
             # Если API не вернул данные, показываем простое сообщение
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton(
-                "📖 Перейти к описанию",
-                callback_data=f"show_film_description:{kp_id}"
+                "◀️ Вернуться к описанию",
+                callback_data=f"back_to_film:{kp_id}"
             ))
             bot.edit_message_text(
                 f"✅ <b>{title}</b> успешно удалён из базы!",
@@ -1179,11 +1179,11 @@ def confirm_remove(call):
             cursor.execute('DELETE FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
             conn.commit()
 
-        # Кнопка "Перейти к описанию"
+        # Кнопка "Вернуться к описанию"
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(
-            "📖 Перейти к описанию",
-            callback_data=f"show_film_description:{kp_id}"
+            "◀️ Вернуться к описанию",
+            callback_data=f"back_to_film:{kp_id}"
         ))
 
         bot.edit_message_text(
@@ -1245,21 +1245,25 @@ def back_to_film_description(call):
         link_from_db = None
         info = None
         
-        # 1. Получаем is_series и link из БД ПЕРВЫМ ДЕЛОМ
+        # 1. Получаем is_series и link из БД ПЕРВЫМ ДЕЛОМ (используем локальные соединение и курсор)
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
         with db_lock:
             try:
-                cursor.execute("""
+                cursor_local.execute("""
                     SELECT is_series, link
                     FROM movies
                     WHERE chat_id = %s AND kp_id = %s
                 """, (chat_id, kp_id_db))
-                row = cursor.fetchone()
+                row = cursor_local.fetchone()
                 if row:
                     is_series = bool(row.get('is_series') if isinstance(row, dict) else row[0])
                     link_from_db = row.get('link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
                     logger.info(f"[BACK TO FILM] is_series из БД: {is_series}, link_from_db: {link_from_db}")
             except Exception as e:
-                logger.warning(f"[BACK TO FILM] Ошибка получения is_series и link из БД: {e}")
+                logger.warning(f"[BACK TO FILM] Ошибка получения is_series и link из БД: {e}", exc_info=True)
         
         # 2. Формируем правильную ссылку на основе is_series из БД
         if link_from_db:
@@ -1291,15 +1295,16 @@ def back_to_film_description(call):
         existing = current_state['existing']
         
         # 5. Если фильм в базе, но API не дал данных, получаем из БД
+        # Используем локальные соединение и курсор (уже определены выше)
         if existing and (not info or not info.get('title')):
             with db_lock:
                 try:
-                    cursor.execute("""
+                    cursor_local.execute("""
                         SELECT title, year, genres, description, director, actors, is_series, link
                         FROM movies
                         WHERE chat_id = %s AND kp_id = %s
                     """, (chat_id, kp_id_db))
-                    row = cursor.fetchone()
+                    row = cursor_local.fetchone()
                     if row:
                         info = info or {}
                         if isinstance(row, dict):

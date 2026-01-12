@@ -102,6 +102,11 @@ def register_series_callbacks(bot):
 
             # ── Дальше идёт твой оригинальный код построения клавиатуры ─────────────
             now = datetime.now()
+            
+            # Используем локальные соединение и курсор (определяем один раз перед циклом)
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
 
             markup = InlineKeyboardMarkup(row_width=1)
             for season in seasons_data:
@@ -133,15 +138,16 @@ def register_series_callbacks(bot):
                     continue
 
                 watched_count = 0
+                
                 with db_lock:
                     for ep in episodes:
                         ep_num = ep.get('episodeNumber', '')
-                        cursor.execute('''
+                        cursor_local.execute('''
                             SELECT watched FROM series_tracking 
                             WHERE chat_id = %s AND film_id = %s AND user_id = %s 
                             AND season_number = %s AND episode_number = %s AND watched = TRUE
                         ''', (chat_id, film_id, user_id, season_num, ep_num))
-                        watched_row = cursor.fetchone()
+                        watched_row = cursor_local.fetchone()
                         if watched_row:
                             watched_count += 1
 
@@ -193,12 +199,12 @@ def register_series_callbacks(bot):
                     with db_lock:
                         for ep in episodes:
                             ep_num = ep.get('episodeNumber', '')
-                            cursor.execute('''
+                            cursor_local.execute('''
                                 SELECT watched FROM series_tracking 
                                 WHERE chat_id = %s AND film_id = %s AND user_id = %s 
                                 AND season_number = %s AND episode_number = %s AND watched = TRUE
                             ''', (chat_id, film_id, user_id, season_num, ep_num))
-                            watched_row = cursor.fetchone()
+                            watched_row = cursor_local.fetchone()
                             if watched_row:
                                 watched_count += 1
                     
@@ -208,39 +214,54 @@ def register_series_callbacks(bot):
                 
                 # Если все сезоны просмотрены, отмечаем сериал как просмотренный в БД
                 if all_seasons_watched:
+                    # Используем локальные соединение и курсор (уже определены выше)
                     with db_lock:
-                        cursor.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                        conn.commit()
+                        try:
+                            cursor_local.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                            conn_local.commit()
+                        except Exception as update_e:
+                            logger.error(f"[SERIES TRACK] Ошибка обновления watched: {update_e}", exc_info=True)
+                            try:
+                                conn_local.rollback()
+                            except:
+                                pass
                 
                 # Добавляем кнопку "Оценить" если все сезоны просмотрены
                 if all_seasons_watched:
                     # Получаем информацию об оценках
+                    # Используем локальные соединение и курсор (уже определены выше)
                     with db_lock:
-                        # Получаем среднюю оценку
-                        cursor.execute('''
-                            SELECT AVG(rating) as avg FROM ratings 
-                            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                        ''', (chat_id, film_id))
-                        avg_result = cursor.fetchone()
-                        avg_rating = None
-                        if avg_result:
-                            avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                            avg_rating = float(avg) if avg is not None else None
-                        
-                        # Получаем активных пользователей
-                        cursor.execute('''
-                            SELECT DISTINCT user_id
-                            FROM stats
-                            WHERE chat_id = %s AND user_id IS NOT NULL
-                        ''', (chat_id,))
-                        active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
-                        
-                        # Получаем всех, кто оценил этот фильм
-                        cursor.execute('''
-                            SELECT DISTINCT user_id FROM ratings
-                            WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                        ''', (chat_id, film_id))
-                        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                        try:
+                            # Получаем среднюю оценку
+                            cursor_local.execute('''
+                                SELECT AVG(rating) as avg FROM ratings 
+                                WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                            ''', (chat_id, film_id))
+                            avg_result = cursor_local.fetchone()
+                            avg_rating = None
+                            if avg_result:
+                                avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                                avg_rating = float(avg) if avg is not None else None
+                            
+                            # Получаем активных пользователей
+                            cursor_local.execute('''
+                                SELECT DISTINCT user_id
+                                FROM stats
+                                WHERE chat_id = %s AND user_id IS NOT NULL
+                            ''', (chat_id,))
+                            active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local.fetchall()}
+                            
+                            # Получаем всех, кто оценил этот фильм
+                            cursor_local.execute('''
+                                SELECT DISTINCT user_id FROM ratings
+                                WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                            ''', (chat_id, film_id))
+                            rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local.fetchall()}
+                        except Exception as rating_e:
+                            logger.error(f"[SERIES TRACK] Ошибка получения информации об оценках: {rating_e}", exc_info=True)
+                            active_users = set()
+                            rated_users = set()
+                            avg_rating = None
                         
                         # Определяем текст и эмодзи кнопки
                         if active_users and active_users.issubset(rated_users) and avg_rating is not None:
@@ -259,6 +280,9 @@ def register_series_callbacks(bot):
                     markup.add(InlineKeyboardButton(rating_text, callback_data=f"rate_film:{int(kp_id)}"))
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{int(kp_id)}"))
+                
+                # Формируем текст сообщения со списком сезонов
+                text_msg = f"📺 <b>{title}</b>\n\n<b>Выберите сезон:</b>"
                 
                 message_thread_id = getattr(call.message, 'message_thread_id', None)
                 
@@ -279,22 +303,19 @@ def register_series_callbacks(bot):
                 except Exception as e:
                     logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
                     # фолбэк — новое сообщение
-                    try:
-                        send_kwargs = {
-                            'chat_id': chat_id,
-                            'text': text_msg,
-                            'reply_markup': markup,
-                            'parse_mode': 'HTML'
-                        }
-                        if message_thread_id is not None:
-                            send_kwargs['message_thread_id'] = message_thread_id
-                        bot.send_message(**send_kwargs)
-                    except Exception as send_e:
-                        logger.error(f"[SERIES TRACK] Фейл отправки: {send_e}")
+                    send_kwargs = {
+                        'chat_id': chat_id,
+                        'text': text_msg,
+                        'reply_markup': markup,
+                        'parse_mode': 'HTML'
+                    }
                     if message_thread_id is not None:
                         send_kwargs['message_thread_id'] = message_thread_id
-                    bot.send_message(**send_kwargs)
-                bot.answer_callback_query(call.id)
+                    try:
+                        bot.send_message(**send_kwargs)
+                        logger.info(f"[SERIES TRACK] Отправлено новое сообщение как fallback")
+                    except Exception as send_e:
+                        logger.error(f"[SERIES TRACK] Фейл отправки: {send_e}", exc_info=True)
         except Exception as e:
             logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
             try:
@@ -363,10 +384,20 @@ def register_series_callbacks(bot):
                 )
                 return
             
+            # Используем локальные соединение и курсор
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            
             # Получение film_id и title из БД (добавляем в базу, если нет)
             with db_lock:
-                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                row = cursor.fetchone()
+                try:
+                    cursor_local.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                    row = cursor_local.fetchone()
+                except Exception as db_e:
+                    logger.error(f"[SERIES SUBSCRIBE] Ошибка запроса film_id: {db_e}", exc_info=True)
+                    row = None
+                    
                 if row:
                     film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if isinstance(row, tuple) else row.get('id')
                     title = row[1] if isinstance(row, tuple) else row.get('title')
@@ -415,20 +446,28 @@ def register_series_callbacks(bot):
             # Добавление подписки
             logger.info(f"[SERIES SUBSCRIBE] Добавляю подписку в БД: chat_id={chat_id}, film_id={film_id}, kp_id={kp_id}, user_id={user_id}")
             with db_lock:
-                cursor.execute('''
-                    INSERT INTO series_subscriptions (chat_id, film_id, kp_id, user_id, subscribed)
-                    VALUES (%s, %s, %s, %s, TRUE)
-                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET subscribed = TRUE
-                ''', (chat_id, film_id, kp_id, user_id))
-                conn.commit()
-                logger.info(f"[SERIES SUBSCRIBE] Подписка добавлена в БД успешно")
-                
-                # Проверяем, что подписка действительно установлена
-                cursor.execute('''
-                    SELECT subscribed FROM series_subscriptions 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                ''', (chat_id, film_id, user_id))
-                check_row = cursor.fetchone()
+                try:
+                    cursor_local.execute('''
+                        INSERT INTO series_subscriptions (chat_id, film_id, kp_id, user_id, subscribed)
+                        VALUES (%s, %s, %s, %s, TRUE)
+                        ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET subscribed = TRUE
+                    ''', (chat_id, film_id, kp_id, user_id))
+                    conn_local.commit()
+                    logger.info(f"[SERIES SUBSCRIBE] Подписка добавлена в БД успешно")
+                    
+                    # Проверяем, что подписка действительно установлена
+                    cursor_local.execute('''
+                        SELECT subscribed FROM series_subscriptions 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                    ''', (chat_id, film_id, user_id))
+                    check_row = cursor_local.fetchone()
+                except Exception as db_e:
+                    logger.error(f"[SERIES SUBSCRIBE] Ошибка работы с БД: {db_e}", exc_info=True)
+                    try:
+                        conn_local.rollback()
+                    except:
+                        pass
+                    check_row = None
                 if check_row:
                     subscribed_status = bool(check_row.get('subscribed') if isinstance(check_row, dict) else check_row[0])
                     logger.info(f"[SERIES SUBSCRIBE] ✅ ПОДТВЕРЖДЕНО: Пользователь {user_id} успешно подписан на сериал {title} (kp_id={kp_id}, film_id={film_id}, subscribed={subscribed_status})")
@@ -705,10 +744,19 @@ def register_series_callbacks(bot):
             
             logger.info(f"[EPISODE TOGGLE] Переключение эпизода: kp_id={kp_id}, season={season_num}, episode={ep_num}, user_id={user_id}")
             
+            # Используем локальные соединение и курсор
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            
             # Получаем film_id (добавляем сериал в базу, если его еще нет)
             with db_lock:
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                row = cursor.fetchone()
+                try:
+                    cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                    row = cursor_local.fetchone()
+                except Exception as db_e:
+                    logger.error(f"[EPISODE TOGGLE] Ошибка запроса film_id: {db_e}", exc_info=True)
+                    row = None
                 
             film_id = None
             if row:
@@ -731,34 +779,42 @@ def register_series_callbacks(bot):
             
             # Проверяем текущий статус и переключаем
             with db_lock:
-                cursor.execute('''
-                    SELECT watched FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                    AND season_number = %s AND episode_number = %s
-                ''', (chat_id, film_id, user_id, season_num, ep_num))
-                watched_row = cursor.fetchone()
-                is_watched = False
-                if watched_row:
-                    is_watched = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
-                
-                # Переключаем статус
-                if is_watched:
-                    # Убираем отметку
-                    cursor.execute('''
-                        DELETE FROM series_tracking 
+                try:
+                    cursor_local.execute('''
+                        SELECT watched FROM series_tracking 
                         WHERE chat_id = %s AND film_id = %s AND user_id = %s 
                         AND season_number = %s AND episode_number = %s
                     ''', (chat_id, film_id, user_id, season_num, ep_num))
-                else:
-                    # Добавляем отметку эпизода
-                    cursor.execute('''
-                        INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
-                        VALUES (%s, %s, %s, %s, %s, TRUE)
-                        ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
-                        DO UPDATE SET watched = TRUE
-                    ''', (chat_id, film_id, user_id, season_num, ep_num))
-                
-                conn.commit()
+                    watched_row = cursor_local.fetchone()
+                    is_watched = False
+                    if watched_row:
+                        is_watched = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                    
+                    # Переключаем статус
+                    if is_watched:
+                        # Убираем отметку
+                        cursor_local.execute('''
+                            DELETE FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                            AND season_number = %s AND episode_number = %s
+                        ''', (chat_id, film_id, user_id, season_num, ep_num))
+                    else:
+                        # Добавляем отметку эпизода
+                        cursor_local.execute('''
+                            INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                            VALUES (%s, %s, %s, %s, %s, TRUE)
+                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
+                            DO UPDATE SET watched = TRUE
+                        ''', (chat_id, film_id, user_id, season_num, ep_num))
+                    
+                    conn_local.commit()
+                except Exception as db_e:
+                    logger.error(f"[EPISODE TOGGLE] Ошибка работы с БД: {db_e}", exc_info=True)
+                    try:
+                        conn_local.rollback()
+                    except:
+                        pass
+                    raise
             
             # Обновляем страницу эпизодов
             from moviebot.bot.handlers.seasons import show_episodes_page
@@ -796,10 +852,21 @@ def register_series_callbacks(bot):
             
             logger.info(f"[SEASON ALL] Отметка всех эпизодов сезона: kp_id={kp_id}, season={season_num}, user_id={user_id}")
             
+            # Используем локальные соединение и курсор
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            
             # Получаем film_id и эпизоды сезона
             with db_lock:
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                row = cursor.fetchone()
+                try:
+                    cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                    row = cursor_local.fetchone()
+                except Exception as db_e:
+                    logger.error(f"[SEASON ALL] Ошибка запроса film_id: {db_e}", exc_info=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка доступа к базе данных", show_alert=True)
+                    return
+                    
                 if not row:
                     bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
                     return
@@ -820,16 +887,25 @@ def register_series_callbacks(bot):
                 episodes = season.get('episodes', [])
                 
                 # Отмечаем все эпизоды как просмотренные
-                for ep in episodes:
-                    ep_num = str(ep.get('episodeNumber', ''))
-                    cursor.execute('''
-                        INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
-                        VALUES (%s, %s, %s, %s, %s, TRUE)
-                        ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
-                        DO UPDATE SET watched = TRUE
-                    ''', (chat_id, film_id, user_id, season_num, ep_num))
-                
-                conn.commit()
+                try:
+                    for ep in episodes:
+                        ep_num = str(ep.get('episodeNumber', ''))
+                        cursor_local.execute('''
+                            INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                            VALUES (%s, %s, %s, %s, %s, TRUE)
+                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
+                            DO UPDATE SET watched = TRUE
+                        ''', (chat_id, film_id, user_id, season_num, ep_num))
+                    
+                    conn_local.commit()
+                except Exception as db_e:
+                    logger.error(f"[SEASON ALL] Ошибка обновления эпизодов: {db_e}", exc_info=True)
+                    try:
+                        conn_local.rollback()
+                    except:
+                        pass
+                    bot.answer_callback_query(call.id, "❌ Ошибка при обновлении эпизодов", show_alert=True)
+                    return
             
             # Обновляем страницу эпизодов
             from moviebot.bot.handlers.seasons import show_episodes_page

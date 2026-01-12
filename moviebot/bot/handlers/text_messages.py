@@ -241,7 +241,7 @@ def handle_list_mark_watched_reply(message):
         # Добавляем кнопки для каждого отмеченного фильма (максимум 5, чтобы не перегружать)
         for kp_id, title in marked_films[:5]:
             button_text = f"📖 {title[:30]}..." if title and len(title) > 30 else (f"📖 {title}" if title else f"📖 ID: {kp_id}")
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"back_to_film:{int(kp_id)}"))
         
         # Если фильмов больше 5, добавляем кнопку "Показать все"
         if len(marked_films) > 5:

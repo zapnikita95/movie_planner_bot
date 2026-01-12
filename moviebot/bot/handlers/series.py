@@ -3003,7 +3003,7 @@ def register_series_handlers(bot_param):
                 button_text = f"{emoji} {title}"
                 if len(button_text) > 50:
                     button_text = button_text[:47] + "..."
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{kp_id}"))
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"back_to_film:{kp_id}"))
             
             # Кнопки пагинации
             nav_buttons = []
@@ -4615,10 +4615,10 @@ def register_series_handlers(bot_param):
                         # Берем первый фильм для кнопки "Перейти к описанию"
                         message_text = f"🕵 Найден подходящий фильм в вашей базе!\n\n{similar_list[0].replace('• ', '')}"
                         
-                        # Создаем кнопку "Перейти к описанию" для первого фильма
+                        # Создаем кнопку "Вернуться к описанию" для первого фильма
                         markup = InlineKeyboardMarkup()
                         if first_movie_kp_id:
-                            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{first_movie_kp_id}"))
+                            markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{first_movie_kp_id}"))
                         markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
                     else:
                         message_text = (
@@ -4959,8 +4959,8 @@ def register_series_handlers(bot_param):
             if not film_id:
                 markup.add(InlineKeyboardButton("🗑️ Удалить из расписания", callback_data=f"remove_from_calendar:{plan_id}"))
             elif kp_id:
-                # Если это фильм, добавляем кнопку "📖 Перейти к описанию"
-                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_description:{int(kp_id)}"))
+                # Если это фильм, добавляем кнопку "Вернуться к описанию"
+                markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{int(kp_id)}"))
             
             if file_id:
                 # Если есть file_id, значит пользователь хочет добавить билеты к этому сеансу

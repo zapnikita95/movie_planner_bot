@@ -536,7 +536,7 @@ def show_schedule(message):
                 
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
+                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"back_to_film:{int(kp_id)}"))
             
             if not home_plans:
                 cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
@@ -556,7 +556,7 @@ def show_schedule(message):
                 button_text = f"{title} | {date_str}"
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_description:{int(kp_id)}"))
+                home_markup.add(InlineKeyboardButton(button_text, callback_data=f"back_to_film:{int(kp_id)}"))
             
             home_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
             
@@ -606,113 +606,9 @@ def show_schedule(message):
         """Обертка для регистрации команды /schedule"""
         show_schedule(message)
 
-    @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("show_film_description:"))
-    def show_film_description_callback(call):
-        """Обработчик кнопки показа описания фильма из /schedule"""
-        logger.info("=" * 80)
-        logger.info(f"[SHOW FILM DESCRIPTION] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
-        logger.info(f"[SHOW FILM DESCRIPTION] ✅ ОБРАБОТЧИК ВЫЗВАН!")
-        try:
-            logger.info(f"[SHOW FILM DESCRIPTION] Вызов answer_callback_query")
-            bot.answer_callback_query(call.id)
-            logger.info(f"[SHOW FILM DESCRIPTION] answer_callback_query выполнен")
-            kp_id_str = call.data.split(":")[1]
-            kp_id = int(kp_id_str)
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            message_id = call.message.message_id
-            message_thread_id = getattr(call.message, 'message_thread_id', None)
-            
-            logger.info(f"[SHOW FILM DESCRIPTION] Пользователь {user_id} хочет посмотреть описание фильма kp_id={kp_id}")
-            
-            # Получаем актуальное состояние через get_film_current_state
-            from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
-            current_state = get_film_current_state(chat_id, kp_id, user_id)
-            existing = current_state['existing']
-            
-            # Определяем ссылку
-            link = None
-            if existing:
-                # Если фильм в базе, получаем ссылку из БД
-                with db_lock:
-                    cursor.execute('SELECT link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
-                    row = cursor.fetchone()
-                    if row:
-                        link = row.get('link') if isinstance(row, dict) else row[0]
-                        is_series = bool(row.get('is_series') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0))
-                        if not link:
-                            # Формируем ссылку на основе is_series
-                            link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
-            
-            if not link:
-                # Фильм не в базе, пробуем API для определения типа
-                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            
-            # Получаем информацию через API
-            from moviebot.api.kinopoisk_api import extract_movie_info
-            info = extract_movie_info(link)
-            
-            if not info or not info.get('title'):
-                # Если API не сработал, пробуем получить из БД
-                if existing:
-                    with db_lock:
-                        cursor.execute('''
-                            SELECT title, year, genres, description, director, actors, is_series, link
-                            FROM movies WHERE id = %s AND chat_id = %s
-                        ''', (existing[0], chat_id))
-                        db_row = cursor.fetchone()
-                        if db_row:
-                            info = {
-                                'title': db_row[0],
-                                'year': db_row[1],
-                                'genres': db_row[2],
-                                'description': db_row[3],
-                                'director': db_row[4],
-                                'actors': db_row[5],
-                                'is_series': bool(db_row[6])
-                            }
-                            if not link:
-                                link = db_row[7] if len(db_row) > 7 else f"https://www.kinopoisk.ru/film/{kp_id}/"
-            
-            if not info or not info.get('title'):
-                bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
-                return
-            
-            # Убеждаемся, что is_series правильно установлен
-            if existing:
-                with db_lock:
-                    cursor.execute('SELECT is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
-                    row = cursor.fetchone()
-                    if row:
-                        info['is_series'] = bool(row.get('is_series') if isinstance(row, dict) else row[0])
-            
-            # Уточняем link для сериала
-            if info.get('is_series'):
-                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            elif not link or '/series/' in link:
-                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            
-            # Вызываем show_film_info_with_buttons с актуальным existing
-            # existing будет переопределен внутри функции через get_film_current_state, но передаем для оптимизации
-            show_film_info_with_buttons(
-                chat_id=chat_id,
-                user_id=user_id,
-                info=info,
-                link=link,
-                kp_id=kp_id,
-                existing=existing,
-                message_id=message_id,
-                message_thread_id=message_thread_id
-            )
-            logger.info(f"[SHOW FILM DESCRIPTION] ===== END (успешно) =====")
-            
-        except Exception as e:
-            logger.error(f"[SHOW FILM DESCRIPTION] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
-            logger.error(f"[SHOW FILM DESCRIPTION] Тип ошибки: {type(e).__name__}, args: {e.args}")
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
+    # Обработчик show_film_description удален - теперь используется единый back_to_film_description из film_callbacks.py
+    # Все кнопки теперь используют callback_data="back_to_film:{kp_id}"
+    # Старый обработчик show_film_description_callback больше не нужен, так как все кнопки используют back_to_film
 
     @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("schedule_back:"))
     def schedule_back_callback(call):
@@ -2097,7 +1993,7 @@ def stream_sel_callback(call):
                 "😔 Не найдено онлайн-кинотеатров для просмотра.",
                 chat_id, message_id,
                 reply_markup=InlineKeyboardMarkup().add(
-                    InlineKeyboardButton("◀️ Назад", callback_data=f"back_to_film:{kp_id}")
+                    InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{kp_id}")
                 )
             )
             return
@@ -2110,7 +2006,7 @@ def stream_sel_callback(call):
                 url=url  # Прямая ссылка на платформу
             ))
         
-        markup.add(InlineKeyboardButton("◀️ Назад к описанию", callback_data=f"back_to_film:{kp_id}"))
+        markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{kp_id}"))
         
         bot.edit_message_text(
             "📺 <b>Онлайн-кинотеатры для просмотра:</b>\n\nВыберите платформу:",
