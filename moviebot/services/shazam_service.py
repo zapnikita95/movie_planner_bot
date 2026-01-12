@@ -270,10 +270,10 @@ def build_tmdb_index():
                 logger.warning(f"Попытка 1 не удалась: {e1}")
         
         # Попытка 2: Python engine (более гибкий парсер)
+        # ВАЖНО: Python engine не поддерживает low_memory параметр
         if df is None:
             try:
                 kwargs = {
-                    'low_memory': False,
                     'engine': 'python',
                     'encoding': 'utf-8'
                 }
@@ -291,10 +291,10 @@ def build_tmdb_index():
                 logger.warning(f"Попытка 2 не удалась: {e2}")
         
         # Попытка 3: С явными параметрами для кавычек
+        # ВАЖНО: Python engine не поддерживает low_memory параметр
         if df is None:
             try:
                 kwargs = {
-                    'low_memory': False,
                     'engine': 'python',
                     'encoding': 'utf-8',
                     'quotechar': '"',
@@ -311,7 +311,38 @@ def build_tmdb_index():
                 logger.info(f"✅ Загружено {len(df)} записей (с явными параметрами кавычек)")
             except Exception as e3:
                 error = e3
-                logger.error(f"Попытка 3 не удалась: {e3}")
+                logger.warning(f"Попытка 3 не удалась: {e3}")
+        
+        # Попытка 4: Чтение по частям (chunksize) для обхода проблемных строк
+        if df is None:
+            try:
+                logger.info("Попытка 4: Чтение файла по частям для обхода проблемных строк...")
+                chunks = []
+                chunk_size = 10000
+                skipped_rows = 0
+                
+                sig = inspect.signature(pd.read_csv)
+                kwargs = {
+                    'engine': 'python',
+                    'encoding': 'utf-8',
+                    'chunksize': chunk_size
+                }
+                if 'on_bad_lines' in sig.parameters:
+                    kwargs['on_bad_lines'] = 'skip'
+                elif 'error_bad_lines' in sig.parameters:
+                    kwargs['error_bad_lines'] = False
+                
+                for chunk in pd.read_csv(TMDB_CSV_PATH, **kwargs):
+                    chunks.append(chunk)
+                
+                if chunks:
+                    df = pd.concat(chunks, ignore_index=True)
+                    logger.info(f"✅ Загружено {len(df)} записей (по частям, пропущено проблемных строк: {skipped_rows})")
+                else:
+                    raise Exception("Не удалось загрузить ни одного чанка")
+            except Exception as e4:
+                error = e4
+                logger.warning(f"Попытка 4 не удалась: {e4}")
         
         if df is None:
             raise Exception(f"Не удалось загрузить CSV после всех попыток. Последняя ошибка: {error}")
