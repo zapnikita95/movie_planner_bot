@@ -527,8 +527,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         # ОПТИМИЗАЦИЯ: Загружаем источники с коротким таймаутом (500ms)
         # Если загрузились быстро - показываем кнопку, если нет - показываем без нее
         # Это экономит 1-3 секунды на запросе к API
+        # threading уже импортирован в начале файла, не нужно импортировать снова
         from moviebot.api.kinopoisk_api import get_external_sources
-        import threading
         import time
         
         sources = None
