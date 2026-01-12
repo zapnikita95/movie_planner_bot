@@ -166,7 +166,12 @@ def register_payment_callbacks(bot_instance):
         # Явно указываем, что используем глобальные переменные
         global YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY, pytz
         try:
-            bot_instance.answer_callback_query(call.id)
+            try:
+                bot_instance.answer_callback_query(call.id)
+            except Exception as cbq_e:
+                # Игнорируем ошибки устаревших callback query (query is too old)
+                if "query is too old" not in str(cbq_e).lower() and "timeout expired" not in str(cbq_e).lower():
+                    logger.warning(f"[PAYMENT CALLBACK] Ошибка answer_callback_query: {cbq_e}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             action = call.data.split(":", 1)[1]
