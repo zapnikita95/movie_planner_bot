@@ -42,12 +42,11 @@ def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount
             'start_parameter': payload[:64] if len(payload) > 64 else payload  # start_parameter ограничен 64 символами
         }
         
-        # Если указан subscription_period, добавляем параметр для создания подписки
-        # Согласно документации: https://core.telegram.org/api/subscriptions#bot-subscriptions
-        # subscription_period должен быть 30*24*60*60 (месяц) для подписок
+        # ПРИМЕЧАНИЕ: subscription_period не поддерживается в send_invoice текущей версией pyTelegramBotAPI
+        # Для подписок через Stars подписки обрабатываются через scheduler на основе period_type из базы данных
+        # Если указан subscription_period, логируем это, но не передаем в send_invoice
         if subscription_period:
-            invoice_params['subscription_period'] = subscription_period
-            logger.info(f"[STARS] Создается подписка с периодом {subscription_period} секунд")
+            logger.info(f"[STARS] Подписка будет обработана через scheduler (period={subscription_period} секунд, не передается в send_invoice)")
         
         bot.send_invoice(**invoice_params)
         return True

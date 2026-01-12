@@ -313,6 +313,7 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
     # Текст сообщения — короткий и чистый
     text = f"<b>📺 Твои сериалы</b> ({series_data['total_count']} шт.)\n\n"
+    unwatched_count = series_data.get('unwatched_count', series_data['total_count'])
     if series_data['total_pages'] > 1:
         text += f"<i>Страница {page}/{series_data['total_pages']}</i>\n\n"
     
@@ -387,17 +388,19 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
             item['seasons_count'] = seasons_count
             item['next_episode'] = next_ep
 
-        # Строгий порядок эмодзи — как в твоём примере
+        # Строгий порядок эмодзи
         emojis = ""
         if item['is_ongoing']:
             emojis += "🟢"
             if item['has_subscription']:
                 emojis += "🔔"
-            if watched == 0:
+            if watched > 0:
                 emojis += "⏳"
         else:
             emojis += "🔴"
-            if watched == 0:
+            if item['has_subscription']:
+                emojis += "🔔"
+            if watched > 0:
                 emojis += "⏳"
 
         # Кнопка
@@ -507,7 +510,7 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
                 for w_row in cursor_local.fetchall():
                     s_num = str(w_row.get('season_number', ''))
                     e_num = str(w_row.get('episode_number', ''))
-                watched_set.add((s_num, e_num))
+                    watched_set.add((s_num, e_num))
 
             total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
 
@@ -755,7 +758,8 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     m.next_episode,
                     m.last_api_update,
                     COUNT(st.id) AS watched_episodes_count,
-                    BOOL_OR(ss.subscribed = TRUE) AS has_subscription
+                    BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
+                    COALESCE(m.watched, FALSE) AS all_watched
                 FROM movies m
                 LEFT JOIN series_tracking st 
                     ON st.film_id = m.id 
@@ -788,6 +792,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                 last_api_update = row.get('last_api_update') if isinstance(row, dict) else (row[9] if len(row) > 9 else None)
                 watched_count = row.get('watched_episodes_count') if isinstance(row, dict) else (row[10] if len(row) > 10 else 0)
                 has_subscription = bool(row.get('has_subscription') if isinstance(row, dict) else (row[11] if len(row) > 11 else False))
+                all_watched = bool(row.get('all_watched') if isinstance(row, dict) else (row[12] if len(row) > 12 else False))
                 
                 # Обработка next_episode
                 next_episode = next_episode_raw
@@ -810,6 +815,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     'last_api_update': last_api_update,
                     'watched_count': watched_count or 0,
                     'has_subscription': has_subscription,
+                    'all_watched': all_watched,
                 })
             
             # Сортировка по приоритету:
@@ -838,16 +844,25 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                 else:
                     return 6  # Остальные
             
-            # Сортировка по приоритету
-            items.sort(key=get_sort_priority)
+            # Разделяем на непросмотренные и просмотренные
+            unwatched_items = [item for item in items if not item.get('all_watched', False)]
+            watched_items = [item for item in items if item.get('all_watched', False)]
             
-            # Подсчитываем общее количество после получения всех элементов
-            total_count = len(items)
-            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+            # Сортируем непросмотренные по приоритету
+            unwatched_items.sort(key=get_sort_priority)
+            # Просмотренные сортируем по названию
+            watched_items.sort(key=lambda x: x.get('title', ''))
             
-            # Применяем пагинацию после сортировки
-            offset = (page - 1) * page_size
-            items = items[offset:offset + page_size]
+            # Пагинация только для непросмотренных
+            unwatched_count = len(unwatched_items)
+            unwatched_total_pages = math.ceil(unwatched_count / page_size) if unwatched_count > 0 else 1
+            unwatched_offset = (page - 1) * page_size
+            unwatched_page_items = unwatched_items[unwatched_offset:unwatched_offset + page_size]
+            
+            # Объединяем: непросмотренные (постранично) + все просмотренные (всегда внизу)
+            items = unwatched_page_items + watched_items
+            total_count = unwatched_count + len(watched_items)
+            total_pages = unwatched_total_pages
 
     except psycopg2.InterfaceError as e:
         logger.error(f"[GET_USER_SERIES_PAGE] Cursor error: {e}")

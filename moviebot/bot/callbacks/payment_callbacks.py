@@ -3448,6 +3448,21 @@ def register_payment_callbacks(bot_instance):
                         existing_sub_names = [plan_names_short.get(pt, pt) for pt in existing_plan_types]
                         total_existing_price = sum(sub.get('price', 0) for sub in active_subs)
                         
+                        # Проверяем периоды существующих подписок
+                        existing_period_types = [sub.get('period_type', 'month') for sub in active_subs]
+                        has_long_term_sub = any(pt in ['3months', 'year'] for pt in existing_period_types)
+                        
+                        # Если есть подписка на 3 месяца/год, нельзя подключить помесячную
+                        if period_type == 'month' and has_long_term_sub:
+                            text = "⚠️ <b>Невозможно подключить помесячную подписку</b>\n\n"
+                            text += "Сейчас у вас более полная подписка по более выгодным условиям (3 месяца или год).\n\n"
+                            text += "Вы можете отменить свою подписку и оформить ежемесячную подписку."
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
+                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            logger.info(f"[PAYMENT] Пользователь user_id={user_id} пытается подключить помесячную подписку при наличии подписки на 3 месяца/год")
+                            return
+                        
                         # Ищем ближайшее следующее списание
                         next_payment_date = None
                         next_sub = None
@@ -3545,12 +3560,25 @@ def register_payment_callbacks(bot_instance):
                             return
                         
                         elif plan_type in existing_plan_types:
-                            # Уже есть такой план
+                            # Уже есть такой план - пользователь пытается добавить существующую подписку
+                            # Предлагаем доплату для объединения подписок (хотя функционал уже есть, можем предложить переход на "Все режимы")
                             plan_name = plan_names_short.get(plan_type, plan_type)
-                            text = f"⚠️ У вас уже есть \"{plan_name}\"\n\nОтмените текущую, если хотите изменить."
+                            text = f"✅ <b>У вас уже есть \"{plan_name}\"</b>\n\n"
+                            text += "Эта подписка уже активна.\n\n"
+                            text += "Для полного доступа оформите подписку \"Все режимы\":"
+                            
                             markup = InlineKeyboardMarkup(row_width=1)
+                            all_month = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
+                            all_3m = SUBSCRIPTION_PRICES['personal']['all'].get('3months', 0)
+                            all_life = SUBSCRIPTION_PRICES['personal']['all'].get('lifetime', 0)
+                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_month}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
+                            if all_3m > 0:
+                                markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_3m}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
+                            if all_life > 0:
+                                markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_life}₽ навсегда)", callback_data="payment:subscribe:personal:all:lifetime"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            logger.info(f"[PAYMENT] Пользователь user_id={user_id} пытается добавить уже существующую подписку plan_type={plan_type}, предлагаем 'Все режимы'")
                             return
                         
                         else:
