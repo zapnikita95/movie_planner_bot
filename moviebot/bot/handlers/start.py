@@ -161,13 +161,20 @@ def register_start_handlers(bot):
                                 logger.error(f"[START] Не удалось отправить даже простое сообщение: {final_error}")
                 else:
                     # В личных чатах используем обычный send_message
-                    sent_msg = bot.send_message(
-                        chat_id,
-                        welcome_text,
-                        parse_mode='HTML',
-                        reply_markup=markup
-                    )
-                    logger.info(f"✅ Ответ на /start отправлен пользователю {user_id} в личном чате, message_id={sent_msg.message_id}")
+                    try:
+                        sent_msg = bot.send_message(
+                            chat_id,
+                            welcome_text,
+                            parse_mode='HTML',
+                            reply_markup=markup
+                        )
+                        if sent_msg:
+                            logger.info(f"✅ Ответ на /start отправлен пользователю {user_id} в личном чате, message_id={sent_msg.message_id}")
+                        else:
+                            logger.error(f"❌ send_message вернул None для пользователя {user_id} в личном чате")
+                    except Exception as send_msg_error:
+                        logger.error(f"❌ Ошибка при send_message в личном чате: {send_msg_error}", exc_info=True)
+                        raise
             except Exception as send_error:
                 logger.error(f"❌ Ошибка при отправке сообщения /start: {send_error}", exc_info=True)
                 # Пробуем отправить простой ответ

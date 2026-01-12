@@ -1658,9 +1658,30 @@ def back_to_film_description(call):
             # НЕ делаем raise - продолжаем выполнение, чтобы не прерывать обработку
 
         logger.info(f"[BACK TO FILM] ===== КОНЕЦ ОБРАБОТКИ ===== is_series={is_series}, existing={'есть' if existing else 'нет'}")
+        
+        # Закрываем локальное соединение
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
     except Exception as e:
         logger.error(f"[BACK TO FILM] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
+        # Закрываем соединение даже при ошибке
+        try:
+            if 'cursor_local' in locals():
+                cursor_local.close()
+        except:
+            pass
+        try:
+            if 'conn_local' in locals():
+                conn_local.close()
+        except:
+            pass
         try:
             from moviebot.database.db_connection import get_db_connection
             conn_local_error = get_db_connection()

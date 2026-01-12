@@ -694,13 +694,26 @@ def get_user_personal_subscriptions(user_id):
         }
         return [virtual_sub]
     
-    with db_lock:
-        cursor.execute("""
-            SELECT * FROM subscriptions 
-            WHERE user_id = %s AND subscription_type = 'personal' 
-            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
-        """, (user_id,))
-        return cursor.fetchall()
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT * FROM subscriptions 
+                WHERE user_id = %s AND subscription_type = 'personal' 
+                AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+            """, (user_id,))
+            return cursor_local.fetchall()
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_user_group_subscriptions(user_id):
