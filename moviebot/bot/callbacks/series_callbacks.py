@@ -716,15 +716,15 @@ def register_series_callbacks(bot):
                             cursor_local.execute('SELECT title, year, genres, description, director, actors, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                             db_row = cursor_local.fetchone()
                             if db_row:
-                            info = {
-                                'title': db_row.get('title') if isinstance(db_row, dict) else db_row[0],
-                                'year': db_row.get('year') if isinstance(db_row, dict) else (db_row[1] if len(db_row) > 1 else None),
-                                'genres': db_row.get('genres') if isinstance(db_row, dict) else (db_row[2] if len(db_row) > 2 else None),
-                                'description': db_row.get('description') if isinstance(db_row, dict) else (db_row[3] if len(db_row) > 3 else None),
-                                'director': db_row.get('director') if isinstance(db_row, dict) else (db_row[4] if len(db_row) > 4 else None),
-                                'actors': db_row.get('actors') if isinstance(db_row, dict) else (db_row[5] if len(db_row) > 5 else None),
-                                'is_series': bool(db_row.get('is_series') if isinstance(db_row, dict) else (db_row[6] if len(db_row) > 6 else 0))
-                            }
+                                info = {
+                                    'title': db_row.get('title') if isinstance(db_row, dict) else db_row[0],
+                                    'year': db_row.get('year') if isinstance(db_row, dict) else (db_row[1] if len(db_row) > 1 else None),
+                                    'genres': db_row.get('genres') if isinstance(db_row, dict) else (db_row[2] if len(db_row) > 2 else None),
+                                    'description': db_row.get('description') if isinstance(db_row, dict) else (db_row[3] if len(db_row) > 3 else None),
+                                    'director': db_row.get('director') if isinstance(db_row, dict) else (db_row[4] if len(db_row) > 4 else None),
+                                    'actors': db_row.get('actors') if isinstance(db_row, dict) else (db_row[5] if len(db_row) > 5 else None),
+                                    'is_series': bool(db_row.get('is_series') if isinstance(db_row, dict) else (db_row[6] if len(db_row) > 6 else 0))
+                                }
                 
                 if info:
                     message_id = call.message.message_id if call.message else None
