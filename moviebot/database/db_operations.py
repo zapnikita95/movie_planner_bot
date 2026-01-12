@@ -18,23 +18,30 @@ def get_watched_emoji(chat_id):
 
     """Возвращает строку с эмодзи для отметки просмотренных (может быть несколько) для конкретного чата"""
 
-    with db_lock:
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+            row = cursor_local.fetchone()
 
-        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+            if row:
+                value = row.get('value') if isinstance(row, dict) else row[0]
+                if value:
+                    return value
 
-        row = cursor.fetchone()
-
-        if row:
-
-            value = row.get('value') if isinstance(row, dict) else row[0]
-
-            if value:
-
-                return value
-
-        # Дефолт, если не настроено: ✅, все варианты лайков и сердечек
-
-        return "✅👍👍🏻👍🏼👍🏽👍🏾👍🏿❤️❤️‍🔥❤️‍🩹💛🧡💚💙💜🖤🤍🤎"
+            # Дефолт, если не настроено: ✅, все варианты лайков и сердечек
+            return "✅👍👍🏻👍🏼👍🏽👍🏾👍🏿❤️❤️‍🔥❤️‍🩹💛🧡💚💙💜🖤🤍🤎"
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 
@@ -42,124 +49,99 @@ def get_watched_emojis(chat_id):
 
     """Возвращает эмодзи для отметки просмотренных для конкретного чата как список"""
 
-    with db_lock:
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+            row = cursor_local.fetchone()
 
-        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
-
-        row = cursor.fetchone()
-
-        if row:
-
-            value = row.get('value') if isinstance(row, dict) else row[0]
-
-            if value:
-
-                # Убираем кастомные эмодзи вида custom:ID из строки
-
-                import re
-
-                value_clean = re.sub(r'custom:\d+,?', '', str(value))
-
-                
-
-                # Используем библиотеку emoji для правильного извлечения всех эмодзи из строки
-
-                try:
-
-                    import emoji
-
-                    emojis_list = emoji.distinct_emoji_list(value_clean)
-
-                    if emojis_list:
-
-                        return emojis_list
-
-                except ImportError:
-
-                    # Если библиотека emoji недоступна, используем fallback метод
-
-                    # Список известных эмодзи для правильного извлечения
-
-                    known_emojis = ['✅', '👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿', '❤️', '❤️‍🔥', '❤️‍🩹', '💛', '🧡', '💚', '💙', '💜', '🖤', '🤍', '🤎', '🔥']
-
+            if row:
+                value = row.get('value') if isinstance(row, dict) else row[0]
+                if value:
+                    # Убираем кастомные эмодзи вида custom:ID из строки
+                    import re
+                    value_clean = re.sub(r'custom:\d+,?', '', str(value))
                     
-
-                    # Извлекаем эмодзи из строки, проверяя по известным эмодзи (в порядке длины, чтобы сначала проверять составные)
-
-                    found_emojis = []
-
-                    value_remaining = value_clean
-
+                    # Используем библиотеку emoji для правильного извлечения всех эмодзи из строки
+                    try:
+                        import emoji
+                        emojis_list = emoji.distinct_emoji_list(value_clean)
+                        if emojis_list:
+                            return emojis_list
+                    except ImportError:
+                        # Если библиотека emoji недоступна, используем fallback метод
+                        # Список известных эмодзи для правильного извлечения
+                        known_emojis = ['✅', '👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿', '❤️', '❤️‍🔥', '❤️‍🩹', '💛', '🧡', '💚', '💙', '💜', '🖤', '🤍', '🤎', '🔥']
+                        
+                        # Извлекаем эмодзи из строки, проверяя по известным эмодзи (в порядке длины, чтобы сначала проверять составные)
+                        found_emojis = []
+                        value_remaining = value_clean
+                        
+                        # Сортируем по длине (от длинных к коротким), чтобы сначала находить составные эмодзи
+                        sorted_emojis = sorted(known_emojis, key=len, reverse=True)
+                        
+                        for emoji_char in sorted_emojis:
+                            while emoji_char in value_remaining:
+                                idx = value_remaining.index(emoji_char)
+                                found_emojis.append(emoji_char)
+                                # Удаляем найденный эмодзи из строки
+                                value_remaining = value_remaining[:idx] + value_remaining[idx+len(emoji_char):]
+                        
+                        # Если нашли эмодзи, возвращаем их
+                        if found_emojis:
+                            return found_emojis
+                    except Exception as e:
+                        logger.warning(f"[GET WATCHED EMOJIS] Ошибка при извлечении эмодзи: {e}")
+                        pass
                     
-
-                    # Сортируем по длине (от длинных к коротким), чтобы сначала находить составные эмодзи
-
-                    sorted_emojis = sorted(known_emojis, key=len, reverse=True)
-
-                    
-
-                    for emoji_char in sorted_emojis:
-
-                        while emoji_char in value_remaining:
-
-                            idx = value_remaining.index(emoji_char)
-
-                            found_emojis.append(emoji_char)
-
-                            # Удаляем найденный эмодзи из строки
-
-                            value_remaining = value_remaining[:idx] + value_remaining[idx+len(emoji_char):]
-
-                    
-
-                    # Если нашли эмодзи, возвращаем их
-
-                    if found_emojis:
-
-                        return found_emojis
-
-                except Exception as e:
-
-                    logger.warning(f"[GET WATCHED EMOJIS] Ошибка при извлечении эмодзи: {e}")
-
-                    pass
-
-                
-
-                # Если ничего не нашли, возвращаем дефолт
-
-                return ['✅']
-
-        # Дефолт, если не настроено: ✅, все варианты лайков и сердечек
-
-        return ['✅', '👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿', '❤️', '❤️‍🔥', '❤️‍🩹', '💛', '🧡', '💚', '💙', '💜', '🖤', '🤍', '🤎', '🔥']
+                    # Если ничего не нашли, возвращаем дефолт
+                    return ['✅']
+            
+            # Дефолт, если не настроено: ✅, все варианты лайков и сердечек
+            return ['✅', '👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿', '❤️', '❤️‍🔥', '❤️‍🩹', '💛', '🧡', '💚', '💙', '💜', '🖤', '🤍', '🤎', '🔥']
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 
 def get_watched_custom_emoji_ids(chat_id):
     """Возвращает список ID кастомных эмодзи для отметки просмотренных для конкретного чата"""
 
-    with db_lock:
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+            row = cursor_local.fetchone()
 
-        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_emoji'", (chat_id,))
+            if row:
+                value = row.get('value') if isinstance(row, dict) else row[0]
+                if value:
+                    # Ищем кастомные эмодзи в формате custom:ID
+                    import re
+                    custom_ids = re.findall(r'custom:(\d+)', str(value))
+                    return [str(cid) for cid in custom_ids]
 
-        row = cursor.fetchone()
-
-        if row:
-
-            value = row.get('value') if isinstance(row, dict) else row[0]
-
-            if value:
-
-                # Ищем кастомные эмодзи в формате custom:ID
-
-                import re
-
-                custom_ids = re.findall(r'custom:(\d+)', str(value))
-
-                return [str(cid) for cid in custom_ids]
-
-        return []
+            return []
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 
@@ -283,48 +265,62 @@ def set_user_timezone(user_id, timezone_name):
 
 def get_user_films_count(user_id):
     """Возвращает количество фильмов в базе пользователя (для личного чата, где chat_id = user_id)"""
-    with db_lock:
-        cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (user_id,))
-        row = cursor.fetchone()
-        if row:
-            count = row.get('count') if isinstance(row, dict) else row[0]
-            return count if count else 0
-        return 0
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (user_id,))
+            row = cursor_local.fetchone()
+            if row:
+                count = row.get('count') if isinstance(row, dict) else row[0]
+                return count if count else 0
+            return 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_watched_reactions(chat_id):
 
     """Возвращает словарь с обычными и кастомными эмодзи для реакций"""
 
-    with db_lock:
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
+            row = cursor_local.fetchone()
 
-        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'watched_reactions'", (chat_id,))
+            if row:
+                value = row.get('value') if isinstance(row, dict) else row[0]
+                if value:
+                    try:
+                        reactions = json.loads(value)
+                        emojis = [r for r in reactions if not r.startswith('custom:')]
+                        custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
+                        return {'emoji': emojis, 'custom': custom_ids}
+                    except:
+                        pass
 
-        row = cursor.fetchone()
-
-        if row:
-
-            value = row.get('value') if isinstance(row, dict) else row[0]
-
-            if value:
-
-                try:
-
-                    reactions = json.loads(value)
-
-                    emojis = [r for r in reactions if not r.startswith('custom:')]
-
-                    custom_ids = [r.split('custom:')[1] for r in reactions if r.startswith('custom:')]
-
-                    return {'emoji': emojis, 'custom': custom_ids}
-
-                except:
-
-                    pass
-
-    # Дефолт: ✅, все варианты лайков и сердечек
-
-    return {'emoji': ['✅', '👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿', '❤️', '❤️‍🔥', '❤️‍🩹', '💛', '🧡', '💚', '💙', '💜', '🖤', '🤍', '🤎'], 'custom': []}
+        # Дефолт: ✅, все варианты лайков и сердечек
+        return {'emoji': ['✅', '👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿', '❤️', '❤️‍🔥', '❤️‍🩹', '💛', '🧡', '💚', '💙', '💜', '🖤', '🤍', '🤎'], 'custom': []}
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 
@@ -397,16 +393,19 @@ def log_request(user_id, username, command_or_action, chat_id=None):
 
 def print_daily_stats():
     """Выводит статистику за текущий день в консоль"""
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         today = datetime.now().strftime('%Y-%m-%d')
         with db_lock:
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) as total_requests,
                        COUNT(DISTINCT user_id) as unique_users
                 FROM stats
                 WHERE DATE(timestamp) = DATE(%s)
             ''', (today,))
-            row = cursor.fetchone()
+            row = cursor_local.fetchone()
             if row:
                 total_requests = row.get('total_requests') if isinstance(row, dict) else (row[0] if len(row) > 0 else 0)
                 unique_users = row.get('unique_users') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0)
@@ -415,14 +414,14 @@ def print_daily_stats():
                 unique_users = 0
             
             # Статистика по командам
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT command_or_action, COUNT(*) as count
                 FROM stats
                 WHERE DATE(timestamp) = DATE(%s)
                 GROUP BY command_or_action
                 ORDER BY count DESC
             ''', (today,))
-            commands_stats = cursor.fetchall()
+            commands_stats = cursor_local.fetchall()
         
         print("\n" + "=" * 60)
         print(f"📊 СТАТИСТИКА БОТА ЗА {today}")
@@ -438,21 +437,43 @@ def print_daily_stats():
         print("=" * 60 + "\n")
     except Exception as e:
         logger.error(f"Ошибка вывода статистики: {e}")
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_ratings_info(chat_id, film_id, user_id):
     """Получает информацию об оценках для фильма и пользователя"""
-    with db_lock:
-        cursor.execute("""
-            SELECT rating 
-            FROM ratings 
-            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-        """, (chat_id, film_id, user_id))
-        row = cursor.fetchone()
-        return {
-            'current_user_rated': row is not None,
-            'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)
-        }
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT rating 
+                FROM ratings 
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+            """, (chat_id, film_id, user_id))
+            row = cursor_local.fetchone()
+            return {
+                'current_user_rated': row is not None,
+                'current_user_rating': row.get('rating') if row and isinstance(row, dict) else (row[0] if row else None)
+            }
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_notification_settings(chat_id):
@@ -527,13 +548,26 @@ def get_notification_settings(chat_id):
 
 def set_notification_setting(chat_id, key, value):
     """Сохраняет настройку времени напоминаний для чата"""
-    with db_lock:
-        cursor.execute("""
-            INSERT INTO settings (chat_id, key, value)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-        """, (chat_id, key, str(value)))
-        conn.commit()
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                INSERT INTO settings (chat_id, key, value)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (chat_id, key, str(value)))
+            conn_local.commit()
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 # Функции для работы с подписками
@@ -631,36 +665,62 @@ def get_active_subscription_by_username(telegram_username, subscription_type='pe
         }
         return virtual_sub
     
-    with db_lock:
-        cursor.execute("""
-            SELECT * FROM subscriptions 
-            WHERE telegram_username = %s AND subscription_type = %s 
-            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
-            ORDER BY activated_at DESC LIMIT 1
-        """, (telegram_username, subscription_type))
-        return cursor.fetchone()
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT * FROM subscriptions 
+                WHERE telegram_username = %s AND subscription_type = %s 
+                AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY activated_at DESC LIMIT 1
+            """, (telegram_username, subscription_type))
+            return cursor_local.fetchone()
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_active_group_subscription(group_username):
     """Получает активную групповую подписку по username группы"""
-    with db_lock:
-        # Сначала проверяем реальную подписку
-        cursor.execute("""
-            SELECT * FROM subscriptions 
-            WHERE group_username = %s AND subscription_type = 'group' 
-            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
-            ORDER BY activated_at DESC LIMIT 1
-        """, (group_username,))
-        row = cursor.fetchone()
-        
-        # Если есть реальная подписка, возвращаем её
-        if row:
-            return row
-        
-        # Если подписки нет, проверяем наличие активности (бот присутствует в группе)
-        # Для этого нужно найти chat_id по username, но это сложно без bot объекта
-        # Поэтому возвращаем None - проверка будет в обработчике через bot.get_chat
-        return None
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            # Сначала проверяем реальную подписку
+            cursor_local.execute("""
+                SELECT * FROM subscriptions 
+                WHERE group_username = %s AND subscription_type = 'group' 
+                AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY activated_at DESC LIMIT 1
+            """, (group_username,))
+            row = cursor_local.fetchone()
+            
+            # Если есть реальная подписка, возвращаем её
+            if row:
+                return row
+            
+            # Если подписки нет, проверяем наличие активности (бот присутствует в группе)
+            # Для этого нужно найти chat_id по username, но это сложно без bot объекта
+            # Поэтому возвращаем None - проверка будет в обработчике через bot.get_chat
+            return None
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_active_group_subscription_by_chat_id(chat_id):
@@ -749,13 +809,26 @@ def get_user_group_subscriptions(user_id):
     if user_id == 301810276:
         return []
     
-    with db_lock:
-        cursor.execute("""
-            SELECT * FROM subscriptions 
-            WHERE user_id = %s AND subscription_type = 'group' 
-            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
-        """, (user_id,))
-        return cursor.fetchall()
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT * FROM subscriptions 
+                WHERE user_id = %s AND subscription_type = 'group' 
+                AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+            """, (user_id,))
+            return cursor_local.fetchall()
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def renew_subscription(subscription_id, period_type):
@@ -795,14 +868,27 @@ def renew_subscription(subscription_id, period_type):
         next_payment_date = None
     
     # ВАЖНО: НЕ обновляем поле price - цена остается той же, что была при создании подписки
-    with db_lock:
-        cursor.execute("""
-            UPDATE subscriptions 
-            SET next_payment_date = %s, expires_at = %s, activated_at = %s
-            WHERE id = %s
-        """, (next_payment_date, expires_at, now, subscription_id))
-        conn.commit()
-        return True
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                UPDATE subscriptions 
+                SET next_payment_date = %s, expires_at = %s, activated_at = %s
+                WHERE id = %s
+            """, (next_payment_date, expires_at, now, subscription_id))
+            conn_local.commit()
+            return True
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def create_subscription(chat_id, user_id, subscription_type, plan_type, period_type, price, 
@@ -850,41 +936,54 @@ def create_subscription(chat_id, user_id, subscription_type, plan_type, period_t
         elif period_type == 'lifetime':
             expires_at = None
     
-    with db_lock:
-        cursor.execute("""
-            INSERT INTO subscriptions 
-            (chat_id, user_id, subscription_type, plan_type, period_type, price, 
-             activated_at, next_payment_date, expires_at, telegram_username, group_username, group_size, payment_method_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (chat_id, user_id, subscription_type, plan_type, period_type, price,
-              now, next_payment_date, expires_at, telegram_username, group_username, group_size, payment_method_id))
-        result = cursor.fetchone()
-        if result:
-            subscription_id = result.get('id') if isinstance(result, dict) else result[0]
-        else:
-            subscription_id = None
-        
-        # Добавляем features в зависимости от plan_type
-        if plan_type == 'all':
-            features = ['notifications', 'recommendations', 'tickets']
-        elif plan_type == 'notifications':
-            features = ['notifications']
-        elif plan_type == 'recommendations':
-            features = ['recommendations']
-        elif plan_type == 'tickets':
-            features = ['tickets']
-        else:
-            features = []
-        
-        for feature in features:
-            cursor.execute("""
-                INSERT INTO subscription_features (subscription_id, feature_type)
-                VALUES (%s, %s)
-            """, (subscription_id, feature))
-        
-        conn.commit()
-        return subscription_id
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                INSERT INTO subscriptions 
+                (chat_id, user_id, subscription_type, plan_type, period_type, price, 
+                 activated_at, next_payment_date, expires_at, telegram_username, group_username, group_size, payment_method_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (chat_id, user_id, subscription_type, plan_type, period_type, price,
+                  now, next_payment_date, expires_at, telegram_username, group_username, group_size, payment_method_id))
+            result = cursor_local.fetchone()
+            if result:
+                subscription_id = result.get('id') if isinstance(result, dict) else result[0]
+            else:
+                subscription_id = None
+            
+            # Добавляем features в зависимости от plan_type
+            if plan_type == 'all':
+                features = ['notifications', 'recommendations', 'tickets']
+            elif plan_type == 'notifications':
+                features = ['notifications']
+            elif plan_type == 'recommendations':
+                features = ['recommendations']
+            elif plan_type == 'tickets':
+                features = ['tickets']
+            else:
+                features = []
+            
+            for feature in features:
+                cursor_local.execute("""
+                    INSERT INTO subscription_features (subscription_id, feature_type)
+                    VALUES (%s, %s)
+                """, (subscription_id, feature))
+            
+            conn_local.commit()
+            return subscription_id
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def cancel_subscription(subscription_id, user_id):
@@ -896,52 +995,65 @@ def cancel_subscription(subscription_id, user_id):
     
     logger = logging.getLogger(__name__)
     
-    # Получаем информацию о подписке перед отменой
-    with db_lock:
-        cursor.execute("""
-            SELECT payment_method_id, subscription_type, period_type
-            FROM subscriptions 
-            WHERE id = %s AND user_id = %s
-        """, (subscription_id, user_id))
-        sub_info = cursor.fetchone()
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
     
-    # Отменяем подписку Telegram Stars, если она была оплачена через Stars
-    # Проверяем, есть ли платежи через Stars для этой подписки
-    if sub_info:
+    try:
+        # Получаем информацию о подписке перед отменой
+        with db_lock:
+            cursor_local.execute("""
+                SELECT payment_method_id, subscription_type, period_type
+                FROM subscriptions 
+                WHERE id = %s AND user_id = %s
+            """, (subscription_id, user_id))
+            sub_info = cursor_local.fetchone()
+        
+        # Отменяем подписку Telegram Stars, если она была оплачена через Stars
+        # Проверяем, есть ли платежи через Stars для этой подписки
+        if sub_info:
+            try:
+                # Ищем платежи через Stars для этой подписки
+                # Проверяем наличие поля payment_method в таблице payments
+                cursor_local.execute("""
+                    SELECT p.yookassa_payment_id, p.status
+                    FROM payments p
+                    WHERE p.subscription_id = %s 
+                    AND p.status = 'succeeded'
+                    AND p.yookassa_payment_id IS NULL
+                    ORDER BY p.created_at DESC
+                    LIMIT 1
+                """, (subscription_id,))
+                stars_payment = cursor_local.fetchone()
+                
+                if stars_payment:
+                    # Если есть платеж через Stars (yookassa_payment_id = NULL), пытаемся отменить подписку
+                    # Согласно документации Telegram, отмена подписки Stars происходит автоматически
+                    # при деактивации подписки в БД, но можно также вызвать API для явной отмены
+                    logger.info(f"[CANCEL SUBSCRIPTION] Найден платеж через Stars для подписки {subscription_id}")
+                    # Примечание: Отмена подписки Telegram Stars происходит автоматически при деактивации
+                    # в нашей БД, так как Telegram отслеживает активные подписки через payments.getStarsSubscriptions
+            except Exception as e:
+                logger.error(f"[CANCEL SUBSCRIPTION] Ошибка проверки платежей Stars: {e}", exc_info=True)
+        
+        # Отменяем подписку в БД
+        # Также обнуляем payment_method_id, чтобы прекратить автоплатежи через YooKassa
+        with db_lock:
+            cursor_local.execute("""
+                UPDATE subscriptions 
+                SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
+                WHERE id = %s AND user_id = %s
+            """, (datetime.now(pytz.UTC), subscription_id, user_id))
+            conn_local.commit()
+            return cursor_local.rowcount > 0
+    finally:
         try:
-            # Ищем платежи через Stars для этой подписки
-            # Проверяем наличие поля payment_method в таблице payments
-            cursor.execute("""
-                SELECT p.yookassa_payment_id, p.status
-                FROM payments p
-                WHERE p.subscription_id = %s 
-                AND p.status = 'succeeded'
-                AND p.yookassa_payment_id IS NULL
-                ORDER BY p.created_at DESC
-                LIMIT 1
-            """, (subscription_id,))
-            stars_payment = cursor.fetchone()
-            
-            if stars_payment:
-                # Если есть платеж через Stars (yookassa_payment_id = NULL), пытаемся отменить подписку
-                # Согласно документации Telegram, отмена подписки Stars происходит автоматически
-                # при деактивации подписки в БД, но можно также вызвать API для явной отмены
-                logger.info(f"[CANCEL SUBSCRIPTION] Найден платеж через Stars для подписки {subscription_id}")
-                # Примечание: Отмена подписки Telegram Stars происходит автоматически при деактивации
-                # в нашей БД, так как Telegram отслеживает активные подписки через payments.getStarsSubscriptions
-        except Exception as e:
-            logger.error(f"[CANCEL SUBSCRIPTION] Ошибка проверки платежей Stars: {e}", exc_info=True)
-    
-    # Отменяем подписку в БД
-    # Также обнуляем payment_method_id, чтобы прекратить автоплатежи через YooKassa
-    with db_lock:
-        cursor.execute("""
-            UPDATE subscriptions 
-            SET is_active = FALSE, cancelled_at = %s, payment_method_id = NULL
-            WHERE id = %s AND user_id = %s
-        """, (datetime.now(pytz.UTC), subscription_id, user_id))
-        conn.commit()
-        return cursor.rowcount > 0
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def has_subscription_feature(chat_id, user_id, feature_type):
@@ -1098,57 +1210,83 @@ def get_active_group_users(chat_id, bot_id=None):
             
 def get_user_groups(user_id, bot=None):
     """Получает список групп, где есть и пользователь, и бот (если bot передан)"""
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
     groups = []
-    with db_lock:
-        # Получаем группы из stats, где пользователь был активен
-        cursor.execute("""
-            SELECT DISTINCT chat_id, username
-            FROM stats 
-            WHERE user_id = %s AND chat_id < 0
-            ORDER BY chat_id
-        """, (user_id,))
-        
-        for row in cursor.fetchall():
-            if isinstance(row, dict):
-                chat_id = row.get('chat_id')
-                username = row.get('username')
-            else:
-                chat_id = row.get("chat_id") if isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
-                username = row[1] if len(row) > 1 else None
-            
-            if chat_id and chat_id < 0:  # Только группы (отрицательные ID)
-                if bot:
-                    # Проверяем, что бот состоит в группе
-                    try:
-                        chat = bot.get_chat(chat_id)
-                        if chat.type in ['group', 'supergroup']:
-                            groups.append({
-                                'chat_id': chat_id,
-                                'title': chat.title,
-                                'username': chat.username or username
-                            })
-                    except Exception as e:
-                        logger.warning(f"Не удалось получить информацию о группе {chat_id}: {e}")
-                        continue
-                else:
-                    # Если бот не передан — возвращаем без проверки (для совместимости)
-                    groups.append({
-                        'chat_id': chat_id,
-                        'title': None,
-                        'username': username
-                    })
     
-    return groups
+    try:
+        with db_lock:
+            # Получаем группы из stats, где пользователь был активен
+            cursor_local.execute("""
+                SELECT DISTINCT chat_id, username
+                FROM stats 
+                WHERE user_id = %s AND chat_id < 0
+                ORDER BY chat_id
+            """, (user_id,))
+            
+            for row in cursor_local.fetchall():
+                if isinstance(row, dict):
+                    chat_id = row.get('chat_id')
+                    username = row.get('username')
+                else:
+                    chat_id = row.get("chat_id") if isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
+                    username = row[1] if len(row) > 1 else None
+                
+                if chat_id and chat_id < 0:  # Только группы (отрицательные ID)
+                    if bot:
+                        # Проверяем, что бот состоит в группе
+                        try:
+                            chat = bot.get_chat(chat_id)
+                            if chat.type in ['group', 'supergroup']:
+                                groups.append({
+                                    'chat_id': chat_id,
+                                    'title': chat.title,
+                                    'username': chat.username or username
+                                })
+                        except Exception as e:
+                            logger.warning(f"Не удалось получить информацию о группе {chat_id}: {e}")
+                            continue
+                    else:
+                        # Если бот не передан — возвращаем без проверки (для совместимости)
+                        groups.append({
+                            'chat_id': chat_id,
+                            'title': None,
+                            'username': username
+                        })
+        
+        return groups
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_subscription_by_id(subscription_id):
     """Получает подписку по ID"""
-    with db_lock:
-        cursor.execute("""
-            SELECT * FROM subscriptions 
-            WHERE id = %s
-        """, (subscription_id,))
-        return cursor.fetchone()
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT * FROM subscriptions 
+                WHERE id = %s
+            """, (subscription_id,))
+            return cursor_local.fetchone()
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_subscription_members(subscription_id):
@@ -1182,138 +1320,255 @@ def get_subscription_members(subscription_id):
 
 def add_subscription_member(subscription_id, user_id, username=None):
     """Добавляет участника в подписку"""
-    with db_lock:
-        cursor.execute("""
-            INSERT INTO subscription_members (subscription_id, user_id, username)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (subscription_id, user_id) DO NOTHING
-        """, (subscription_id, user_id, username))
-        conn.commit()
-        return cursor.rowcount > 0
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                INSERT INTO subscription_members (subscription_id, user_id, username)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (subscription_id, user_id) DO NOTHING
+            """, (subscription_id, user_id, username))
+            conn_local.commit()
+            return cursor_local.rowcount > 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def update_subscription_group_size(subscription_id, new_group_size, additional_price):
     """Обновляет размер группы подписки и добавляет доплату"""
-    with db_lock:
-        cursor.execute("""
-            UPDATE subscriptions 
-            SET group_size = %s, price = price + %s
-            WHERE id = %s
-        """, (new_group_size, additional_price, subscription_id))
-        conn.commit()
-        return cursor.rowcount > 0
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                UPDATE subscriptions 
+                SET group_size = %s, price = price + %s
+                WHERE id = %s
+            """, (new_group_size, additional_price, subscription_id))
+            conn_local.commit()
+            return cursor_local.rowcount > 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def update_subscription_price(subscription_id, new_price):
     """Обновляет цену подписки"""
-    with db_lock:
-        cursor.execute("""
-            UPDATE subscriptions 
-            SET price = %s
-            WHERE id = %s
-        """, (new_price, subscription_id))
-        conn.commit()
-        return cursor.rowcount > 0
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                UPDATE subscriptions 
+                SET price = %s
+                WHERE id = %s
+            """, (new_price, subscription_id))
+            conn_local.commit()
+            return cursor_local.rowcount > 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def update_subscription_plan_type(subscription_id, new_plan_type, new_price):
     """Обновляет тип плана и цену подписки (для изменения со следующего платежа)"""
-    with db_lock:
-        cursor.execute("""
-            UPDATE subscriptions 
-            SET plan_type = %s, price = %s
-            WHERE id = %s
-        """, (new_plan_type, new_price, subscription_id))
-        conn.commit()
-        return True
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                UPDATE subscriptions 
+                SET plan_type = %s, price = %s
+                WHERE id = %s
+            """, (new_plan_type, new_price, subscription_id))
+            conn_local.commit()
+            return True
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def update_subscription_next_payment(subscription_id, next_payment_date):
     """Обновляет дату следующего платежа подписки"""
-    with db_lock:
-        cursor.execute("""
-            UPDATE subscriptions 
-            SET next_payment_date = %s
-            WHERE id = %s
-        """, (next_payment_date, subscription_id))
-        conn.commit()
-        return cursor.rowcount > 0
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                UPDATE subscriptions 
+                SET next_payment_date = %s
+                WHERE id = %s
+            """, (next_payment_date, subscription_id))
+            conn_local.commit()
+            return cursor_local.rowcount > 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def remove_subscription_member(subscription_id, user_id):
     """Удаляет участника из подписки"""
-    with db_lock:
-        cursor.execute("""
-            DELETE FROM subscription_members
-            WHERE subscription_id = %s AND user_id = %s
-        """, (subscription_id, user_id))
-        conn.commit()
-        return cursor.rowcount > 0
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                DELETE FROM subscription_members
+                WHERE subscription_id = %s AND user_id = %s
+            """, (subscription_id, user_id))
+            conn_local.commit()
+            return cursor_local.rowcount > 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def save_payment(payment_id, yookassa_payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status='pending'):
     """Сохраняет информацию о платеже"""
-    with db_lock:
-        cursor.execute("""
-            INSERT INTO payments (payment_id, yookassa_payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (payment_id) DO UPDATE SET
-                yookassa_payment_id = EXCLUDED.yookassa_payment_id,
-                status = EXCLUDED.status,
-                updated_at = NOW()
-        """, (payment_id, yookassa_payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status))
-        conn.commit()
-        return cursor.rowcount > 0
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                INSERT INTO payments (payment_id, yookassa_payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (payment_id) DO UPDATE SET
+                    yookassa_payment_id = EXCLUDED.yookassa_payment_id,
+                    status = EXCLUDED.status,
+                    updated_at = NOW()
+            """, (payment_id, yookassa_payment_id, user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount, status))
+            conn_local.commit()
+            return cursor_local.rowcount > 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def update_payment_status(payment_id, status, subscription_id=None):
     """Обновляет статус платежа"""
-    with db_lock:
-        if subscription_id:
-            cursor.execute("""
-                UPDATE payments 
-                SET status = %s, subscription_id = %s, updated_at = NOW()
-                WHERE payment_id = %s
-            """, (status, subscription_id, payment_id))
-        else:
-            cursor.execute("""
-                UPDATE payments 
-                SET status = %s, updated_at = NOW()
-                WHERE payment_id = %s
-            """, (status, payment_id))
-        conn.commit()
-        return cursor.rowcount > 0
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            if subscription_id:
+                cursor_local.execute("""
+                    UPDATE payments 
+                    SET status = %s, subscription_id = %s, updated_at = NOW()
+                    WHERE payment_id = %s
+                """, (status, subscription_id, payment_id))
+            else:
+                cursor_local.execute("""
+                    UPDATE payments 
+                    SET status = %s, updated_at = NOW()
+                    WHERE payment_id = %s
+                """, (status, payment_id))
+            conn_local.commit()
+            return cursor_local.rowcount > 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_payment_by_yookassa_id(yookassa_payment_id):
     """Получает платеж по ID из ЮKassa"""
-    with db_lock:
-        cursor.execute("""
-            SELECT * FROM payments 
-            WHERE yookassa_payment_id = %s
-        """, (yookassa_payment_id,))
-        row = cursor.fetchone()
-        if row:
-            if isinstance(row, dict):
-                return dict(row)
-            else:
-                return {
-                    'id': row.get('id') if isinstance(row, dict) else row[0],
-                    'payment_id': row[1],
-                    'yookassa_payment_id': row[2],
-                    'user_id': row[3],
-                    'chat_id': row[4],
-                    'subscription_type': row[5],
-                    'plan_type': row[6],
-                    'period_type': row[7],
-                    'group_size': row[8],
-                    'amount': row[9],
-                    'status': row[10],
-                    'subscription_id': row[11],
-                    'created_at': row[12],
-                    'updated_at': row[13]
-                }
-        return None
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT * FROM payments 
+                WHERE yookassa_payment_id = %s
+            """, (yookassa_payment_id,))
+            row = cursor_local.fetchone()
+            if row:
+                if isinstance(row, dict):
+                    return dict(row)
+                else:
+                    return {
+                        'id': row.get('id') if isinstance(row, dict) else row[0],
+                        'payment_id': row[1],
+                        'yookassa_payment_id': row[2],
+                        'user_id': row[3],
+                        'chat_id': row[4],
+                        'subscription_type': row[5],
+                        'plan_type': row[6],
+                        'period_type': row[7],
+                        'group_size': row[8],
+                        'amount': row[9],
+                        'status': row[10],
+                        'subscription_id': row[11],
+                        'created_at': row[12],
+                        'updated_at': row[13]
+                    }
+            return None
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_admin_statistics():
@@ -1321,12 +1576,14 @@ def get_admin_statistics():
     from datetime import datetime, timedelta
     import pytz
     
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
     stats = {}
     
     try:
         with db_lock:
             # Активные пользователи (кто отправлял запросы за последние 30 дней)
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(DISTINCT user_id) as count
                 FROM stats
                 WHERE user_id > 0 AND timestamp >= NOW() - INTERVAL '30 days'
@@ -1556,23 +1813,44 @@ def get_admin_statistics():
     except Exception as e:
         logger.error(f"Ошибка получения статистики: {e}", exc_info=True)
         stats['error'] = str(e)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
     
     return stats
 
 
 def is_bot_participant(chat_id, user_id):
     """Проверяет, является ли пользователь участником бота (есть ли запись в stats)"""
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         with db_lock:
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) FROM stats 
                 WHERE chat_id = %s AND user_id = %s
             ''', (chat_id, user_id))
-            count = cursor.fetchone()
+            count = cursor_local.fetchone()
             return (count.get('count') if isinstance(count, dict) else count[0]) > 0
     except Exception as e:
         logger.error(f"[IS_BOT_PARTICIPANT] Ошибка: {e}")
         return False
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def add_and_announce(link, chat_id, user_id=None, source='unknown'):
