@@ -950,56 +950,70 @@ def has_subscription_feature(chat_id, user_id, feature_type):
     if user_id == 301810276:
         return True
     
-    with db_lock:
-        # Проверяем персональную подписку
-        cursor.execute("""
-            SELECT 1 FROM subscriptions s
-            JOIN subscription_features sf ON s.id = sf.subscription_id
-            WHERE s.chat_id = %s AND s.user_id = %s 
-            AND s.subscription_type = 'personal' AND s.is_active = TRUE
-            AND (s.expires_at IS NULL OR s.expires_at > NOW())
-            AND sf.feature_type = %s
-            LIMIT 1
-        """, (chat_id, user_id, feature_type))
-        if cursor.fetchone():
-            return True
-        
-        # Проверяем групповую подписку
-        cursor.execute("""
-            SELECT s.id, s.group_size 
-            FROM subscriptions s
-            JOIN subscription_features sf ON s.id = sf.subscription_id
-            WHERE s.chat_id = %s 
-            AND s.subscription_type = 'group' 
-            AND s.is_active = TRUE 
-            AND (s.expires_at IS NULL OR s.expires_at > NOW())
-            AND sf.feature_type = %s
-            LIMIT 1
-        """, (chat_id, feature_type))
-        sub_row = cursor.fetchone()
-        
-        if not sub_row:
-            return False
-        
-        # Безопасно извлекаем значения
-        if isinstance(sub_row, dict):
-            subscription_id = sub_row['id']
-            group_size = sub_row.get('group_size')  # .get() — безопасно, если нет ключа
-        else:
-            subscription_id = sub_row.get("id") if isinstance(sub_row, dict) else (sub_row[0] if sub_row else None)
-            group_size = sub_row[1] if len(sub_row) > 1 else None  # если только id вернулся
-        
-        # Если есть ограничение по участникам — проверяем membership
-        if group_size is not None:
-            cursor.execute("""
-                SELECT 1 FROM subscription_members
-                WHERE subscription_id = %s AND user_id = %s
+    # Используем локальное подключение, чтобы не зависеть от глобального курсора
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            # Проверяем персональную подписку
+            cursor_local.execute("""
+                SELECT 1 FROM subscriptions s
+                JOIN subscription_features sf ON s.id = sf.subscription_id
+                WHERE s.chat_id = %s AND s.user_id = %s 
+                AND s.subscription_type = 'personal' AND s.is_active = TRUE
+                AND (s.expires_at IS NULL OR s.expires_at > NOW())
+                AND sf.feature_type = %s
                 LIMIT 1
-            """, (subscription_id, user_id))
-            if not cursor.fetchone():
+            """, (chat_id, user_id, feature_type))
+            if cursor_local.fetchone():
+                return True
+            
+            # Проверяем групповую подписку
+            cursor_local.execute("""
+                SELECT s.id, s.group_size 
+                FROM subscriptions s
+                JOIN subscription_features sf ON s.id = sf.subscription_id
+                WHERE s.chat_id = %s 
+                AND s.subscription_type = 'group' 
+                AND s.is_active = TRUE 
+                AND (s.expires_at IS NULL OR s.expires_at > NOW())
+                AND sf.feature_type = %s
+                LIMIT 1
+            """, (chat_id, feature_type))
+            sub_row = cursor_local.fetchone()
+            
+            if not sub_row:
                 return False
-        
-        return True
+            
+            # Безопасно извлекаем значения
+            if isinstance(sub_row, dict):
+                subscription_id = sub_row['id']
+                group_size = sub_row.get('group_size')  # .get() — безопасно, если нет ключа
+            else:
+                subscription_id = sub_row.get("id") if isinstance(sub_row, dict) else (sub_row[0] if sub_row else None)
+                group_size = sub_row[1] if len(sub_row) > 1 else None  # если только id вернулся
+            
+            # Если есть ограничение по участникам — проверяем membership
+            if group_size is not None:
+                cursor_local.execute("""
+                    SELECT 1 FROM subscription_members
+                    WHERE subscription_id = %s AND user_id = %s
+                    LIMIT 1
+                """, (subscription_id, user_id))
+                if not cursor_local.fetchone():
+                    return False
+            
+            return True
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def check_user_in_group(bot, user_id, group_username):
