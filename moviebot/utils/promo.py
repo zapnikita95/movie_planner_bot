@@ -7,8 +7,6 @@ from decimal import Decimal, ROUND_DOWN
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 
 def create_promocode(code, discount_input, total_uses):
@@ -51,49 +49,64 @@ def create_promocode(code, discount_input, total_uses):
         except ValueError:
             return False, "Количество использований должно быть целым числом"
         
-        # Проверяем существование промокода
-        with db_lock:
-            cursor.execute('SELECT id FROM promocodes WHERE code = %s', (code.upper(),))
-            if cursor.fetchone():
-                return False, f"Промокод {code.upper()} уже существует"
-            
-            # Вставляем новый промокод + возвращаем все поля как dict
-            cursor.execute('''
-                INSERT INTO promocodes (code, discount_type, discount_value, total_uses, used_count, is_active)
-                VALUES (%s, %s, %s, %s, 0, TRUE)
-                RETURNING id, code, discount_type, discount_value, total_uses, used_count, is_active
-            ''', (code.upper(), discount_type, discount_value, total_uses))
-            
-            new_promo = cursor.fetchone()  # ← здесь dict!
-            
-            if not new_promo:
-                raise Exception("Не удалось получить данные созданного промокода")
-            
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
         
-        # Формируем сообщение успеха
-        discount_str = f"{new_promo['discount_value']}%" if new_promo['discount_type'] == 'percent' else f"{int(new_promo['discount_value'])} руб/звезд"
-        success_message = f"Промокод {new_promo['code']} создан: {discount_str}, использований: {new_promo['total_uses']}"
-        
-        return new_promo, success_message
+        try:
+            # Проверяем существование промокода
+            with db_lock:
+                cursor_local.execute('SELECT id FROM promocodes WHERE code = %s', (code.upper(),))
+                if cursor_local.fetchone():
+                    return False, f"Промокод {code.upper()} уже существует"
+                
+                # Вставляем новый промокод + возвращаем все поля как dict
+                cursor_local.execute('''
+                    INSERT INTO promocodes (code, discount_type, discount_value, total_uses, used_count, is_active)
+                    VALUES (%s, %s, %s, %s, 0, TRUE)
+                    RETURNING id, code, discount_type, discount_value, total_uses, used_count, is_active
+                ''', (code.upper(), discount_type, discount_value, total_uses))
+                
+                new_promo = cursor_local.fetchone()  # ← здесь dict!
+                
+                if not new_promo:
+                    raise Exception("Не удалось получить данные созданного промокода")
+                
+                conn_local.commit()
+            
+            # Формируем сообщение успеха
+            discount_str = f"{new_promo['discount_value']}%" if new_promo['discount_type'] == 'percent' else f"{int(new_promo['discount_value'])} руб/звезд"
+            success_message = f"Промокод {new_promo['code']} создан: {discount_str}, использований: {new_promo['total_uses']}"
+            
+            return new_promo, success_message
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
     except Exception as e:
         logger.error(f"Ошибка при создании промокода: {e}", exc_info=True)
-        conn.rollback()
         return False, f"Ошибка при создании промокода: {e}"
 
 def get_all_promocodes():
     """
     Получает ВСЕ промокоды (активные и неактивные, исчерпанные и нет)
     """
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         with db_lock:
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT id, code, discount_type, discount_value, total_uses, used_count, is_active
                 FROM promocodes
                 ORDER BY created_at DESC
             ''')
-            rows = cursor.fetchall()
+            rows = cursor_local.fetchall()
             
             result = []
             for row in rows:
@@ -115,21 +128,33 @@ def get_all_promocodes():
     except Exception as e:
         logger.error(f"Ошибка при получении всех промокодов: {e}", exc_info=True)
         return []
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_active_promocodes():
     """
     Получает только активные промокоды (is_active = TRUE и не исчерпанные)
     """
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         with db_lock:
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT id, code, discount_type, discount_value, total_uses, used_count, is_active
                 FROM promocodes
                 WHERE is_active = TRUE
                 ORDER BY created_at DESC
             ''')
-            rows = cursor.fetchall()
+            rows = cursor_local.fetchall()
             
             result = []
             for row in rows:
@@ -151,6 +176,15 @@ def get_active_promocodes():
     except Exception as e:
         logger.error(f"Ошибка при получении активных промокодов: {e}", exc_info=True)
         return []
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 def get_promocode_info(code):
     """
@@ -163,14 +197,17 @@ def get_promocode_info(code):
         dict or None: {'id': int, 'code': str, 'discount_type': str, 'discount_value': float,
                       'total_uses': int, 'used_count': int, 'is_active': bool}
     """
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         with db_lock:
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT id, code, discount_type, discount_value, total_uses, used_count, is_active
                 FROM promocodes
                 WHERE code = %s
             ''', (code.upper(),))
-            row = cursor.fetchone()
+            row = cursor_local.fetchone()
             
             if not row:
                 return None
@@ -198,6 +235,15 @@ def get_promocode_info(code):
     except Exception as e:
         logger.error(f"Ошибка при получении информации о промокоде: {e}", exc_info=True)
         return None
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def apply_promocode(code, original_amount, user_id, chat_id):
@@ -254,27 +300,39 @@ def apply_promocode(code, original_amount, user_id, chat_id):
             discounted_amount = 0
         
         # Увеличиваем счетчик использований
-        with db_lock:
-            cursor.execute('''
-                UPDATE promocodes
-                SET used_count = used_count + 1
-                WHERE id = %s
-            ''', (promocode_info['id'],))
-            
-            # Записываем использование
-            cursor.execute('''
-                INSERT INTO promocode_uses (promocode_id, user_id, chat_id)
-                VALUES (%s, %s, %s)
-            ''', (promocode_info['id'], user_id, chat_id))
-            
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
         
-        discount_str = f"{discount_value}%" if discount_type == 'percent' else f"{int(discount_value)} руб/звезд"
-        return True, discounted_amount, f"Промокод применен! Скидка: {discount_str}", promocode_info['id']
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    UPDATE promocodes
+                    SET used_count = used_count + 1
+                    WHERE id = %s
+                ''', (promocode_info['id'],))
+                
+                # Записываем использование
+                cursor_local.execute('''
+                    INSERT INTO promocode_uses (promocode_id, user_id, chat_id)
+                    VALUES (%s, %s, %s)
+                ''', (promocode_info['id'], user_id, chat_id))
+                
+                conn_local.commit()
+            
+            discount_str = f"{discount_value}%" if discount_type == 'percent' else f"{int(discount_value)} руб/звезд"
+            return True, discounted_amount, f"Промокод применен! Скидка: {discount_str}", promocode_info['id']
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
     except Exception as e:
         logger.error(f"Ошибка при применении промокода: {e}", exc_info=True)
-        conn.rollback()
         return False, original_amount, f"Ошибка при применении промокода: {e}", None
 
 
@@ -288,20 +346,31 @@ def deactivate_promocode(promocode_id):
     Returns:
         (success: bool, message: str)
     """
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         with db_lock:
-            cursor.execute('''
+            cursor_local.execute('''
                 UPDATE promocodes
                 SET is_active = FALSE, deactivated_at = NOW()
                 WHERE id = %s
             ''', (promocode_id,))
-            conn.commit()
+            conn_local.commit()
         
         return True, "Промокод деактивирован"
     except Exception as e:
         logger.error(f"Ошибка при деактивации промокода: {e}", exc_info=True)
-        conn.rollback()
         return False, f"Ошибка при деактивации промокода: {e}"
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_promocode_statistics():
@@ -312,30 +381,33 @@ def get_promocode_statistics():
         dict: {'total_promocodes': int, 'active_promocodes': int, 
                'total_uses': int, 'promocodes': list}
     """
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         with db_lock:
             # Общая статистика
-            cursor.execute('SELECT COUNT(*) FROM promocodes')
-            total_promocodes = cursor.fetchone()
+            cursor_local.execute('SELECT COUNT(*) FROM promocodes')
+            total_promocodes = cursor_local.fetchone()
             total_promocodes = total_promocodes.get('count') if isinstance(total_promocodes, dict) else total_promocodes[0]
             
-            cursor.execute('SELECT COUNT(*) FROM promocodes WHERE is_active = TRUE')
-            active_promocodes = cursor.fetchone()
+            cursor_local.execute('SELECT COUNT(*) FROM promocodes WHERE is_active = TRUE')
+            active_promocodes = cursor_local.fetchone()
             active_promocodes = active_promocodes.get('count') if isinstance(active_promocodes, dict) else active_promocodes[0]
             
-            cursor.execute('SELECT SUM(used_count) FROM promocodes')
-            total_uses = cursor.fetchone()
+            cursor_local.execute('SELECT SUM(used_count) FROM promocodes')
+            total_uses = cursor_local.fetchone()
             total_uses = total_uses.get('sum') if total_uses and total_uses.get('sum') else 0
             if total_uses is None:
                 total_uses = 0
             
             # Детальная статистика по промокодам
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT code, discount_type, discount_value, total_uses, used_count, is_active
                 FROM promocodes
                 ORDER BY created_at DESC
             ''')
-            rows = cursor.fetchall()
+            rows = cursor_local.fetchall()
             
             promocodes_list = []
             for row in rows:
@@ -374,4 +446,13 @@ def get_promocode_statistics():
             'total_uses': 0,
             'promocodes': []
         }
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 

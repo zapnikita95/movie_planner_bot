@@ -12,33 +12,58 @@ from moviebot.states import dice_game_state
 from moviebot.bot.bot_init import bot
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 plans_tz = PLANS_TZ
 
 
 def _get_random_events_enabled(chat_id):
     """Вспомогательная функция для проверки включенности случайных событий"""
-    with db_lock:
-        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
-        row = cursor.fetchone()
-        if row:
-            value = row.get('value') if isinstance(row, dict) else row[0]
-            return value == 'true'
-    return True  # По умолчанию включено
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+            row = cursor_local.fetchone()
+            if row:
+                value = row.get('value') if isinstance(row, dict) else row[0]
+                return value == 'true'
+        return True  # По умолчанию включено
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def _mark_event_sent(chat_id, event_type):
     """Вспомогательная функция для отметки отправленного события"""
     now = datetime.now(plans_tz)
     today = now.date()
-    with db_lock:
-        cursor.execute("""
-            INSERT INTO event_notifications (chat_id, event_type, sent_date)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (chat_id, event_type, sent_date) DO NOTHING
-        """, (chat_id, event_type, today))
-        conn.commit()
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                INSERT INTO event_notifications (chat_id, event_type, sent_date)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, event_type, sent_date) DO NOTHING
+            """, (chat_id, event_type, today))
+            conn_local.commit()
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def send_dice_game_event(chat_id, skip_checks=False):
@@ -72,9 +97,21 @@ def send_dice_game_event(chat_id, skip_checks=False):
                 return False
             
             # Проверяем, когда последний раз запускали игру
-            with db_lock:
-                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_dice_game_date'", (chat_id,))
-                last_date_row = cursor.fetchone()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_dice_game_date'", (chat_id,))
+                    last_date_row = cursor_local.fetchone()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if last_date_row:
                 last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
@@ -97,17 +134,29 @@ def send_dice_game_event(chat_id, skip_checks=False):
                 return False
             
             threshold_time = (now - timedelta(days=30)).isoformat()
-            with db_lock:
-                bot_id = bot.get_me().id
-                cursor.execute('''
-                    SELECT COUNT(DISTINCT user_id) AS count
-                    FROM stats 
-                    WHERE chat_id = %s 
-                    AND timestamp >= %s
-                    AND user_id != %s
-                ''', (chat_id, threshold_time, bot_id))
-                row = cursor.fetchone()
-                active_participants = row.get("count") if isinstance(row, dict) else (row[0] if row else 0)
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    bot_id = bot.get_me().id
+                    cursor_local.execute('''
+                        SELECT COUNT(DISTINCT user_id) AS count
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND timestamp >= %s
+                        AND user_id != %s
+                    ''', (chat_id, threshold_time, bot_id))
+                    row = cursor_local.fetchone()
+                    active_participants = row.get("count") if isinstance(row, dict) else (row[0] if row else 0)
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             required_participants = int(total_participants * 0.65)
             if active_participants < required_participants:
@@ -178,13 +227,25 @@ def send_dice_game_event(chat_id, skip_checks=False):
             _mark_event_sent(current_chat_id, 'random_event')
             
             # Сохраняем дату последнего запуска
-            with db_lock:
-                cursor.execute('''
-                    INSERT INTO settings (chat_id, key, value)
-                    VALUES (%s, 'last_dice_game_date', %s)
-                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-                ''', (current_chat_id, now.date().isoformat()))
-                conn.commit()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        INSERT INTO settings (chat_id, key, value)
+                        VALUES (%s, 'last_dice_game_date', %s)
+                        ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                    ''', (current_chat_id, now.date().isoformat()))
+                    conn_local.commit()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
         
         logger.info(f"[DICE GAME] Успешно отправлено событие игры в кубик для чата {current_chat_id}")
         return True
@@ -205,23 +266,35 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
         from datetime import datetime, timedelta
 
         # Получаем список всех активных участников (исключая бота)
-        with db_lock:
-            if bot_id:
-                cursor.execute('''
-                    SELECT DISTINCT user_id 
-                    FROM stats 
-                    WHERE chat_id = %s 
-                    AND timestamp >= %s
-                    AND user_id != %s
-                ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat(), bot_id))
-            else:
-                cursor.execute('''
-                    SELECT DISTINCT user_id 
-                    FROM stats 
-                    WHERE chat_id = %s 
-                    AND timestamp >= %s
-                ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat()))
-            all_participants = [row[0] if not isinstance(row, dict) else row.get('user_id') for row in cursor.fetchall()]
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                if bot_id:
+                    cursor_local.execute('''
+                        SELECT DISTINCT user_id 
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND timestamp >= %s
+                        AND user_id != %s
+                    ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat(), bot_id))
+                else:
+                    cursor_local.execute('''
+                        SELECT DISTINCT user_id 
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND timestamp >= %s
+                    ''', (chat_id, (datetime.now(plans_tz) - timedelta(days=30)).isoformat()))
+                all_participants = [row[0] if not isinstance(row, dict) else row.get('user_id') for row in cursor_local.fetchall()]
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Формируем текст с результатами
         text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"

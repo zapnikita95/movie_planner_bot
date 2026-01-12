@@ -9,6 +9,7 @@ import time
 import pytz
 
 from datetime import datetime, timedelta, date
+from typing import Optional
 
 # 2. Сторонние библиотеки (в алфавитном порядке)
 import telebot
@@ -1371,8 +1372,17 @@ def check_subscription_payments():
             pass
 
 
-def send_successful_payment_notification(chat_id, subscription_id, subscription_type, plan_type, period_type, is_recurring=False):
-    """Отправляет уведомление об успешном платеже"""
+def send_successful_payment_notification(
+    chat_id: int,
+    subscription_id: int,
+    subscription_type: str,
+    plan_type: str,
+    period_type: str,
+    is_recurring: bool = False,
+    check_url: Optional[str] = None,
+    pdf_url: Optional[str] = None
+):
+    """Отправляет уведомление об успешном платеже с чеком от самозанятого (если есть)"""
     if not bot:
         return
     
@@ -1472,6 +1482,13 @@ def send_successful_payment_notification(chat_id, subscription_id, subscription_
                     except:
                         text += f"Действует до: {expires_at}"
         
+        # === ДОБАВЛЯЕМ ЧЕК ОТ САМОЗАНЯТОГО ===
+        if check_url:
+            text += "\n\n📄 <b>Чек от самозанятого:</b>\n"
+            text += f"{check_url}\n"
+            if pdf_url:
+                text += f"\n📥 <a href=\"{pdf_url}\">Скачать чек в PDF</a>"
+        
         markup = InlineKeyboardMarkup()
         
         # Для групповых подписок проверяем, есть ли участники группы, которых можно добавить
@@ -1525,8 +1542,8 @@ def send_successful_payment_notification(chat_id, subscription_id, subscription_
             target_chat_id = chat_id
         
         try:
-            bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
-            logger.info(f"[SUCCESSFUL PAYMENT] Уведомление отправлено для подписки {subscription_id}")
+            bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML', disable_web_page_preview=True)
+            logger.info(f"[SUCCESSFUL PAYMENT] Уведомление отправлено для подписки {subscription_id} (check={'ДА' if check_url else 'НЕТ'})")
         except Exception as e:
             logger.error(f"[SUCCESSFUL PAYMENT] Ошибка отправки уведомления: {e}")
     except Exception as e:
@@ -1543,6 +1560,7 @@ def process_recurring_payments():
         from moviebot.database.db_operations import renew_subscription, save_payment, update_payment_status, create_subscription
         from moviebot.database.db_connection import get_db_connection
         import uuid as uuid_module
+        from moviebot.services.nalog_service import create_check  # Добавляем импорт
         
         now = datetime.now(pytz.UTC)
         
@@ -1661,6 +1679,17 @@ def process_recurring_payments():
                     renew_subscription(subscription_id, period_type)
                     update_payment_status(payment_id, 'succeeded', subscription_id)
                     
+                    # === СОЗДАЁМ ЧЕК ДЛЯ РЕКУРРЕНТНОГО ПЛАТЕЖА ===
+                    check_url = None
+                    pdf_url = None
+                    description = f"Автопродление подписки \"{plan_type}\" на {period_type}"
+                    user_name = telegram_username or f"user_{user_id}"
+                    check_url, pdf_url = create_check(
+                        amount_rub=price,
+                        description=description,
+                        user_name=user_name
+                    )
+                    
                     # Отправляем уведомление об успешном рекуррентном платеже
                     # is_recurring=True для отображения специального текста
                     send_successful_payment_notification(
@@ -1669,7 +1698,9 @@ def process_recurring_payments():
                         subscription_type=subscription_type,
                         plan_type=plan_type,
                         period_type=period_type,
-                        is_recurring=True
+                        is_recurring=True,
+                        check_url=check_url,
+                        pdf_url=pdf_url
                     )
                 else:
                     # Платеж не успешен - проверяем причину
@@ -2474,8 +2505,25 @@ def update_series_status_cache():
             next_ep_json = json.dumps(next_ep) if next_ep else None
 
             # Обновляем только нужные колонки
+            # Получаем новый курсор для каждой итерации, так как курсор может закрыться
             with db_lock:
                 try:
+                    # Проверяем состояние курсора и соединения, пересоздаем при необходимости
+                    try:
+                        if cursor_local.closed or conn_local.closed:
+                            raise Exception("Cursor or connection closed")
+                        # Проверяем, что курсор еще валиден
+                        cursor_local.execute("SELECT 1")
+                    except:
+                        # Пересоздаем курсор и соединение
+                        try:
+                            if cursor_local and not cursor_local.closed:
+                                cursor_local.close()
+                        except:
+                            pass
+                        conn_local = get_db_connection()
+                        cursor_local = get_db_cursor()
+                    
                     cursor_local.execute("""
                         UPDATE movies
                         SET is_ongoing = %s, 

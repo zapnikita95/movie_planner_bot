@@ -5298,7 +5298,7 @@ def register_payment_callbacks(bot_instance):
                 
                 from yookassa import Configuration, Payment
                 import uuid as uuid_module
-                import os
+                # os уже импортирован в начале файла, не нужно импортировать снова
                 
                 Configuration.account_id = YOOKASSA_SHOP_ID.strip()
                 Configuration.secret_key = YOOKASSA_SECRET_KEY.strip()
