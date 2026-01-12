@@ -2344,6 +2344,15 @@ def choose_random_participant():
                 
     except Exception as e:
         logger.error(f"[RANDOM PARTICIPANT] Глобальная ошибка в choose_random_participant: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def start_dice_game():
