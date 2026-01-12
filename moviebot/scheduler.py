@@ -711,14 +711,26 @@ def check_and_send_plan_notifications():
                     # Время плана уже прошло, но не более 30 минут назад - отправляем сразу
                     # КРИТИЧЕСКИ ВАЖНО: Перечитываем флаг из БД перед проверкой, чтобы избежать дублирования
                     notification_sent_current = notification_sent
+                    # Используем отдельное соединение для проверки, чтобы не конфликтовать с основным
+                    conn_check = get_db_connection()
+                    cursor_check = get_db_cursor()
                     try:
                         with db_lock:
-                            cursor_local.execute('SELECT notification_sent FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                            sent_row = cursor_local.fetchone()
+                            cursor_check.execute('SELECT notification_sent FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                            sent_row = cursor_check.fetchone()
                             if sent_row:
                                 notification_sent_current = bool(sent_row.get('notification_sent') if isinstance(sent_row, dict) else sent_row[0])
                     except Exception as read_e:
                         logger.warning(f"[PLAN CHECK] Не удалось перечитать notification_sent для плана {plan_id}: {read_e}")
+                    finally:
+                        try:
+                            cursor_check.close()
+                        except:
+                            pass
+                        try:
+                            conn_check.close()
+                        except:
+                            pass
                     
                     if not notification_sent_current:
                         try:
@@ -726,22 +738,34 @@ def check_and_send_plan_notifications():
                             existing_job = scheduler.get_job(job_id)
                             if not existing_job:
                                 # Перед отправкой еще раз проверяем флаг в БД с блокировкой
-                                with db_lock:
-                                    cursor_local.execute('SELECT notification_sent FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                                    final_check = cursor_local.fetchone()
-                                    if final_check:
-                                        is_sent = bool(final_check.get('notification_sent') if isinstance(final_check, dict) else final_check[0])
-                                        if is_sent:
-                                            logger.info(f"[PLAN CHECK] Уведомление уже было отправлено для плана дома {plan_id} (дубликат предотвращен)")
-                                            # Пропускаем отправку этого плана, переходим к следующему в цикле
+                                conn_final = get_db_connection()
+                                cursor_final = get_db_cursor()
+                                try:
+                                    with db_lock:
+                                        cursor_final.execute('SELECT notification_sent FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                                        final_check = cursor_final.fetchone()
+                                        if final_check:
+                                            is_sent = bool(final_check.get('notification_sent') if isinstance(final_check, dict) else final_check[0])
+                                            if is_sent:
+                                                logger.info(f"[PLAN CHECK] Уведомление уже было отправлено для плана дома {plan_id} (дубликат предотвращен)")
+                                                # Пропускаем отправку этого плана, переходим к следующему в цикле
+                                            else:
+                                                # Отправляем уведомление
+                                                send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
+                                                logger.info(f"[PLAN CHECK] Уведомление отправлено сразу для плана дома {plan_id} (фильм {title}) на время плана {plan_utc}")
                                         else:
-                                            # Отправляем уведомление
+                                            # Если план не найден при повторной проверке, все равно пытаемся отправить
                                             send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
                                             logger.info(f"[PLAN CHECK] Уведомление отправлено сразу для плана дома {plan_id} (фильм {title}) на время плана {plan_utc}")
-                                    else:
-                                        # Если план не найден при повторной проверке, все равно пытаемся отправить
-                                        send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
-                                        logger.info(f"[PLAN CHECK] Уведомление отправлено сразу для плана дома {plan_id} (фильм {title}) на время плана {plan_utc}")
+                                finally:
+                                    try:
+                                        cursor_final.close()
+                                    except:
+                                        pass
+                                    try:
+                                        conn_final.close()
+                                    except:
+                                        pass
                             else:
                                 logger.info(f"[PLAN CHECK] Уведомление уже запланировано для плана дома {plan_id}")
                         except Exception as e:

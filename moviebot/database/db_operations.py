@@ -566,28 +566,41 @@ def get_active_subscription(chat_id, user_id, subscription_type=None):
         }
         return virtual_sub
     
-    with db_lock:
-        # Сначала проверяем, есть ли реальная подписка в БД
-        query = """
-            SELECT * FROM subscriptions 
-            WHERE chat_id = %s AND user_id = %s AND is_active = TRUE 
-            AND (expires_at IS NULL OR expires_at > NOW())
-        """
-        params = [chat_id, user_id]
-        if subscription_type:
-            query += " AND subscription_type = %s"
-            params.append(subscription_type)
-        query += " ORDER BY activated_at DESC LIMIT 1"
-        cursor.execute(query, params)
-        row = cursor.fetchone()
-        
-        # Если есть реальная подписка, возвращаем её
-        if row:
-            return row
-        
-        # Если подписки нет, возвращаем None
-        # Не создаем виртуальную подписку автоматически - пользователь должен купить подписку
-        return None
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            # Сначала проверяем, есть ли реальная подписка в БД
+            query = """
+                SELECT * FROM subscriptions 
+                WHERE chat_id = %s AND user_id = %s AND is_active = TRUE 
+                AND (expires_at IS NULL OR expires_at > NOW())
+            """
+            params = [chat_id, user_id]
+            if subscription_type:
+                query += " AND subscription_type = %s"
+                params.append(subscription_type)
+            query += " ORDER BY activated_at DESC LIMIT 1"
+            cursor_local.execute(query, params)
+            row = cursor_local.fetchone()
+            
+            # Если есть реальная подписка, возвращаем её
+            if row:
+                return row
+            
+            # Если подписки нет, возвращаем None
+            # Не создаем виртуальную подписку автоматически - пользователь должен купить подписку
+            return None
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_active_subscription_by_username(telegram_username, subscription_type='personal'):
@@ -652,20 +665,33 @@ def get_active_group_subscription(group_username):
 
 def get_active_group_subscription_by_chat_id(chat_id):
     """Получает активную групповую подписку по chat_id группы"""
-    with db_lock:
-        cursor.execute("""
-            SELECT * FROM subscriptions 
-            WHERE chat_id = %s AND subscription_type = 'group' 
-            AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
-            ORDER BY activated_at DESC LIMIT 1
-        """, (chat_id,))
-        row = cursor.fetchone()
-        
-        # Если есть реальная подписка, возвращаем её
-        if row:
-            return row
-        
-        return None
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT * FROM subscriptions 
+                WHERE chat_id = %s AND subscription_type = 'group' 
+                AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY activated_at DESC LIMIT 1
+            """, (chat_id,))
+            row = cursor_local.fetchone()
+            
+            # Если есть реальная подписка, возвращаем её
+            if row:
+                return row
+            
+            return None
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def get_user_personal_subscriptions(user_id):

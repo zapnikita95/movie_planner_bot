@@ -49,34 +49,38 @@ def register_start_handlers(bot):
 
         # Информация о подписке
         subscription_info = ""
-        if message.chat.type == 'private':
-            sub = get_active_subscription(chat_id, user_id, 'personal')
-            if sub:
-                plan_type = sub.get('plan_type', 'all')
-                plan_names = {
-                    'notifications': 'Уведомления о сериалах',
-                    'recommendations': 'Рекомендации',
-                    'tickets': 'Билеты',
-                    'all': 'Все режимы'
-                }
-                plan_name = plan_names.get(plan_type, plan_type)
-                subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+        try:
+            if message.chat.type == 'private':
+                sub = get_active_subscription(chat_id, user_id, 'personal')
+                if sub:
+                    plan_type = sub.get('plan_type', 'all')
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+                else:
+                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
             else:
-                subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
-        else:
-            group_sub = get_active_group_subscription_by_chat_id(chat_id)
-            if group_sub:
-                plan_type = group_sub.get('plan_type', 'all')
-                plan_names = {
-                    'notifications': 'Уведомления о сериалах',
-                    'recommendations': 'Рекомендации',
-                    'tickets': 'Билеты',
-                    'all': 'Все режимы'
-                }
-                plan_name = plan_names.get(plan_type, plan_type)
-                subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
-            else:
-                subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                group_sub = get_active_group_subscription_by_chat_id(chat_id)
+                if group_sub:
+                    plan_type = group_sub.get('plan_type', 'all')
+                    plan_names = {
+                        'notifications': 'Уведомления о сериалах',
+                        'recommendations': 'Рекомендации',
+                        'tickets': 'Билеты',
+                        'all': 'Все режимы'
+                    }
+                    plan_name = plan_names.get(plan_type, plan_type)
+                    subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
+                else:
+                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+        except Exception as sub_error:
+            logger.error(f"[START] Ошибка получения информации о подписке: {sub_error}", exc_info=True)
+            subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
 
         welcome_text = f"""
 🎬 <b>Главное меню</b>{subscription_info}
@@ -89,8 +93,17 @@ def register_start_handlers(bot):
         try:
             markup = InlineKeyboardMarkup()
 
-            has_shazam_access = has_recommendations_access(chat_id, user_id)
-            has_tickets = has_tickets_access(chat_id, user_id)
+            try:
+                has_shazam_access = has_recommendations_access(chat_id, user_id)
+            except Exception as rec_error:
+                logger.error(f"[BACK TO MENU] Ошибка проверки доступа к рекомендациям: {rec_error}", exc_info=True)
+                has_shazam_access = False
+            
+            try:
+                has_tickets = has_tickets_access(chat_id, user_id)
+            except Exception as tickets_error:
+                logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
+                has_tickets = False
 
             # Строка 1: Сериалы / Премьеры
             markup.row(
@@ -340,34 +353,38 @@ def register_start_handlers(bot):
 
             # Та же логика подписки, что и в /start (теперь с группой)
             subscription_info = ""
-            if call.message.chat.type == 'private':
-                sub = get_active_subscription(chat_id, user_id, 'personal')
-                if sub:
-                    plan_type = sub.get('plan_type', 'all')
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты',
-                        'all': 'Все режимы'
-                    }
-                    plan_name = plan_names.get(plan_type, plan_type)
-                    subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+            try:
+                if call.message.chat.type == 'private':
+                    sub = get_active_subscription(chat_id, user_id, 'personal')
+                    if sub:
+                        plan_type = sub.get('plan_type', 'all')
+                        plan_names = {
+                            'notifications': 'Уведомления о сериалах',
+                            'recommendations': 'Рекомендации',
+                            'tickets': 'Билеты',
+                            'all': 'Все режимы'
+                        }
+                        plan_name = plan_names.get(plan_type, plan_type)
+                        subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+                    else:
+                        subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
                 else:
-                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
-            else:
-                group_sub = get_active_group_subscription_by_chat_id(chat_id)
-                if group_sub:
-                    plan_type = group_sub.get('plan_type', 'all')
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты',
-                        'all': 'Все режимы'
-                    }
-                    plan_name = plan_names.get(plan_type, plan_type)
-                    subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
-                else:
-                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                    group_sub = get_active_group_subscription_by_chat_id(chat_id)
+                    if group_sub:
+                        plan_type = group_sub.get('plan_type', 'all')
+                        plan_names = {
+                            'notifications': 'Уведомления о сериалах',
+                            'recommendations': 'Рекомендации',
+                            'tickets': 'Билеты',
+                            'all': 'Все режимы'
+                        }
+                        plan_name = plan_names.get(plan_type, plan_type)
+                        subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
+                    else:
+                        subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+            except Exception as sub_error:
+                logger.error(f"[BACK TO MENU] Ошибка получения информации о подписке: {sub_error}", exc_info=True)
+                subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
 
             welcome_text = f"""
 🎬 <b>Главное меню</b>{subscription_info}
@@ -379,8 +396,17 @@ def register_start_handlers(bot):
 
             markup = InlineKeyboardMarkup()
 
-            has_shazam_access = has_recommendations_access(chat_id, user_id)
-            has_tickets = has_tickets_access(chat_id, user_id)
+            try:
+                has_shazam_access = has_recommendations_access(chat_id, user_id)
+            except Exception as rec_error:
+                logger.error(f"[BACK TO MENU] Ошибка проверки доступа к рекомендациям: {rec_error}", exc_info=True)
+                has_shazam_access = False
+            
+            try:
+                has_tickets = has_tickets_access(chat_id, user_id)
+            except Exception as tickets_error:
+                logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
+                has_tickets = False
 
             # Строка 1: Сериалы / Премьеры
             markup.row(
