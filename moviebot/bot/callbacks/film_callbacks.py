@@ -1277,6 +1277,11 @@ def back_to_film_description(call):
                 # ВАЖНО: Если is_series уже получен из БД, используем его, а не из API
                 if not link_from_db:  # Только если фильм не в БД, используем is_series из API
                     is_series = info.get('is_series', False)
+                    # Обновляем link на основе is_series из API
+                    if is_series:
+                        link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"
+                    else:
+                        link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"
         except Exception as e:
             logger.warning(f"[BACK TO FILM] API не сработал: {e}")
 
@@ -1329,10 +1334,21 @@ def back_to_film_description(call):
                     logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")
 
         if not info or not info.get('title'):
-            bot.edit_message_text(
-                "❌ Не удалось загрузить информацию о фильме/сериале",
-                chat_id, message_id, message_thread_id=message_thread_id
-            )
+            logger.warning(f"[BACK TO FILM] Нет данных для показа: info={info}")
+            try:
+                if message_id and not callback_is_old:
+                    bot.edit_message_text(
+                        "❌ Не удалось загрузить информацию о фильме/сериале",
+                        chat_id, message_id, message_thread_id=message_thread_id
+                    )
+                else:
+                    bot.send_message(
+                        chat_id,
+                        "❌ Не удалось загрузить информацию о фильме/сериале",
+                        message_thread_id=message_thread_id
+                    )
+            except Exception as send_e:
+                logger.error(f"[BACK TO FILM] Ошибка отправки сообщения об ошибке: {send_e}")
             return
 
         # Убеждаемся, что is_series правильно установлен в info (приоритет у БД)
@@ -1345,6 +1361,8 @@ def back_to_film_description(call):
             else:
                 link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"
         # Если link_from_db есть, он уже установлен выше
+        
+        logger.info(f"[BACK TO FILM] Подготовка к вызову show_film_info_with_buttons: link={link}, is_series={is_series}, title={info.get('title')}")
 
         # Если callback устарел, используем send_message вместо edit_message_text
         # (show_film_info_with_buttons сам обработает это через message_id=None)
@@ -1354,16 +1372,37 @@ def back_to_film_description(call):
 
         # Главный вызов — existing будет получен внутри show_film_info_with_buttons через get_film_current_state
         # Но передаем его для оптимизации, если он уже есть
-        show_film_info_with_buttons(
-            chat_id=chat_id,
-            user_id=user_id,
-            info=info,
-            link=link,
-            kp_id=kp_id_int,
-            existing=existing,  # Может быть None, тогда внутри функции будет получен актуальный
-            message_id=message_id,
-            message_thread_id=message_thread_id
-        )
+        try:
+            logger.info(f"[BACK TO FILM] Вызов show_film_info_with_buttons: kp_id={kp_id_int}, message_id={message_id}, callback_is_old={callback_is_old}")
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id_int,
+                existing=existing,  # Может быть None, тогда внутри функции будет получен актуальный
+                message_id=message_id,
+                message_thread_id=message_thread_id
+            )
+            logger.info(f"[BACK TO FILM] show_film_info_with_buttons вызвана успешно")
+        except Exception as show_e:
+            logger.error(f"[BACK TO FILM] Ошибка в show_film_info_with_buttons: {show_e}", exc_info=True)
+            # Пытаемся отправить сообщение об ошибке
+            try:
+                if message_id and not callback_is_old:
+                    bot.edit_message_text(
+                        f"❌ Ошибка при загрузке описания: {str(show_e)[:100]}",
+                        chat_id, message_id, message_thread_id=message_thread_id
+                    )
+                else:
+                    bot.send_message(
+                        chat_id,
+                        f"❌ Ошибка при загрузке описания: {str(show_e)[:100]}",
+                        message_thread_id=message_thread_id
+                    )
+            except:
+                pass
+            raise
 
         logger.info(f"[BACK TO FILM] Успешно, is_series={is_series}, existing={'есть' if existing else 'нет'}")
 
