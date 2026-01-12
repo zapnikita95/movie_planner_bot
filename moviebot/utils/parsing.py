@@ -344,6 +344,8 @@ def check_timezone_change(user_id, message_date_utc):
 def show_timezone_selection(chat_id, user_id, prompt_text="Выберите часовой пояс:"):
     """Показывает выбор часового пояса пользователю"""
 
+    # Используем отдельное подключение к БД внутри get_user_timezone,
+    # поэтому здесь достаточно просто вызвать функцию
     current_tz = get_user_timezone(user_id)
 
     if not current_tz:

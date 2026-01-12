@@ -179,14 +179,19 @@ def get_user_timezone(user_id):
 
     try:
 
-        with db_lock:
+        # Используем локальное подключение, чтобы не зависеть от глобального курсора
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
 
-            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (user_id, 'user_timezone'))
-
-            row = cursor.fetchone()
+        try:
+            with db_lock:
+                cursor_local.execute(
+                    "SELECT value FROM settings WHERE chat_id = %s AND key = %s",
+                    (user_id, 'user_timezone')
+                )
+                row = cursor_local.fetchone()
 
             if row:
-
                 tz_name = row.get('value') if isinstance(row, dict) else row[0]
 
                 # Карта поддерживаемых идентификаторов часовых поясов
@@ -201,7 +206,16 @@ def get_user_timezone(user_id):
                 if tz_name in tz_map:
                     return pytz.timezone(tz_map[tz_name])
 
-        return None
+            return None
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
     except Exception as e:
 
@@ -226,27 +240,36 @@ def get_user_timezone_or_default(user_id):
 
 
 def set_user_timezone(user_id, timezone_name):
-    """Устанавливает часовой пояс пользователя. timezone_name: 'Moscow' или 'Serbia'"""
+    """Устанавливает часовой пояс пользователя. timezone_name: 'Moscow', 'Serbia', 'Samara', 'Yekaterinburg', 'Novosibirsk'"""
 
     try:
 
-        with db_lock:
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
 
-            cursor.execute("""
-
-                INSERT INTO settings (chat_id, key, value) 
-
-                VALUES (%s, %s, %s) 
-
-                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-
-            """, (user_id, 'user_timezone', timezone_name))
-
-            conn.commit()
+        try:
+            with db_lock:
+                cursor_local.execute(
+                    """
+                    INSERT INTO settings (chat_id, key, value) 
+                    VALUES (%s, %s, %s) 
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                    """,
+                    (user_id, 'user_timezone', timezone_name),
+                )
+                conn_local.commit()
 
             logger.info(f"Часовой пояс установлен для user_id={user_id}: {timezone_name}")
-
             return True
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
     except Exception as e:
 

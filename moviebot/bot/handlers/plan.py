@@ -44,12 +44,11 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     # TODO: Извлечь полную реализацию из moviebot.py строки 22844-23279
     # Это большая функция, нужно скопировать весь код
     plan_dt = None
+    needs_tz_check = False
     
-    # Проверяем, нужно ли уточнить часовой пояс
+    # Проверяем, нужно ли уточнить часовой пояс (НО не прерываем текущее планирование)
     if message_date_utc:
         needs_tz_check = check_timezone_change(user_id, message_date_utc)
-        if needs_tz_check:
-            return 'NEEDS_TIMEZONE'
     
     # Используем часовой пояс пользователя или по умолчанию Москва
     user_tz = get_user_timezone_or_default(user_id)
@@ -144,6 +143,13 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
         # Успешное планирование - фильм уже в базе (film_id получен выше)
         logger.info(f"[PLAN] Успешное планирование: plan_id={plan_id}, film_id={film_id}, kp_id={kp_id}, plan_type={plan_type}, plan_datetime={plan_utc}")
     
+    # Если нужно уточнить часовой пояс, показываем выбор, но текущее планирование уже завершено
+    if needs_tz_check:
+        try:
+            show_timezone_selection(chat_id, user_id, "Для будущих планов выберите часовой пояс:")
+        except Exception as tz_e:
+            logger.warning(f"[PROCESS_PLAN] Не удалось показать выбор часового пояса: {tz_e}")
+
     # Формируем сообщение об успехе
     date_str = plan_dt.strftime('%d.%m %H:%M')
     type_text = "дома" if plan_type == 'home' else "в кино"
