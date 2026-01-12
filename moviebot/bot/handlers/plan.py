@@ -1802,52 +1802,52 @@ def handle_remove_from_calendar_callback(call):
                 conn_local.close()
             except:
                 pass
+        
+        if not row:
+            bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+            logger.warning(f"[REMOVE FROM CALENDAR] План {plan_id} не найден")
+            return
             
-            if not row:
-                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
-                logger.warning(f"[REMOVE FROM CALENDAR] План {plan_id} не найден")
-                return
+        ticket_file_id = row.get('ticket_file_id') if isinstance(row, dict) else row[1]
+        title = row.get('title') if isinstance(row, dict) else row[2]
+        
+        # Проверяем наличие билетов
+        has_tickets = ticket_file_id is not None and ticket_file_id.strip() != ''
+        
+        if has_tickets:
+            # Если есть билеты, показываем подтверждение
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("✅ Да, удалить", callback_data=f"confirm_remove_plan:{plan_id}"))
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_remove_plan:{plan_id}"))
             
-            ticket_file_id = row.get('ticket_file_id') if isinstance(row, dict) else row[1]
-            title = row.get('title') if isinstance(row, dict) else row[2]
-            
-            # Проверяем наличие билетов
-            has_tickets = ticket_file_id is not None and ticket_file_id.strip() != ''
-            
-            if has_tickets:
-                # Если есть билеты, показываем подтверждение
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("✅ Да, удалить", callback_data=f"confirm_remove_plan:{plan_id}"))
-                markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_remove_plan:{plan_id}"))
-                
-                event_name = title if title else "мероприятие"
-                bot.send_message(
-                    chat_id,
-                    f"⚠️ <b>Подтверждение удаления</b>\n\n"
-                    f"Вы уверены, что хотите удалить <b>{event_name}</b> из расписания?\n\n"
-                    f"⚠️ <b>Внимание:</b> При удалении из расписания будут также удалены все билеты, связанные с этим мероприятием.",
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                return
-            
-            # Если билетов нет, удаляем сразу
-            title = title if title else "мероприятие"
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
+            event_name = title if title else "мероприятие"
+            bot.send_message(
+                chat_id,
+                f"⚠️ <b>Подтверждение удаления</b>\n\n"
+                f"Вы уверены, что хотите удалить <b>{event_name}</b> из расписания?\n\n"
+                f"⚠️ <b>Внимание:</b> При удалении из расписания будут также удалены все билеты, связанные с этим мероприятием.",
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            return
+        
+        # Если билетов нет, удаляем сразу
+        title = title if title else "мероприятие"
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                conn_local.commit()
+        finally:
             try:
-                with db_lock:
-                    cursor_local.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                    conn_local.commit()
-            finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         bot.answer_callback_query(call.id, f"✅ '{title}' удалён из календаря")
         logger.info(f"[REMOVE FROM CALENDAR] План {plan_id} удалён пользователем {user_id}")
@@ -1902,26 +1902,42 @@ def confirm_remove_plan_callback(call):
         if not row:
             bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
             return
-            
-            title = row.get('title') if isinstance(row, dict) else row[2]
-            title = title if title else "мероприятие"
-            
-            # Удаляем план (билеты удалятся автоматически, так как они хранятся в ticket_file_id)
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
+        
+        title = row.get('title') if isinstance(row, dict) else row[2]
+        title = title if title else "мероприятие"
+        
+        # Удаляем план (билеты удалятся автоматически, так как они хранятся в ticket_file_id)
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                conn_local.commit()
+        finally:
             try:
-                with db_lock:
-                    cursor_local.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                    conn_local.commit()
-            finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        bot.answer_callback_query(call.id, f"✅ '{title}' удалён из календаря")
+        logger.info(f"[CONFIRM REMOVE PLAN] План {plan_id} с билетами удалён пользователем {user_id}")
+        
+        # Убираем кнопки подтверждения
+        try:
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=None)
+        except Exception as e:
+            logger.warning(f"[CONFIRM REMOVE PLAN] Не удалось убрать кнопки: {e}")
+            
+    except Exception as e:
+        logger.error(f"[CONFIRM REMOVE PLAN] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
         
         # Удаляем сообщение с подтверждением
         try:
@@ -2018,6 +2034,7 @@ def streaming_select_callback(call):
         logger.error(f"[STREAMING SELECT] Ошибка: {e}", exc_info=True)
         bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
 
+
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("streaming_done:"))
 def streaming_done_callback(call):
     """Обработчик кнопки 'Завершить' - сохраняет флаг и обновляет сообщение с подтверждением планирования"""
@@ -2028,13 +2045,12 @@ def streaming_done_callback(call):
         message_id = call.message.message_id
         user_id = call.from_user.id
         
-        # Сохраняем флаг "Завершить" в базу и получаем информацию о плане
+        # Получаем информацию о плане для отображения подтверждения
         conn_local = get_db_connection()
         cursor_local = get_db_cursor()
         plan_row = None
         try:
             with db_lock:
-                # Получаем информацию о плане для отображения подтверждения
                 cursor_local.execute('''
                     SELECT p.film_id, p.plan_datetime, p.plan_type, m.title
                     FROM plans p
@@ -2051,43 +2067,43 @@ def streaming_done_callback(call):
                 conn_local.close()
             except:
                 pass
+        
+        if not plan_row:
+            bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+            return
             
-            if not plan_row:
-                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
-                return
-            
-            if isinstance(plan_row, dict):
-                film_id = plan_row.get('film_id')
-                plan_datetime = plan_row.get('plan_datetime')
-                plan_type = plan_row.get('plan_type')
-                title = plan_row.get('title')
-            else:
-                film_id = plan_row[0]
-                plan_datetime = plan_row[1]
-                plan_type = plan_row[2]
-                title = plan_row[3]
-            
-            # Обновляем флаг "Завершить"
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
+        if isinstance(plan_row, dict):
+            film_id = plan_row.get('film_id')
+            plan_datetime = plan_row.get('plan_datetime')
+            plan_type = plan_row.get('plan_type')
+            title = plan_row.get('title')
+        else:
+            film_id = plan_row[0]
+            plan_datetime = plan_row[1]
+            plan_type = plan_row[2]
+            title = plan_row[3]
+        
+        # Обновляем флаг "Завершить"
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    UPDATE plans 
+                    SET streaming_done = TRUE 
+                    WHERE id = %s AND chat_id = %s
+                ''', (plan_id, chat_id))
+                conn_local.commit()
+            logger.info(f"[STREAMING DONE] Флаг streaming_done установлен для плана {plan_id}")
+        finally:
             try:
-                with db_lock:
-                    cursor_local.execute('''
-                        UPDATE plans 
-                        SET streaming_done = TRUE 
-                        WHERE id = %s AND chat_id = %s
-                    ''', (plan_id, chat_id))
-                    conn_local.commit()
-                logger.info(f"[STREAMING DONE] Флаг streaming_done установлен для плана {plan_id}")
-            finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         bot.answer_callback_query(call.id, "✅")
         
