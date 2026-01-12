@@ -115,13 +115,16 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         logger.error("[SHOW_EPISODES_PAGE] bot is None! Cannot proceed.")
         return False
 
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         logger.info(f"[SHOW EPISODES PAGE] Начало: kp_id={kp_id}, season={season_num}, chat_id={chat_id}, user_id={user_id}, page={page}, message_id={message_id}, message_thread_id={message_thread_id}")
         EPISODES_PER_PAGE = 20
         
         with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-            row = cursor.fetchone()
+            cursor_local.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+            row = cursor_local.fetchone()
             if not row:
                 logger.warning(f"[SHOW EPISODES PAGE] Сериал не найден: chat_id={chat_id}, kp_id={kp_id}")
                 return False
@@ -155,12 +158,12 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
             ep_num = ep.get('episodeNumber', '')
             
             with db_lock:
-                cursor.execute('''
+                cursor_local.execute('''
                     SELECT watched FROM series_tracking 
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s 
                     AND season_number = %s AND episode_number = %s
                 ''', (chat_id, film_id, user_id, season_num, ep_num))
-                watched_row = cursor.fetchone()
+                watched_row = cursor_local.fetchone()
                 is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
             
             mark = "Просмотрено" if is_watched else "Не просмотрено"
@@ -216,12 +219,12 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         with db_lock:
             for ep in episodes:
                 ep_num = ep.get('episodeNumber', '')
-                cursor.execute('''
+                cursor_local.execute('''
                     SELECT watched FROM series_tracking 
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s 
                     AND season_number = %s AND episode_number = %s
                 ''', (chat_id, film_id, user_id, season_num, ep_num))
-                watched_row = cursor.fetchone()
+                watched_row = cursor_local.fetchone()
                 is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
                 if not is_watched:
                     all_watched = False
@@ -259,6 +262,15 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
     except Exception as e:
         logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
         return False
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None, page=1, bot=None):
     """Основная функция показа списка сериалов с пагинацией"""
@@ -351,13 +363,25 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
             next_ep_json = json.dumps(next_ep, default=default_serializer) if next_ep else None
 
-            with db_lock:
-                cursor.execute("""
-                    UPDATE movies 
-                    SET is_ongoing = %s, seasons_count = %s, next_episode = %s, last_api_update = NOW()
-                    WHERE chat_id = %s AND kp_id = %s
-                """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
-                conn.commit()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute("""
+                        UPDATE movies 
+                        SET is_ongoing = %s, seasons_count = %s, next_episode = %s, last_api_update = NOW()
+                        WHERE chat_id = %s AND kp_id = %s
+                    """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
+                    conn_local.commit()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
 
             item['is_ongoing'] = is_airing
             item['seasons_count'] = seasons_count
@@ -456,36 +480,49 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
 
     has_access = has_notifications_access(chat_id, user_id)
     
-    with db_lock:
-        cursor.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
-        all_series = cursor.fetchall()
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
     
-    completed_series = []
-    for row in all_series:
-        # Упрощаем получение полей — cursor возвращает DictRow, так что .get() везде безопасно
-        film_id = row.get('id') if row else None
-        title = row.get('title')
-        kp_id = row.get('kp_id')
-
-        is_airing, _ = get_series_airing_status(kp_id)
-        seasons_data = get_seasons_data(kp_id)
-
-        watched_set = set()
+    try:
         with db_lock:
-            cursor.execute('''
-                SELECT season_number, episode_number FROM series_tracking 
-                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-            ''', (chat_id, film_id, user_id))
-            for w_row in cursor.fetchall():
-                s_num = str(w_row.get('season_number', ''))
-                e_num = str(w_row.get('episode_number', ''))
+            cursor_local.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
+            all_series = cursor_local.fetchall()
+        
+        completed_series = []
+        for row in all_series:
+            # Упрощаем получение полей — cursor возвращает DictRow, так что .get() везде безопасно
+            film_id = row.get('id') if row else None
+            title = row.get('title')
+            kp_id = row.get('kp_id')
+
+            is_airing, _ = get_series_airing_status(kp_id)
+            seasons_data = get_seasons_data(kp_id)
+
+            watched_set = set()
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT season_number, episode_number FROM series_tracking 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id))
+                for w_row in cursor_local.fetchall():
+                    s_num = str(w_row.get('season_number', ''))
+                    e_num = str(w_row.get('episode_number', ''))
                 watched_set.add((s_num, e_num))
 
-        total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
+            total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
 
-        if total_ep == watched_ep and total_ep > 0 and not is_airing:
-            button_text = f"✅ {title}"
-            completed_series.append((kp_id, button_text))
+            if total_ep == watched_ep and total_ep > 0 and not is_airing:
+                button_text = f"✅ {title}"
+                completed_series.append((kp_id, button_text))
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
     # Общий kwargs для отправки/редактирования
     if not completed_series:
@@ -551,66 +588,78 @@ def handle_seasons_kp(call):
 
         logger.info(f"[SEASONS_KP → ОПИСАНИЕ] kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
 
-        with db_lock:
-            cursor.execute('''
-                SELECT id, title, watched, link, year, genres, description, director, actors, is_series
-                FROM movies WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, kp_id_db))
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT id, title, watched, link, year, genres, description, director, actors, is_series
+                    FROM movies WHERE chat_id = %s AND kp_id = %s
+                ''', (chat_id, kp_id_db))
 
-            row = cursor.fetchone()
+                row = cursor_local.fetchone()
 
-        if not row:
-            bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
-            return
+            if not row:
+                bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
+                return
 
-        if isinstance(row, dict):
-            film_id = row['id']
-            title = row['title']
-            watched = row['watched']
-            link = row.get('link') or f"https://www.kinopoisk.ru/film/{kp_id}/"
-            year = row.get('year')
-            genres = row.get('genres')
-            description = row.get('description')
-            director = row.get('director')
-            actors = row.get('actors')
-            is_series = bool(row.get('is_series', 0))
-        else:
-            film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
-            title = row[1]
-            watched = row[2]
-            link = row[3] if len(row) > 3 else f"https://www.kinopoisk.ru/film/{kp_id}/"
-            year = row[4] if len(row) > 4 else None
-            genres = row[5] if len(row) > 5 else None
-            description = row[6] if len(row) > 6 else None
-            director = row[7] if len(row) > 7 else None
-            actors = row[8] if len(row) > 8 else None
-            is_series = bool(row[9] if len(row) > 9 else 0)
+            if isinstance(row, dict):
+                film_id = row['id']
+                title = row['title']
+                watched = row['watched']
+                link = row.get('link') or f"https://www.kinopoisk.ru/film/{kp_id}/"
+                year = row.get('year')
+                genres = row.get('genres')
+                description = row.get('description')
+                director = row.get('director')
+                actors = row.get('actors')
+                is_series = bool(row.get('is_series', 0))
+            else:
+                film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
+                title = row[1]
+                watched = row[2]
+                link = row[3] if len(row) > 3 else f"https://www.kinopoisk.ru/film/{kp_id}/"
+                year = row[4] if len(row) > 4 else None
+                genres = row[5] if len(row) > 5 else None
+                description = row[6] if len(row) > 6 else None
+                director = row[7] if len(row) > 7 else None
+                actors = row[8] if len(row) > 8 else None
+                is_series = bool(row[9] if len(row) > 9 else 0)
 
-        info = {
-            'title': title,
-            'year': year,
-            'genres': genres,
-            'description': description,
-            'director': director,
-            'actors': actors,
-            'is_series': is_series
-        }
+            info = {
+                'title': title,
+                'year': year,
+                'genres': genres,
+                'description': description,
+                'director': director,
+                'actors': actors,
+                'is_series': is_series
+            }
 
-        existing = (film_id, title, watched)
+            existing = (film_id, title, watched)
 
-        from moviebot.bot.handlers.series import show_film_info_with_buttons
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
 
-        show_film_info_with_buttons(
-            chat_id=chat_id,
-            user_id=user_id,
-            info=info,
-            link=link,
-            kp_id=kp_id,
-            existing=existing,
-            message_id=message_id,
-            message_thread_id=message_thread_id
-        )
-
+            show_film_info_with_buttons(
+                chat_id=chat_id,
+                user_id=user_id,
+                info=info,
+                link=link,
+                kp_id=kp_id,
+                existing=existing,
+                message_id=message_id,
+                message_thread_id=message_thread_id
+            )
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
     except Exception as e:
         logger.error(f"[SEASONS_KP → ОПИСАНИЕ] Ошибка: {e}", exc_info=True)
         try:
@@ -850,12 +899,24 @@ def handle_seasons_pagination(call):
                 is_airing, next_ep = get_series_airing_status(kp_id)
                 seasons_count = len(get_seasons_data(str(kp_id))) if get_seasons_data(kp_id) else 0
                 next_ep_json = json.dumps(next_ep) if next_ep else None
-                with db_lock:
-                    cursor.execute("""
-                        UPDATE movies SET is_ongoing = %s, seasons_count = %s, next_episode = %s, last_api_update = NOW()
-                        WHERE chat_id = %s AND kp_id = %s
-                    """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
-                    conn.commit()
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute("""
+                            UPDATE movies SET is_ongoing = %s, seasons_count = %s, next_episode = %s, last_api_update = NOW()
+                            WHERE chat_id = %s AND kp_id = %s
+                        """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
+                        conn_local.commit()
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
         else:
             page = int(call.data.split(':')[1])
 

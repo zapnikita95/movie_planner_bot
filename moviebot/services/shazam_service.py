@@ -248,11 +248,78 @@ def build_tmdb_index():
     # === Чтение и обработка CSV ===
     logger.info("Загружаем TMDB датасет из CSV...")
     try:
-        df = pd.read_csv(TMDB_CSV_PATH, low_memory=False)
-        logger.info(f"Загружено {len(df)} записей")
+        # Пробуем разные способы чтения CSV для обработки проблемных строк
+        import inspect
+        sig = inspect.signature(pd.read_csv)
+        
+        df = None
+        error = None
+        
+        # Попытка 1: Современный pandas (>= 1.3.0) с on_bad_lines
+        if 'on_bad_lines' in sig.parameters:
+            try:
+                df = pd.read_csv(
+                    TMDB_CSV_PATH, 
+                    low_memory=False,
+                    on_bad_lines='skip',  # Пропускаем проблемные строки
+                    encoding='utf-8'
+                )
+                logger.info(f"✅ Загружено {len(df)} записей (с on_bad_lines='skip')")
+            except Exception as e1:
+                error = e1
+                logger.warning(f"Попытка 1 не удалась: {e1}")
+        
+        # Попытка 2: Python engine (более гибкий парсер)
+        if df is None:
+            try:
+                kwargs = {
+                    'low_memory': False,
+                    'engine': 'python',
+                    'encoding': 'utf-8'
+                }
+                # Добавляем параметр для обработки проблемных строк
+                sig = inspect.signature(pd.read_csv)
+                if 'on_bad_lines' in sig.parameters:
+                    kwargs['on_bad_lines'] = 'skip'
+                elif 'error_bad_lines' in sig.parameters:
+                    kwargs['error_bad_lines'] = False
+                
+                df = pd.read_csv(TMDB_CSV_PATH, **kwargs)
+                logger.info(f"✅ Загружено {len(df)} записей (через Python engine)")
+            except Exception as e2:
+                error = e2
+                logger.warning(f"Попытка 2 не удалась: {e2}")
+        
+        # Попытка 3: С явными параметрами для кавычек
+        if df is None:
+            try:
+                kwargs = {
+                    'low_memory': False,
+                    'engine': 'python',
+                    'encoding': 'utf-8',
+                    'quotechar': '"',
+                    'escapechar': '\\',
+                    'doublequote': True
+                }
+                sig = inspect.signature(pd.read_csv)
+                if 'on_bad_lines' in sig.parameters:
+                    kwargs['on_bad_lines'] = 'skip'
+                elif 'error_bad_lines' in sig.parameters:
+                    kwargs['error_bad_lines'] = False
+                
+                df = pd.read_csv(TMDB_CSV_PATH, **kwargs)
+                logger.info(f"✅ Загружено {len(df)} записей (с явными параметрами кавычек)")
+            except Exception as e3:
+                error = e3
+                logger.error(f"Попытка 3 не удалась: {e3}")
+        
+        if df is None:
+            raise Exception(f"Не удалось загрузить CSV после всех попыток. Последняя ошибка: {error}")
+        
+        logger.info(f"✅ Успешно загружено {len(df)} записей")
         logger.info(f"Колонки в датасете: {', '.join(df.columns.tolist())}")
     except Exception as e:
-        logger.error(f"Ошибка чтения CSV файла: {e}", exc_info=True)
+        logger.error(f"Ошибка чтения CSV файла после всех попыток: {e}", exc_info=True)
         return None, None
     
     # Парсим даты (формат: 1994-06-09) для дальнейшего использования
