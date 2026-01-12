@@ -255,11 +255,37 @@ def build_tmdb_index():
         logger.error(f"Ошибка чтения CSV файла: {e}", exc_info=True)
         return None, None
     
+    # Парсим даты (формат: 1994-06-09)
     df['year'] = pd.to_datetime(df['release_date'], errors='coerce').dt.year
-    current_year = datetime.now().year
-    df = df[(df['year'] >= current_year - 50) & (df['vote_count'] >= MIN_VOTE_COUNT)]
+    
+    # Фильтруем:
+    # 1. vote_count >= 500
+    # 2. year >= 1950 (последние 70+ лет)
+    # 3. imdb_id не NaN (обязательно должен быть)
+    # 4. overview и title не пустые
+    logger.info(f"Фильтрация: vote_count >= {MIN_VOTE_COUNT}, year >= 1950, imdb_id not NaN")
+    initial_count = len(df)
+    
+    df = df[df['vote_count'] >= MIN_VOTE_COUNT]
+    logger.info(f"После фильтра vote_count >= {MIN_VOTE_COUNT}: {len(df)} фильмов")
+    
+    df = df[df['year'] >= 1950]
+    logger.info(f"После фильтра year >= 1950: {len(df)} фильмов")
+    
+    # Фильтруем NaN imdb_id (важно: проверяем до преобразования в строку)
+    df = df[df['imdb_id'].notna()]
+    logger.info(f"После фильтра imdb_id not NaN: {len(df)} фильмов")
+    
+    # Также убираем строки где imdb_id после преобразования будет 'nan'
+    df = df[df['imdb_id'].astype(str).str.lower() != 'nan']
+    logger.info(f"После фильтра imdb_id != 'nan': {len(df)} фильмов")
+    
     df = df.dropna(subset=['overview', 'title'])
-    df = df.sort_values('vote_count', ascending=False).head(MAX_MOVIES * 2)
+    logger.info(f"После фильтра overview/title not NaN: {len(df)} фильмов")
+    
+    # Сортируем по популярности (vote_count) и берем топ фильмов
+    df = df.sort_values('vote_count', ascending=False).head(MAX_MOVIES)
+    logger.info(f"После сортировки и ограничения до {MAX_MOVIES}: {len(df)} фильмов (изначально было {initial_count})")
     
     logger.info("Keywords отсутствуют — используем только сюжет, жанры, актёров и режиссёра")
     
@@ -284,13 +310,18 @@ def build_tmdb_index():
     )
     
     # ФИКС IMDB ID — чистим .0 и убираем все tt в начале (сохраняем БЕЗ префикса tt)
+    # Применяем преобразования только к валидным imdb_id (не NaN, не пустые)
     df['imdb_id'] = df['imdb_id'].astype(str).str.strip()  # убираем пробелы
     df['imdb_id'] = df['imdb_id'].str.replace(r'\.0$', '', regex=True)  # убираем .0
     # Убираем все "tt" в начале (может быть tttt или tt), сохраняем БЕЗ префикса
     df['imdb_id'] = df['imdb_id'].str.replace(r'^tt+', '', regex=True)  # убираем все tt в начале
     
+    # Удаляем строки, где imdb_id стал пустым после обработки
+    df = df[df['imdb_id'].str.len() > 0]
+    logger.info(f"После финальной очистки imdb_id: {len(df)} фильмов")
+    
     processed = df[['imdb_id', 'title', 'year', 'description']].copy()
-    processed = processed.head(MAX_MOVIES)
+    # Уже отсортировали и ограничили выше, не нужно еще раз .head()
     
     logger.info(f"Генерация эмбеддингов для {len(processed)} фильмов...")
     
