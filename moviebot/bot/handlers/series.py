@@ -63,6 +63,7 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
         - has_tickets: bool (True если у плана в кино есть билеты)
         - is_subscribed: bool (для сериалов, True если пользователь подписан)
     """
+    logger.info(f"[GET FILM STATE] ===== START: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
     kp_id_str = str(kp_id)
     film_id = None
     existing = None
@@ -70,30 +71,46 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
     has_tickets = False
     is_subscribed = False
     
+    # ВАЖНО: Используем локальные соединения вместо глобальных
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+    conn_local = None
+    cursor_local = None
+    
     try:
+        logger.info(f"[GET FILM STATE] Получение локального соединения...")
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        logger.info(f"[GET FILM STATE] Локальное соединение получено")
+        
+        logger.info(f"[GET FILM STATE] Попытка получить db_lock...")
         with db_lock:
+            logger.info(f"[GET FILM STATE] db_lock получен, выполняем запросы")
             # Получаем информацию о фильме
-            cursor.execute("""
+            cursor_local.execute("""
                 SELECT id, title, watched, is_series
                 FROM movies 
                 WHERE chat_id = %s AND kp_id = %s
             """, (chat_id, kp_id_str))
-            film_row = cursor.fetchone()
+            film_row = cursor_local.fetchone()
+            logger.info(f"[GET FILM STATE] Запрос к movies выполнен, film_row={film_row is not None}")
             
             if film_row:
                 film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
                 title = film_row.get('title') if isinstance(film_row, dict) else film_row[1]
                 watched = bool(film_row.get('watched') if isinstance(film_row, dict) else film_row[2])
                 existing = (film_id, title, watched)
+                logger.info(f"[GET FILM STATE] Фильм найден: film_id={film_id}, title={title}, watched={watched}")
                 
                 # Проверяем план для этого фильма
-                cursor.execute("""
+                logger.info(f"[GET FILM STATE] Проверка плана для film_id={film_id}")
+                cursor_local.execute("""
                     SELECT id, plan_type, plan_datetime, ticket_file_id
                     FROM plans 
                     WHERE film_id = %s AND chat_id = %s 
                     LIMIT 1
                 """, (film_id, chat_id))
-                plan_row = cursor.fetchone()
+                plan_row = cursor_local.fetchone()
+                logger.info(f"[GET FILM STATE] Запрос к plans выполнен, plan_row={plan_row is not None}")
                 
                 if plan_row:
                     plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
@@ -141,28 +158,49 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
                 
                 # Для сериалов проверяем подписку
                 is_series_db = bool(film_row.get('is_series') if isinstance(film_row, dict) else (film_row[3] if len(film_row) > 3 else 0))
+                logger.info(f"[GET FILM STATE] is_series_db={is_series_db}, user_id={user_id}")
                 if is_series_db and user_id:
                     query_user = user_id if user_id is not None else None
-                    cursor.execute("""
+                    logger.info(f"[GET FILM STATE] Проверка подписки для сериала: film_id={film_id}, user_id={query_user}")
+                    cursor_local.execute("""
                         SELECT subscribed 
                         FROM series_subscriptions 
                         WHERE chat_id = %s AND film_id = %s AND user_id = %s 
                         LIMIT 1
                     """, (chat_id, film_id, query_user))
-                    sub_row = cursor.fetchone()
+                    sub_row = cursor_local.fetchone()
                     if sub_row:
                         is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
+                        logger.info(f"[GET FILM STATE] Подписка найдена: is_subscribed={is_subscribed}")
+                    else:
+                        logger.info(f"[GET FILM STATE] Подписка не найдена")
+            else:
+                logger.info(f"[GET FILM STATE] Фильм не найден в базе")
     
     except Exception as e:
-        logger.error(f"[GET FILM STATE] Ошибка получения состояния: {e}", exc_info=True)
+        logger.error(f"[GET FILM STATE] ❌ Ошибка получения состояния: {e}", exc_info=True)
+    finally:
+        # Закрываем локальные соединения, если они были созданы
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if conn_local:
+            try:
+                conn_local.close()
+            except:
+                pass
     
-    return {
+    result = {
         'film_id': film_id,
         'existing': existing,
         'plan_info': plan_info,
         'has_tickets': has_tickets,
         'is_subscribed': is_subscribed
     }
+    logger.info(f"[GET FILM STATE] ===== END: existing={existing is not None}, plan_info={plan_info is not None}, has_tickets={has_tickets}, is_subscribed={is_subscribed}")
+    return result
 
 def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
     """Показывает описание фильма с кнопками действий"""

@@ -1275,9 +1275,18 @@ def back_to_film_description(call):
         # 3. Получаем актуальное состояние через get_film_current_state (ОДИН РАЗ!)
         logger.info(f"[BACK TO FILM] Получение актуального состояния: chat_id={chat_id}, kp_id={kp_id_int}, user_id={user_id}")
         from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
-        current_state = get_film_current_state(chat_id, kp_id_int, user_id)
-        existing = current_state['existing']
-        logger.info(f"[BACK TO FILM] Состояние получено: existing={existing}, plan_info={current_state.get('plan_info')}")
+        try:
+            logger.info(f"[BACK TO FILM] Вызов get_film_current_state...")
+            current_state = get_film_current_state(chat_id, kp_id_int, user_id)
+            logger.info(f"[BACK TO FILM] get_film_current_state завершен успешно")
+            existing = current_state['existing']
+            logger.info(f"[BACK TO FILM] Состояние получено: existing={existing}, plan_info={current_state.get('plan_info')}")
+        except Exception as state_e:
+            logger.error(f"[BACK TO FILM] ❌ Ошибка в get_film_current_state: {state_e}", exc_info=True)
+            # Продолжаем с пустым existing, чтобы не прерывать выполнение
+            existing = None
+            current_state = {'existing': None, 'plan_info': None, 'has_tickets': False, 'is_subscribed': False}
+            logger.warning(f"[BACK TO FILM] Продолжаем с пустым existing из-за ошибки")
         
         # 4. ОПТИМИЗАЦИЯ: Если фильм уже в базе, используем данные из БД вместо API
         # Это экономит 1-3 секунды на запросах к API
