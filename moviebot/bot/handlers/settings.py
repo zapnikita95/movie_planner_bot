@@ -1144,7 +1144,7 @@ def handle_timezone_callback(call):
                     state['chat_id'] = chat_id_from_state
                     user_plan_state[user_id] = state
                     # Отправляем промпт для ввода времени/даты
-                    from moviebot.bot.bot_init import bot
+                    # bot уже импортирован в начале файла, не нужно импортировать снова
                     prompt_msg = bot.send_message(
                         chat_id_from_state,
                         f"Когда планируете смотреть {'дома' if plan_type == 'home' else 'в кино'}?\n\n"

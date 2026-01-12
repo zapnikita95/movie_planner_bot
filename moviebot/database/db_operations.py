@@ -305,68 +305,65 @@ def get_watched_reactions(chat_id):
 
 def log_request(user_id, username, command_or_action, chat_id=None):
     """Логирует запрос пользователя в БД"""
-
+    # ВАЖНО: Используем локальные соединения вместо глобальных
+    conn_local = None
+    cursor_local = None
+    
     try:
-
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
         logger.debug(f"[LOG_REQUEST] Попытка логирования: user_id={user_id}, username={username}, command={command_or_action}, chat_id={chat_id}, timestamp={timestamp}")
 
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+
         with db_lock:
-
             try:
-
                 # Проверяем, не в состоянии ли ошибки транзакция
-
                 try:
-
-                    cursor.execute('SELECT 1')
-
-                    cursor.fetchone()
-
+                    cursor_local.execute('SELECT 1')
+                    cursor_local.fetchone()
                 except:
-
                     # Если транзакция в состоянии ошибки, откатываем
-
-                    conn.rollback()
-
+                    conn_local.rollback()
                 
-
-                cursor.execute('''
-
+                cursor_local.execute('''
                     INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
-
                     VALUES (%s, %s, %s, %s, %s)
-
                 ''', (user_id, username, command_or_action, timestamp, chat_id))
 
-                conn.commit()
-
+                conn_local.commit()
                 logger.debug(f"[LOG_REQUEST] Успешно залогировано: user_id={user_id}, command={command_or_action}, chat_id={chat_id}")
 
             except Exception as db_error:
-
                 # КРИТИЧНО: откатываем транзакцию при ошибке
-
-                conn.rollback()
-
+                try:
+                    conn_local.rollback()
+                except:
+                    pass
                 logger.error(f"[LOG_REQUEST] Ошибка БД при логировании: {db_error}", exc_info=True)
-
-                raise db_error
+                # Не делаем raise, чтобы не прерывать выполнение основной логики
 
     except Exception as e:
-
         logger.error(f"Ошибка логирования запроса: {e}", exc_info=True)
-
         # Убеждаемся, что транзакция откачена
-
-        try:
-
-            with db_lock:
-
-                conn.rollback()
-
-        except:
+        if conn_local:
+            try:
+                with db_lock:
+                    conn_local.rollback()
+            except:
+                pass
+    finally:
+        # Закрываем локальные соединения
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if conn_local:
+            try:
+                conn_local.close()
+            except:
+                pass
 
             pass
 

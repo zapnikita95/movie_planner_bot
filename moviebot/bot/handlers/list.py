@@ -178,19 +178,23 @@ def register_list_handlers(bot):
 
 def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
     """Показывает страницу списка фильмов"""
+    # ВАЖНО: Используем локальные соединения вместо глобальных
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         MOVIES_PER_PAGE = 15
         
         with db_lock:
             # Получаем все непросмотренные фильмы, отсортированные по алфавиту
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT DISTINCT m.id, m.kp_id, m.title, m.year, m.genres, m.link 
                 FROM movies m
                 WHERE m.chat_id = %s 
                   AND m.watched = 0
                 ORDER BY m.title
             ''', (chat_id,))
-            rows = cursor.fetchall()
+            rows = cursor_local.fetchall()
         
         if not rows:
             text = "⏳ Нет непросмотренных фильмов!"
@@ -325,6 +329,18 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
     except Exception as e:
         logger.error(f"[LIST] Ошибка в show_list_page: {e}", exc_info=True)
         return None
+    finally:
+        # Закрываем локальные соединения
+        if 'cursor_local' in locals():
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if 'conn_local' in locals():
+            try:
+                conn_local.close()
+            except:
+                pass
 
 
 def handle_view_film_reply_internal(message, state):
