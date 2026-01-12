@@ -251,15 +251,17 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
 
 def send_ticket_notification(chat_id, plan_id):
     """Отправляет напоминание с билетами за 10 минут до сеанса"""
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
     try:
         with db_lock:
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT p.ticket_file_id, m.title, p.plan_datetime
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.id = %s AND p.chat_id = %s
             ''', (plan_id, chat_id))
-            ticket_row = cursor.fetchone()
+            ticket_row = cursor_local.fetchone()
         
         if not ticket_row:
             logger.warning(f"[TICKET NOTIFICATION] План не найден для plan_id={plan_id}")
@@ -277,6 +279,20 @@ def send_ticket_notification(chat_id, plan_id):
         if not ticket_file_id:
             logger.warning(f"[TICKET NOTIFICATION] Билеты не найдены для plan_id={plan_id}")
             return
+    except Exception as e:
+        logger.error(f"[TICKET NOTIFICATION] Ошибка: {e}", exc_info=True)
+    finally:
+        # Закрываем локальные соединения
+        if 'cursor_local' in locals():
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if 'conn_local' in locals():
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Парсим билеты (может быть JSON массив или один file_id)
         ticket_files = []
@@ -315,12 +331,12 @@ def send_ticket_notification(chat_id, plan_id):
         # Отмечаем как отправленное в базе данных
         try:
             with db_lock:
-                cursor.execute('''
+                cursor_local.execute('''
                     UPDATE plans 
                     SET ticket_notification_sent = TRUE 
                     WHERE id = %s
                 ''', (plan_id,))
-                conn.commit()
+                conn_local.commit()
             logger.info(f"[TICKET NOTIFICATION] План {plan_id} отмечен как уведомление с билетами отправлено")
         except Exception as e:
             logger.warning(f"[TICKET NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}")
@@ -584,9 +600,9 @@ def check_and_send_plan_notifications():
 
                 with db_lock:
 
-                    cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
+                    cursor_local.execute('SELECT ticket_file_id FROM plans WHERE id = %s', (plan_id,))
 
-                    ticket_row = cursor.fetchone()
+                    ticket_row = cursor_local.fetchone()
 
                     ticket_file_id = ticket_row.get('ticket_file_id') if isinstance(ticket_row, dict) else (ticket_row[0] if ticket_row else None)
 
@@ -639,8 +655,8 @@ def check_and_send_plan_notifications():
                                     send_ticket_notification(chat_id, plan_id)
                                     # Отмечаем как отправленное
                                     with db_lock:
-                                        cursor.execute('UPDATE plans SET ticket_notification_sent = TRUE WHERE id = %s', (plan_id,))
-                                        conn.commit()
+                                        cursor_local.execute('UPDATE plans SET ticket_notification_sent = TRUE WHERE id = %s', (plan_id,))
+                                        conn_local.commit()
                                     logger.info(f"[PLAN CHECK] Уведомление с билетами отправлено сразу для плана {plan_id} (фильм {title})")
                                 else:
                                     logger.info(f"[PLAN CHECK] Уведомление с билетами уже запланировано для плана {plan_id}")
@@ -742,8 +758,19 @@ def check_and_send_plan_notifications():
                         logger.info(f"[PLAN CHECK] Уведомление уже отправлено для плана дома {plan_id}, пропускаем")
 
     except Exception as e:
-
         logger.error(f"[PLAN CHECK] Ошибка при проверке планов: {e}", exc_info=True)
+    finally:
+        # Закрываем локальные соединения
+        if 'cursor_local' in locals():
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if 'conn_local' in locals():
+            try:
+                conn_local.close()
+            except:
+                pass
 
 
 
@@ -757,22 +784,24 @@ def check_and_send_plan_notifications():
 def clean_home_plans():
     """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок.
     Также удаляет все планы дома на прошедшие выходные (суббота и воскресенье) в понедельник."""
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    try:
+        now = datetime.now(plans_tz)
+        today = now.date()
+        yesterday = (now - timedelta(days=1)).date()
+        today_weekday = today.weekday()  # 0 = Monday, 6 = Sunday
 
-    now = datetime.now(plans_tz)
-    today = now.date()
-    yesterday = (now - timedelta(days=1)).date()
-    today_weekday = today.weekday()  # 0 = Monday, 6 = Sunday
+        deleted_count = 0
 
-    deleted_count = 0
-
-    with db_lock:
+        with db_lock:
         # Если сегодня понедельник, удаляем все планы дома на прошедшие выходные (суббота и воскресенье)
         if today_weekday == 0:  # Monday
             # Находим субботу и воскресенье прошлой недели
             saturday = yesterday - timedelta(days=1)  # Вчера было воскресенье, значит суббота - позавчера
             sunday = yesterday
 
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT p.id, p.film_id, p.chat_id, m.title, m.link
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
@@ -780,7 +809,7 @@ def clean_home_plans():
                 AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
             ''', (saturday, sunday))
 
-            weekend_rows = cursor.fetchall()
+            weekend_rows = cursor_local.fetchall()
 
             for row in weekend_rows:
                 plan_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -789,7 +818,7 @@ def clean_home_plans():
                 title = row.get('title') if isinstance(row, dict) else row[3]
                 link = row.get('link') if isinstance(row, dict) else row[4]
                 
-                cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
                 deleted_count += 1
                 
                 if bot:
@@ -804,13 +833,13 @@ def clean_home_plans():
             logger.info(f"Очищены планы дома на выходные: {len(weekend_rows)} планов")
         
         # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
-        cursor.execute('''
+        cursor_local.execute('''
             SELECT p.id, p.film_id, p.chat_id
             FROM plans p
             WHERE p.plan_type = 'home' AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') = %s
         ''', (yesterday,))
 
-        rows = cursor.fetchall()
+        rows = cursor_local.fetchall()
 
         for row in rows:
             # RealDictCursor возвращает словари, но поддерживает доступ по индексу
@@ -819,14 +848,14 @@ def clean_home_plans():
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
 
             # Проверяем, есть ли оценки по фильму
-            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            cursor_local.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
 
-            count_row = cursor.fetchone()
+            count_row = cursor_local.fetchone()
 
             count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
 
             if count == 0:
-                cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
                 deleted_count += 1
 
                 if bot:
@@ -843,18 +872,28 @@ def clean_home_plans():
 
 def clean_cinema_plans():
     """Каждый понедельник удаляет все планы кино"""
-
-    with db_lock:
-
-        cursor.execute("DELETE FROM plans WHERE plan_type = 'cinema'")
-
-        deleted_count = cursor.rowcount
-
-        conn.commit()
-
-    
-
-    logger.info(f"Очищены все планы кино (понедельник): {deleted_count} планов")
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    try:
+        with db_lock:
+            cursor_local.execute("DELETE FROM plans WHERE plan_type = 'cinema'")
+            deleted_count = cursor_local.rowcount
+            conn_local.commit()
+        logger.info(f"Очищены все планы кино (понедельник): {deleted_count} планов")
+    except Exception as e:
+        logger.error(f"[CLEAN CINEMA PLANS] Ошибка: {e}", exc_info=True)
+    finally:
+        # Закрываем локальные соединения
+        if 'cursor_local' in locals():
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if 'conn_local' in locals():
+            try:
+                conn_local.close()
+            except:
+                pass
 
 
 
@@ -947,12 +986,24 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
                 # Получаем часовой пояс пользователя
                 user_tz = pytz.timezone('Europe/Moscow')
                 try:
-                    with db_lock:
-                        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
-                        tz_row = cursor.fetchone()
-                        if tz_row:
-                            tz_str = tz_row.get('value') if isinstance(tz_row, dict) else tz_row[0]
-                            user_tz = pytz.timezone(tz_str)
+                    conn_tz = get_db_connection()
+                    cursor_tz = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_tz.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
+                            tz_row = cursor_tz.fetchone()
+                            if tz_row:
+                                tz_str = tz_row.get('value') if isinstance(tz_row, dict) else tz_row[0]
+                                user_tz = pytz.timezone(tz_str)
+                    finally:
+                        try:
+                            cursor_tz.close()
+                        except:
+                            pass
+                        try:
+                            conn_tz.close()
+                        except:
+                            pass
                 except:
                     pass
                 
@@ -1010,10 +1061,22 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
             return
         
         # Проверяем, подписан ли еще пользователь
-        with db_lock:
-            cursor.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
-            sub_row = cursor.fetchone()
-            is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+        conn_sub = get_db_connection()
+        cursor_sub = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_sub.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
+                sub_row = cursor_sub.fetchone()
+                is_subscribed = sub_row and (sub_row.get('subscribed') if isinstance(sub_row, dict) else sub_row[0])
+        finally:
+            try:
+                cursor_sub.close()
+            except:
+                pass
+            try:
+                conn_sub.close()
+            except:
+                pass
         
         if not is_subscribed:
             logger.info(f"[SERIES CHECK] Пользователь {user_id} отписался от сериала kp_id={kp_id}")
@@ -1055,12 +1118,24 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
             # Получаем часовой пояс пользователя
             user_tz = pytz.timezone('Europe/Moscow')
             try:
-                with db_lock:
-                    cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
-                    tz_row = cursor.fetchone()
-                    if tz_row:
-                        tz_str = tz_row.get('value') if isinstance(tz_row, dict) else tz_row[0]
-                        user_tz = pytz.timezone(tz_str)
+                conn_tz = get_db_connection()
+                cursor_tz = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_tz.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
+                        tz_row = cursor_tz.fetchone()
+                        if tz_row:
+                            tz_str = tz_row.get('value') if isinstance(tz_row, dict) else tz_row[0]
+                            user_tz = pytz.timezone(tz_str)
+                finally:
+                    try:
+                        cursor_tz.close()
+                    except:
+                        pass
+                    try:
+                        conn_tz.close()
+                    except:
+                        pass
             except:
                 pass
             
@@ -1069,9 +1144,21 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
             notification_time = user_tz.localize(notification_time.replace(hour=10, minute=0))
             
             with db_lock:
-                cursor.execute("SELECT title FROM movies WHERE id = %s", (film_id,))
-                title_row = cursor.fetchone()
-                title = title_row.get('title') if title_row and isinstance(title_row, dict) else (title_row[0] if title_row else "Сериал")
+                conn_title = get_db_connection()
+                cursor_title = get_db_cursor()
+                try:
+                    cursor_title.execute("SELECT title FROM movies WHERE id = %s", (film_id,))
+                    title_row = cursor_title.fetchone()
+                    title = title_row.get('title') if title_row and isinstance(title_row, dict) else (title_row[0] if title_row else "Сериал")
+                finally:
+                    try:
+                        cursor_title.close()
+                    except:
+                        pass
+                    try:
+                        conn_title.close()
+                    except:
+                        pass
             
             scheduler.add_job(
                 send_series_notification,

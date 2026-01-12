@@ -346,31 +346,38 @@ def show_timezone_selection(chat_id, user_id, prompt_text="Выберите ча
 
     current_tz = get_user_timezone(user_id)
 
-    current_tz_name = "Москва" if not current_tz or current_tz.zone == 'Europe/Moscow' else "Сербия"
-
-    current_tz_display = current_tz_name if current_tz else "не установлен"
+    if not current_tz:
+        current_tz_display = "не установлен"
+    else:
+        tz_zone = current_tz.zone
+        tz_display_map = {
+            'Europe/Moscow': "Москва",
+            'Europe/Belgrade': "Сербия",
+            'Europe/Samara': "Самара (+1 МСК)",
+            'Asia/Yekaterinburg': "Екатеринбург (+2 МСК)",
+            'Asia/Novosibirsk': "Новосибирск (+4 МСК)",
+        }
+        current_tz_display = tz_display_map.get(tz_zone, tz_zone)
 
     
 
-    # Получаем текущее время в обоих часовых поясах для отображения
-
-    moscow_tz = pytz.timezone('Europe/Moscow')
-
-    serbia_tz = pytz.timezone('Europe/Belgrade')
-
+    # Получаем текущее время во всех поддерживаемых часовых поясах для отображения
     now_utc = datetime.now(pytz.utc)
 
-    moscow_time = now_utc.astimezone(moscow_tz).strftime('%H:%M')
-
-    serbia_time = now_utc.astimezone(serbia_tz).strftime('%H:%M')
-
-    
+    tz_buttons = [
+        ("🇷🇺 Москва (MSK)", "Europe/Moscow", "timezone:Moscow"),
+        ("🇷🇸 Сербия (CET)", "Europe/Belgrade", "timezone:Serbia"),
+        ("🇷🇺 Самара (+1 МСК)", "Europe/Samara", "timezone:Samara"),
+        ("🇷🇺 Екатеринбург (+2 МСК)", "Asia/Yekaterinburg", "timezone:Yekaterinburg"),
+        ("🇷🇺 Новосибирск (+4 МСК)", "Asia/Novosibirsk", "timezone:Novosibirsk"),
+    ]
 
     markup = InlineKeyboardMarkup(row_width=1)
 
-    markup.add(InlineKeyboardButton(f"🇷🇺 Москва (MSK) {moscow_time}", callback_data="timezone:Moscow"))
-
-    markup.add(InlineKeyboardButton(f"🇷🇸 Сербия (CET) {serbia_time}", callback_data="timezone:Serbia"))
+    for label, tz_code, cb in tz_buttons:
+        tz = pytz.timezone(tz_code)
+        local_time = now_utc.astimezone(tz).strftime('%H:%M')
+        markup.add(InlineKeyboardButton(f"{label} {local_time}", callback_data=cb))
 
     
 

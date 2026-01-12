@@ -437,11 +437,26 @@ def handle_settings_callback(call):
         if action == "timezone":
             # Показываем выбор часового пояса
             current_tz = get_user_timezone(user_id)
-            current_tz_name = "Москва" if not current_tz or current_tz.zone == 'Europe/Moscow' else "Сербия"
+            # Отображаемое имя для текущего пояса
+            if not current_tz:
+                current_tz_name = "не установлен"
+            else:
+                tz_zone = current_tz.zone
+                tz_display_map = {
+                    'Europe/Moscow': "Москва",
+                    'Europe/Belgrade': "Сербия",
+                    'Europe/Samara': "Самара (+1 МСК)",
+                    'Asia/Yekaterinburg': "Екатеринбург (+2 МСК)",
+                    'Asia/Novosibirsk': "Новосибирск (+4 МСК)",
+                }
+                current_tz_name = tz_display_map.get(tz_zone, tz_zone)
             
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🇷🇺 Москва (Europe/Moscow)", callback_data="timezone:Moscow"))
             markup.add(InlineKeyboardButton("🇷🇸 Сербия (Europe/Belgrade)", callback_data="timezone:Serbia"))
+            markup.add(InlineKeyboardButton("🇷🇺 Самара (+1 МСК)", callback_data="timezone:Samara"))
+            markup.add(InlineKeyboardButton("🇷🇺 Екатеринбург (+2 МСК)", callback_data="timezone:Yekaterinburg"))
+            markup.add(InlineKeyboardButton("🇷🇺 Новосибирск (+4 МСК)", callback_data="timezone:Novosibirsk"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
             bot.edit_message_text(
@@ -1064,11 +1079,24 @@ def handle_timezone_callback(call):
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
-        timezone_name = call.data.split(":", 1)[1]  # "Moscow" или "Serbia"
-        
+        timezone_name = call.data.split(":", 1)[1]  # "Moscow", "Serbia", "Samara", "Yekaterinburg", "Novosibirsk"
+
+        # Карта идентификаторов к отображаемым именам и pytz-таймзонам
+        tz_info = {
+            "Moscow": ("Москва", "Europe/Moscow"),
+            "Serbia": ("Сербия", "Europe/Belgrade"),
+            "Samara": ("Самара (+1 МСК)", "Europe/Samara"),
+            "Yekaterinburg": ("Екатеринбург (+2 МСК)", "Asia/Yekaterinburg"),
+            "Novosibirsk": ("Новосибирск (+4 МСК)", "Asia/Novosibirsk"),
+        }
+
+        if timezone_name not in tz_info:
+            logger.error(f"[TIMEZONE] Неизвестный идентификатор часового пояса: {timezone_name}")
+            return
+
         if set_user_timezone(user_id, timezone_name):
-            tz_display = "Москва" if timezone_name == "Moscow" else "Сербия"
-            tz_obj = pytz.timezone('Europe/Moscow' if timezone_name == "Moscow" else 'Europe/Belgrade')
+            tz_display, tz_code = tz_info[timezone_name]
+            tz_obj = pytz.timezone(tz_code)
             current_time = datetime.now(tz_obj).strftime('%H:%M')
             
             bot.edit_message_text(

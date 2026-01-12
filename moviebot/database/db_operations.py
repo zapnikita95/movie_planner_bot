@@ -189,13 +189,17 @@ def get_user_timezone(user_id):
 
                 tz_name = row.get('value') if isinstance(row, dict) else row[0]
 
-                if tz_name == 'Moscow':
+                # Карта поддерживаемых идентификаторов часовых поясов
+                tz_map = {
+                    'Moscow': 'Europe/Moscow',
+                    'Serbia': 'Europe/Belgrade',
+                    'Samara': 'Europe/Samara',                # +1 МСК
+                    'Yekaterinburg': 'Asia/Yekaterinburg',    # +2 МСК
+                    'Novosibirsk': 'Asia/Novosibirsk',        # +4 МСК
+                }
 
-                    return pytz.timezone('Europe/Moscow')
-
-                elif tz_name == 'Serbia':
-
-                    return pytz.timezone('Europe/Belgrade')
+                if tz_name in tz_map:
+                    return pytz.timezone(tz_map[tz_name])
 
         return None
 

@@ -25,9 +25,12 @@ def register_start_handlers(bot):
     @bot.message_handler(commands=['start', 'menu'])
     def send_welcome(message):
         logger.info(f"[START] СРАБОТАЛ /start от user_id={message.from_user.id}, chat_id={message.chat.id}")
+        
+        # Логируем полный текст сообщения для отладки
+        message_text = message.text or ""
+        logger.info(f"[START] Полный текст сообщения: '{message_text}', entities: {getattr(message, 'entities', None)}")
 
         try:
-            message_text = message.text or ""
             command_type = '/start' if message_text.startswith('/start') else '/menu'
             logger.info(f"[HANDLER] {command_type} вызван от {message.from_user.id}, chat_type={message.chat.type}")
             username = message.from_user.username or f"user_{message.from_user.id}"
@@ -125,18 +128,37 @@ def register_start_handlers(bot):
             try:
                 # В группах пытаемся использовать reply_to для лучшей доставки
                 if message.chat.type in ['group', 'supergroup']:
+                    logger.info(f"[START] Попытка отправки в группе {chat_id} для пользователя {user_id}")
                     try:
-                        bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
-                        logger.info(f"✅ Ответ на /start отправлен через reply_to пользователю {user_id} в группе {chat_id}")
+                        sent_msg = bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
+                        if sent_msg:
+                            logger.info(f"✅ Ответ на /start отправлен через reply_to пользователю {user_id} в группе {chat_id}, message_id={sent_msg.message_id}")
+                        else:
+                            logger.warning(f"[START] reply_to вернул None для пользователя {user_id} в группе {chat_id}")
                     except Exception as reply_error:
-                        logger.warning(f"[START] Не удалось отправить через reply_to: {reply_error}, пробуем send_message")
-                        sent_msg = bot.send_message(
-                            chat_id,
-                            welcome_text,
-                            parse_mode='HTML',
-                            reply_markup=markup
-                        )
-                        logger.info(f"✅ Ответ на /start отправлен через send_message пользователю {user_id} в группе {chat_id}, message_id={sent_msg.message_id}")
+                        error_str = str(reply_error).lower()
+                        logger.warning(f"[START] Не удалось отправить через reply_to: {reply_error} (тип: {type(reply_error).__name__})")
+                        # Проверяем, не связана ли ошибка с правами бота
+                        if "not enough rights" in error_str or "chat not found" in error_str or "bot was blocked" in error_str:
+                            logger.error(f"[START] КРИТИЧЕСКАЯ ОШИБКА: {reply_error}")
+                        try:
+                            sent_msg = bot.send_message(
+                                chat_id,
+                                welcome_text,
+                                parse_mode='HTML',
+                                reply_markup=markup
+                            )
+                            if sent_msg:
+                                logger.info(f"✅ Ответ на /start отправлен через send_message пользователю {user_id} в группе {chat_id}, message_id={sent_msg.message_id}")
+                            else:
+                                logger.warning(f"[START] send_message вернул None для пользователя {user_id} в группе {chat_id}")
+                        except Exception as send_error2:
+                            logger.error(f"[START] Не удалось отправить через send_message: {send_error2}", exc_info=True)
+                            # Последняя попытка - простое сообщение
+                            try:
+                                bot.reply_to(message, "❌ Ошибка при загрузке меню. Попробуйте позже.")
+                            except Exception as final_error:
+                                logger.error(f"[START] Не удалось отправить даже простое сообщение: {final_error}")
                 else:
                     # В личных чатах используем обычный send_message
                     sent_msg = bot.send_message(
