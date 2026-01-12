@@ -2,6 +2,7 @@
 Модуль для задач планировщика
 """
 # 1. Стандартная библиотека Python
+import json
 import logging
 import random
 import time
@@ -64,6 +65,11 @@ def hourly_stats():
 # Функции для уведомлений о планах (определяем до использования в scheduler)
 def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None, user_id=None):
     """Отправляет уведомление о запланированном просмотре"""
+    # Используем локальные соединение и курсор
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         plan_type_text = "дома" if plan_type == 'home' else "в кино"
         text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
@@ -76,20 +82,20 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         last_episode_info = None
         if user_id and film_id:
             with db_lock:
-                cursor.execute('SELECT is_series FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                movie_row = cursor.fetchone()
+                cursor_local.execute('SELECT is_series FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                movie_row = cursor_local.fetchone()
                 if movie_row:
                     is_series = bool(movie_row.get('is_series') if isinstance(movie_row, dict) else movie_row[0])
                    
                     if is_series:
-                        cursor.execute('''
+                        cursor_local.execute('''
                             SELECT season_number, episode_number
                             FROM series_tracking
                             WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
                             ORDER BY season_number DESC, episode_number DESC
                             LIMIT 1
                         ''', (chat_id, film_id, user_id))
-                        last_episode_row = cursor.fetchone()
+                        last_episode_row = cursor_local.fetchone()
                         if last_episode_row:
                             if isinstance(last_episode_row, dict):
                                 last_episode_info = {
@@ -115,12 +121,12 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         # Для планов "дома" — существующий код с онлайн-кинотеатрами
         if plan_type == 'home' and plan_id:
             with db_lock:
-                cursor.execute('''
+                cursor_local.execute('''
                     SELECT streaming_service, streaming_url, streaming_done, ticket_file_id
                     FROM plans
                     WHERE id = %s AND chat_id = %s
                 ''', (plan_id, chat_id))
-                plan_row = cursor.fetchone()
+                plan_row = cursor_local.fetchone()
                
                 if plan_row:
                     if isinstance(plan_row, dict):
@@ -141,8 +147,8 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                         logger.info(f"[PLAN NOTIFICATION] Показываем ссылку на кинотеатр {streaming_service} для плана {plan_id}")
                     else:
                         # ... (твой код с кнопками кинотеатров остаётся без изменений)
-                        cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                        movie_row = cursor.fetchone()
+                        cursor_local.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        movie_row = cursor_local.fetchone()
                         kp_id = None
                         if movie_row:
                             kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
@@ -161,12 +167,12 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                                 if sources:
                                     sources_dict = {platform: url for platform, url in sources[:6]}
                                     sources_json = json.dumps(sources_dict, ensure_ascii=False)
-                                    cursor.execute('''
+                                    cursor_local.execute('''
                                         UPDATE plans
                                         SET ticket_file_id = %s
                                         WHERE id = %s AND chat_id = %s
                                     ''', (sources_json, plan_id, chat_id))
-                                    conn.commit()
+                                    conn_local.commit()
                             except Exception as e:
                                 logger.warning(f"[PLAN NOTIFICATION] Ошибка получения sources для kp_id={kp_id}: {e}")
                        
@@ -181,8 +187,8 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         # Новый блок для планов "в кино"
         elif plan_type == 'cinema' and plan_id:
             with db_lock:
-                cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                row = cursor.fetchone()
+                cursor_local.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                row = cursor_local.fetchone()
                 ticket_file_id = None
                 if row:
                     if isinstance(row, dict):
@@ -210,22 +216,31 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
        
         msg = bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
        
-        plan_notification_messages[msg.message_id] = {
-            'link': link,
-            'film_id': film_id,
-            'plan_id': plan_id
-        }
+        # Импортируем plan_notification_messages из states
+        try:
+            from moviebot.states import plan_notification_messages
+            plan_notification_messages[msg.message_id] = {
+                'link': link,
+                'film_id': film_id,
+                'plan_id': plan_id
+            }
+        except Exception as import_e:
+            logger.warning(f"[PLAN NOTIFICATION] Не удалось импортировать plan_notification_messages: {import_e}")
        
         logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}, message_id={msg.message_id}, plan_id={plan_id}")
        
+        # КРИТИЧЕСКИ ВАЖНО: Обновляем флаг notification_sent СРАЗУ после отправки, используя локальное соединение
         if plan_id:
             try:
+                from moviebot.database.db_connection import get_db_connection, get_db_cursor
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
                 with db_lock:
-                    cursor.execute('UPDATE plans SET notification_sent = TRUE WHERE id = %s', (plan_id,))
-                    conn.commit()
+                    cursor_local.execute('UPDATE plans SET notification_sent = TRUE WHERE id = %s', (plan_id,))
+                    conn_local.commit()
                 logger.info(f"[PLAN NOTIFICATION] План {plan_id} отмечен как уведомление отправлено")
             except Exception as e:
-                logger.warning(f"[PLAN NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}")
+                logger.error(f"[PLAN NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}", exc_info=True)
 
     except Exception as e:
         logger.error(f"[PLAN NOTIFICATION] Ошибка отправки уведомления: {e}")
@@ -682,13 +697,39 @@ def check_and_send_plan_notifications():
                         
                 elif plan_utc <= now_utc and plan_utc >= now_utc - timedelta(minutes=30):
                     # Время плана уже прошло, но не более 30 минут назад - отправляем сразу
-                    if not notification_sent:
+                    # КРИТИЧЕСКИ ВАЖНО: Перечитываем флаг из БД перед проверкой, чтобы избежать дублирования
+                    notification_sent_current = notification_sent
+                    try:
+                        with db_lock:
+                            cursor_local.execute('SELECT notification_sent FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                            sent_row = cursor_local.fetchone()
+                            if sent_row:
+                                notification_sent_current = bool(sent_row.get('notification_sent') if isinstance(sent_row, dict) else sent_row[0])
+                    except Exception as read_e:
+                        logger.warning(f"[PLAN CHECK] Не удалось перечитать notification_sent для плана {plan_id}: {read_e}")
+                    
+                    if not notification_sent_current:
                         try:
                             job_id = f'plan_notify_home_{chat_id}_{plan_id}_{int(plan_utc.timestamp())}'
                             existing_job = scheduler.get_job(job_id)
                             if not existing_job:
-                                send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
-                                logger.info(f"[PLAN CHECK] Уведомление отправлено сразу для плана дома {plan_id} (фильм {title}) на время плана {plan_utc}")
+                                # Перед отправкой еще раз проверяем флаг в БД с блокировкой
+                                with db_lock:
+                                    cursor_local.execute('SELECT notification_sent FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                                    final_check = cursor_local.fetchone()
+                                    if final_check:
+                                        is_sent = bool(final_check.get('notification_sent') if isinstance(final_check, dict) else final_check[0])
+                                        if is_sent:
+                                            logger.info(f"[PLAN CHECK] Уведомление уже было отправлено для плана дома {plan_id} (дубликат предотвращен)")
+                                            # Пропускаем отправку этого плана, переходим к следующему в цикле
+                                        else:
+                                            # Отправляем уведомление
+                                            send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
+                                            logger.info(f"[PLAN CHECK] Уведомление отправлено сразу для плана дома {plan_id} (фильм {title}) на время плана {plan_utc}")
+                                    else:
+                                        # Если план не найден при повторной проверке, все равно пытаемся отправить
+                                        send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=plan_id, user_id=user_id)
+                                        logger.info(f"[PLAN CHECK] Уведомление отправлено сразу для плана дома {plan_id} (фильм {title}) на время плана {plan_utc}")
                             else:
                                 logger.info(f"[PLAN CHECK] Уведомление уже запланировано для плана дома {plan_id}")
                         except Exception as e:
