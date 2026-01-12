@@ -381,8 +381,9 @@ def build_tmdb_index():
     logger.info(f"После фильтра (title OR original_title) not empty: {len(df)} фильмов")
     
     # Сортируем по популярности (vote_count, если есть) и берем топ фильмов
+    # NaN значения по умолчанию идут в конец при ascending=False
     if 'vote_count' in df.columns:
-        df = df.sort_values('vote_count', ascending=False, na_last=True).head(MAX_MOVIES)
+        df = df.sort_values('vote_count', ascending=False).head(MAX_MOVIES)
     else:
         df = df.head(MAX_MOVIES)
     logger.info(f"После сортировки и ограничения до {MAX_MOVIES}: {len(df)} фильмов (изначально было {initial_count})")
