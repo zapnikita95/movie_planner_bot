@@ -255,22 +255,14 @@ def build_tmdb_index():
         logger.error(f"Ошибка чтения CSV файла: {e}", exc_info=True)
         return None, None
     
-    # Парсим даты (формат: 1994-06-09)
+    # Парсим даты (формат: 1994-06-09) для дальнейшего использования
     df['year'] = pd.to_datetime(df['release_date'], errors='coerce').dt.year
     
-    # Фильтруем:
-    # 1. vote_count >= 500
-    # 2. year >= 1950 (последние 70+ лет)
-    # 3. imdb_id не NaN (обязательно должен быть)
-    # 4. overview и title не пустые
-    logger.info(f"Фильтрация: vote_count >= {MIN_VOTE_COUNT}, year >= 1950, imdb_id not NaN")
+    # Фильтруем только обязательные поля:
+    # 1. imdb_id не NaN (обязательно должен быть)
+    # 2. overview и title не пустые
+    logger.info(f"Фильтрация: imdb_id not NaN, overview/title not NaN")
     initial_count = len(df)
-    
-    df = df[df['vote_count'] >= MIN_VOTE_COUNT]
-    logger.info(f"После фильтра vote_count >= {MIN_VOTE_COUNT}: {len(df)} фильмов")
-    
-    df = df[df['year'] >= 1950]
-    logger.info(f"После фильтра year >= 1950: {len(df)} фильмов")
     
     # Фильтруем NaN imdb_id (важно: проверяем до преобразования в строку)
     df = df[df['imdb_id'].notna()]
@@ -283,8 +275,11 @@ def build_tmdb_index():
     df = df.dropna(subset=['overview', 'title'])
     logger.info(f"После фильтра overview/title not NaN: {len(df)} фильмов")
     
-    # Сортируем по популярности (vote_count) и берем топ фильмов
-    df = df.sort_values('vote_count', ascending=False).head(MAX_MOVIES)
+    # Сортируем по популярности (vote_count, если есть) и берем топ фильмов
+    if 'vote_count' in df.columns:
+        df = df.sort_values('vote_count', ascending=False, na_last=True).head(MAX_MOVIES)
+    else:
+        df = df.head(MAX_MOVIES)
     logger.info(f"После сортировки и ограничения до {MAX_MOVIES}: {len(df)} фильмов (изначально было {initial_count})")
     
     logger.info("Keywords отсутствуют — используем только сюжет, жанры, актёров и режиссёра")
