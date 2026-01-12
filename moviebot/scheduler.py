@@ -1193,39 +1193,25 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
 
 def send_rating_reminder(chat_id, film_id, film_title, user_id):
     """Отправляет напоминание пользователю об оценке фильма на следующий день после просмотра"""
-
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
-
         # Проверяем, не оценил ли уже пользователь
-
         with db_lock:
-
-            cursor.execute("""
-
+            cursor_local.execute("""
                 SELECT id FROM ratings 
-
                 WHERE chat_id = %s AND film_id = %s AND user_id = %s
-
             """, (chat_id, film_id, user_id))
-
-            has_rating = cursor.fetchone()
-
+            has_rating = cursor_local.fetchone()
             
-
             if has_rating:
-
                 logger.info(f"[RATING REMINDER] Пользователь {user_id} уже оценил фильм {film_id}, пропускаем")
-
                 return
-
             
-
             # Получаем ссылку на фильм
-
-            cursor.execute("SELECT link FROM movies WHERE id = %s", (film_id,))
-
-            film_row = cursor.fetchone()
-
+            cursor_local.execute("SELECT link FROM movies WHERE id = %s", (film_id,))
+            film_row = cursor_local.fetchone()
             link = film_row.get('link') if isinstance(film_row, dict) else (film_row[0] if film_row else None)
 
             
@@ -1259,14 +1245,25 @@ def send_rating_reminder(chat_id, film_id, film_title, user_id):
             logger.info(f"[RATING REMINDER] Напоминание отправлено user_id={user_id}, film_id={film_id}, message_id={msg.message_id}")
 
     except Exception as e:
-
         logger.error(f"[RATING REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def check_subscription_payments():
     """Проверяет подписки и отправляет уведомления за день до списания"""
     if not bot:
         return
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
     
     try:
         from moviebot.database.db_operations import get_active_subscription        
@@ -1275,14 +1272,14 @@ def check_subscription_payments():
         
         # Находим подписки, у которых next_payment_date завтра
         with db_lock:
-            cursor.execute("""
+            cursor_local.execute("""
                 SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, next_payment_date
                 FROM subscriptions
                 WHERE is_active = TRUE
                 AND next_payment_date IS NOT NULL
                 AND DATE(next_payment_date AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
             """, (tomorrow,))
-            subscriptions = cursor.fetchall()
+            subscriptions = cursor_local.fetchall()
         
         for sub in subscriptions:
             try:
@@ -1343,6 +1340,15 @@ def check_subscription_payments():
     
     except Exception as e:
         logger.error(f"[SUBSCRIPTION PAYMENT] Ошибка проверки подписок: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def send_successful_payment_notification(chat_id, subscription_id, subscription_type, plan_type, period_type, is_recurring=False):
@@ -1747,50 +1753,88 @@ def process_recurring_payments():
 
 def get_random_events_enabled(chat_id):
     """Проверяет, включены ли случайные события для чата"""
-    with db_lock:
-        cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
-        row = cursor.fetchone()
-        if row:
-            value = row.get('value') if isinstance(row, dict) else row[0]
-            return value == 'true'
-    return True  # По умолчанию включено
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    try:
+        with db_lock:
+            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+            row = cursor_local.fetchone()
+            if row:
+                value = row.get('value') if isinstance(row, dict) else row[0]
+                return value == 'true'
+        return True  # По умолчанию включено
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def was_event_sent_today(chat_id, event_type):
     """Проверяет, было ли отправлено событие/уведомление сегодня для данного чата"""
     if not bot:
         return False
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         now = datetime.now(PLANS_TZ)
         today = now.date()
         with db_lock:
-            cursor.execute("""
+            cursor_local.execute("""
                 SELECT id FROM event_notifications 
                 WHERE chat_id = %s AND event_type = %s AND sent_date = %s
             """, (chat_id, event_type, today))
-            row = cursor.fetchone()
+            row = cursor_local.fetchone()
             return row is not None
     except Exception as e:
         logger.error(f"[EVENT NOTIFICATIONS] Ошибка проверки события: {e}", exc_info=True)
         return False
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def mark_event_sent(chat_id, event_type):
     """Отмечает, что событие/уведомление было отправлено сегодня"""
     if not bot:
         return
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         now = datetime.now(PLANS_TZ)
         today = now.date()
         with db_lock:
-            cursor.execute("""
+            cursor_local.execute("""
                 INSERT INTO event_notifications (chat_id, event_type, sent_date)
                 VALUES (%s, %s, %s)
                 ON CONFLICT (chat_id, event_type, sent_date) DO NOTHING
             """, (chat_id, event_type, today))
-            conn.commit()
+            conn_local.commit()
     except Exception as e:
         logger.error(f"[EVENT NOTIFICATIONS] Ошибка сохранения события: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def check_weekend_schedule():
@@ -1798,6 +1842,10 @@ def check_weekend_schedule():
     Выполняется только в пятницу. Если нет планов вообще (ни дома, ни в кино), отправляет уведомление раз в неделю."""
     if not bot:
         return
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         now = datetime.now(PLANS_TZ)
         current_weekday = now.weekday()
@@ -1808,8 +1856,8 @@ def check_weekend_schedule():
         
         # Получаем все групповые чаты
         with db_lock:
-            cursor.execute("SELECT DISTINCT chat_id FROM movies")
-            chat_rows = cursor.fetchall()
+            cursor_local.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor_local.fetchall()
         
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
@@ -1833,8 +1881,8 @@ def check_weekend_schedule():
                 continue
             
             # Проверяем, отключено ли это напоминание
-            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_weekend_films_disabled'", (chat_id,))
-            reminder_disabled_row = cursor.fetchone()
+            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_weekend_films_disabled'", (chat_id,))
+            reminder_disabled_row = cursor_local.fetchone()
             if reminder_disabled_row:
                 is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
                 if is_disabled == 'true':
@@ -1845,32 +1893,32 @@ def check_weekend_schedule():
             sunday = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=2)
             
             # Проверяем планы домашнего просмотра на выходные
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) FROM plans
                 WHERE chat_id = %s 
                 AND plan_type = 'home'
                 AND plan_datetime >= %s 
                 AND plan_datetime <= %s
             ''', (chat_id, friday, sunday))
-            home_plans_count = cursor.fetchone()
+            home_plans_count = cursor_local.fetchone()
             home_count = home_plans_count.get('count') if isinstance(home_plans_count, dict) else home_plans_count[0] if home_plans_count else 0
             
             # Проверяем планы в кино на выходные
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) FROM plans
                 WHERE chat_id = %s 
                 AND plan_type = 'cinema'
                 AND plan_datetime >= %s 
                 AND plan_datetime <= %s
             ''', (chat_id, friday, sunday))
-            cinema_plans_count = cursor.fetchone()
+            cinema_plans_count = cursor_local.fetchone()
             cinema_count = cinema_plans_count.get('count') if isinstance(cinema_plans_count, dict) else cinema_plans_count[0] if cinema_plans_count else 0
             
             # Если нет планов домашнего просмотра, отправляем уведомление
             if home_count == 0:
                 # Проверяем, когда последний раз отправляли уведомление о выходных
-                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_weekend_reminder_date'", (chat_id,))
-                last_date_row = cursor.fetchone()
+                cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_weekend_reminder_date'", (chat_id,))
+                last_date_row = cursor_local.fetchone()
                 
                 should_send = True
                 if last_date_row:
@@ -1907,18 +1955,27 @@ def check_weekend_schedule():
                         mark_event_sent(chat_id, 'weekend_reminder')
                         
                         # Сохраняем дату последнего уведомления
-                        cursor.execute('''
+                        cursor_local.execute('''
                             INSERT INTO settings (chat_id, key, value)
                             VALUES (%s, 'last_weekend_reminder_date', %s)
                             ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
                         ''', (chat_id, now.date().isoformat()))
-                        conn.commit()
+                        conn_local.commit()
                         
                         logger.info(f"[WEEKEND SCHEDULE] Отправлено уведомление о выходных для чата {chat_id}")
                     except Exception as e:
                         logger.error(f"[WEEKEND SCHEDULE] Ошибка при отправке уведомления: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[WEEKEND SCHEDULE] Ошибка в check_weekend_schedule: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def check_premiere_reminder():
@@ -1926,6 +1983,10 @@ def check_premiere_reminder():
     Выполняется только в пятницу. Если нет планов вообще (ни дома, ни в кино), отправляет раз в неделю."""
     if not bot:
         return
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         now = datetime.now(PLANS_TZ)
         current_weekday = now.weekday()
@@ -1936,8 +1997,8 @@ def check_premiere_reminder():
         
         # Получаем все групповые чаты
         with db_lock:
-            cursor.execute("SELECT DISTINCT chat_id FROM movies")
-            chat_rows = cursor.fetchall()
+            cursor_local.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor_local.fetchall()
         
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
@@ -1961,19 +2022,19 @@ def check_premiere_reminder():
                 continue
             
             # Проверяем, отключено ли это напоминание
-            cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_cinema_premieres_disabled'", (chat_id,))
-            reminder_disabled_row = cursor.fetchone()
+            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_cinema_premieres_disabled'", (chat_id,))
+            reminder_disabled_row = cursor_local.fetchone()
             if reminder_disabled_row:
                 is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
                 if is_disabled == 'true':
                     continue
             
             # Проверяем, когда последний раз добавляли фильм в кино (plan_type='cinema')
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT MAX(plan_datetime) FROM plans
                 WHERE chat_id = %s AND plan_type = 'cinema'
             ''', (chat_id,))
-            last_cinema_row = cursor.fetchone()
+            last_cinema_row = cursor_local.fetchone()
             
             has_recent_cinema_plan = False
             if last_cinema_row:
@@ -1991,8 +2052,8 @@ def check_premiere_reminder():
             # Если давно не добавляли фильмы в кино (14+ дней), отправляем напоминание
             if not has_recent_cinema_plan:
                 # Проверяем, когда последний раз отправляли напоминание
-                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_cinema_reminder_date'", (chat_id,))
-                last_reminder_row = cursor.fetchone()
+                cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_cinema_reminder_date'", (chat_id,))
+                last_reminder_row = cursor_local.fetchone()
                 
                 should_send = True
                 if last_reminder_row:
@@ -2004,14 +2065,14 @@ def check_premiere_reminder():
                         # Проверяем планы домашнего просмотра
                         friday = now.replace(hour=0, minute=0, second=0, microsecond=0)
                         sunday = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=2)
-                        cursor.execute('''
+                        cursor_local.execute('''
                             SELECT COUNT(*) FROM plans
                             WHERE chat_id = %s 
                             AND plan_type = 'home'
                             AND plan_datetime >= %s 
                             AND plan_datetime <= %s
                         ''', (chat_id, friday, sunday))
-                        home_plans_count = cursor.fetchone()
+                        home_plans_count = cursor_local.fetchone()
                         home_count = home_plans_count.get('count') if isinstance(home_plans_count, dict) else home_plans_count[0] if home_plans_count else 0
                         
                         if home_count == 0 and days_passed < 7:
@@ -2054,18 +2115,27 @@ def check_premiere_reminder():
                             mark_event_sent(chat_id, 'premiere_reminder')
                             
                             # Сохраняем дату последнего напоминания
-                            cursor.execute('''
+                            cursor_local.execute('''
                                 INSERT INTO settings (chat_id, key, value)
                                 VALUES (%s, 'last_cinema_reminder_date', %s)
                                 ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
                             ''', (chat_id, now.date().isoformat()))
-                            conn.commit()
+                            conn_local.commit()
                             
                             logger.info(f"[PREMIERE REMINDER] Отправлено напоминание о премьерах для чата {chat_id}")
                     except Exception as e:
                         logger.error(f"[PREMIERE REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[PREMIERE REMINDER] Ошибка в check_premiere_reminder: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def choose_random_participant():
@@ -2073,13 +2143,16 @@ def choose_random_participant():
     if not bot:
         return
     
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         now = datetime.now(PLANS_TZ)
         
         # Получаем все групповые чаты
         with db_lock:
-            cursor.execute("SELECT DISTINCT chat_id FROM movies")
-            chat_rows = cursor.fetchall()
+            cursor_local.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor_local.fetchall()
         
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
@@ -2104,11 +2177,11 @@ def choose_random_participant():
                 continue
             
             # Проверяем, когда последний раз выбирали участника
-            cursor.execute(
+            cursor_local.execute(
                 "SELECT value FROM settings WHERE chat_id = %s AND key = 'last_random_participant_date'",
                 (chat_id,)
             )
-            last_date_row = cursor.fetchone()
+            last_date_row = cursor_local.fetchone()
             
             if last_date_row:
                 last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
@@ -2140,14 +2213,14 @@ def choose_random_participant():
                 query += " AND user_id != %s"
                 params += (current_bot_id,)
                 
-            cursor.execute(query, params)
-            participants = cursor.fetchall()
+            cursor_local.execute(query, params)
+            participants = cursor_local.fetchall()
             
             if not participants:
                 continue
             
             # Проверка недели участия
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT user_id, MIN(timestamp) as first_participation
                 FROM stats
                 WHERE chat_id = %s
@@ -2156,7 +2229,7 @@ def choose_random_participant():
             first_participations = {
                 row.get('user_id') if isinstance(row, dict) else row[0]:
                 row.get('first_participation') if isinstance(row, dict) else row[1]
-                for row in cursor.fetchall()
+                for row in cursor_local.fetchall()
             }
             
             week_ago = now - timedelta(days=7)
@@ -2224,16 +2297,16 @@ def choose_random_participant():
                             with db_lock:
                                 tables_to_update = ['movies', 'stats', 'settings', 'events', 'reminders']
                                 for table in tables_to_update:
-                                    cursor.execute(f"""
+                                    cursor_local.execute(f"""
                                         UPDATE {table}
                                         SET chat_id = %s
                                         WHERE chat_id = %s
                                     """, (new_chat_id, original_chat_id))
                                 
                                 # Также можно обновить другие таблицы, если они есть
-                                conn.commit()
+                                conn_local.commit()
                             
-                            logger.info(f"[RANDOM PARTICIPANT] Обновлено {cursor.rowcount} записей chat_id")
+                            logger.info(f"[RANDOM PARTICIPANT] Обновлено {cursor_local.rowcount} записей chat_id")
                             
                             # Меняем chat_id для повторной попытки
                             chat_id = new_chat_id
@@ -2258,12 +2331,12 @@ def choose_random_participant():
                 
                 # Сохраняем дату
                 with db_lock:
-                    cursor.execute('''
+                    cursor_local.execute('''
                         INSERT INTO settings (chat_id, key, value)
                         VALUES (%s, 'last_random_participant_date', %s)
                         ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
                     ''', (chat_id, now.date().isoformat()))
-                    conn.commit()
+                    conn_local.commit()
                 
                 logger.info(f"[RANDOM PARTICIPANT] Успешно выбран участник {user_id} для чата {chat_id}")
             else:
@@ -2277,13 +2350,17 @@ def start_dice_game():
     """Раз в две недели запускает игру в кубик для выбора фильма - использует общую функцию send_dice_game_event"""
     if not bot:
         return
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     try:
         now = datetime.now(PLANS_TZ)
         
         # Получаем все групповые чаты
         with db_lock:
-            cursor.execute("SELECT DISTINCT chat_id FROM movies")
-            chat_rows = cursor.fetchall()
+            cursor_local.execute("SELECT DISTINCT chat_id FROM movies")
+            chat_rows = cursor_local.fetchall()
         
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
@@ -2301,6 +2378,15 @@ def start_dice_game():
             
     except Exception as e:
         logger.error(f"[DICE GAME] Критическая ошибка в start_dice_game: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 def update_series_status_cache():
     """Фоновая задача: обновляет статусы сериалов раз в день"""
