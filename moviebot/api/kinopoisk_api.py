@@ -16,26 +16,33 @@ logger = logging.getLogger(__name__)
 
 def log_kinopoisk_api_request(endpoint, method='GET', status_code=None, user_id=None, chat_id=None, kp_id=None):
     """Логирует запрос к API Кинопоиска в БД"""
+    # Используем локальные соединение и курсор для избежания проблем с закрытыми соединениями
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
     with db_lock:
         try:
             # Самое важное: всегда чистим возможную сломанную транзакцию
-            conn.rollback()
+            try:
+                conn_local.rollback()
+            except:
+                pass
 
             # kp_id приводим к строке (потому что столбец text)
             kp_id_str = str(kp_id) if kp_id is not None else None
 
-            cursor.execute('''
+            cursor_local.execute('''
                 INSERT INTO kinopoisk_api_logs 
                 (endpoint, method, status_code, user_id, chat_id, kp_id)
                 VALUES (%s, %s, %s, %s, %s, %s)
             ''', (endpoint, method, status_code, user_id, chat_id, kp_id_str))
             
-            conn.commit()
+            conn_local.commit()
             
         except Exception as e:
             logger.error(f"Ошибка логирования API-запроса: {e}", exc_info=True)
             try:
-                conn.rollback()
+                conn_local.rollback()
             except:
                 pass  # если соединение уже мертво — молчим
         

@@ -59,14 +59,18 @@ def add_to_database_callback(call):
 
         # 3. Проверяем, вдруг уже есть в базе
         existing = None
+        # Используем локальные соединение и курсор
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
         with db_lock:
             try:
-                cursor.execute("""
+                cursor_local.execute("""
                     SELECT id, title, watched 
                     FROM movies 
                     WHERE chat_id = %s AND kp_id = %s
                 """, (chat_id, kp_id_str))
-                row = cursor.fetchone()
+                row = cursor_local.fetchone()
 
                 if row:
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -74,7 +78,7 @@ def add_to_database_callback(call):
                     watched = row.get('watched') if isinstance(row, dict) else row[2]
                     existing = (film_id, title_db, watched)
                     logger.info(f"[ADD TO DB] Уже существует → existing={existing}")
-                    conn.commit()
+                    conn_local.commit()
                 else:
                     # 4. Добавляем в базу
                     title = info.get('title', f"Без названия {kp_id}")
@@ -84,7 +88,7 @@ def add_to_database_callback(call):
                     director = info.get('director')
                     actors = info.get('actors')
 
-                    cursor.execute('''
+                    cursor_local.execute('''
                         INSERT INTO movies 
                         (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'button')
@@ -103,19 +107,22 @@ def add_to_database_callback(call):
                         1 if is_series else 0, user_id
                     ))
 
-                    result = cursor.fetchone()
+                    result = cursor_local.fetchone()
                     if result:
                         film_id = result.get('id') if isinstance(result, dict) else result[0]
                         title_db = result.get('title') if isinstance(result, dict) else result[1]
                         watched = result.get('watched') if isinstance(result, dict) else result[2]
                         existing = (film_id, title_db, watched)
-                    conn.commit()
+                    conn_local.commit()
 
                     logger.info(f"[ADD TO DB] Добавлен/обновлён → existing={existing}")
 
             except Exception as db_err:
                 logger.error(f"[ADD TO DB] Ошибка БД: {db_err}", exc_info=True)
-                conn.rollback()
+                try:
+                    conn_local.rollback()
+                except:
+                    pass
                 raise
 
         # 5. Гарантируем наличие is_series в info
@@ -146,7 +153,8 @@ def add_to_database_callback(call):
     except Exception as e:
         logger.error(f"[ADD TO DB] Критическая ошибка: {e}", exc_info=True)
         try:
-            conn.rollback()
+            conn_local = get_db_connection()
+            conn_local.rollback()
         except:
             pass
         try:
@@ -179,31 +187,24 @@ def plan_from_added_callback(call):
 
         # 1. Пробуем взять из базы (самое быстрое)
         try:
-            conn_check = get_db_connection()                    # ← новое имя
-            cur_check = conn_check.cursor(cursor_factory=RealDictCursor)
-            cur_check.execute(
-                'SELECT title, link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s',
-                (chat_id, str(kp_id))
-            )
-            row = cur_check.fetchone()
-            if row:
-                title = row['title']
-                link = row['link']
-                is_series = bool(row['is_series'])
-                logger.info(f"[PLAN FROM ADDED] Название взято из базы: {title}")
-            cur_check.close()
-            conn_check.close()
+            conn_check = get_db_connection()
+            cursor_check = get_db_cursor()
+            with db_lock:
+                cursor_check.execute(
+                    'SELECT title, link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s',
+                    (chat_id, str(kp_id))
+                )
+                row = cursor_check.fetchone()
+                if row:
+                    title = row.get('title') if isinstance(row, dict) else row[0]
+                    link = row.get('link') if isinstance(row, dict) else row[1]
+                    is_series = bool(row.get('is_series') if isinstance(row, dict) else row[2])
+                    logger.info(f"[PLAN FROM ADDED] Название взято из базы: {title}")
         except Exception as db_e:
             logger.error(f"[PLAN FROM ADDED] Ошибка чтения из БД: {db_e}", exc_info=True)
             title = None
             link = None
             is_series = False
-        finally:
-            if 'cursor' in locals():
-                try:
-                    cursor.close()
-                except:
-                    pass
                 
         # 2. Если в базе нет — берём из API (надёжно)
         if not title:
@@ -225,41 +226,54 @@ def plan_from_added_callback(call):
         watched = 0  # дефолт для нового фильма
         existing = None
         try:
+            # Используем локальные соединение и курсор
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            
             with db_lock:
-                    cur_add = conn.cursor(cursor_factory=RealDictCursor)
+                try:
                     # Проверяем наличие + сразу берём нужные поля
-                    cur_add.execute(
+                    cursor_local.execute(
                         'SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s',
                         (chat_id, str(kp_id))
                     )
-                    row = cur_add.fetchone()
+                    row = cursor_local.fetchone()
 
                     if row:
-                        existing = row  # row — RealDictRow
+                        existing = row  # row может быть dict или tuple
                         film_id, watched = extract_film_info_from_existing(existing)
                         logger.info(f"[PLAN FROM ADDED] Фильм уже в базе: film_id={film_id}, watched={watched}")
                     else:
                         # Добавляем новый
                         is_series_int = 1 if is_series else 0
-                        cur_add.execute('''
+                        cursor_local.execute('''
                             INSERT INTO movies (chat_id, kp_id, title, link, is_series, added_by, added_at, source)
                             VALUES (%s, %s, %s, %s, %s, %s, NOW(), 'plan_button')
                             ON CONFLICT (chat_id, kp_id) DO NOTHING
                             RETURNING id, title, watched
                         ''', (chat_id, str(kp_id), title, link, is_series_int, user_id))
                         
-                        result = cur_add.fetchone()
+                        result = cursor_local.fetchone()
                         if result:
                             existing = result
                             film_id, watched = extract_film_info_from_existing(existing)
                             logger.info(f"[PLAN FROM ADDED] Фильм добавлен: film_id={film_id}")
                         
-                        conn.commit()
-                    
-                    cur_add.close()
+                        conn_local.commit()
+                except Exception as db_e:
+                    logger.error(f"[PLAN FROM ADDED] Ошибка при работе с БД: {db_e}", exc_info=True)
+                    try:
+                        conn_local.rollback()
+                    except:
+                        pass
+                    raise
         except Exception as db_e:
-            conn.rollback()
             logger.error(f"[PLAN FROM ADDED] Ошибка БД при добавлении фильма: {db_e}", exc_info=True)
+            try:
+                conn_local = get_db_connection()
+                conn_local.rollback()
+            except:
+                pass
             bot.send_message(chat_id, "❌ Ошибка при добавлении фильма в базу.")
             return
         
