@@ -40,8 +40,6 @@ from moviebot.bot.handlers.text_messages import expect_text_from_user
 from moviebot.utils.parsing import extract_kp_id_from_text, show_timezone_selection, extract_kp_user_id
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 # Жанры, которые нужно исключать из режимов рандома
 EXCLUDED_GENRES = ['музыка', 'короткометражка', 'реальное тв', 'церемония', 'концерт', 'ток-шоу']
@@ -532,45 +530,81 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             if watched:
                 text += "\n\n✅ <b>Просмотрено</b>"
                 try:
-                    with db_lock:
-                        cursor.execute("""
-                            SELECT AVG(rating) as avg 
-                            FROM ratings 
-                            WHERE chat_id = %s AND film_id = %s 
-                            AND (is_imported = FALSE OR is_imported IS NULL)
-                        """, (chat_id, film_id))
-                        avg_result = cursor.fetchone()
-                        avg = avg_result[0] if avg_result else None
-                        if avg:
-                            text += f"\n⭐ <b>Средняя оценка: {avg:.1f}/10</b>"
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_local.execute("""
+                                SELECT AVG(rating) as avg 
+                                FROM ratings 
+                                WHERE chat_id = %s AND film_id = %s 
+                                AND (is_imported = FALSE OR is_imported IS NULL)
+                            """, (chat_id, film_id))
+                            avg_result = cursor_local.fetchone()
+                            avg = avg_result[0] if avg_result else None
+                            if avg:
+                                text += f"\n⭐ <b>Средняя оценка: {avg:.1f}/10</b>"
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
 
                     if user_id:
-                        with db_lock:
-                            cursor.execute("""
-                                SELECT rating 
-                                FROM ratings 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                                AND (is_imported = FALSE OR is_imported IS NULL)
-                            """, (chat_id, film_id, user_id))
-                            user_rating_row = cursor.fetchone()
-                            user_rating = user_rating_row[0] if user_rating_row else None
-                            text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
+                        conn_local = get_db_connection()
+                        cursor_local = get_db_cursor()
+                        try:
+                            with db_lock:
+                                cursor_local.execute("""
+                                    SELECT rating 
+                                    FROM ratings 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                                    AND (is_imported = FALSE OR is_imported IS NULL)
+                                """, (chat_id, film_id, user_id))
+                                user_rating_row = cursor_local.fetchone()
+                                user_rating = user_rating_row[0] if user_rating_row else None
+                                text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
+                        finally:
+                            try:
+                                cursor_local.close()
+                            except:
+                                pass
+                            try:
+                                conn_local.close()
+                            except:
+                                pass
                 except Exception as e:
                     logger.warning(f"[SHOW FILM INFO] Ошибка оценок: {e}")
             else:
                 text += "\n\n⏳ <b>Ещё не просмотрено</b>"
                 if user_id:
                     try:
-                        with db_lock:
-                            cursor.execute("""
-                                SELECT rating 
-                                FROM ratings 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                                AND (is_imported = FALSE OR is_imported IS NULL)
-                            """, (chat_id, film_id, user_id))
-                            user_rating_row = cursor.fetchone()
-                            user_rating = user_rating_row[0] if user_rating_row else None
-                            text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
+                        conn_local = get_db_connection()
+                        cursor_local = get_db_cursor()
+                        try:
+                            with db_lock:
+                                cursor_local.execute("""
+                                    SELECT rating 
+                                    FROM ratings 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                                    AND (is_imported = FALSE OR is_imported IS NULL)
+                                """, (chat_id, film_id, user_id))
+                                user_rating_row = cursor_local.fetchone()
+                                user_rating = user_rating_row[0] if user_rating_row else None
+                                text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
+                        finally:
+                            try:
+                                cursor_local.close()
+                            except:
+                                pass
+                            try:
+                                conn_local.close()
+                            except:
+                                pass
                     except Exception as e:
                         logger.warning(f"[SHOW FILM INFO] Ошибка личной оценки: {e}")
             
@@ -586,16 +620,28 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         if lock_acquired:
                             try:
                                 # Получаем среднюю оценку всех участников
-                                cursor.execute('''
-                                    SELECT AVG(rating) as avg FROM ratings 
-                                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                                ''', (chat_id, film_id))
-                                avg_result = cursor.fetchone()
-                                if avg_result:
-                                    avg_rating = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                                    avg_rating = float(avg_rating) if avg_rating is not None else None
-                                    if avg_rating:
-                                        text += f"\n⭐ <b>Средняя оценка: {avg_rating:.1f}/10</b>"
+                                conn_local = get_db_connection()
+                                cursor_local = get_db_cursor()
+                                try:
+                                    cursor_local.execute('''
+                                        SELECT AVG(rating) as avg FROM ratings 
+                                        WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                                    ''', (chat_id, film_id))
+                                    avg_result = cursor_local.fetchone()
+                                    if avg_result:
+                                        avg_rating = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                                        avg_rating = float(avg_rating) if avg_rating is not None else None
+                                        if avg_rating:
+                                            text += f"\n⭐ <b>Средняя оценка: {avg_rating:.1f}/10</b>"
+                                finally:
+                                    try:
+                                        cursor_local.close()
+                                    except:
+                                        pass
+                                    try:
+                                        conn_local.close()
+                                    except:
+                                        pass
                             finally:
                                 db_lock.release()
                     except Exception as avg_e:
@@ -706,13 +752,26 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.warning(f"[SHOW FILM INFO] Ошибка парсинга даты премьеры {kp_id}: {e}")
 
         if show_premiere_button:
-            with db_lock:
-                cursor.execute("""
-                    SELECT reminder_sent 
-                    FROM premiere_reminders 
-                    WHERE chat_id = %s AND kp_id = %s
-                """, (chat_id, kp_id))
-                reminder = cursor.fetchone()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            reminder = None
+            try:
+                with db_lock:
+                    cursor_local.execute("""
+                        SELECT reminder_sent 
+                        FROM premiere_reminders 
+                        WHERE chat_id = %s AND kp_id = %s
+                    """, (chat_id, kp_id))
+                    reminder = cursor_local.fetchone()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
                 
                 if reminder and reminder[0]:
                     markup.add(InlineKeyboardButton("🔕 Отменить уведомление", callback_data=f"premiere_cancel:{int(kp_id)}"))
@@ -1927,10 +1986,23 @@ def register_series_handlers(bot_param):
                 
             if mode == 'database':
                 # Проверяем количество фильмов в базе для данного chat_id (работает и для личных, и для групповых чатов)
-                with db_lock:
-                    cursor.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
-                    count_row = cursor.fetchone()
-                    count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                count = 0
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT COUNT(*) FROM movies WHERE chat_id = %s', (chat_id,))
+                        count_row = cursor_local.fetchone()
+                        count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 if count == 0:
                     markup = InlineKeyboardMarkup(row_width=1)
@@ -1991,29 +2063,41 @@ def register_series_handlers(bot_param):
                     # Для режима "по моим оценкам" - получаем годы из импортированных фильмов и импортированных оценок с оценкой 9-10
                     years = []
                     # Годы из фильмов в базе
-                    cursor.execute("""
-                        SELECT DISTINCT m.year
-                        FROM movies m
-                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                        WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND m.year IS NOT NULL
-                        ORDER BY m.year
-                    """, (chat_id, user_id))
-                    years_rows = cursor.fetchall()
-                    years_from_movies = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
-                    years.extend(years_from_movies)
-                    
-                    # Годы из импортированных оценок (film_id = NULL)
-                    cursor.execute("""
-                        SELECT DISTINCT r.year
-                        FROM ratings r
-                        WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND r.film_id IS NULL AND r.year IS NOT NULL
-                        ORDER BY r.year
-                    """, (chat_id, user_id))
-                    years_rows_imported = cursor.fetchall()
-                    years_from_imported = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows_imported if row]
-                    years.extend(years_from_imported)
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    try:
+                        cursor_local.execute("""
+                            SELECT DISTINCT m.year
+                            FROM movies m
+                            JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                            WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                            AND m.year IS NOT NULL
+                            ORDER BY m.year
+                        """, (chat_id, user_id))
+                        years_rows = cursor_local.fetchall()
+                        years_from_movies = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                        years.extend(years_from_movies)
+                        
+                        # Годы из импортированных оценок (film_id = NULL)
+                        cursor_local.execute("""
+                            SELECT DISTINCT r.year
+                            FROM ratings r
+                            WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                            AND r.film_id IS NULL AND r.year IS NOT NULL
+                            ORDER BY r.year
+                        """, (chat_id, user_id))
+                        years_rows_imported = cursor_local.fetchall()
+                        years_from_imported = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows_imported if row]
+                        years.extend(years_from_imported)
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
                     
                     # Убираем дубликаты
                     years = sorted(list(set(years)))
@@ -2042,20 +2126,33 @@ def register_series_handlers(bot_param):
                                 available_periods.append(period)
                 elif mode == 'group_votes':
                     # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 7.5
-                    cursor.execute("""
-                        SELECT DISTINCT m.year
-                        FROM movies m
-                        WHERE m.chat_id = %s AND m.year IS NOT NULL
-                        AND EXISTS (
-                            SELECT 1 FROM ratings r 
-                            WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
-                            GROUP BY r.film_id, r.chat_id 
-                            HAVING AVG(r.rating) >= 7.5
-                        )
-                        ORDER BY m.year
-                    """, (chat_id,))
-                    years_rows = cursor.fetchall()
-                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    years = []
+                    try:
+                        cursor_local.execute("""
+                            SELECT DISTINCT m.year
+                            FROM movies m
+                            WHERE m.chat_id = %s AND m.year IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1 FROM ratings r 
+                                WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                                GROUP BY r.film_id, r.chat_id 
+                                HAVING AVG(r.rating) >= 7.5
+                            )
+                            ORDER BY m.year
+                        """, (chat_id,))
+                        years_rows = cursor_local.fetchall()
+                        years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
                     
                     logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for group_votes mode")
                     
@@ -2104,9 +2201,22 @@ def register_series_handlers(bot_param):
                             condition = "m.year >= 2020"
                         
                         query = f"{base_query} AND {condition}"
-                        cursor.execute(query, tuple(params))
-                        count_row = cursor.fetchone()
-                        count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                        conn_local = get_db_connection()
+                        cursor_local = get_db_cursor()
+                        count = 0
+                        try:
+                            cursor_local.execute(query, tuple(params))
+                            count_row = cursor_local.fetchone()
+                            count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                        finally:
+                            try:
+                                cursor_local.close()
+                            except:
+                                pass
+                            try:
+                                conn_local.close()
+                            except:
+                                pass
                         
                         if count > 0:
                             available_periods.append(period)
@@ -2155,10 +2265,23 @@ def register_series_handlers(bot_param):
                 message_text = "⭐ Режим \"По оценкам в базе\" доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
             elif mode == "my_votes":
                 # Проверяем количество оценок
-                with db_lock:
-                    cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-                    user_ratings_count = cursor.fetchone()
-                    user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                user_ratings = 0
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                        user_ratings_count = cursor_local.fetchone()
+                        user_ratings = user_ratings_count.get('count') if isinstance(user_ratings_count, dict) else (user_ratings_count[0] if user_ratings_count else 0)
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 if user_ratings < 50:
                     message_text = "⭐ Режим \"По моим оценкам\" откроется после добавления 50 оценок в базу. Оцените больше фильмов!"
@@ -2542,14 +2665,26 @@ def register_series_handlers(bot_param):
             
             # --------------------- Выполняем запрос ---------------------
             genres = []  # всегда инициализируем, даже если запрос вернёт пусто
-            with db_lock:
-                cursor.execute(base_query, params)
-                rows = cursor.fetchall()
-                
-                for row in rows:
-                    genre = row.get('genre') if isinstance(row, dict) else (row[0] if row else None)
-                    if genre and genre.strip():
-                        genres.append(genre.strip())
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute(base_query, params)
+                    rows = cursor_local.fetchall()
+                    
+                    for row in rows:
+                        genre = row.get('genre') if isinstance(row, dict) else (row[0] if row else None)
+                        if genre and genre.strip():
+                            genres.append(genre.strip())
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             # Исключаем нежелательные жанры
             genres = [g for g in genres if g.lower() not in [eg.lower() for eg in EXCLUDED_GENRES]]
@@ -2666,15 +2801,27 @@ def register_series_handlers(bot_param):
             base_query += " GROUP BY m.director"
             base_query += " ORDER BY cnt DESC LIMIT 10"
             
-            with db_lock:
-                cursor.execute(base_query, params)
-                rows = cursor.fetchall()
-                directors = []
-                for row in rows:
-                    director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                    if director:
-                        directors.append(director)
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            directors = []
+            try:
+                with db_lock:
+                    cursor_local.execute(base_query, params)
+                    rows = cursor_local.fetchall()
+                    for row in rows:
+                        director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                        if director:
+                            directors.append(director)
                 logger.info(f"[RANDOM] Directors found for group_votes: {len(directors)}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             # Если режиссеров нет, пропускаем шаг и переходим к актерам
             if not directors:
@@ -2785,16 +2932,28 @@ def register_series_handlers(bot_param):
             
             # Берем топ актёров по частоте
             actor_counts = {}
-            with db_lock:
-                cursor.execute(base_query, params)
-                for row in cursor.fetchall():
-                    actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                    if actors_str:
-                        for actor in actors_str.split(', '):
-                            actor = actor.strip()
-                            if actor:
-                                actor_counts[actor] = actor_counts.get(actor, 0) + 1
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute(base_query, params)
+                    for row in cursor_local.fetchall():
+                        actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                        if actors_str:
+                            for actor in actors_str.split(', '):
+                                actor = actor.strip()
+                                if actor:
+                                    actor_counts[actor] = actor_counts.get(actor, 0) + 1
                 logger.info(f"[RANDOM] Unique actors found for group_votes: {len(actor_counts)}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             # Если актеров нет, пропускаем шаг и переходим к финалу
             if not actor_counts:
@@ -2925,15 +3084,27 @@ def register_series_handlers(bot_param):
             base_query += " LIMIT 50"
             
             kp_ids = []
-            with db_lock:
-                cursor.execute(base_query, params)
-                rows = cursor.fetchall()
-                for row in rows:
-                    kp_id = row.get('kp_id') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                    if kp_id:
-                        kp_ids.append(str(kp_id))
-            
-            logger.info(f"[RANDOM] Found {len(kp_ids)} films for my_votes director step")
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute(base_query, params)
+                    rows = cursor_local.fetchall()
+                    for row in rows:
+                        kp_id = row.get('kp_id') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                        if kp_id:
+                            kp_ids.append(str(kp_id))
+                
+                logger.info(f"[RANDOM] Found {len(kp_ids)} films for my_votes director step")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not kp_ids:
                 logger.info(f"[RANDOM] No films found for my_votes, skipping to actor step")
@@ -3063,15 +3234,27 @@ def register_series_handlers(bot_param):
             base_query += " LIMIT 50"
             
             kp_ids = []
-            with db_lock:
-                cursor.execute(base_query, params)
-                rows = cursor.fetchall()
-                for row in rows:
-                    kp_id = row.get('kp_id') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                    if kp_id:
-                        kp_ids.append(str(kp_id))
-            
-            logger.info(f"[RANDOM] Found {len(kp_ids)} films for my_votes actor step")
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute(base_query, params)
+                    rows = cursor_local.fetchall()
+                    for row in rows:
+                        kp_id = row.get('kp_id') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                        if kp_id:
+                            kp_ids.append(str(kp_id))
+                
+                logger.info(f"[RANDOM] Found {len(kp_ids)} films for my_votes actor step")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not kp_ids:
                 logger.info(f"[RANDOM] No films found for my_votes, skipping to final step")
@@ -3449,15 +3632,27 @@ def register_series_handlers(bot_param):
             base_query += " GROUP BY m.director"
             base_query += " ORDER BY cnt DESC LIMIT 10"
             
-            with db_lock:
-                cursor.execute(base_query, params)
-                rows = cursor.fetchall()
-                directors = []
-                for row in rows:
-                    director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                    if director:
-                        directors.append(director)
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            directors = []
+            try:
+                with db_lock:
+                    cursor_local.execute(base_query, params)
+                    rows = cursor_local.fetchall()
+                    for row in rows:
+                        director = row.get('director') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                        if director:
+                            directors.append(director)
                 logger.info(f"[RANDOM] Directors found: {len(directors)}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             # Если режиссеров нет, пропускаем шаг и переходим к актерам
             if not directors:
@@ -3561,16 +3756,28 @@ def register_series_handlers(bot_param):
             
             # Берем топ актёров по частоте
             actor_counts = {}
-            with db_lock:
-                cursor.execute(base_query, params)
-                for row in cursor.fetchall():
-                    actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
-                    if actors_str:
-                        for actor in actors_str.split(', '):
-                            actor = actor.strip()
-                            if actor:
-                                actor_counts[actor] = actor_counts.get(actor, 0) + 1
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute(base_query, params)
+                    for row in cursor_local.fetchall():
+                        actors_str = row.get('actors') if isinstance(row, dict) else (row[0] if len(row) > 0 else None)
+                        if actors_str:
+                            for actor in actors_str.split(', '):
+                                actor = actor.strip()
+                                if actor:
+                                    actor_counts[actor] = actor_counts.get(actor, 0) + 1
                 logger.info(f"[RANDOM] Unique actors found: {len(actor_counts)}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             # Если актеров нет, пропускаем шаг и переходим к финалу
             if not actor_counts:
@@ -4195,45 +4402,69 @@ def register_series_handlers(bot_param):
                 
                 # Получаем любимый жанр из /total
                 fav_genre = None
-                with db_lock:
-                    cursor.execute('''
-                        SELECT m.genres FROM movies m
-                        WHERE m.chat_id = %s AND m.watched = 1
-                        AND NOT (
-                            NOT EXISTS (
-                                SELECT 1 FROM ratings r 
-                                WHERE r.chat_id = m.chat_id 
-                                AND r.film_id = m.id 
-                                AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('''
+                            SELECT m.genres FROM movies m
+                            WHERE m.chat_id = %s AND m.watched = 1
+                            AND NOT (
+                                NOT EXISTS (
+                                    SELECT 1 FROM ratings r 
+                                    WHERE r.chat_id = m.chat_id 
+                                    AND r.film_id = m.id 
+                                    AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                                )
+                                AND EXISTS (
+                                    SELECT 1 FROM ratings r 
+                                    WHERE r.chat_id = m.chat_id 
+                                    AND r.film_id = m.id 
+                                    AND r.is_imported = TRUE
+                                )
                             )
-                            AND EXISTS (
-                                SELECT 1 FROM ratings r 
-                                WHERE r.chat_id = m.chat_id 
-                                AND r.film_id = m.id 
-                                AND r.is_imported = TRUE
-                            )
-                        )
-                    ''', (chat_id,))
-                    genre_counts = {}
-                    for row in cursor.fetchall():
-                        genres_str = row.get('genres') if isinstance(row, dict) else row[0]
-                        if genres_str:
-                            for g in str(genres_str).split(', '):
-                                if g.strip():
-                                    genre_counts[g.strip()] = genre_counts.get(g.strip(), 0) + 1
-                    if genre_counts:
-                        fav_genre = max(genre_counts, key=genre_counts.get)
-                        logger.info(f"[RANDOM KINOPOISK] Любимый жанр: {fav_genre}")
+                        ''', (chat_id,))
+                        genre_counts = {}
+                        for row in cursor_local.fetchall():
+                            genres_str = row.get('genres') if isinstance(row, dict) else row[0]
+                            if genres_str:
+                                for g in str(genres_str).split(', '):
+                                    if g.strip():
+                                        genre_counts[g.strip()] = genre_counts.get(g.strip(), 0) + 1
+                        if genre_counts:
+                            fav_genre = max(genre_counts, key=genre_counts.get)
+                            logger.info(f"[RANDOM KINOPOISK] Любимый жанр: {fav_genre}")
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 # Исключаем фильмы, которые уже в базе
                 exclude_kp_ids = set()
-                with db_lock:
-                    cursor.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND kp_id IS NOT NULL', (chat_id,))
-                    existing_movies = cursor.fetchall()
-                    for movie in existing_movies:
-                        kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
-                        if kp_id_val:
-                            exclude_kp_ids.add(str(kp_id_val))
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND kp_id IS NOT NULL', (chat_id,))
+                        existing_movies = cursor_local.fetchall()
+                        for movie in existing_movies:
+                            kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
+                            if kp_id_val:
+                                exclude_kp_ids.add(str(kp_id_val))
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 # Формируем список запросов: для каждого периода и каждого жанра (если выбрано несколько)
                 search_queries = []
@@ -4480,24 +4711,37 @@ def register_series_handlers(bot_param):
                 
                 # Получаем до 5 случайных фильмов с импортированной оценкой 9-10
                 # Используем UNION для объединения фильмов из базы группы и импортированных оценок
-                with db_lock:
-                    cursor.execute("""
-                        (SELECT r.kp_id, NULL::integer as id
-                        FROM ratings r
-                        WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND r.film_id IS NULL AND r.kp_id IS NOT NULL
-                        ORDER BY RANDOM()
-                        LIMIT 5)
-                        UNION ALL
-                        (SELECT m.kp_id, m.id
-                        FROM movies m
-                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                        WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND m.kp_id IS NOT NULL
-                        ORDER BY RANDOM()
-                        LIMIT 5)
-                    """, (chat_id, user_id, chat_id, user_id))
-                    favorite_films = cursor.fetchall()
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                favorite_films = []
+                try:
+                    with db_lock:
+                        cursor_local.execute("""
+                            (SELECT r.kp_id, NULL::integer as id
+                            FROM ratings r
+                            WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                            AND r.film_id IS NULL AND r.kp_id IS NOT NULL
+                            ORDER BY RANDOM()
+                            LIMIT 5)
+                            UNION ALL
+                            (SELECT m.kp_id, m.id
+                            FROM movies m
+                            JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                            WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                            AND m.kp_id IS NOT NULL
+                            ORDER BY RANDOM()
+                            LIMIT 5)
+                        """, (chat_id, user_id, chat_id, user_id))
+                        favorite_films = cursor_local.fetchall()
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 if not favorite_films:
                     bot.edit_message_text("😔 Не найдено фильмов с оценкой 9-10, импортированных с Кинопоиска.", chat_id, message_id or call.message.message_id)
@@ -4532,14 +4776,26 @@ def register_series_handlers(bot_param):
                 actors = state.get('actors', [])
                 
                 # Исключаем фильмы, которые уже в базе
-                with db_lock:
-                    cursor.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND kp_id IS NOT NULL', (chat_id,))
-                    existing_movies = cursor.fetchall()
-                    exclude_kp_ids = set()
-                    for movie in existing_movies:
-                        kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
-                        if kp_id_val:
-                            exclude_kp_ids.add(str(kp_id_val))
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                exclude_kp_ids = set()
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND kp_id IS NOT NULL', (chat_id,))
+                        existing_movies = cursor_local.fetchall()
+                        for movie in existing_movies:
+                            kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
+                            if kp_id_val:
+                                exclude_kp_ids.add(str(kp_id_val))
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 # Получаем информацию о похожих фильмах через extract_movie_info и фильтруем
                 filtered_films = []
@@ -4622,13 +4878,25 @@ def register_series_handlers(bot_param):
                 
                 # Получаем список kp_id фильмов, которые уже в базе (исключаем их)
                 exclude_kp_ids = set()
-                with db_lock:
-                    cursor.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND kp_id IS NOT NULL', (chat_id,))
-                    existing_movies = cursor.fetchall()
-                    for movie in existing_movies:
-                        kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
-                        if kp_id_val:
-                            exclude_kp_ids.add(str(kp_id_val))
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT DISTINCT kp_id FROM movies WHERE chat_id = %s AND kp_id IS NOT NULL', (chat_id,))
+                        existing_movies = cursor_local.fetchall()
+                        for movie in existing_movies:
+                            kp_id_val = movie.get('kp_id') if isinstance(movie, dict) else (movie[0] if len(movie) > 0 else None)
+                            if kp_id_val:
+                                exclude_kp_ids.add(str(kp_id_val))
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 # Выбираем до 5 фильмов из базы со средней оценкой >= 7.5, которые соответствуют выбранным критериям
                 base_query = """
@@ -4691,9 +4959,22 @@ def register_series_handlers(bot_param):
                 
                 base_query += " ORDER BY RANDOM() LIMIT 5"
                 
-                with db_lock:
-                    cursor.execute(base_query, tuple(params))
-                    base_films = cursor.fetchall()
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                base_films = []
+                try:
+                    with db_lock:
+                        cursor_local.execute(base_query, tuple(params))
+                        base_films = cursor_local.fetchall()
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 if not base_films:
                     bot.edit_message_text("😔 Не удалось найти фильм по заданным критериям в вашей базе.", chat_id, message_id or call.message.message_id)
@@ -4921,9 +5202,22 @@ def register_series_handlers(bot_param):
                 
                 similar_query += " LIMIT 10"
                 
-                with db_lock:
-                    cursor.execute(similar_query, similar_params)
-                    similar_movies = cursor.fetchall()
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                similar_movies = []
+                try:
+                    with db_lock:
+                        cursor_local.execute(similar_query, similar_params)
+                        similar_movies = cursor_local.fetchall()
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 if similar_movies:
                     # Формируем список похожих фильмов
@@ -5019,12 +5313,22 @@ def register_series_handlers(bot_param):
 
             movie_info = extract_movie_info(link)
 
-            conn = get_db_connection()
-            cur = conn.cursor()
-            cur.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            row = None
+            try:
+                with db_lock:
+                    cursor_local.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+                    row = cursor_local.fetchone()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
 
             existing = None
             if row:
@@ -5230,16 +5534,29 @@ def register_series_handlers(bot_param):
                 return
             
             # Получаем информацию о сеансе (включая мероприятия без film_id)
-            with db_lock:
-                cursor.execute('''
-                    SELECT p.id, p.plan_datetime, p.ticket_file_id, p.film_id,
-                           COALESCE(m.title, 'Мероприятие') as title, 
-                           m.kp_id
-                    FROM plans p
-                    LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                    WHERE p.id = %s AND p.chat_id = %s AND p.plan_type = 'cinema'
-                ''', (plan_id, chat_id))
-                plan_row = cursor.fetchone()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            plan_row = None
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT p.id, p.plan_datetime, p.ticket_file_id, p.film_id,
+                               COALESCE(m.title, 'Мероприятие') as title, 
+                               m.kp_id
+                        FROM plans p
+                        LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                        WHERE p.id = %s AND p.chat_id = %s AND p.plan_type = 'cinema'
+                    ''', (plan_id, chat_id))
+                    plan_row = cursor_local.fetchone()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not plan_row:
                 bot.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
@@ -5463,9 +5780,22 @@ def register_series_handlers(bot_param):
             
             # Получаем ticket_file_id (может быть JSON массив или один file_id)
             import json
-            with db_lock:
-                cursor.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                ticket_row = cursor.fetchone()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            ticket_row = None
+            try:
+                with db_lock:
+                    cursor_local.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                    ticket_row = cursor_local.fetchone()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not ticket_row:
                 bot.answer_callback_query(call.id, "❌ Билеты не найдены", show_alert=True)
@@ -5564,9 +5894,22 @@ def register_series_handlers(bot_param):
             plan_id = int(call.data.split(":")[1])
             
             # Получаем текущее время сеанса
-            with db_lock:
-                cursor.execute('SELECT plan_datetime FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                plan_row = cursor.fetchone()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            plan_row = None
+            try:
+                with db_lock:
+                    cursor_local.execute('SELECT plan_datetime FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                    plan_row = cursor_local.fetchone()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not plan_row:
                 bot.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
@@ -5756,18 +6099,30 @@ def register_series_handlers(bot_param):
                     }
                     
                     # Фиксируем в БД, кто бросил кубик
-                    with db_lock:
-                        cursor.execute('''
-                            INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
-                            VALUES (%s, %s, %s, %s, %s)
-                        ''', (
-                            user_id,
-                            username,
-                            'dice_game:thrown',
-                            datetime.now(PLANS_TZ).isoformat(),
-                            chat_id
-                        ))
-                        conn.commit()
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_local.execute('''
+                                INSERT INTO stats (user_id, username, command_or_action, timestamp, chat_id)
+                                VALUES (%s, %s, %s, %s, %s)
+                            ''', (
+                                user_id,
+                                username,
+                                'dice_game:thrown',
+                                datetime.now(PLANS_TZ).isoformat(),
+                                chat_id
+                            ))
+                            conn_local.commit()
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
                     
                     logger.info(f"[DICE GAME] Пользователь {user_id} ({username}) бросил кубик в чате {chat_id}, message_id={dice_msg.message_id}")
                     logger.info(f"[DICE GAME] Текущее состояние dice_game_state[{chat_id}]: participants={list(game_state.get('participants', {}).keys())}, dice_messages={list(game_state.get('dice_messages', {}).keys())}")
@@ -6129,37 +6484,76 @@ def handle_kinopoisk_link(message):
         logger.info(f"[KINOPOISK LINK] Данные получены: {info.get('title')} (сериал: {info.get('is_series')})")
         
         # Проверяем наличие в базе (таблица movies — как у тебя везде)
-        with db_lock:
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-            row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        row = None
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         if row:
             # Уже в базе — обновляем актуальными данными
             film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if not isinstance(row, dict) else row.get('id')
             logger.info(f"[KINOPOISK LINK] Фильм в базе (id={film_id}) — обновляем данные")
             
-            with db_lock:
-                cursor.execute('''
-                    UPDATE movies 
-                    SET title = %s, year = %s, genres = %s, description = %s, 
-                        director = %s, actors = %s, is_series = %s, link = %s
-                    WHERE id = %s
-                ''', (
-                    info.get('title'),
-                    info.get('year'),
-                    info.get('genres', '—'),
-                    info.get('description', 'Нет описания'),
-                    info.get('director', 'Не указан'),
-                    info.get('actors', '—'),
-                    1 if info.get('is_series') else 0,
-                    link,
-                    film_id
-                ))
-                conn.commit()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        UPDATE movies 
+                        SET title = %s, year = %s, genres = %s, description = %s, 
+                            director = %s, actors = %s, is_series = %s, link = %s
+                        WHERE id = %s
+                    ''', (
+                        info.get('title'),
+                        info.get('year'),
+                        info.get('genres', '—'),
+                        info.get('description', 'Нет описания'),
+                        info.get('director', 'Не указан'),
+                        info.get('actors', '—'),
+                        1 if info.get('is_series') else 0,
+                        link,
+                        film_id
+                    ))
+                    conn_local.commit()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             # Получаем watched для existing
-            cursor.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
-            movie_row = cursor.fetchone()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            movie_row = None
+            try:
+                with db_lock:
+                    cursor_local.execute("SELECT title, watched FROM movies WHERE id = %s", (film_id,))
+                    movie_row = cursor_local.fetchone()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             title_db = movie_row[0] if not isinstance(movie_row, dict) else movie_row.get('title')
             watched = movie_row[1] if not isinstance(movie_row, dict) else movie_row.get('watched')
             
@@ -6196,35 +6590,48 @@ def handle_kinopoisk_link(message):
         
 def ensure_movie_in_database(kp_id, title=None):
     """Убеждается, что фильм есть в базе данных. Если нет - добавляет его."""
-    with db_lock:
-        cursor.execute("SELECT id FROM films WHERE kp_id = %s", (str(kp_id),))
-        existing = cursor.fetchone()
-        
-        if not existing:
-            # Фильма нет в базе, добавляем его
-            link = f"https://kinopoisk.ru/film/{kp_id}"
-            info = extract_movie_info(link)
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    existing = None
+    try:
+        with db_lock:
+            cursor_local.execute("SELECT id FROM films WHERE kp_id = %s", (str(kp_id),))
+            existing = cursor_local.fetchone()
             
-            if info:
-                cursor.execute("""
-                    INSERT INTO films (kp_id, title, year, genres, director, actors, description, is_series)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                """, (
-                    kp_id,
-                    info.get('title') or title,
-                    info.get('year'),
-                    info.get('genres'),
-                    info.get('director'),
-                    info.get('actors'),
-                    info.get('description'),
-                    info.get('is_series', False)
-                ))
-                conn.commit()
-                logger.info(f"[ENSURE MOVIE] Фильм {kp_id} добавлен в базу")
-            else:
-                logger.warning(f"[ENSURE MOVIE] Не удалось получить информацию о фильме {kp_id}")
-        
-        return existing or cursor.lastrowid
+            if not existing:
+                # Фильма нет в базе, добавляем его
+                link = f"https://kinopoisk.ru/film/{kp_id}"
+                info = extract_movie_info(link)
+                
+                if info:
+                    cursor_local.execute("""
+                        INSERT INTO films (kp_id, title, year, genres, director, actors, description, is_series)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    """, (
+                        kp_id,
+                        info.get('title') or title,
+                        info.get('year'),
+                        info.get('genres'),
+                        info.get('director'),
+                        info.get('actors'),
+                        info.get('description'),
+                        info.get('is_series', False)
+                    ))
+                    conn_local.commit()
+                    logger.info(f"[ENSURE MOVIE] Фильм {kp_id} добавлен в базу")
+                else:
+                    logger.warning(f"[ENSURE MOVIE] Не удалось получить информацию о фильме {kp_id}")
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+    
+    return existing or (cursor_local.lastrowid if 'cursor_local' in locals() else None)
 
 # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
 @bot.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
@@ -6408,21 +6815,29 @@ def add_film_from_search_callback(call):
                 return
             
             # Проверяем, есть ли фильм уже в базе
-            from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-            conn = get_db_connection()
-            cursor = get_db_cursor()
-            
             existing = None
             # Приводим kp_id к строке для корректного поиска в БД
             kp_id_str = str(kp_id)
-            with db_lock:
-                cursor.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id_str))
-                row = cursor.fetchone()
-                if row:
-                    film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    title = row.get('title') if isinstance(row, dict) else row[1]
-                    watched = row.get('watched') if isinstance(row, dict) else row[2]
-                    existing = (film_id, title, watched)
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute("SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, kp_id_str))
+                    row = cursor_local.fetchone()
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        title = row.get('title') if isinstance(row, dict) else row[1]
+                        watched = row.get('watched') if isinstance(row, dict) else row[2]
+                        existing = (film_id, title, watched)
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             # Показываем карточку фильма с кнопками (всегда, даже если просмотрен)
             show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_str, existing, message_id=message_id, message_thread_id=message_thread_id)
@@ -6447,44 +6862,61 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
     logger.info(f"[ENSURE MOVIE] ===== START: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}, link={link}")
     try:
         logger.info(f"[ENSURE MOVIE] Входим в db_lock")
-        with db_lock:
-            logger.info(f"[ENSURE MOVIE] db_lock получен, проверяю существование фильма")
-            # Проверяем, существует ли фильм
-            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-            row = cursor.fetchone()
-            
-            if row:
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                logger.info(f"[ENSURE MOVIE] Фильм уже в базе: film_id={film_id}, kp_id={kp_id}")
-                logger.info(f"[ENSURE MOVIE] ===== END (уже в базе) =====")
-                return film_id, False
-            
-            # Добавляем фильм в базу
-            logger.info(f"[ENSURE MOVIE] Фильм не найден, добавляю в БД")
-            logger.info(f"[ENSURE MOVIE] Данные: title={info.get('title', 'N/A')}, year={info.get('year', 'N/A')}, is_series={info.get('is_series', False)}")
-            cursor.execute('''
-                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'link')
-                ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
-                RETURNING id
-            ''', (chat_id, link, str(kp_id), info['title'], info['year'], info['genres'], info['description'], 
-                  info['director'], info['actors'], 1 if info.get('is_series') else 0, user_id))
-            
-            result = cursor.fetchone()
-            logger.info(f"[ENSURE MOVIE] INSERT выполнен, result={result}")
-            film_id = result.get('id') if isinstance(result, dict) else result[0]
-            logger.info(f"[ENSURE MOVIE] film_id извлечен: {film_id}")
-            conn.commit()
-            logger.info(f"[ENSURE MOVIE] commit выполнен")
-            
-            logger.info(f"[ENSURE MOVIE] Фильм добавлен в базу: film_id={film_id}, kp_id={kp_id}, title={info['title']}")
-            logger.info(f"[ENSURE MOVIE] ===== END (добавлен) =====")
-            return film_id, True
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                logger.info(f"[ENSURE MOVIE] db_lock получен, проверяю существование фильма")
+                # Проверяем, существует ли фильм
+                cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                row = cursor_local.fetchone()
+                
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    logger.info(f"[ENSURE MOVIE] Фильм уже в базе: film_id={film_id}, kp_id={kp_id}")
+                    logger.info(f"[ENSURE MOVIE] ===== END (уже в базе) =====")
+                    return film_id, False
+                
+                # Добавляем фильм в базу
+                logger.info(f"[ENSURE MOVIE] Фильм не найден, добавляю в БД")
+                logger.info(f"[ENSURE MOVIE] Данные: title={info.get('title', 'N/A')}, year={info.get('year', 'N/A')}, is_series={info.get('is_series', False)}")
+                cursor_local.execute('''
+                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'link')
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
+                    RETURNING id
+                ''', (chat_id, link, str(kp_id), info['title'], info['year'], info['genres'], info['description'], 
+                      info['director'], info['actors'], 1 if info.get('is_series') else 0, user_id))
+                
+                result = cursor_local.fetchone()
+                logger.info(f"[ENSURE MOVIE] INSERT выполнен, result={result}")
+                film_id = result.get('id') if isinstance(result, dict) else result[0]
+                logger.info(f"[ENSURE MOVIE] film_id извлечен: {film_id}")
+                conn_local.commit()
+                logger.info(f"[ENSURE MOVIE] commit выполнен")
+                
+                logger.info(f"[ENSURE MOVIE] Фильм добавлен в базу: film_id={film_id}, kp_id={kp_id}, title={info['title']}")
+                logger.info(f"[ENSURE MOVIE] ===== END (добавлен) =====")
+                return film_id, True
+        except Exception as e:
+            logger.error(f"[ENSURE MOVIE] КРИТИЧЕСКАЯ ОШИБКА при добавлении фильма в базу: {e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            raise
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
             
     except Exception as e:
         logger.error(f"[ENSURE MOVIE] КРИТИЧЕСКАЯ ОШИБКА при добавлении фильма в базу: {e}", exc_info=True)
-        try:
-            conn.rollback()
             logger.info(f"[ENSURE MOVIE] rollback выполнен")
         except Exception as rollback_e:
             logger.error(f"[ENSURE MOVIE] Ошибка при rollback: {rollback_e}")
@@ -6544,11 +6976,13 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 # Импортированные оценки НЕ добавляют фильмы в базу группы
                 # Они существуют только как оценки в таблице ratings с is_imported = TRUE
                 # Для импортированных оценок используем film_id = NULL или создаем виртуальный film_id
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
                 try:
                     with db_lock:
                         # Проверяем, есть ли фильм в базе группы (добавлен через бота)
-                        cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                        film_row = cursor.fetchone()
+                        cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                        film_row = cursor_local.fetchone()
                         
                         if film_row:
                             # Фильм уже есть в базе группы - можем добавить импортированную оценку
@@ -6556,31 +6990,31 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             logger.debug(f"[IMPORT] Фильм {kp_id} уже существует в базе группы, film_id={film_id}")
                             
                             # Проверяем, есть ли уже оценка у этого пользователя для этого фильма
-                            cursor.execute('''
+                            cursor_local.execute('''
                                 SELECT rating FROM ratings 
                                 WHERE chat_id = %s AND film_id = %s AND user_id = %s
                             ''', (chat_id, film_id, user_id))
-                            existing_rating = cursor.fetchone()
+                            existing_rating = cursor_local.fetchone()
                             
                             if existing_rating:
                                 # Оценка уже есть, пропускаем
-                                cursor.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
-                                title_row = cursor.fetchone()
+                                cursor_local.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
+                                title_row = cursor_local.fetchone()
                                 title = title_row.get('title') if isinstance(title_row, dict) else (title_row[0] if title_row else 'Неизвестно')
                                 logger.debug(f"[IMPORT] Фильм {title} уже имеет оценку, пропускаем")
                                 continue
                             
                             # Добавляем импортированную оценку для существующего фильма
-                            cursor.execute('''
+                            cursor_local.execute('''
                                 INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id, year, genres)
                                 VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s)
                                 ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE, kp_id = EXCLUDED.kp_id, year = EXCLUDED.year, genres = EXCLUDED.genres
                             ''', (chat_id, film_id, user_id, user_rating, kp_id, film_year, film_genres_str))
-                            conn.commit()
+                            conn_local.commit()
                             
                             imported_count += 1
-                            cursor.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
-                            title_row = cursor.fetchone()
+                            cursor_local.execute('SELECT title FROM movies WHERE id = %s', (film_id,))
+                            title_row = cursor_local.fetchone()
                             title = title_row.get('title') if isinstance(title_row, dict) else (title_row[0] if title_row else 'Неизвестно')
                             logger.info(f"[IMPORT] Импортирован фильм {title} с оценкой {user_rating}")
                         else:
@@ -6589,28 +7023,41 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             title = item.get('nameRu') or item.get('nameEn') or 'Без названия'
                             
                             # Проверяем, есть ли уже импортированная оценка для этого kp_id и пользователя
-                            cursor.execute('''
+                            cursor_local.execute('''
                                 SELECT rating FROM ratings 
                                 WHERE chat_id = %s AND kp_id = %s AND user_id = %s AND film_id IS NULL
                             ''', (chat_id, kp_id, user_id))
-                            existing_imported_rating = cursor.fetchone()
+                            existing_imported_rating = cursor_local.fetchone()
                             
                             if existing_imported_rating:
                                 logger.debug(f"[IMPORT] Импортированная оценка для фильма {kp_id} ({title}) уже существует, пропускаем")
                                 continue
                             
                             # Добавляем импортированную оценку БЕЗ film_id (film_id = NULL)
-                            cursor.execute('''
+                            cursor_local.execute('''
                                 INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id, year, genres)
                                 VALUES (%s, NULL, %s, %s, TRUE, %s, %s, %s)
                             ''', (chat_id, user_id, user_rating, kp_id, film_year, film_genres_str))
-                            conn.commit()
+                            conn_local.commit()
                             
                             imported_count += 1
                             logger.info(f"[IMPORT] Импортирован фильм {title} (kp_id={kp_id}) с оценкой {user_rating} (без добавления в базу группы)")
                 except Exception as db_error:
                     logger.error(f"[IMPORT] Ошибка при работе с БД для фильма {kp_id}: {db_error}", exc_info=True)
+                    try:
+                        conn_local.rollback()
+                    except:
+                        pass
                     continue
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
             
             # Если получили меньше 20 фильмов, значит страницы закончились
             if len(items) < 20:
@@ -6738,41 +7185,56 @@ def handle_clean_confirm_internal(message):
     
     target = state.get('target')
     chat_id = message.chat.id
-    conn = get_db_connection()
-    cursor = get_db_cursor()
     
     logger.info(f"[CLEAN CONFIRM] ===== START: user_id={user_id}, target={target}, chat_id={chat_id}")
     
     if target == 'user':
         # Удаление всех данных пользователя
         logger.info(f"[CLEAN CONFIRM] Начало удаления данных пользователя: user_id={user_id}, chat_id={chat_id}")
-        with db_lock:
-            # Удаляем оценки пользователя (но не импортированные - они удаляются отдельной командой)
-            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, user_id))
-            ratings_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено оценок: {ratings_deleted}")
-            
-            # Удаляем планы пользователя
-            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-            plans_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено планов: {plans_deleted}")
-            
-            # Удаляем отметки просмотра пользователя
-            cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-            watched_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено отметок просмотра: {watched_deleted}")
-            
-            # Удаляем статистику пользователя
-            cursor.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
-            stats_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено статистики: {stats_deleted}")
-            
-            # Удаляем настройки пользователя
-            cursor.execute('DELETE FROM settings WHERE chat_id = %s AND key LIKE %s', (user_id, 'user_%'))
-            settings_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено настроек: {settings_deleted}")
-            
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        ratings_deleted = 0
+        plans_deleted = 0
+        watched_deleted = 0
+        stats_deleted = 0
+        settings_deleted = 0
+        try:
+            with db_lock:
+                # Удаляем оценки пользователя (но не импортированные - они удаляются отдельной командой)
+                cursor_local.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, user_id))
+                ratings_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено оценок: {ratings_deleted}")
+                
+                # Удаляем планы пользователя
+                cursor_local.execute('DELETE FROM plans WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                plans_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено планов: {plans_deleted}")
+                
+                # Удаляем отметки просмотра пользователя
+                cursor_local.execute('DELETE FROM watched_movies WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                watched_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено отметок просмотра: {watched_deleted}")
+                
+                # Удаляем статистику пользователя
+                cursor_local.execute('DELETE FROM stats WHERE chat_id = %s AND user_id = %s', (chat_id, user_id))
+                stats_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено статистики: {stats_deleted}")
+                
+                # Удаляем настройки пользователя
+                cursor_local.execute('DELETE FROM settings WHERE chat_id = %s AND key LIKE %s', (user_id, 'user_%'))
+                settings_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено настроек: {settings_deleted}")
+                
+                conn_local.commit()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Обнуление базы данных пользователя"
         result_text = f"{action_text}\n\nУдалено:\n"
@@ -6799,11 +7261,24 @@ def handle_clean_confirm_internal(message):
     elif target == 'imported_ratings':
         # Удаление импортированных оценок пользователя
         logger.info(f"[CLEAN CONFIRM] Начало удаления импортированных оценок: user_id={user_id}, chat_id={chat_id}")
-        with db_lock:
-            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s AND is_imported = TRUE', (chat_id, user_id))
-            imported_deleted = cursor.rowcount
-            conn.commit()
-            logger.info(f"[CLEAN CONFIRM] Удалено импортированных оценок: {imported_deleted}")
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        imported_deleted = 0
+        try:
+            with db_lock:
+                cursor_local.execute('DELETE FROM ratings WHERE chat_id = %s AND user_id = %s AND is_imported = TRUE', (chat_id, user_id))
+                imported_deleted = cursor_local.rowcount
+                conn_local.commit()
+                logger.info(f"[CLEAN CONFIRM] Удалено импортированных оценок: {imported_deleted}")
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Удаление импортированных оценок с Кинопоиска"
         result_text = f"{action_text}\n\nУдалено импортированных оценок: {imported_deleted}"
@@ -6825,32 +7300,50 @@ def handle_clean_confirm_internal(message):
     elif target == 'chat':
         # Удаление всех данных чата (требует голосования в группах)
         logger.info(f"[CLEAN CONFIRM] Начало обнуления базы данных чата: chat_id={chat_id}")
-        with db_lock:
-            cursor.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
-            ratings_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено оценок: {ratings_deleted}")
-            
-            cursor.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
-            plans_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено планов: {plans_deleted}")
-            
-            cursor.execute('DELETE FROM watched_movies WHERE chat_id = %s', (chat_id,))
-            watched_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено отметок просмотра: {watched_deleted}")
-            
-            cursor.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
-            movies_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено фильмов: {movies_deleted}")
-            
-            cursor.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
-            stats_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено статистики: {stats_deleted}")
-            
-            cursor.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
-            settings_deleted = cursor.rowcount
-            logger.info(f"[CLEAN CONFIRM] Удалено настроек: {settings_deleted}")
-            
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        ratings_deleted = 0
+        plans_deleted = 0
+        watched_deleted = 0
+        movies_deleted = 0
+        stats_deleted = 0
+        settings_deleted = 0
+        try:
+            with db_lock:
+                cursor_local.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
+                ratings_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено оценок: {ratings_deleted}")
+                
+                cursor_local.execute('DELETE FROM plans WHERE chat_id = %s', (chat_id,))
+                plans_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено планов: {plans_deleted}")
+                
+                cursor_local.execute('DELETE FROM watched_movies WHERE chat_id = %s', (chat_id,))
+                watched_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено отметок просмотра: {watched_deleted}")
+                
+                cursor_local.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
+                movies_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено фильмов: {movies_deleted}")
+                
+                cursor_local.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
+                stats_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено статистики: {stats_deleted}")
+                
+                cursor_local.execute('DELETE FROM settings WHERE chat_id = %s', (chat_id,))
+                settings_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено настроек: {settings_deleted}")
+                
+                conn_local.commit()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Обнуление базы данных чата"
         result_text = f"{action_text}\n\nУдалено:\n"
@@ -6878,17 +7371,30 @@ def handle_clean_confirm_internal(message):
     elif target == 'unwatched_movies':
         # Удаление непросмотренных фильмов
         logger.info(f"[CLEAN CONFIRM] Начало удаления непросмотренных фильмов: user_id={user_id}, chat_id={chat_id}")
-        with db_lock:
-            cursor.execute('''
-                DELETE FROM movies 
-                WHERE chat_id = %s 
-                  AND watched = 0
-                  AND id NOT IN (SELECT DISTINCT film_id FROM plans WHERE chat_id = %s AND film_id IS NOT NULL)
-                  AND id NOT IN (SELECT DISTINCT film_id FROM watched_movies WHERE chat_id = %s AND film_id IS NOT NULL)
-            ''', (chat_id, chat_id, chat_id))
-            movies_deleted = cursor.rowcount
-            conn.commit()
-            logger.info(f"[CLEAN CONFIRM] Удалено непросмотренных фильмов: {movies_deleted}")
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        movies_deleted = 0
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    DELETE FROM movies 
+                    WHERE chat_id = %s 
+                      AND watched = 0
+                      AND id NOT IN (SELECT DISTINCT film_id FROM plans WHERE chat_id = %s AND film_id IS NOT NULL)
+                      AND id NOT IN (SELECT DISTINCT film_id FROM watched_movies WHERE chat_id = %s AND film_id IS NOT NULL)
+                ''', (chat_id, chat_id, chat_id))
+                movies_deleted = cursor_local.rowcount
+                conn_local.commit()
+                logger.info(f"[CLEAN CONFIRM] Удалено непросмотренных фильмов: {movies_deleted}")
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         action_text = "✅ ДЕЙСТВИЕ ВЫПОЛНЕНО: Удаление непросмотренных фильмов"
         result_text = f"{action_text}\n\nУдалено непросмотренных фильмов: {movies_deleted}"

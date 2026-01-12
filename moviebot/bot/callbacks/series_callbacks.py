@@ -28,8 +28,6 @@ from moviebot.api.kinopoisk_api import get_facts
 # show_film_info_with_buttons больше не используется - обновляем только кнопку подписки без API запросов
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 def register_series_callbacks(bot):
     """Регистрирует callback handlers для сериалов"""
@@ -524,11 +522,23 @@ def register_series_callbacks(bot):
                 
                 # Получаем link из БД
                 link = None
-                with db_lock:
-                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                    link_row = cursor.fetchone()
-                    if link_row:
-                        link = link_row.get('link') if isinstance(link_row, dict) else link_row[0]
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                        link_row = cursor_local.fetchone()
+                        if link_row:
+                            link = link_row.get('link') if isinstance(link_row, dict) else link_row[0]
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 if not link:
                     link = f"https://www.kinopoisk.ru/series/{kp_id}/"
@@ -537,19 +547,31 @@ def register_series_callbacks(bot):
                 info = extract_movie_info(link)
                 if not info:
                     # Если API не сработал, получаем из БД
-                    with db_lock:
-                        cursor.execute('SELECT title, year, genres, description, director, actors, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                        db_row = cursor.fetchone()
-                        if db_row:
-                            info = {
-                                'title': db_row.get('title') if isinstance(db_row, dict) else db_row[0],
-                                'year': db_row.get('year') if isinstance(db_row, dict) else (db_row[1] if len(db_row) > 1 else None),
-                                'genres': db_row.get('genres') if isinstance(db_row, dict) else (db_row[2] if len(db_row) > 2 else None),
-                                'description': db_row.get('description') if isinstance(db_row, dict) else (db_row[3] if len(db_row) > 3 else None),
-                                'director': db_row.get('director') if isinstance(db_row, dict) else (db_row[4] if len(db_row) > 4 else None),
-                                'actors': db_row.get('actors') if isinstance(db_row, dict) else (db_row[5] if len(db_row) > 5 else None),
-                                'is_series': bool(db_row.get('is_series') if isinstance(db_row, dict) else (db_row[6] if len(db_row) > 6 else 0))
-                            }
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_local.execute('SELECT title, year, genres, description, director, actors, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                            db_row = cursor_local.fetchone()
+                            if db_row:
+                                info = {
+                                    'title': db_row.get('title') if isinstance(db_row, dict) else db_row[0],
+                                    'year': db_row.get('year') if isinstance(db_row, dict) else (db_row[1] if len(db_row) > 1 else None),
+                                    'genres': db_row.get('genres') if isinstance(db_row, dict) else (db_row[2] if len(db_row) > 2 else None),
+                                    'description': db_row.get('description') if isinstance(db_row, dict) else (db_row[3] if len(db_row) > 3 else None),
+                                    'director': db_row.get('director') if isinstance(db_row, dict) else (db_row[4] if len(db_row) > 4 else None),
+                                    'actors': db_row.get('actors') if isinstance(db_row, dict) else (db_row[5] if len(db_row) > 5 else None),
+                                    'is_series': bool(db_row.get('is_series') if isinstance(db_row, dict) else (db_row[6] if len(db_row) > 6 else 0))
+                                }
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
                 
                 if info:
                     message_id = call.message.message_id if call.message else None
@@ -619,26 +641,38 @@ def register_series_callbacks(bot):
                 return
             
             # Получение film_id
-            with db_lock:
-                cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                row = cursor.fetchone()
-                if not row:
-                    logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден для kp_id={kp_id}")
-                    raise ValueError("Сериал не найден в БД")
-                
-                film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if isinstance(row, tuple) else row.get('id')
-                title = row[1] if isinstance(row, tuple) else row.get('title')
-                logger.info(f"[SERIES UNSUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
-                
-                # Отписываемся
-                logger.info(f"[SERIES UNSUBSCRIBE] Отписка от сериала: user_id={user_id}, film_id={film_id}")
-                cursor.execute('''
-                    UPDATE series_subscriptions 
-                    SET subscribed = FALSE 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                ''', (chat_id, film_id, user_id))
-                conn.commit()
-                logger.info(f"[SERIES UNSUBSCRIBE] Отписка выполнена в БД")
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                    row = cursor_local.fetchone()
+                    if not row:
+                        logger.error(f"[SERIES UNSUBSCRIBE] Сериал не найден для kp_id={kp_id}")
+                        raise ValueError("Сериал не найден в БД")
+                    
+                    film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if isinstance(row, tuple) else row.get('id')
+                    title = row[1] if isinstance(row, tuple) else row.get('title')
+                    logger.info(f"[SERIES UNSUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
+                    
+                    # Отписываемся
+                    logger.info(f"[SERIES UNSUBSCRIBE] Отписка от сериала: user_id={user_id}, film_id={film_id}")
+                    cursor_local.execute('''
+                        UPDATE series_subscriptions 
+                        SET subscribed = FALSE 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                    ''', (chat_id, film_id, user_id))
+                    conn_local.commit()
+                    logger.info(f"[SERIES UNSUBSCRIBE] Отписка выполнена в БД")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             logger.info(f"[SERIES UNSUBSCRIBE] Пользователь {user_id} отписался от сериала (kp_id={kp_id})")
             
@@ -650,11 +684,23 @@ def register_series_callbacks(bot):
                 
                 # Получаем link из БД
                 link = None
-                with db_lock:
-                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                    link_row = cursor.fetchone()
-                    if link_row:
-                        link = link_row.get('link') if isinstance(link_row, dict) else link_row[0]
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                        link_row = cursor_local.fetchone()
+                        if link_row:
+                            link = link_row.get('link') if isinstance(link_row, dict) else link_row[0]
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 if not link:
                     link = f"https://www.kinopoisk.ru/series/{kp_id}/"
@@ -663,10 +709,13 @@ def register_series_callbacks(bot):
                 info = extract_movie_info(link)
                 if not info:
                     # Если API не сработал, получаем из БД
-                    with db_lock:
-                        cursor.execute('SELECT title, year, genres, description, director, actors, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                        db_row = cursor.fetchone()
-                        if db_row:
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_local.execute('SELECT title, year, genres, description, director, actors, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                            db_row = cursor_local.fetchone()
+                            if db_row:
                             info = {
                                 'title': db_row.get('title') if isinstance(db_row, dict) else db_row[0],
                                 'year': db_row.get('year') if isinstance(db_row, dict) else (db_row[1] if len(db_row) > 1 else None),
@@ -1096,13 +1145,26 @@ def rate_film_callback(call):
         title = 'Фильм'
         is_series = False
 
-        with db_lock:
-            cursor.execute('''
-                SELECT id, title, is_series 
-                FROM movies 
-                WHERE chat_id = %s AND kp_id = %s
-            ''', (chat_id, kp_id))
-            row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        row = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT id, title, is_series 
+                    FROM movies 
+                    WHERE chat_id = %s AND kp_id = %s
+                ''', (chat_id, kp_id))
+                row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
         if row:
             film_id = row[0] if isinstance(row, tuple) else row.get('id')
@@ -1133,13 +1195,26 @@ def rate_film_callback(call):
             logger.info(f"[RATE FILM] Добавлено в rating_messages: msg_id={msg.message_id} → kp_id:{kp_id}")
             return
 
-        with db_lock:
-            cursor.execute('''
-                SELECT rating FROM ratings 
-                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                AND (is_imported = FALSE OR is_imported IS NULL)
-            ''', (chat_id, film_id, user_id))
-            existing = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        existing = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT rating FROM ratings 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    AND (is_imported = FALSE OR is_imported IS NULL)
+                ''', (chat_id, film_id, user_id))
+                existing = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
         if existing:
             rating = existing[0] if isinstance(existing, tuple) else existing.get('rating')

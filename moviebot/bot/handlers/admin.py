@@ -17,8 +17,6 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 # ID владельца бота
 OWNER_ID = 301810276
@@ -35,25 +33,27 @@ def cancel_subscription_by_id(target_id, is_group=False):
     Returns:
         (success: bool, message: str, count: int)
     """
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
     try:
         with db_lock:
             if is_group:
                 # Отменяем групповую подписку
-                cursor.execute("""
+                cursor_local.execute("""
                     UPDATE subscriptions 
                     SET is_active = FALSE, cancelled_at = %s
                     WHERE chat_id = %s AND subscription_type = 'group'
                 """, (datetime.now(pytz.UTC), target_id))
             else:
                 # Отменяем персональную подписку
-                cursor.execute("""
+                cursor_local.execute("""
                     UPDATE subscriptions 
                     SET is_active = FALSE, cancelled_at = %s
                     WHERE user_id = %s AND subscription_type = 'personal'
                 """, (datetime.now(pytz.UTC), target_id))
             
-            count = cursor.rowcount
-            conn.commit()
+            count = cursor_local.rowcount
+            conn_local.commit()
             
             if count > 0:
                 return True, f"Отменено подписок: {count}", count
@@ -61,8 +61,20 @@ def cancel_subscription_by_id(target_id, is_group=False):
                 return False, "Подписки не найдены", 0
     except Exception as e:
         logger.error(f"Ошибка при отмене подписки: {e}", exc_info=True)
-        conn.rollback()
+        try:
+            conn_local.rollback()
+        except:
+            pass
         return False, f"Ошибка при отмене подписки: {e}", 0
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 @bot.message_handler(commands=['unsubscribe'])
@@ -392,15 +404,27 @@ def handle_unsubscribe_callback(call):
         
         elif action == "paid":
             # Показываем список всех подписок, оплаченных пользователем
-            with db_lock:
-                cursor.execute("""
-                    SELECT s.* FROM subscriptions s
-                    INNER JOIN payments p ON s.payment_id = p.payment_id
-                    WHERE p.user_id = %s AND s.is_active = TRUE 
-                    AND (s.expires_at IS NULL OR s.expires_at > NOW())
-                    ORDER BY s.created_at DESC
-                """, (target_user_id,))
-                subscriptions = cursor.fetchall()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute("""
+                        SELECT s.* FROM subscriptions s
+                        INNER JOIN payments p ON s.payment_id = p.payment_id
+                        WHERE p.user_id = %s AND s.is_active = TRUE 
+                        AND (s.expires_at IS NULL OR s.expires_at > NOW())
+                        ORDER BY s.created_at DESC
+                    """, (target_user_id,))
+                    subscriptions = cursor_local.fetchall()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not subscriptions:
                 text = f"💳 <b>Оплаченные подписки пользователя {target_user_id}</b>\n\n"

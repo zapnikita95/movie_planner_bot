@@ -26,8 +26,6 @@ from datetime import datetime, timedelta
 import pytz
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 
 def rubles_to_stars(rubles):
@@ -2684,15 +2682,25 @@ def register_payment_callbacks(bot_instance):
                             # Обновляем существующую подписку
                             update_subscription_price(next_sub_id, all_price)
                             # Обновляем plan_type и period_type
-                            conn = get_db_connection()
-                            cursor = get_db_cursor()
-                            with db_lock:
-                                cursor.execute(
-                                    'UPDATE subscriptions SET plan_type = %s, period_type = %s, is_active = TRUE WHERE id = %s',
-                                    ('all', period_type, next_sub_id)
-                                )
-                                conn.commit()
-                            logger.info(f"[PAYMENT] Обновлена подписка {next_sub_id} на 'Все режимы', цена: {all_price}₽, period_type: {period_type}")
+                            conn_local = get_db_connection()
+                            cursor_local = get_db_cursor()
+                            try:
+                                with db_lock:
+                                    cursor_local.execute(
+                                        'UPDATE subscriptions SET plan_type = %s, period_type = %s, is_active = TRUE WHERE id = %s',
+                                        ('all', period_type, next_sub_id)
+                                    )
+                                    conn_local.commit()
+                                logger.info(f"[PAYMENT] Обновлена подписка {next_sub_id} на 'Все режимы', цена: {all_price}₽, period_type: {period_type}")
+                            finally:
+                                try:
+                                    cursor_local.close()
+                                except:
+                                    pass
+                                try:
+                                    conn_local.close()
+                                except:
+                                    pass
                             
                             next_payment_date = next_sub.get('next_payment_date')
                             if not next_payment_date:
@@ -5954,15 +5962,27 @@ def register_payment_callbacks(bot_instance):
                 if not sub_id or sub_id <= 0:
                     logger.info(f"[PAYMENT CANCEL] Виртуальная подписка (id={sub_id}), деактивируем через UPDATE по chat_id и user_id")
                     # Для виртуальных подписок деактивируем все активные подписки этого типа для пользователя
-                    # Используем глобальные cursor и conn, которые уже определены в начале файла
-                    with db_lock:
-                        cursor.execute("""
-                            UPDATE subscriptions 
-                            SET is_active = FALSE, cancelled_at = NOW()
-                            WHERE chat_id = %s AND user_id = %s AND subscription_type = %s AND is_active = TRUE
-                        """, (chat_id, user_id, sub_type))
-                        conn.commit()
-                        rows_updated = cursor.rowcount
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    rows_updated = 0
+                    try:
+                        with db_lock:
+                            cursor_local.execute("""
+                                UPDATE subscriptions 
+                                SET is_active = FALSE, cancelled_at = NOW()
+                                WHERE chat_id = %s AND user_id = %s AND subscription_type = %s AND is_active = TRUE
+                            """, (chat_id, user_id, sub_type))
+                            conn_local.commit()
+                            rows_updated = cursor_local.rowcount
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
                 
                     if rows_updated > 0:
                         logger.info(f"[PAYMENT CANCEL] Деактивировано {rows_updated} виртуальных подписок")
@@ -6329,33 +6349,70 @@ def handle_successful_payment(message):
         
         # Обновляем платеж в БД, добавляя telegram_payment_charge_id
         if telegram_payment_charge_id:
-            with db_lock:
-                cursor.execute("""
-                    UPDATE payments 
-                    SET telegram_payment_charge_id = %s, status = 'succeeded', updated_at = NOW()
-                    WHERE payment_id = %s
-                """, (telegram_payment_charge_id, payment_id))
-                conn.commit()
-                logger.info(f"[SUCCESSFUL PAYMENT] ✅ Обновлен платеж: payment_id={payment_id}, telegram_payment_charge_id={telegram_payment_charge_id[:50]}...")
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute("""
+                        UPDATE payments 
+                        SET telegram_payment_charge_id = %s, status = 'succeeded', updated_at = NOW()
+                        WHERE payment_id = %s
+                    """, (telegram_payment_charge_id, payment_id))
+                    conn_local.commit()
+                    logger.info(f"[SUCCESSFUL PAYMENT] ✅ Обновлен платеж: payment_id={payment_id}, telegram_payment_charge_id={telegram_payment_charge_id[:50]}...")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
         else:
             logger.warning(f"[SUCCESSFUL PAYMENT] telegram_payment_charge_id отсутствует в successful_payment")
             # Обновляем статус платежа на succeeded даже без charge_id
-            with db_lock:
-                cursor.execute("""
-                    UPDATE payments 
-                    SET status = 'succeeded', updated_at = NOW()
-                    WHERE payment_id = %s
-                """, (payment_id,))
-                conn.commit()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute("""
+                        UPDATE payments 
+                        SET status = 'succeeded', updated_at = NOW()
+                        WHERE payment_id = %s
+                    """, (payment_id,))
+                    conn_local.commit()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
         
         # Получаем данные платежа для создания подписки
-        with db_lock:
-            cursor.execute("""
-                SELECT user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount
-                FROM payments 
-                WHERE payment_id = %s
-            """, (payment_id,))
-            payment_row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        payment_row = None
+        try:
+            with db_lock:
+                cursor_local.execute("""
+                    SELECT user_id, chat_id, subscription_type, plan_type, period_type, group_size, amount
+                    FROM payments 
+                    WHERE payment_id = %s
+                """, (payment_id,))
+                payment_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         if not payment_row:
             logger.error(f"[SUCCESSFUL PAYMENT] Платеж {payment_id} не найден в БД")

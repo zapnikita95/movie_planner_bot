@@ -14,8 +14,6 @@ from moviebot.states import user_edit_state
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 
 @bot.message_handler(commands=['edit'])
@@ -73,16 +71,28 @@ def edit_action_callback(call):
         
         if action == "plan":
             # Показываем список планов для редактирования
-            with db_lock:
-                cursor.execute('''
-                    SELECT p.id, m.title, p.plan_type, p.plan_datetime
-                    FROM plans p
-                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                    WHERE p.chat_id = %s
-                    ORDER BY p.plan_datetime
-                    LIMIT 20
-                ''', (chat_id,))
-                plans = cursor.fetchall()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT p.id, m.title, p.plan_type, p.plan_datetime
+                        FROM plans p
+                        JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                        WHERE p.chat_id = %s
+                        ORDER BY p.plan_datetime
+                        LIMIT 20
+                    ''', (chat_id,))
+                    plans = cursor_local.fetchall()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not plans:
                 bot.edit_message_text("Нет планов для редактирования.", chat_id, call.message.message_id)
@@ -106,16 +116,28 @@ def edit_action_callback(call):
         
         elif action == "rating":
             # Показываем список фильмов с оценками для изменения
-            with db_lock:
-                cursor.execute('''
-                    SELECT m.id, m.title, m.year, r.rating
-                    FROM movies m
-                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                    WHERE m.chat_id = %s AND r.user_id = %s
-                    ORDER BY m.title
-                    LIMIT 20
-                ''', (chat_id, user_id))
-                movies = cursor.fetchall()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT m.id, m.title, m.year, r.rating
+                        FROM movies m
+                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                        WHERE m.chat_id = %s AND r.user_id = %s
+                        ORDER BY m.title
+                        LIMIT 20
+                    ''', (chat_id, user_id))
+                    movies = cursor_local.fetchall()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not movies:
                 bot.edit_message_text("Нет фильмов с вашими оценками для изменения.", chat_id, call.message.message_id)
@@ -137,16 +159,28 @@ def edit_action_callback(call):
         
         elif action == "delete_rating":
             # Показываем список фильмов с оценками для удаления
-            with db_lock:
-                cursor.execute('''
-                    SELECT m.id, m.title, m.year, r.rating
-                    FROM movies m
-                    JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                    WHERE m.chat_id = %s AND r.user_id = %s AND (r.is_imported = FALSE OR r.is_imported IS NULL)
-                    ORDER BY m.title
-                    LIMIT 20
-                ''', (chat_id, user_id))
-                movies = cursor.fetchall()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT m.id, m.title, m.year, r.rating
+                        FROM movies m
+                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                        WHERE m.chat_id = %s AND r.user_id = %s AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                        ORDER BY m.title
+                        LIMIT 20
+                    ''', (chat_id, user_id))
+                    movies = cursor_local.fetchall()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not movies:
                 bot.edit_message_text("Нет фильмов с вашими оценками для удаления.", chat_id, call.message.message_id)
@@ -168,16 +202,28 @@ def edit_action_callback(call):
         
         elif action == "delete_plan":
             # Показываем список планов для удаления
-            with db_lock:
-                cursor.execute('''
-                    SELECT p.id, m.title, p.plan_type, p.plan_datetime
-                    FROM plans p
-                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                    WHERE p.chat_id = %s
-                    ORDER BY p.plan_datetime
-                    LIMIT 20
-                ''', (chat_id,))
-                plans = cursor.fetchall()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT p.id, m.title, p.plan_type, p.plan_datetime
+                        FROM plans p
+                        JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                        WHERE p.chat_id = %s
+                        ORDER BY p.plan_datetime
+                        LIMIT 20
+                    ''', (chat_id,))
+                    plans = cursor_local.fetchall()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not plans:
                 bot.edit_message_text("Нет планов для удаления.", chat_id, call.message.message_id)
@@ -201,15 +247,27 @@ def edit_action_callback(call):
         
         elif action == "delete_movie":
             # Показываем список фильмов для удаления
-            with db_lock:
-                cursor.execute('''
-                    SELECT id, title, year
-                    FROM movies
-                    WHERE chat_id = %s
-                    ORDER BY title
-                    LIMIT 30
-                ''', (chat_id,))
-                movies = cursor.fetchall()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT id, title, year
+                        FROM movies
+                        WHERE chat_id = %s
+                        ORDER BY title
+                        LIMIT 30
+                    ''', (chat_id,))
+                    movies = cursor_local.fetchall()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not movies:
                 bot.edit_message_text("Нет фильмов в базе для удаления.", chat_id, call.message.message_id)
@@ -273,9 +331,21 @@ def edit_action_callback(call):
                     from moviebot.api.kinopoisk_api import extract_movie_info
                     
                     # Получаем информацию о фильме из базы
-                    with db_lock:
-                        cursor.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                        row = cursor.fetchone()
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_local.execute('SELECT id, title, watched, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                            row = cursor_local.fetchone()
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
                     
                     if row:
                         film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -367,14 +437,26 @@ def edit_plan_streaming_callback(call):
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
         
-        with db_lock:
-            cursor.execute('''
-                SELECT p.ticket_file_id, m.kp_id, p.streaming_service
-                FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.id = %s AND p.chat_id = %s
-            ''', (plan_id, chat_id))
-            plan_row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT p.ticket_file_id, m.kp_id, p.streaming_service
+                    FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s AND p.chat_id = %s
+                ''', (plan_id, chat_id))
+                plan_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         if not plan_row:
             bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
@@ -397,9 +479,21 @@ def edit_plan_streaming_callback(call):
             if sources:
                 sources_dict = {platform: url for platform, url in sources[:6]}
                 sources_json = json.dumps(sources_dict, ensure_ascii=False)
-                with db_lock:
-                    cursor.execute('UPDATE plans SET ticket_file_id = %s WHERE id = %s', (sources_json, plan_id))
-                    conn.commit()
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('UPDATE plans SET ticket_file_id = %s WHERE id = %s', (sources_json, plan_id))
+                        conn_local.commit()
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
         
         if not sources_dict:
             bot.answer_callback_query(call.id, "❌ Онлайн-кинотеатры не найдены", show_alert=True)
@@ -470,19 +564,31 @@ def edit_plan_switch_callback(call):
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
         
-        with db_lock:
-            cursor.execute('SELECT plan_type FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-            plan_row = cursor.fetchone()
-            
-            if not plan_row:
-                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
-                return
-            
-            current_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[0]
-            new_type = 'cinema' if current_type == 'home' else 'home'
-            
-            cursor.execute('UPDATE plans SET plan_type = %s WHERE id = %s', (new_type, plan_id))
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT plan_type FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                plan_row = cursor_local.fetchone()
+                
+                if not plan_row:
+                    bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+                    return
+                
+                current_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[0]
+                new_type = 'cinema' if current_type == 'home' else 'home'
+                
+                cursor_local.execute('UPDATE plans SET plan_type = %s WHERE id = %s', (new_type, plan_id))
+                conn_local.commit()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         type_text = "в кино" if new_type == 'cinema' else "дома"
         bot.edit_message_text(
@@ -538,9 +644,21 @@ def edit_delete_rating_callback(call):
         chat_id = call.message.chat.id
         film_id = int(call.data.split(":")[1])
         
-        with db_lock:
-            cursor.execute('DELETE FROM ratings WHERE film_id = %s AND chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (film_id, chat_id, user_id))
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('DELETE FROM ratings WHERE film_id = %s AND chat_id = %s AND user_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (film_id, chat_id, user_id))
+                conn_local.commit()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         bot.edit_message_text("✅ Оценка удалена.", chat_id, call.message.message_id)
         
@@ -581,9 +699,21 @@ def edit_delete_plan_callback(call):
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
         
-        with db_lock:
-            cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                conn_local.commit()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         bot.edit_message_text("✅ План удален из расписания.", chat_id, call.message.message_id)
         
@@ -624,12 +754,24 @@ def edit_delete_movie_callback(call):
         chat_id = call.message.chat.id
         film_id = int(call.data.split(":")[1])
         
-        with db_lock:
-            # Удаляем фильм и все связанные данные
-            cursor.execute('DELETE FROM ratings WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
-            cursor.execute('DELETE FROM plans WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
-            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                # Удаляем фильм и все связанные данные
+                cursor_local.execute('DELETE FROM ratings WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+                cursor_local.execute('DELETE FROM plans WHERE film_id = %s AND chat_id = %s', (film_id, chat_id))
+                cursor_local.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                conn_local.commit()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         bot.edit_message_text("✅ Фильм удален из базы.", chat_id, call.message.message_id)
         

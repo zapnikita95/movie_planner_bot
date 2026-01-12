@@ -15,8 +15,6 @@ from datetime import datetime, timedelta
 
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 # Новое состояние для отслеживания голосований через текстовые сообщения для chat_db
 clean_chat_text_votes = {}  # message_id: {'chat_id': int, 'members_count': int, 'voted': set(), 'active_members': set()}
@@ -90,18 +88,30 @@ def clean_action_choice(call):
                     chat_member_count = None
                 
                 # Получаем список активных участников из stats (за последние 30 дней)
-                with db_lock:
-                    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
-                    cursor.execute('''
-                        SELECT DISTINCT user_id
-                        FROM stats
-                        WHERE chat_id = %s AND timestamp > %s
-                    ''', (chat_id, thirty_days_ago))
-                    rows = cursor.fetchall()
-                    active_members_from_stats = set()
-                    for row in rows:
-                        user_id_val = row.get('user_id') if isinstance(row, dict) else row[0]
-                        active_members_from_stats.add(user_id_val)
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+                        cursor_local.execute('''
+                            SELECT DISTINCT user_id
+                            FROM stats
+                            WHERE chat_id = %s AND timestamp > %s
+                        ''', (chat_id, thirty_days_ago))
+                        rows = cursor_local.fetchall()
+                        active_members_from_stats = set()
+                        for row in rows:
+                            user_id_val = row.get('user_id') if isinstance(row, dict) else row[0]
+                            active_members_from_stats.add(user_id_val)
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 # Исключаем бота из списка активных участников
                 if BOT_ID and BOT_ID in active_members_from_stats:
@@ -211,18 +221,30 @@ def clean_action_choice(call):
                     chat_member_count = None
                 
                 # Получаем список активных участников из stats (за последние 30 дней)
-                with db_lock:
-                    thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
-                    cursor.execute('''
-                        SELECT DISTINCT user_id
-                        FROM stats
-                        WHERE chat_id = %s AND timestamp > %s
-                    ''', (chat_id, thirty_days_ago))
-                    rows = cursor.fetchall()
-                    active_members_from_stats = set()
-                    for row in rows:
-                        user_id_val = row.get('user_id') if isinstance(row, dict) else row[0]
-                        active_members_from_stats.add(user_id_val)
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        thirty_days_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S')
+                        cursor_local.execute('''
+                            SELECT DISTINCT user_id
+                            FROM stats
+                            WHERE chat_id = %s AND timestamp > %s
+                        ''', (chat_id, thirty_days_ago))
+                        rows = cursor_local.fetchall()
+                        active_members_from_stats = set()
+                        for row in rows:
+                            user_id_val = row.get('user_id') if isinstance(row, dict) else row[0]
+                            active_members_from_stats.add(user_id_val)
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 # Исключаем бота
                 if BOT_ID and BOT_ID in active_members_from_stats:

@@ -27,8 +27,6 @@ from moviebot.config import MONTHS_MAP, DAYS_FULL
 
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 # Используем DAYS_FULL из config
 days_full = DAYS_FULL
@@ -343,13 +341,25 @@ def register_plan_handlers(bot):
                 id_match = re.search(r'^(\d+)', text.strip())
                 if id_match:
                     kp_id = id_match.group(1)
-                    with db_lock:
-                        cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                        row = cursor.fetchone()
-                        if row:
-                            link = row.get('link') if isinstance(row, dict) else row[0]
-                        else:
-                            link = f"https://kinopoisk.ru/film/{kp_id}"
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_local.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                            row = cursor_local.fetchone()
+                            if row:
+                                link = row.get('link') if isinstance(row, dict) else row[0]
+                            else:
+                                link = f"https://kinopoisk.ru/film/{kp_id}"
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
             
             plan_type = 'home' if 'дома' in text else 'cinema' if 'кино' in text else None
             logger.info(f"[PLAN] plan_type={plan_type}, text={text}")
@@ -961,13 +971,25 @@ def plan_type_callback(call):
             # Приводим kp_id к строке для корректного поиска в БД
             kp_id_str = str(kp_id)
             
-            with db_lock:
-                cursor.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
-                row = cursor.fetchone()
-                if row:
-                    film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    link = row.get('link') if isinstance(row, dict) else row[1]
-                    logger.info(f"[PLAN FROM ADDED] Фильм найден в базе: film_id={film_id}, link={link}")
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('SELECT id, link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id_str))
+                    row = cursor_local.fetchone()
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                        link = row.get('link') if isinstance(row, dict) else row[1]
+                        logger.info(f"[PLAN FROM ADDED] Фильм найден в базе: film_id={film_id}, link={link}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if not film_id:
                 # Фильм не в базе - добавляем
@@ -1059,14 +1081,26 @@ def plan_type_callback(call):
             link = None
             if existing:
                 # Если фильм в базе, получаем ссылку из БД
-                with db_lock:
-                    cursor.execute('SELECT link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
-                    row = cursor.fetchone()
-                    if row:
-                        link = row.get('link') if isinstance(row, dict) else row[0]
-                        is_series = bool(row.get('is_series') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0))
-                        if not link:
-                            link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT link, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                        row = cursor_local.fetchone()
+                        if row:
+                            link = row.get('link') if isinstance(row, dict) else row[0]
+                            is_series = bool(row.get('is_series') if isinstance(row, dict) else (row[1] if len(row) > 1 else 0))
+                            if not link:
+                                link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
             
             if not link:
                 # Фильм не в базе, пробуем API для определения типа
@@ -1078,24 +1112,36 @@ def plan_type_callback(call):
             if not info or not info.get('title'):
                 # Если API не сработал, пробуем получить из БД
                 if existing:
-                    with db_lock:
-                        cursor.execute('''
-                            SELECT title, year, genres, description, director, actors, is_series, link
-                            FROM movies WHERE id = %s AND chat_id = %s
-                        ''', (existing[0], chat_id))
-                        db_row = cursor.fetchone()
-                        if db_row:
-                            info = {
-                                'title': db_row[0] if len(db_row) > 0 else None,
-                                'year': db_row[1] if len(db_row) > 1 else None,
-                                'genres': db_row[2] if len(db_row) > 2 else None,
-                                'description': db_row[3] if len(db_row) > 3 else None,
-                                'director': db_row[4] if len(db_row) > 4 else None,
-                                'actors': db_row[5] if len(db_row) > 5 else None,
-                                'is_series': bool(db_row[6]) if len(db_row) > 6 else False
-                            }
-                            if not link:
-                                link = db_row[7] if len(db_row) > 7 else f"https://www.kinopoisk.ru/film/{kp_id}/"
+                    conn_local = get_db_connection()
+                    cursor_local = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_local.execute('''
+                                SELECT title, year, genres, description, director, actors, is_series, link
+                                FROM movies WHERE id = %s AND chat_id = %s
+                            ''', (existing[0], chat_id))
+                            db_row = cursor_local.fetchone()
+                            if db_row:
+                                info = {
+                                    'title': db_row[0] if len(db_row) > 0 else None,
+                                    'year': db_row[1] if len(db_row) > 1 else None,
+                                    'genres': db_row[2] if len(db_row) > 2 else None,
+                                    'description': db_row[3] if len(db_row) > 3 else None,
+                                    'director': db_row[4] if len(db_row) > 4 else None,
+                                    'actors': db_row[5] if len(db_row) > 5 else None,
+                                    'is_series': bool(db_row[6]) if len(db_row) > 6 else False
+                                }
+                                if not link:
+                                    link = db_row[7] if len(db_row) > 7 else f"https://www.kinopoisk.ru/film/{kp_id}/"
+                    finally:
+                        try:
+                            cursor_local.close()
+                        except:
+                            pass
+                        try:
+                            conn_local.close()
+                        except:
+                            pass
             
             if not info or not info.get('title'):
                 bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
@@ -1103,11 +1149,23 @@ def plan_type_callback(call):
             
             # Убеждаемся, что is_series правильно установлен
             if existing:
-                with db_lock:
-                    cursor.execute('SELECT is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
-                    row = cursor.fetchone()
-                    if row:
-                        info['is_series'] = bool(row.get('is_series') if isinstance(row, dict) else row[0])
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                        row = cursor_local.fetchone()
+                        if row:
+                            info['is_series'] = bool(row.get('is_series') if isinstance(row, dict) else row[0])
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
             
             # Уточняем link для сериала
             if info.get('is_series'):
@@ -1184,15 +1242,27 @@ def get_plan_link_internal(message, state):
                 logger.info(f"[PLAN] Найдена ссылка в тексте сообщения: {link}")
             else:
                 # Это ID, проверяем в базе или создаем ссылку
-                with db_lock:
-                    cursor.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                    row = cursor.fetchone()
-                    if row:
-                        link = row.get('link') if isinstance(row, dict) else row[0]
-                        logger.info(f"[PLAN] Найден фильм по ID {kp_id} в тексте сообщения (из базы): {link}")
-                    else:
-                        link = f"https://kinopoisk.ru/film/{kp_id}/"
-                        logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                        row = cursor_local.fetchone()
+                        if row:
+                            link = row.get('link') if isinstance(row, dict) else row[0]
+                            logger.info(f"[PLAN] Найден фильм по ID {kp_id} в тексте сообщения (из базы): {link}")
+                        else:
+                            link = f"https://kinopoisk.ru/film/{kp_id}/"
+                            logger.info(f"[PLAN] Фильм с ID {kp_id} не найден в базе, создана ссылка: {link}")
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
     
     if not link:
         bot.reply_to(message, "❌ Не найдена ссылка на фильм. Пришлите ссылку или ID фильма.")
@@ -1608,14 +1678,27 @@ def edit_plan_callback(call):
             }
         
         # Получаем информацию о плане
-        with db_lock:
-            cursor.execute('''
-                SELECT p.plan_type, p.plan_datetime, m.title, m.kp_id
-                FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.id = %s AND p.chat_id = %s
-            ''', (plan_id, chat_id))
-            plan_row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        plan_row = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT p.plan_type, p.plan_datetime, m.title, m.kp_id
+                    FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s AND p.chat_id = %s
+                ''', (plan_id, chat_id))
+                plan_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         if not plan_row:
             bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
@@ -1696,16 +1779,29 @@ def handle_remove_from_calendar_callback(call):
         
         bot.answer_callback_query(call.id)
         
-        with db_lock:
-            # Получаем информацию о плане (включая проверку наличия билетов)
-            cursor.execute('''
-                SELECT p.id, p.ticket_file_id, 
-                       CASE WHEN p.film_id IS NOT NULL THEN m.title ELSE NULL END as title
-                FROM plans p
-                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.id = %s AND p.chat_id = %s
-            ''', (plan_id, chat_id))
-            row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        row = None
+        try:
+            with db_lock:
+                # Получаем информацию о плане (включая проверку наличия билетов)
+                cursor_local.execute('''
+                    SELECT p.id, p.ticket_file_id, 
+                           CASE WHEN p.film_id IS NOT NULL THEN m.title ELSE NULL END as title
+                    FROM plans p
+                    LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s AND p.chat_id = %s
+                ''', (plan_id, chat_id))
+                row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
             
             if not row:
                 bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
@@ -1737,8 +1833,21 @@ def handle_remove_from_calendar_callback(call):
             
             # Если билетов нет, удаляем сразу
             title = title if title else "мероприятие"
-            cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-            conn.commit()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                    conn_local.commit()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
         
         bot.answer_callback_query(call.id, f"✅ '{title}' удалён из календаря")
         logger.info(f"[REMOVE FROM CALENDAR] План {plan_id} удалён пользователем {user_id}")
@@ -1766,27 +1875,53 @@ def confirm_remove_plan_callback(call):
         
         bot.answer_callback_query(call.id)
         
-        with db_lock:
-            # Получаем информацию о плане
-            cursor.execute('''
-                SELECT p.id, p.ticket_file_id,
-                       CASE WHEN p.film_id IS NOT NULL THEN m.title ELSE NULL END as title
-                FROM plans p
-                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.id = %s AND p.chat_id = %s
-            ''', (plan_id, chat_id))
-            row = cursor.fetchone()
-            
-            if not row:
-                bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
-                return
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        row = None
+        try:
+            with db_lock:
+                # Получаем информацию о плане
+                cursor_local.execute('''
+                    SELECT p.id, p.ticket_file_id,
+                           CASE WHEN p.film_id IS NOT NULL THEN m.title ELSE NULL END as title
+                    FROM plans p
+                    LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s AND p.chat_id = %s
+                ''', (plan_id, chat_id))
+                row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        if not row:
+            bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
+            return
             
             title = row.get('title') if isinstance(row, dict) else row[2]
             title = title if title else "мероприятие"
             
             # Удаляем план (билеты удалятся автоматически, так как они хранятся в ticket_file_id)
-            cursor.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-            conn.commit()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('DELETE FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                    conn_local.commit()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
         
         # Удаляем сообщение с подтверждением
         try:
@@ -1825,17 +1960,30 @@ def streaming_select_callback(call):
         message_id = call.message.message_id
 
         # Получаем kp_id из плана (чтоб звать API)
-        with db_lock:
-            cursor.execute('SELECT film_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-            row = cursor.fetchone()
-            if not row:
-                bot.edit_message_text("План не найден.", chat_id, message_id)
-                return
-            film_id = row[0] if isinstance(row, dict) else row[0]
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        kp_id = None
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT film_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                row = cursor_local.fetchone()
+                if not row:
+                    bot.edit_message_text("План не найден.", chat_id, message_id)
+                    return
+                film_id = row[0] if isinstance(row, dict) else row[0]
 
-            cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            kp_row = cursor.fetchone()
-            kp_id = kp_row[0] if kp_row else None
+                cursor_local.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                kp_row = cursor_local.fetchone()
+                kp_id = kp_row[0] if kp_row else None
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
         if not kp_id:
             bot.edit_message_text("Ошибка: kp_id не найден.", chat_id, message_id)
@@ -1881,15 +2029,28 @@ def streaming_done_callback(call):
         user_id = call.from_user.id
         
         # Сохраняем флаг "Завершить" в базу и получаем информацию о плане
-        with db_lock:
-            # Получаем информацию о плане для отображения подтверждения
-            cursor.execute('''
-                SELECT p.film_id, p.plan_datetime, p.plan_type, m.title
-                FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.id = %s AND p.chat_id = %s
-            ''', (plan_id, chat_id))
-            plan_row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        plan_row = None
+        try:
+            with db_lock:
+                # Получаем информацию о плане для отображения подтверждения
+                cursor_local.execute('''
+                    SELECT p.film_id, p.plan_datetime, p.plan_type, m.title
+                    FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s AND p.chat_id = %s
+                ''', (plan_id, chat_id))
+                plan_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
             
             if not plan_row:
                 bot.answer_callback_query(call.id, "❌ План не найден", show_alert=True)
@@ -1907,13 +2068,26 @@ def streaming_done_callback(call):
                 title = plan_row[3]
             
             # Обновляем флаг "Завершить"
-            cursor.execute('''
-                UPDATE plans 
-                SET streaming_done = TRUE 
-                WHERE id = %s AND chat_id = %s
-            ''', (plan_id, chat_id))
-            conn.commit()
-            logger.info(f"[STREAMING DONE] Флаг streaming_done установлен для плана {plan_id}")
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        UPDATE plans 
+                        SET streaming_done = TRUE 
+                        WHERE id = %s AND chat_id = %s
+                    ''', (plan_id, chat_id))
+                    conn_local.commit()
+                logger.info(f"[STREAMING DONE] Флаг streaming_done установлен для плана {plan_id}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
         
         bot.answer_callback_query(call.id, "✅")
         
@@ -1940,11 +2114,23 @@ def streaming_done_callback(call):
         
         # Получаем kp_id для кнопки
         kp_id = None
-        with db_lock:
-            cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            movie_row = cursor.fetchone()
-            if movie_row:
-                kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                movie_row = cursor_local.fetchone()
+                if movie_row:
+                    kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Создаём клавиатуру
         markup = InlineKeyboardMarkup(row_width=1)
@@ -2040,14 +2226,27 @@ def handle_edit_plan_datetime_internal(message, state):
             return
         
         # Получаем информацию о плане
-        with db_lock:
-            cursor.execute('''
-                SELECT m.link, p.plan_type
-                FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.id = %s AND p.chat_id = %s
-            ''', (plan_id, chat_id))
-            plan_row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        plan_row = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT m.link, p.plan_type
+                    FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s AND p.chat_id = %s
+                ''', (plan_id, chat_id))
+                plan_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         if not plan_row:
             bot.reply_to(message, "❌ План не найден.")
@@ -2074,9 +2273,21 @@ def handle_edit_plan_datetime_internal(message, state):
             else:
                 session_utc = session_dt
             
-            with db_lock:
-                cursor.execute('UPDATE plans SET plan_datetime = %s WHERE id = %s', (session_utc, plan_id))
-                conn.commit()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('UPDATE plans SET plan_datetime = %s WHERE id = %s', (session_utc, plan_id))
+                    conn_local.commit()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             tz_name = "MSK" if user_tz.zone == 'Europe/Moscow' else "CET" if user_tz.zone == 'Europe/Belgrade' else "UTC"
             if isinstance(session_dt, datetime):
@@ -2173,9 +2384,21 @@ def select_streaming_callback(call):
         message_id = call.message.message_id
 
         # Сохраняем выбор
-        with db_lock:
-            cursor.execute('UPDATE plans SET streaming_platform = %s, streaming_url = %s WHERE id = %s AND chat_id = %s', (platform, url, plan_id, chat_id))
-            conn.commit()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute('UPDATE plans SET streaming_platform = %s, streaming_url = %s WHERE id = %s AND chat_id = %s', (platform, url, plan_id, chat_id))
+                conn_local.commit()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
 
         bot.edit_message_text(
             f"✅ Запомнили: {platform}\nСсылка: {url}\n\nВ день просмотра напомним!",

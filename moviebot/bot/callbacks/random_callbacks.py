@@ -13,8 +13,6 @@ from moviebot.utils.helpers import has_recommendations_access
 
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 
 def register_random_callbacks(bot):
@@ -76,19 +74,28 @@ def register_random_callbacks(bot):
 
             # Для режима my_votes проверяем наличие импортированных оценок
             if mode == 'my_votes':
-                from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-                conn = get_db_connection()
-                cursor = get_db_cursor()
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
                 
-                with db_lock:
-                    cursor.execute("""
-                        SELECT COUNT(*) 
-                        FROM movies m
-                        JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                        WHERE m.chat_id = %s AND r.user_id = %s AND r.is_imported = TRUE
-                    """, (chat_id, user_id))
-                    imported_count = cursor.fetchone()
-                    imported_ratings = imported_count.get('count') if isinstance(imported_count, dict) else (imported_count[0] if imported_count else 0)
+                try:
+                    with db_lock:
+                        cursor_local.execute("""
+                            SELECT COUNT(*) 
+                            FROM movies m
+                            JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                            WHERE m.chat_id = %s AND r.user_id = %s AND r.is_imported = TRUE
+                        """, (chat_id, user_id))
+                        imported_count = cursor_local.fetchone()
+                        imported_ratings = imported_count.get('count') if isinstance(imported_count, dict) else (imported_count[0] if imported_count else 0)
+                finally:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
+                    try:
+                        conn_local.close()
+                    except:
+                        pass
                 
                 if imported_ratings == 0:
                     # Нет импортированных оценок - показываем сообщение с кнопкой на импорт
@@ -137,148 +144,161 @@ def register_random_callbacks(bot):
             
             logger.info(f"[RANDOM CALLBACK] Checking available periods for mode={mode}")
             
-            with db_lock:
-                if mode == 'my_votes':
-                    # Для режима "по моим оценкам" - получаем годы из импортированных фильмов с оценкой 9-10
-                    # Используем UNION для объединения:
-                    # 1. Годы из фильмов, которые уже в базе группы (film_id IS NOT NULL)
-                    # 2. Годы из импортированных оценок без film_id (film_id IS NULL) - используем сохраненный year
-                    cursor.execute("""
-                        SELECT DISTINCT COALESCE(m.year, r.year) as year
-                        FROM ratings r
-                        LEFT JOIN movies m ON m.id = r.film_id AND m.chat_id = r.chat_id
-                        WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND (m.year IS NOT NULL OR r.year IS NOT NULL)
-                        ORDER BY year
-                    """, (chat_id, user_id))
-                    years_rows = cursor.fetchall()
-                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row and (row.get('year') if isinstance(row, dict) else row[0])]
-                    
-                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode")
-                    
-                    # Определяем доступные периоды на основе найденных годов
-                    for period in all_periods:
-                        if period == "До 1980":
-                            if any(y < 1980 for y in years):
-                                available_periods.append(period)
-                        elif period == "1980–1990":
-                            if any(1980 <= y <= 1990 for y in years):
-                                available_periods.append(period)
-                        elif period == "1990–2000":
-                            if any(1990 <= y <= 2000 for y in years):
-                                available_periods.append(period)
-                        elif period == "2000–2010":
-                            if any(2000 <= y <= 2010 for y in years):
-                                available_periods.append(period)
-                        elif period == "2010–2020":
-                            if any(2010 <= y <= 2020 for y in years):
-                                available_periods.append(period)
-                        elif period == "2020–сейчас":
-                            if any(y >= 2020 for y in years):
-                                available_periods.append(period)
-                elif mode == 'group_votes':
-                    # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 7.5
-                    cursor.execute("""
-                        SELECT DISTINCT m.year
-                        FROM movies m
-                        WHERE m.chat_id = %s AND m.year IS NOT NULL
-                        AND EXISTS (
-                            SELECT 1 FROM ratings r 
-                            WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
-                            GROUP BY r.film_id, r.chat_id 
-                            HAVING AVG(r.rating) >= 7.5
-                        )
-                        ORDER BY m.year
-                    """, (chat_id,))
-                    years_rows = cursor.fetchall()
-                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
-                    
-                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for group_votes mode")
-                    
-                    # Определяем доступные периоды на основе найденных годов
-                    for period in all_periods:
-                        if period == "До 1980":
-                            if any(y < 1980 for y in years):
-                                available_periods.append(period)
-                        elif period == "1980–1990":
-                            if any(1980 <= y <= 1990 for y in years):
-                                available_periods.append(period)
-                        elif period == "1990–2000":
-                            if any(1990 <= y <= 2000 for y in years):
-                                available_periods.append(period)
-                        elif period == "2000–2010":
-                            if any(2000 <= y <= 2010 for y in years):
-                                available_periods.append(period)
-                        elif period == "2010–2020":
-                            if any(2010 <= y <= 2020 for y in years):
-                                available_periods.append(period)
-                        elif period == "2020–сейчас":
-                            if any(y >= 2020 for y in years):
-                                available_periods.append(period)
-                elif mode == 'kinopoisk':
-                    # Для режима "Рандом по кинопоиску" - получаем годы из всех фильмов в базе
-                    cursor.execute("""
-                        SELECT DISTINCT m.year
-                        FROM movies m
-                        WHERE m.chat_id = %s AND m.year IS NOT NULL
-                        ORDER BY m.year
-                    """, (chat_id,))
-                    years_rows = cursor.fetchall()
-                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
-                    
-                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for kinopoisk mode")
-                    
-                    # Определяем доступные периоды на основе найденных годов
-                    for period in all_periods:
-                        if period == "До 1980":
-                            if any(y < 1980 for y in years):
-                                available_periods.append(period)
-                        elif period == "1980–1990":
-                            if any(1980 <= y <= 1990 for y in years):
-                                available_periods.append(period)
-                        elif period == "1990–2000":
-                            if any(1990 <= y <= 2000 for y in years):
-                                available_periods.append(period)
-                        elif period == "2000–2010":
-                            if any(2000 <= y <= 2010 for y in years):
-                                available_periods.append(period)
-                        elif period == "2010–2020":
-                            if any(2010 <= y <= 2020 for y in years):
-                                available_periods.append(period)
-                        elif period == "2020–сейчас":
-                            if any(y >= 2020 for y in years):
-                                available_periods.append(period)
-                else:
-                    # Для режима database - используем старую логику
-                    base_query = """
-                        SELECT COUNT(DISTINCT m.id) 
-                        FROM movies m
-                        LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                        WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-                    """
-                    params = [chat_id]
-                
-                    for period in all_periods:
-                        if period == "До 1980":
-                            condition = "m.year < 1980"
-                        elif period == "1980–1990":
-                            condition = "(m.year >= 1980 AND m.year <= 1990)"
-                        elif period == "1990–2000":
-                            condition = "(m.year >= 1990 AND m.year <= 2000)"
-                        elif period == "2000–2010":
-                            condition = "(m.year >= 2000 AND m.year <= 2010)"
-                        elif period == "2010–2020":
-                            condition = "(m.year >= 2010 AND m.year <= 2020)"
-                        elif period == "2020–сейчас":
-                            condition = "m.year >= 2020"
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            
+            try:
+                with db_lock:
+                    if mode == 'my_votes':
+                        # Для режима "по моим оценкам" - получаем годы из импортированных фильмов с оценкой 9-10
+                        # Используем UNION для объединения:
+                        # 1. Годы из фильмов, которые уже в базе группы (film_id IS NOT NULL)
+                        # 2. Годы из импортированных оценок без film_id (film_id IS NULL) - используем сохраненный year
+                        cursor_local.execute("""
+                            SELECT DISTINCT COALESCE(m.year, r.year) as year
+                            FROM ratings r
+                            LEFT JOIN movies m ON m.id = r.film_id AND m.chat_id = r.chat_id
+                            WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                            AND (m.year IS NOT NULL OR r.year IS NOT NULL)
+                            ORDER BY year
+                        """, (chat_id, user_id))
+                        years_rows = cursor_local.fetchall()
+                        years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row and (row.get('year') if isinstance(row, dict) else row[0])]
                         
-                        query = f"{base_query} AND {condition}"
-                        cursor.execute(query, tuple(params))
-                        count_row = cursor.fetchone()
-                        count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                        logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode")
                         
-                        if count > 0:
-                            available_periods.append(period)
+                        # Определяем доступные периоды на основе найденных годов
+                        for period in all_periods:
+                            if period == "До 1980":
+                                if any(y < 1980 for y in years):
+                                    available_periods.append(period)
+                            elif period == "1980–1990":
+                                if any(1980 <= y <= 1990 for y in years):
+                                    available_periods.append(period)
+                            elif period == "1990–2000":
+                                if any(1990 <= y <= 2000 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2000–2010":
+                                if any(2000 <= y <= 2010 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2010–2020":
+                                if any(2010 <= y <= 2020 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2020–сейчас":
+                                if any(y >= 2020 for y in years):
+                                    available_periods.append(period)
+                    elif mode == 'group_votes':
+                        # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 7.5
+                        cursor_local.execute("""
+                            SELECT DISTINCT m.year
+                            FROM movies m
+                            WHERE m.chat_id = %s AND m.year IS NOT NULL
+                            AND EXISTS (
+                                SELECT 1 FROM ratings r 
+                                WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                                GROUP BY r.film_id, r.chat_id 
+                                HAVING AVG(r.rating) >= 7.5
+                            )
+                            ORDER BY m.year
+                        """, (chat_id,))
+                        years_rows = cursor_local.fetchall()
+                        years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                        
+                        logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for group_votes mode")
+                        
+                        # Определяем доступные периоды на основе найденных годов
+                        for period in all_periods:
+                            if period == "До 1980":
+                                if any(y < 1980 for y in years):
+                                    available_periods.append(period)
+                            elif period == "1980–1990":
+                                if any(1980 <= y <= 1990 for y in years):
+                                    available_periods.append(period)
+                            elif period == "1990–2000":
+                                if any(1990 <= y <= 2000 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2000–2010":
+                                if any(2000 <= y <= 2010 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2010–2020":
+                                if any(2010 <= y <= 2020 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2020–сейчас":
+                                if any(y >= 2020 for y in years):
+                                    available_periods.append(period)
+                    elif mode == 'kinopoisk':
+                        # Для режима "Рандом по кинопоиску" - получаем годы из всех фильмов в базе
+                        cursor_local.execute("""
+                            SELECT DISTINCT m.year
+                            FROM movies m
+                            WHERE m.chat_id = %s AND m.year IS NOT NULL
+                            ORDER BY m.year
+                        """, (chat_id,))
+                        years_rows = cursor_local.fetchall()
+                        years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                        
+                        logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for kinopoisk mode")
+                        
+                        # Определяем доступные периоды на основе найденных годов
+                        for period in all_periods:
+                            if period == "До 1980":
+                                if any(y < 1980 for y in years):
+                                    available_periods.append(period)
+                            elif period == "1980–1990":
+                                if any(1980 <= y <= 1990 for y in years):
+                                    available_periods.append(period)
+                            elif period == "1990–2000":
+                                if any(1990 <= y <= 2000 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2000–2010":
+                                if any(2000 <= y <= 2010 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2010–2020":
+                                if any(2010 <= y <= 2020 for y in years):
+                                    available_periods.append(period)
+                            elif period == "2020–сейчас":
+                                if any(y >= 2020 for y in years):
+                                    available_periods.append(period)
+                    else:
+                        # Для режима database - используем старую логику
+                        base_query = """
+                            SELECT COUNT(DISTINCT m.id) 
+                            FROM movies m
+                            LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                            WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                        """
+                        params = [chat_id]
+                        
+                        for period in all_periods:
+                            if period == "До 1980":
+                                condition = "m.year < 1980"
+                            elif period == "1980–1990":
+                                condition = "(m.year >= 1980 AND m.year <= 1990)"
+                            elif period == "1990–2000":
+                                condition = "(m.year >= 1990 AND m.year <= 2000)"
+                            elif period == "2000–2010":
+                                condition = "(m.year >= 2000 AND m.year <= 2010)"
+                            elif period == "2010–2020":
+                                condition = "(m.year >= 2010 AND m.year <= 2020)"
+                            elif period == "2020–сейчас":
+                                condition = "m.year >= 2020"
+                            
+                            query = f"{base_query} AND {condition}"
+                            cursor_local.execute(query, tuple(params))
+                            count_row = cursor_local.fetchone()
+                            count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                            
+                            if count > 0:
+                                available_periods.append(period)
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             logger.info(f"[RANDOM CALLBACK] Available periods: {available_periods}")
             

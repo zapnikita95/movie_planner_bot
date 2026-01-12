@@ -23,8 +23,6 @@ from moviebot.config import KP_TOKEN
 
 
 logger = logging.getLogger(__name__)
-conn = get_db_connection()
-cursor = get_db_cursor()
 
 
 def get_film_distribution(kp_id):
@@ -352,12 +350,24 @@ def premiere_detail_handler(call):
         
         # Улучшенная проверка: получаем id, title и watched за один запрос
         existing_row = None
-        with db_lock:
-            cursor.execute(
-                'SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s',
-                (chat_id, str(kp_id))
-            )
-            existing_row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local.execute(
+                    'SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s',
+                    (chat_id, str(kp_id))
+                )
+                existing_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         in_database = existing_row is not None
         
@@ -475,9 +485,22 @@ def premiere_add_to_db(call):
         logger.info(f"[PREMIERE ADD] kp_id={kp_id}, user_id={user_id}, chat_id={chat_id}")
         
         # Проверяем, есть ли фильм уже в базе
-        with db_lock:
-            cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
-            existing_row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        existing_row = None
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                existing_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         if existing_row:
             film_id, watched = extract_film_info_from_existing(existing_row)
@@ -491,12 +514,25 @@ def premiere_add_to_db(call):
                     pass
             
             # Получаем полную информацию из БД (без API запроса)
-            with db_lock:
-                cursor.execute('''
-                    SELECT year, genres, description, director, actors, is_series, link
-                    FROM movies WHERE id = %s AND chat_id = %s
-                ''', (film_id, chat_id))
-                db_row = cursor.fetchone()
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            db_row = None
+            try:
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT year, genres, description, director, actors, is_series, link
+                        FROM movies WHERE id = %s AND chat_id = %s
+                    ''', (film_id, chat_id))
+                    db_row = cursor_local.fetchone()
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             if db_row:
                 if isinstance(db_row, dict):
@@ -595,12 +631,25 @@ def premiere_add_to_db(call):
                 pass
         
         # Получаем полную информацию из БД (без повторного API запроса)
-        with db_lock:
-            cursor.execute('''
-                SELECT title, watched, year, genres, description, director, actors, is_series, link
-                FROM movies WHERE id = %s AND chat_id = %s
-            ''', (film_id, chat_id))
-            db_row = cursor.fetchone()
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        db_row = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT title, watched, year, genres, description, director, actors, is_series, link
+                    FROM movies WHERE id = %s AND chat_id = %s
+                ''', (film_id, chat_id))
+                db_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         if db_row:
             if isinstance(db_row, dict):
@@ -691,29 +740,54 @@ def premiere_notify_handler(call):
         title = info.get('title', 'Фильм')
         
         # Проверяем, есть ли фильм уже в базе
-        with db_lock:
-            cursor.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-            existing = cursor.fetchone()
-            
-            if existing:
-                film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
-                title = existing.get('title') if isinstance(existing, dict) else existing[1]
-                film_already_in_db = True
-            else:
-                film_id = None
-                film_already_in_db = False
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        film_id = None
+        film_already_in_db = False
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                existing = cursor_local.fetchone()
+                
+                if existing:
+                    film_id = existing.get('id') if isinstance(existing, dict) else existing[0]
+                    title = existing.get('title') if isinstance(existing, dict) else existing[1]
+                    film_already_in_db = True
+                else:
+                    film_id = None
+                    film_already_in_db = False
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Получаем часовой пояс пользователя
         user_tz = pytz.timezone('Europe/Moscow')  # По умолчанию
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
         try:
             with db_lock:
-                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
-                tz_row = cursor.fetchone()
+                cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
+                tz_row = cursor_local.fetchone()
                 if tz_row:
                     tz_str = tz_row.get('value') if isinstance(tz_row, dict) else tz_row[0]
                     user_tz = pytz.timezone(tz_str)
         except:
             pass
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Получаем настройки уведомлений для определения времени по умолчанию
         notify_settings = get_notification_settings(chat_id)
@@ -739,65 +813,77 @@ def premiere_notify_handler(call):
         plan_id = None
         film_added = False
         
-        with db_lock:
-            try:
-                # Если фильма нет в базе, добавляем его (но не коммитим пока)
-                if not film_already_in_db:
-                    cursor.execute('''
-                        INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'link')
-                        ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
-                        RETURNING id
-                    ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], info['description'], 
-                          info['director'], info['actors'], 1 if info.get('is_series') else 0, user_id))
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                try:
+                    # Если фильма нет в базе, добавляем его (но не коммитим пока)
+                    if not film_already_in_db:
+                        cursor_local.execute('''
+                            INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'link')
+                            ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
+                            RETURNING id
+                        ''', (chat_id, link, kp_id, info['title'], info['year'], info['genres'], info['description'], 
+                              info['director'], info['actors'], 1 if info.get('is_series') else 0, user_id))
+                        
+                        result = cursor_local.fetchone()
+                        film_id = result.get('id') if isinstance(result, dict) else result[0]
+                        film_added = True
+                        logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в транзакции: film_id={film_id}, title={title}")
                     
-                    result = cursor.fetchone()
-                    film_id = result.get('id') if isinstance(result, dict) else result[0]
-                    film_added = True
-                    logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в транзакции: film_id={film_id}, title={title}")
-                
-                # Проверяем, нет ли уже плана на эту дату
-                cursor.execute('''
-                    SELECT id FROM plans 
-                    WHERE chat_id = %s AND film_id = %s AND plan_type = 'cinema' AND DATE(plan_datetime AT TIME ZONE 'UTC' AT TIME ZONE %s) = %s
-                ''', (chat_id, film_id, str(user_tz), premiere_date))
-                existing_plan = cursor.fetchone()
-                
-                if not existing_plan:
-                    # Добавляем план в расписание
-                    cursor.execute('''
-                        INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
-                        VALUES (%s, %s, 'cinema', %s, %s)
-                        RETURNING id
-                    ''', (chat_id, film_id, plan_utc, user_id))
+                    # Проверяем, нет ли уже плана на эту дату
+                    cursor_local.execute('''
+                        SELECT id FROM plans 
+                        WHERE chat_id = %s AND film_id = %s AND plan_type = 'cinema' AND DATE(plan_datetime AT TIME ZONE 'UTC' AT TIME ZONE %s) = %s
+                    ''', (chat_id, film_id, str(user_tz), premiere_date))
+                    existing_plan = cursor_local.fetchone()
                     
-                    plan_row = cursor.fetchone()
-                    if plan_row:
-                        plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
-                        # Коммитим транзакцию только если план успешно добавлен
-                        conn.commit()
-                        logger.info(f"[PREMIERE NOTIFY] План успешно добавлен: plan_id={plan_id}, film_id={film_id}")
+                    if not existing_plan:
+                        # Добавляем план в расписание
+                        cursor_local.execute('''
+                            INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id)
+                            VALUES (%s, %s, 'cinema', %s, %s)
+                            RETURNING id
+                        ''', (chat_id, film_id, plan_utc, user_id))
+                        
+                        plan_row = cursor_local.fetchone()
+                        if plan_row:
+                            plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                            # Коммитим транзакцию только если план успешно добавлен
+                            conn_local.commit()
+                            logger.info(f"[PREMIERE NOTIFY] План успешно добавлен: plan_id={plan_id}, film_id={film_id}")
+                            if film_added:
+                                logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в базу как следствие успешного добавления плана")
+                        else:
+                            logger.error(f"[PREMIERE NOTIFY] План не был создан, но ошибки не было")
+                            conn_local.rollback()
+                            bot.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
+                            return
+                    else:
+                        plan_id = existing_plan.get('id') if isinstance(existing_plan, dict) else existing_plan[0]
+                        # Если план уже существует, коммитим только если фильм был добавлен
                         if film_added:
-                            logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в базу как следствие успешного добавления плана")
-                    else:
-                        logger.error(f"[PREMIERE NOTIFY] План не был создан, но ошибки не было")
-                        conn.rollback()
-                        bot.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
-                        return
-                else:
-                    plan_id = existing_plan.get('id') if isinstance(existing_plan, dict) else existing_plan[0]
-                    # Если план уже существует, коммитим только если фильм был добавлен
-                    if film_added:
-                        conn.commit()
-                        logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в базу, план уже существовал: plan_id={plan_id}")
-                    else:
-                        logger.info(f"[PREMIERE NOTIFY] План уже существует: plan_id={plan_id}")
-                    
-            except Exception as e:
-                conn.rollback()
-                logger.error(f"[PREMIERE NOTIFY] Ошибка в транзакции: {e}", exc_info=True)
-                bot.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
-                return
+                            conn_local.commit()
+                            logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в базу, план уже существовал: plan_id={plan_id}")
+                        else:
+                            logger.info(f"[PREMIERE NOTIFY] План уже существует: plan_id={plan_id}")
+                        
+                except Exception as e:
+                    conn_local.rollback()
+                    logger.error(f"[PREMIERE NOTIFY] Ошибка в транзакции: {e}", exc_info=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка при добавлении в расписание", show_alert=True)
+                    return
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # Отправляем сообщение-подтверждение
         time_str = f"{int(hour):02d}:{int(minute):02d}"
@@ -841,25 +927,37 @@ def premiere_cancel_handler(call):
         
         deleted_text = "❌ <b>Уведомление отменено</b>"
         
-        with db_lock:
-            if plan_id:
-                cursor.execute(
-                    'DELETE FROM plans WHERE id = %s AND chat_id = %s AND user_id = %s',
-                    (plan_id, chat_id, user_id)
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        try:
+            with db_lock:
+                if plan_id:
+                    cursor_local.execute(
+                        'DELETE FROM plans WHERE id = %s AND chat_id = %s AND user_id = %s',
+                        (plan_id, chat_id, user_id)
+                    )
+                    cursor_local.rowcount  # проверяем, удалили ли
+                
+                cursor_local.execute(
+                    'SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s',
+                    (chat_id, kp_id)
                 )
-                cursor.rowcount  # проверяем, удалили ли
-            
-            cursor.execute(
-                'SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s',
-                (chat_id, kp_id)
-            )
-            film = cursor.fetchone()
-            
-            if film:
-                film_id, title = film
-                deleted_text += f"\n\nФильм <b>{title}</b> остаётся в базе."
-            
-            conn.commit()
+                film = cursor_local.fetchone()
+                
+                if film:
+                    film_id, title = film
+                    deleted_text += f"\n\nФильм <b>{title}</b> остаётся в базе."
+                
+                conn_local.commit()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         bot.edit_message_text(deleted_text, chat_id, call.message.message_id, parse_mode='HTML')
         logger.info(f"[PREMIERE CANCEL] Отменено: kp_id={kp_id}, plan_id={plan_id}")
