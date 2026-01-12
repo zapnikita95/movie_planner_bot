@@ -187,7 +187,6 @@ def register_start_handlers(bot):
                             logger.error(f"❌ send_message вернул None для пользователя {user_id} в личном чате")
                     except Exception as send_msg_error:
                         logger.error(f"❌ Ошибка при send_message в личном чате: {send_msg_error}", exc_info=True)
-                        raise
             except Exception as send_error:
                 logger.error(f"❌ Ошибка при отправке сообщения /start: {send_error}", exc_info=True)
                 # Пробуем отправить простой ответ
@@ -195,7 +194,6 @@ def register_start_handlers(bot):
                     bot.reply_to(message, "❌ Ошибка при загрузке меню. Попробуйте позже.")
                 except:
                     pass
-                raise  # Пробрасываем ошибку дальше
 
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке меню: {e}", exc_info=True)

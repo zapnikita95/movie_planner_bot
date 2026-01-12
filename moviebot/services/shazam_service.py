@@ -55,7 +55,7 @@ INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'     # 'data/shazam/tmdb_index.faiss'
 DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'  # 'data/shazam/tmdb_movies_processed.csv'
 
 MIN_VOTE_COUNT = 500
-MAX_MOVIES = 50000
+MAX_MOVIES = 20000
 
 
 def init_shazam_index():
@@ -77,8 +77,8 @@ def get_model():
             # Проверяем еще раз внутри блокировки
             if _model is None:
                 logger.info("Загрузка модели embeddings...")
-                _model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-                logger.info("Модель embeddings загружена")
+                _model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+                logger.info("Модель embeddings загружена (all-mpnet-base-v2 — лучше для поиска по актёрам и сюжету)")
     return _model
 
 
@@ -192,7 +192,18 @@ def parse_json_list(json_str, key='name', top_n=10):
 def build_tmdb_index():
     global _index, _movies_df
 
-    # Индекс всегда пересобирается при деплое для актуальности данных
+    # Проверяем, существует ли индекс - если да, загружаем его вместо пересборки
+    if INDEX_PATH.exists() and DATA_PATH.exists():
+        logger.info(f"Индекс уже существует ({INDEX_PATH}), загружаем из файла...")
+        try:
+            _index = faiss.read_index(str(INDEX_PATH))
+            _movies_df = pd.read_csv(DATA_PATH)
+            logger.info(f"Индекс успешно загружен из файла, фильмов: {len(_movies_df)}")
+            return _index, _movies_df
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки существующего индекса: {e}, пересобираем...", exc_info=True)
+    
+    # Индекс не существует или не загрузился - пересобираем
     logger.info("Начинаем пересборку индекса TMDB...")
     
     # === СКАЧИВАНИЕ И ПОИСК CSV ФАЙЛА ===
@@ -379,6 +390,11 @@ def build_tmdb_index():
     df = df[(df['title'].notna() & (df['title'].astype(str).str.strip() != '')) | 
             (df['original_title'].notna() & (df['original_title'].astype(str).str.strip() != ''))]
     logger.info(f"После фильтра (title OR original_title) not empty: {len(df)} фильмов")
+    
+    # Фильтруем по минимальному количеству голосов
+    if 'vote_count' in df.columns:
+        df = df[df['vote_count'] >= MIN_VOTE_COUNT]
+        logger.info(f"После фильтра vote_count >= {MIN_VOTE_COUNT}: {len(df)} фильмов")
     
     # Сортируем по популярности (vote_count, если есть) и берем топ фильмов
     # NaN значения по умолчанию идут в конец при ascending=False
