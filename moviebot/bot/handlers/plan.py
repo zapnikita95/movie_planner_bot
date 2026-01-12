@@ -757,8 +757,8 @@ def show_schedule(message):
                 InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random")
             )
             
-            # Строка 3: Поиск / Элиас
-            elias_text = "🔮 Элиас" if has_shazam_access else "🔒 Элиас"
+            # Строка 3: Поиск / Шазам
+            elias_text = "🔮 Шазам" if has_shazam_access else "🔒 Шазам"
             markup.row(
                 InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
                 InlineKeyboardButton(elias_text, callback_data="shazam:start")
