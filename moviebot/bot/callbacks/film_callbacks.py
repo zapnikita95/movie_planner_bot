@@ -1426,9 +1426,8 @@ def back_to_film_description(call):
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         conn_local = get_db_connection()
         cursor_local = get_db_cursor()
-        
-        with db_lock:
-            try:
+        try:
+            with db_lock:
                 cursor_local.execute("""
                     SELECT is_series, link
                     FROM movies
@@ -1439,8 +1438,17 @@ def back_to_film_description(call):
                     is_series = bool(row.get('is_series') if isinstance(row, dict) else row[0])
                     link_from_db = row.get('link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
                     logger.info(f"[BACK TO FILM] is_series из БД: {is_series}, link_from_db: {link_from_db}")
-            except Exception as e:
-                logger.warning(f"[BACK TO FILM] Ошибка получения is_series и link из БД: {e}", exc_info=True)
+        except Exception as e:
+            logger.warning(f"[BACK TO FILM] Ошибка получения is_series и link из БД: {e}", exc_info=True)
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
         
         # 2. Формируем правильную ссылку на основе is_series из БД
         if link_from_db:
@@ -1470,14 +1478,16 @@ def back_to_film_description(call):
         if existing:
             logger.info(f"[BACK TO FILM] Фильм в базе (existing={existing}), получаем данные из БД")
             # Фильм в базе - получаем данные из БД (быстро!)
-            with db_lock:
-                try:
-                    cursor_local.execute("""
+            conn_local2 = get_db_connection()
+            cursor_local2 = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local2.execute("""
                         SELECT title, year, genres, description, director, actors, is_series, link
                         FROM movies
                         WHERE chat_id = %s AND kp_id = %s
                     """, (chat_id, kp_id_db))
-                    row = cursor_local.fetchone()
+                    row = cursor_local2.fetchone()
                     if row:
                         info = {}
                         if isinstance(row, dict):
@@ -1509,9 +1519,18 @@ def back_to_film_description(call):
                         if link_from_db:
                             link = link_from_db
                         logger.info(f"[BACK TO FILM] Данные получены из БД (быстро!): {info.get('title')}")
-                except Exception as e:
-                    logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}", exc_info=True)
-                    info = None
+            except Exception as e:
+                logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}", exc_info=True)
+                info = None
+            finally:
+                try:
+                    cursor_local2.close()
+                except:
+                    pass
+                try:
+                    conn_local2.close()
+                except:
+                    pass
         
         # 5. Если фильм НЕ в базе или БД не дала данных, запрашиваем API
         # ВАЖНО: Это медленная операция (1-3 секунды), но необходима для фильмов не в базе
@@ -1538,16 +1557,17 @@ def back_to_film_description(call):
                 logger.error(f"[BACK TO FILM] API не сработал: {e}", exc_info=True)
         
         # 6. Если фильм в базе, но API не дал данных, получаем из БД (fallback)
-        # Используем локальные соединение и курсор (уже определены выше)
         if existing and (not info or not info.get('title')):
-            with db_lock:
-                try:
-                    cursor_local.execute("""
+            conn_local3 = get_db_connection()
+            cursor_local3 = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local3.execute("""
                         SELECT title, year, genres, description, director, actors, is_series, link
                         FROM movies
                         WHERE chat_id = %s AND kp_id = %s
                     """, (chat_id, kp_id_db))
-                    row = cursor_local.fetchone()
+                    row = cursor_local3.fetchone()
                     if row:
                         info = info or {}
                         if isinstance(row, dict):
@@ -1578,8 +1598,17 @@ def back_to_film_description(call):
                         is_series = info['is_series']
                         if link_from_db:
                             link = link_from_db
-                except Exception as e:
-                    logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")
+            except Exception as e:
+                logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}", exc_info=True)
+            finally:
+                try:
+                    cursor_local3.close()
+                except:
+                    pass
+                try:
+                    conn_local3.close()
+                except:
+                    pass
 
         if not info or not info.get('title'):
             logger.error(f"[BACK TO FILM] ❌ Нет данных для показа: info={info}, existing={existing}, kp_id={kp_id_int}")
@@ -1658,30 +1687,9 @@ def back_to_film_description(call):
             # НЕ делаем raise - продолжаем выполнение, чтобы не прерывать обработку
 
         logger.info(f"[BACK TO FILM] ===== КОНЕЦ ОБРАБОТКИ ===== is_series={is_series}, existing={'есть' if existing else 'нет'}")
-        
-        # Закрываем локальное соединение
-        try:
-            cursor_local.close()
-        except:
-            pass
-        try:
-            conn_local.close()
-        except:
-            pass
 
     except Exception as e:
         logger.error(f"[BACK TO FILM] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
-        # Закрываем соединение даже при ошибке
-        try:
-            if 'cursor_local' in locals():
-                cursor_local.close()
-        except:
-            pass
-        try:
-            if 'conn_local' in locals():
-                conn_local.close()
-        except:
-            pass
         try:
             from moviebot.database.db_connection import get_db_connection
             conn_local_error = get_db_connection()
