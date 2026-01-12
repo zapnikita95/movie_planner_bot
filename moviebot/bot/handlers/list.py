@@ -239,7 +239,9 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
                 # Используем kp_id если есть, иначе film_id
                 movie_id = kp_id or film_id
                 genre_str = f" • {first_genre}" if first_genre else ""
-                text += f"• <b>{title}</b> ({year}){genre_str} [ID: {movie_id}]\n<a href='{link}'>{link}</a>\n\n"
+                # Форматируем год: показываем только если он есть и не None
+                year_str = f" ({year})" if year and year != '—' and str(year).lower() != 'none' else ""
+                text += f"• <b>{title}</b>{year_str}{genre_str} [ID: {movie_id}]\n<a href='{link}'>{link}</a>\n\n"
             
             text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
             

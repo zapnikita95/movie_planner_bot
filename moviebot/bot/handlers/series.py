@@ -419,7 +419,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
 
         # Основной текст
         type_emoji = "📺" if is_series else "🎬"  # ещё раз, на всякий
-        text += f"{type_emoji} <b>{info.get('title', 'Без названия')}</b> ({info.get('year') or '—'})\n"
+        year = info.get('year')
+        year_str = f" ({year})" if year and str(year).lower() != 'none' and year != '—' else ""
+        text += f"{type_emoji} <b>{info.get('title', 'Без названия')}</b>{year_str}\n"
 
         if info.get('director'):
             text += f"<i>Режиссёр:</i> {info['director']}\n"
@@ -1391,10 +1393,11 @@ def handle_search(message):
             if kp_id:
                 # Ограничиваем длину текста кнопки
                 type_indicator = "📺" if is_series else "🎬"
-                button_text = f"{type_indicator} {title} ({year})"
+                year_str = f" ({year})" if year and str(year).lower() != 'none' and year != '—' and year != 'N/A' else ""
+                button_text = f"{type_indicator} {title}{year_str}"
                 if len(button_text) > 50:
                     button_text = button_text[:47] + "..."
-                results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                results_text += f"• {type_indicator} <b>{title}</b>{year_str}"
                 if rating != 'N/A':
                     results_text += f" ⭐ {rating}"
                 results_text += "\n"
@@ -3229,7 +3232,8 @@ def register_series_handlers(bot_param):
                 year = film.get('year', '—')
                 
                 emoji = "📺" if is_series else "🎬"
-                text += f"{emoji} <b>{title}</b> ({year})\n"
+                year_str = f" ({year})" if year and str(year).lower() != 'none' and year != '—' else ""
+                text += f"{emoji} <b>{title}</b>{year_str}\n"
                 
                 button_text = f"{emoji} {title}"
                 if len(button_text) > 50:
@@ -4397,7 +4401,8 @@ def register_series_handlers(bot_param):
                         film_genres = selected_film.get('genres', [])
                         genres_str = ', '.join([g.get('genre', '') for g in film_genres]) if film_genres else '—'
                         
-                        text = f"🎬 <b>{title}</b> ({year})\n\n"
+                        year_str = f" ({year})" if year and str(year).lower() != 'none' and year != '—' else ""
+                        text = f"🎬 <b>{title}</b>{year_str}\n\n"
                         if genres_str and genres_str != '—':
                             text += f"🎭 <b>Жанры:</b> {genres_str}\n"
                         text += f"\n<a href='{link}'>Кинопоиск</a>"
@@ -4906,7 +4911,8 @@ def register_series_handlers(bot_param):
                             kp_id = movie[3] if len(movie) > 3 else None
                         
                         if title and link:
-                            similar_list.append(f"• <a href='{link}'>{title}</a> ({year})")
+                            year_str = f" ({year})" if year and str(year).lower() != 'none' and year != '—' else ""
+                            similar_list.append(f"• <a href='{link}'>{title}</a>{year_str}")
                             if not first_movie_kp_id and kp_id:
                                 first_movie_kp_id = kp_id
                     
@@ -4966,7 +4972,8 @@ def register_series_handlers(bot_param):
                 kp_id = movie[3] if len(movie) > 3 else None
 
             if not link or not kp_id:
-                text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b> ({year})"
+                year_str = f" ({year})" if year and str(year).lower() != 'none' and year != '—' else ""
+                text = f"🍿 <b>Случайный фильм:</b>\n\n<b>{title}</b>{year_str}"
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("⬅️ Вернуться к меню", callback_data="random_back_to_menu"))
                 try:
@@ -5968,10 +5975,11 @@ def register_series_handlers(bot_param):
                     if kp_id:
                         # Ограничиваем длину текста кнопки
                         type_indicator = "📺" if is_series else "🎬"
-                        button_text = f"{type_indicator} {title} ({year})"
+                        year_str = f" ({year})" if year and str(year).lower() != 'none' and year != '—' and year != 'N/A' else ""
+                        button_text = f"{type_indicator} {title}{year_str}"
                         if len(button_text) > 50:
                             button_text = button_text[:47] + "..."
-                        results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                        results_text += f"• {type_indicator} <b>{title}</b>{year_str}"
                         if rating != 'N/A':
                             results_text += f" ⭐ {rating}"
                         results_text += "\n"
@@ -6249,10 +6257,11 @@ def handle_search_reply(message):
                 
                 if kp_id:
                     type_indicator = "📺" if is_series else "🎬"
-                    button_text = f"{type_indicator} {title} ({year})"
+                    year_str = f" ({year})" if year and str(year).lower() != 'none' and year != '—' and year != 'N/A' else ""
+                    button_text = f"{type_indicator} {title}{year_str}"
                     if len(button_text) > 50:
                         button_text = button_text[:47] + "..."
-                    results_text += f"• {type_indicator} <b>{title}</b> ({year})"
+                    results_text += f"• {type_indicator} <b>{title}</b>{year_str}"
                     if rating != 'N/A':
                         results_text += f" ⭐ {rating}"
                     results_text += "\n"

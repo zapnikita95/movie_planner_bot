@@ -122,13 +122,38 @@ def register_start_handlers(bot):
                 InlineKeyboardButton("❓", callback_data="start_menu:help")
             )
 
-            bot.send_message(
-                chat_id,
-                welcome_text,
-                parse_mode='HTML',
-                reply_markup=markup
-            )
-            logger.info(f"✅ Ответ на /start отправлен пользователю {user_id}")
+            try:
+                # В группах пытаемся использовать reply_to для лучшей доставки
+                if message.chat.type in ['group', 'supergroup']:
+                    try:
+                        bot.reply_to(message, welcome_text, parse_mode='HTML', reply_markup=markup)
+                        logger.info(f"✅ Ответ на /start отправлен через reply_to пользователю {user_id} в группе {chat_id}")
+                    except Exception as reply_error:
+                        logger.warning(f"[START] Не удалось отправить через reply_to: {reply_error}, пробуем send_message")
+                        sent_msg = bot.send_message(
+                            chat_id,
+                            welcome_text,
+                            parse_mode='HTML',
+                            reply_markup=markup
+                        )
+                        logger.info(f"✅ Ответ на /start отправлен через send_message пользователю {user_id} в группе {chat_id}, message_id={sent_msg.message_id}")
+                else:
+                    # В личных чатах используем обычный send_message
+                    sent_msg = bot.send_message(
+                        chat_id,
+                        welcome_text,
+                        parse_mode='HTML',
+                        reply_markup=markup
+                    )
+                    logger.info(f"✅ Ответ на /start отправлен пользователю {user_id} в личном чате, message_id={sent_msg.message_id}")
+            except Exception as send_error:
+                logger.error(f"❌ Ошибка при отправке сообщения /start: {send_error}", exc_info=True)
+                # Пробуем отправить простой ответ
+                try:
+                    bot.reply_to(message, "❌ Ошибка при загрузке меню. Попробуйте позже.")
+                except:
+                    pass
+                raise  # Пробрасываем ошибку дальше
 
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке меню: {e}", exc_info=True)

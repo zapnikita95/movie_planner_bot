@@ -1481,16 +1481,37 @@ def add_and_announce(link, chat_id, user_id=None, source='unknown'):
     logger.info(f"[ADD_AND_ANNOUNCE] Обработка kp_id={kp_id}, chat_id={chat_id}")
 
     # Проверяем, есть ли фильм в базе
+    # ВАЖНО: Используем локальные соединения вместо глобальных
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
     existing = None
-    with db_lock:
-        cursor.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
-        row = cursor.fetchone()
-        if row:
-            # Конвертируем DictRow в кортеж для совместимости с show_film_info_with_buttons
-            if isinstance(row, dict):
-                existing = (row.get('id'), row.get('title'), row.get('watched', 0))
-            else:
-                existing = (row[0], row[1], row[2] if len(row) > 2 else 0)
+    
+    try:
+        with db_lock:
+            cursor_local.execute('SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+            row = cursor_local.fetchone()
+            if row:
+                # Конвертируем DictRow в кортеж для совместимости с show_film_info_with_buttons
+                if isinstance(row, dict):
+                    existing = (row.get('id'), row.get('title'), row.get('watched', 0))
+                else:
+                    existing = (row[0], row[1], row[2] if len(row) > 2 else 0)
+    except Exception as db_e:
+        logger.error(f"[ADD_AND_ANNOUNCE] Ошибка БД при проверке существования: {db_e}", exc_info=True)
+        try:
+            conn_local.rollback()
+        except:
+            pass
+    finally:
+        # Закрываем локальные соединения
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
     try:
         # Всегда используем одну функцию — она умеет показывать и новые, и существующие
