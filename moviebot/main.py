@@ -394,9 +394,22 @@ if IS_RAILWAY or IS_PRODUCTION or USE_WEBHOOK:
             bot.remove_webhook()
             webhook_path = "/webhook"
             full_url = f"{WEBHOOK_URL_ENV}{webhook_path}"
-            bot.set_webhook(url=full_url)
+            # КРИТИЧНО: Добавляем allowed_updates для поддержки платежей (Stars и обычных)
+            allowed_updates = [
+                "message",
+                "edited_message",
+                "callback_query",
+                "message_reaction",
+                "message_reaction_count",
+                "chat_member",
+                "my_chat_member",
+                "web_app_data",
+                "pre_checkout_query",      # Для обычных платежей (хотя для Stars не приходит)
+                "successful_payment"       # КРИТИЧНО! Это позволяет ловить successful_payment для Stars
+            ]
+            bot.set_webhook(url=full_url, allowed_updates=allowed_updates)
             _webhook_installed = True
-            logger.info(f"[MAIN] ✅ Webhook установлен на уровне модуля → {full_url}")
+            logger.info(f"[MAIN] ✅ Webhook установлен на уровне модуля → {full_url} (allowed_updates: {allowed_updates})")
         except Exception as e:
             logger.error(f"[MAIN] ❌ Ошибка установки webhook на уровне модуля: {e}", exc_info=True)
             _webhook_installed = False

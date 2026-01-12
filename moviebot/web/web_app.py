@@ -89,6 +89,15 @@ def create_web_app(bot):
             if update:
                 logger.info(f"[WEBHOOK] Update ID: {update.update_id}")
                 
+                # Логируем тип обновления для отладки платежей
+                if update.message:
+                    if update.message.successful_payment:
+                        logger.info("[WEBHOOK] ⭐ ОБНАРУЖЕН successful_payment! ⭐")
+                    if update.message.content_type == 'successful_payment':
+                        logger.info("[WEBHOOK] ⭐ ОБНАРУЖЕН successful_payment (content_type)! ⭐")
+                if update.pre_checkout_query:
+                    logger.info("[WEBHOOK] PRE_CHECKOUT_QUERY пришел! (хотя для Stars не должен)")
+                
                 # КРИТИЧНО: Обрабатываем update в отдельном потоке, чтобы сразу вернуть 200
                 # Это предотвращает 499 ошибки (timeout) от Telegram
                 def process_update_async():
