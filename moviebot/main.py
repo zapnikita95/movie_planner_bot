@@ -70,7 +70,22 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from moviebot.bot.bot_init import bot, init_bot_id
 
 # Получаем ID бота и инициализируем его в bot_init
-BOT_ID = init_bot_id()  # Использует глобальный bot из bot_init
+# Проверяем токен перед инициализацией
+try:
+    BOT_ID = init_bot_id()  # Использует глобальный bot из bot_init
+    if BOT_ID:
+        logger.info(f"[MAIN] ✅ Бот успешно инициализирован, BOT_ID={BOT_ID}")
+    else:
+        logger.error("[MAIN] ❌ Не удалось получить BOT_ID - проверьте BOT_TOKEN!")
+        # Не падаем, но логируем ошибку
+except Exception as bot_init_error:
+    error_str = str(bot_init_error).lower()
+    if 'unauthorized' in error_str or '401' in error_str:
+        logger.critical("[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА: BOT_TOKEN неверный или не обновлен!")
+        logger.critical("[MAIN] Проверьте переменную окружения BOT_TOKEN в Railway")
+        logger.critical("[MAIN] После обновления BOT_TOKEN необходимо ПЕРЕЗАПУСТИТЬ приложение!")
+        logger.critical(f"[MAIN] Текущий токен (первые 10 символов): {TOKEN[:10] if TOKEN else 'НЕ ЗАГРУЖЕН'}...")
+    raise
 
 # Очищаем старые webhook
 try:

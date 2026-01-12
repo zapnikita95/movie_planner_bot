@@ -88,8 +88,20 @@ def create_web_app(bot):
             update = telebot.types.Update.de_json(json_string)
             if update:
                 logger.info(f"[WEBHOOK] Update ID: {update.update_id}")
-                bot.process_new_updates([update])
-                logger.info("[WEBHOOK] ✅ Обновление успешно обработано")
+                
+                # КРИТИЧНО: Обрабатываем update в отдельном потоке, чтобы сразу вернуть 200
+                # Это предотвращает 499 ошибки (timeout) от Telegram
+                def process_update_async():
+                    try:
+                        bot.process_new_updates([update])
+                        logger.info("[WEBHOOK] ✅ Обновление успешно обработано")
+                    except Exception as process_e:
+                        logger.error(f"[WEBHOOK] Ошибка при обработке update: {process_e}", exc_info=True)
+                
+                # Запускаем обработку в отдельном потоке
+                process_thread = threading.Thread(target=process_update_async, daemon=True)
+                process_thread.start()
+                logger.info("[WEBHOOK] Обработка update запущена в фоновом потоке")
             else:
                 logger.warning("[WEBHOOK] Update не распарсился")
         except Exception as e:
@@ -97,6 +109,8 @@ def create_web_app(bot):
             # Telegram требует 200 даже при ошибке
             return '', 200
 
+        # ВАЖНО: Возвращаем 200 СРАЗУ, не дожидаясь обработки
+        # Это предотвращает 499 ошибки (client closed connection)
         return '', 200
     
     def process_yookassa_notification(event_json, is_test=False):

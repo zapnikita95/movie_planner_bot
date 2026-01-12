@@ -17,6 +17,13 @@ TOKEN = os.getenv('BOT_TOKEN')
 KP_TOKEN = os.getenv('KP_TOKEN')
 DATABASE_URL = os.getenv('DATABASE_URL')
 
+# Логирование токена для отладки (только первые и последние символы)
+if TOKEN:
+    token_preview = f"{TOKEN[:10]}...{TOKEN[-10:]}" if len(TOKEN) > 20 else "***"
+    logger.info(f"[CONFIG] BOT_TOKEN загружен: {token_preview}")
+else:
+    logger.error("[CONFIG] BOT_TOKEN НЕ ЗАГРУЖЕН! Проверьте переменные окружения.")
+
 # Настройки ЮKassa (из переменных окружения)
 YOOKASSA_SHOP_ID = os.getenv('YOOKASSA_SHOP_ID', '').strip() if os.getenv('YOOKASSA_SHOP_ID') else None
 YOOKASSA_SECRET_KEY = os.getenv('YOOKASSA_SECRET_KEY', '').strip() if os.getenv('YOOKASSA_SECRET_KEY') else None

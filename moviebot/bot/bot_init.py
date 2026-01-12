@@ -8,6 +8,16 @@ from moviebot.config import TOKEN
 
 logger = logging.getLogger(__name__)
 
+# Проверяем токен перед созданием бота
+if not TOKEN:
+    logger.critical("[BOT INIT] ❌ КРИТИЧЕСКАЯ ОШИБКА: TOKEN не загружен!")
+    logger.critical("[BOT INIT] Проверьте переменную окружения BOT_TOKEN")
+    raise ValueError("BOT_TOKEN не загружен из переменных окружения")
+
+# Логируем первые и последние символы токена для отладки
+token_preview = f"{TOKEN[:10]}...{TOKEN[-10:]}" if len(TOKEN) > 20 else "***"
+logger.info(f"[BOT INIT] Создание бота с токеном: {token_preview}")
+
 # Создаем экземпляр бота с отключённым privacy mode
 bot = telebot.TeleBot(
     TOKEN,
