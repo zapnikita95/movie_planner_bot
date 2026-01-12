@@ -131,23 +131,24 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
                     logger.info(f"[GET FILM STATE] План не найден для film_id={film_id}")
             
             # Для сериалов проверяем подписку (внутри db_lock, но это безопасно)
-            is_series_db = bool(film_row.get('is_series') if isinstance(film_row, dict) else (film_row[3] if len(film_row) > 3 else 0))
-            logger.info(f"[GET FILM STATE] is_series_db={is_series_db}, user_id={user_id}")
-            if is_series_db and user_id:
-                query_user = user_id if user_id is not None else None
-                logger.info(f"[GET FILM STATE] Проверка подписки для сериала: film_id={film_id}, user_id={query_user}")
-                cursor_local.execute("""
-                    SELECT subscribed 
-                    FROM series_subscriptions 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                    LIMIT 1
-                """, (chat_id, film_id, query_user))
-                sub_row = cursor_local.fetchone()
-                if sub_row:
-                    is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
-                    logger.info(f"[GET FILM STATE] Подписка найдена: is_subscribed={is_subscribed}")
-                else:
-                    logger.info(f"[GET FILM STATE] Подписка не найдена")
+            if film_row:
+                is_series_db = bool(film_row.get('is_series') if isinstance(film_row, dict) else (film_row[3] if len(film_row) > 3 else 0))
+                logger.info(f"[GET FILM STATE] is_series_db={is_series_db}, user_id={user_id}")
+                if is_series_db and user_id and film_id:
+                    query_user = user_id if user_id is not None else None
+                    logger.info(f"[GET FILM STATE] Проверка подписки для сериала: film_id={film_id}, user_id={query_user}")
+                    cursor_local.execute("""
+                        SELECT subscribed 
+                        FROM series_subscriptions 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                        LIMIT 1
+                    """, (chat_id, film_id, query_user))
+                    sub_row = cursor_local.fetchone()
+                    if sub_row:
+                        is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
+                        logger.info(f"[GET FILM STATE] Подписка найдена: is_subscribed={is_subscribed}")
+                    else:
+                        logger.info(f"[GET FILM STATE] Подписка не найдена")
         
         # ВАЖНО: Обрабатываем данные плана ВНЕ db_lock, чтобы избежать дедлока при вызове get_user_timezone_or_default
         if plan_data:
