@@ -115,70 +115,98 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
                 plan_row = cursor_local.fetchone()
                 logger.info(f"[GET FILM STATE] Запрос к plans выполнен, plan_row={plan_row is not None}")
                 
+                # Сохраняем данные плана для обработки ВНЕ db_lock
+                plan_data = None
                 if plan_row:
                     plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
                     plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[1]
                     plan_dt_value = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[2]
                     ticket_file_id = plan_row.get('ticket_file_id') if isinstance(plan_row, dict) else (plan_row[3] if len(plan_row) > 3 else None)
-                    
-                    # Форматируем дату
-                    date_str = "не указана"
-                    if plan_dt_value and user_id:
-                        try:
-                            user_tz = get_user_timezone_or_default(user_id)
-                            if isinstance(plan_dt_value, datetime):
-                                if plan_dt_value.tzinfo is None:
-                                    dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
-                                else:
-                                    dt = plan_dt_value.astimezone(user_tz)
-                            else:
-                                dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
-                            date_str = dt.strftime('%d.%m.%Y %H:%M')
-                        except Exception as e:
-                            logger.warning(f"[GET FILM STATE] Ошибка парсинга plan_datetime: {e}")
-                            date_str = str(plan_dt_value)[:16] if plan_dt_value else "не указана"
-                    
-                    plan_info = {
+                    plan_data = {
                         'id': plan_id,
                         'type': plan_type,
-                        'date': date_str
+                        'datetime': plan_dt_value,
+                        'ticket_file_id': ticket_file_id
                     }
-                    
-                    # Проверяем наличие билетов для планов в кино
-                    if plan_type == 'cinema' and ticket_file_id:
-                        import json
-                        try:
-                            # ticket_file_id может быть JSON массивом или строкой
-                            tickets_data = json.loads(ticket_file_id) if isinstance(ticket_file_id, str) else ticket_file_id
-                            if isinstance(tickets_data, list) and len(tickets_data) > 0:
-                                has_tickets = True
-                            elif tickets_data and isinstance(tickets_data, str) and tickets_data.strip():
-                                has_tickets = True
-                        except:
-                            # Если не JSON, проверяем как строку
-                            if ticket_file_id and str(ticket_file_id).strip():
-                                has_tickets = True
-                
-                # Для сериалов проверяем подписку
-                is_series_db = bool(film_row.get('is_series') if isinstance(film_row, dict) else (film_row[3] if len(film_row) > 3 else 0))
-                logger.info(f"[GET FILM STATE] is_series_db={is_series_db}, user_id={user_id}")
-                if is_series_db and user_id:
-                    query_user = user_id if user_id is not None else None
-                    logger.info(f"[GET FILM STATE] Проверка подписки для сериала: film_id={film_id}, user_id={query_user}")
-                    cursor_local.execute("""
-                        SELECT subscribed 
-                        FROM series_subscriptions 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                        LIMIT 1
-                    """, (chat_id, film_id, query_user))
-                    sub_row = cursor_local.fetchone()
-                    if sub_row:
-                        is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
-                        logger.info(f"[GET FILM STATE] Подписка найдена: is_subscribed={is_subscribed}")
+                    logger.info(f"[GET FILM STATE] Данные плана сохранены: plan_id={plan_id}, plan_type={plan_type}")
+                else:
+                    logger.info(f"[GET FILM STATE] План не найден для film_id={film_id}")
+            
+            # Для сериалов проверяем подписку (внутри db_lock, но это безопасно)
+            is_series_db = bool(film_row.get('is_series') if isinstance(film_row, dict) else (film_row[3] if len(film_row) > 3 else 0))
+            logger.info(f"[GET FILM STATE] is_series_db={is_series_db}, user_id={user_id}")
+            if is_series_db and user_id:
+                query_user = user_id if user_id is not None else None
+                logger.info(f"[GET FILM STATE] Проверка подписки для сериала: film_id={film_id}, user_id={query_user}")
+                cursor_local.execute("""
+                    SELECT subscribed 
+                    FROM series_subscriptions 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                    LIMIT 1
+                """, (chat_id, film_id, query_user))
+                sub_row = cursor_local.fetchone()
+                if sub_row:
+                    is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
+                    logger.info(f"[GET FILM STATE] Подписка найдена: is_subscribed={is_subscribed}")
+                else:
+                    logger.info(f"[GET FILM STATE] Подписка не найдена")
+        
+        # ВАЖНО: Обрабатываем данные плана ВНЕ db_lock, чтобы избежать дедлока при вызове get_user_timezone_or_default
+        if plan_data:
+            logger.info(f"[GET FILM STATE] Обработка данных плана ВНЕ db_lock...")
+            plan_id = plan_data['id']
+            plan_type = plan_data['type']
+            plan_dt_value = plan_data['datetime']
+            ticket_file_id = plan_data['ticket_file_id']
+            
+            # Форматируем дату (ВНЕ db_lock, чтобы избежать дедлока)
+            date_str = "не указана"
+            if plan_dt_value and user_id:
+                try:
+                    # ВАЖНО: Вызываем get_user_timezone_or_default ВНЕ db_lock, чтобы избежать дедлока
+                    logger.info(f"[GET FILM STATE] Вызов get_user_timezone_or_default для user_id={user_id}")
+                    user_tz = get_user_timezone_or_default(user_id)
+                    logger.info(f"[GET FILM STATE] Часовой пояс получен: {user_tz}")
+                    if isinstance(plan_dt_value, datetime):
+                        if plan_dt_value.tzinfo is None:
+                            dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                        else:
+                            dt = plan_dt_value.astimezone(user_tz)
                     else:
-                        logger.info(f"[GET FILM STATE] Подписка не найдена")
-            else:
-                logger.info(f"[GET FILM STATE] Фильм не найден в базе")
+                        dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                    date_str = dt.strftime('%d.%m.%Y %H:%M')
+                    logger.info(f"[GET FILM STATE] Дата отформатирована: {date_str}")
+                except Exception as e:
+                    logger.warning(f"[GET FILM STATE] Ошибка парсинга plan_datetime: {e}", exc_info=True)
+                    date_str = str(plan_dt_value)[:16] if plan_dt_value else "не указана"
+            
+            plan_info = {
+                'id': plan_id,
+                'type': plan_type,
+                'date': date_str
+            }
+            logger.info(f"[GET FILM STATE] plan_info создан: {plan_info}")
+            
+            # Проверяем наличие билетов для планов в кино
+            if plan_type == 'cinema' and ticket_file_id:
+                import json
+                try:
+                    # ticket_file_id может быть JSON массивом или строкой
+                    tickets_data = json.loads(ticket_file_id) if isinstance(ticket_file_id, str) else ticket_file_id
+                    if isinstance(tickets_data, list) and len(tickets_data) > 0:
+                        has_tickets = True
+                    elif tickets_data and isinstance(tickets_data, str) and tickets_data.strip():
+                        has_tickets = True
+                except:
+                    # Если не JSON, проверяем как строку
+                    if ticket_file_id and str(ticket_file_id).strip():
+                        has_tickets = True
+            logger.info(f"[GET FILM STATE] has_tickets={has_tickets}")
+        else:
+            logger.info(f"[GET FILM STATE] Нет данных плана для обработки")
+            
+        if not film_row:
+            logger.info(f"[GET FILM STATE] Фильм не найден в базе")
     
     except Exception as e:
         logger.error(f"[GET FILM STATE] ❌ Ошибка получения состояния: {e}", exc_info=True)

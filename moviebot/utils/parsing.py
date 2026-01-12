@@ -263,6 +263,8 @@ def check_timezone_change(user_id, message_date_utc):
     cursor_local = get_db_cursor()
     
     try:
+        # ВАЖНО: Вызываем get_user_timezone ВНЕ db_lock, чтобы избежать дедлока
+        # так как get_user_timezone тоже использует db_lock
         current_tz = get_user_timezone(user_id)
 
         if not current_tz:
