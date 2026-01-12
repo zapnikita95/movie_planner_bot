@@ -1419,16 +1419,14 @@ def back_to_film_description(call):
         
         logger.info(f"[BACK TO FILM] Подготовка к вызову show_film_info_with_buttons: link={link}, is_series={is_series}, title={info.get('title')}")
 
-        # Если callback устарел, используем send_message вместо edit_message_text
-        # (show_film_info_with_buttons сам обработает это через message_id=None)
-        if callback_is_old:
-            logger.info(f"[BACK TO FILM] Callback устарел, отправляем новое сообщение вместо редактирования")
-            message_id = None  # Это заставит show_film_info_with_buttons использовать send_message
-
-        # Главный вызов — existing будет получен внутри show_film_info_with_buttons через get_film_current_state
-        # Но передаем его для оптимизации, если он уже есть
+        # ОПТИМИЗАЦИЯ: Всегда отправляем новое сообщение, не редактируем старое
+        # Это работает быстрее и не требует редактирования сообщения с кнопкой
+        # Пользователь просто получает новое сообщение с описанием, как при отправке ссылки
+        logger.info(f"[BACK TO FILM] Отправляем новое сообщение с описанием (оптимизировано)")
+        
+        # Главный вызов — передаем message_id=None чтобы всегда отправлялось новое сообщение
         try:
-            logger.info(f"[BACK TO FILM] Вызов show_film_info_with_buttons: kp_id={kp_id_int}, message_id={message_id}, callback_is_old={callback_is_old}")
+            logger.info(f"[BACK TO FILM] Вызов show_film_info_with_buttons: kp_id={kp_id_int}, message_id=None (новое сообщение)")
             show_film_info_with_buttons(
                 chat_id=chat_id,
                 user_id=user_id,
@@ -1436,7 +1434,7 @@ def back_to_film_description(call):
                 link=link,
                 kp_id=kp_id_int,
                 existing=existing,  # Может быть None, тогда внутри функции будет получен актуальный
-                message_id=message_id,
+                message_id=None,  # Всегда новое сообщение (оптимизация)
                 message_thread_id=message_thread_id
             )
             logger.info(f"[BACK TO FILM] show_film_info_with_buttons вызвана успешно")

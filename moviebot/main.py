@@ -149,10 +149,8 @@ if process_recurring_payments:
     scheduler.add_job(process_recurring_payments, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='process_recurring_payments')
     scheduler.add_job(process_recurring_payments, 'interval', minutes=10, id='process_recurring_payments_test')
 
-# Добавляем задачи очистки и голосования в scheduler
+# Добавляем задачи очистки в scheduler
 scheduler.add_job(clean_home_plans, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='clean_home_plans')
-scheduler.add_job(start_cinema_votes, 'cron', day_of_week='mon', hour=9, minute=0, timezone=PLANS_TZ, id='start_cinema_votes')
-scheduler.add_job(resolve_cinema_votes, 'cron', day_of_week='tue', hour=9, minute=0, timezone=PLANS_TZ, id='resolve_cinema_votes')
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
 # Случайные события и уведомления

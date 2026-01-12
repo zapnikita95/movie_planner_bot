@@ -281,10 +281,19 @@ def register_series_callbacks(bot):
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{int(kp_id)}"))
                 
-                # Формируем текст сообщения со списком сезонов
+                # Формируем текст сообщения со списком сезонов (определяем ДО try-except)
                 text_msg = f"📺 <b>{title}</b>\n\n<b>Выберите сезон:</b>"
-                
                 message_thread_id = getattr(call.message, 'message_thread_id', None)
+                
+                # Инициализируем send_kwargs заранее для fallback
+                send_kwargs = {
+                    'chat_id': chat_id,
+                    'text': text_msg,
+                    'reply_markup': markup,
+                    'parse_mode': 'HTML'
+                }
+                if message_thread_id is not None:
+                    send_kwargs['message_thread_id'] = message_thread_id
                 
                 logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
                 try:
@@ -302,15 +311,7 @@ def register_series_callbacks(bot):
                     logger.info(f"[SERIES TRACK] Сообщение обновлено успешно")
                 except Exception as e:
                     logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
-                    # фолбэк — новое сообщение
-                    send_kwargs = {
-                        'chat_id': chat_id,
-                        'text': text_msg,
-                        'reply_markup': markup,
-                        'parse_mode': 'HTML'
-                    }
-                    if message_thread_id is not None:
-                        send_kwargs['message_thread_id'] = message_thread_id
+                    # фолбэк — новое сообщение (send_kwargs уже определен выше)
                     try:
                         bot.send_message(**send_kwargs)
                         logger.info(f"[SERIES TRACK] Отправлено новое сообщение как fallback")
@@ -1115,6 +1116,7 @@ def rate_film_callback(call):
             link = f"https://www.kinopoisk.ru/film/{kp_id}/"
 
         if not film_id:
+            # Фильм не в базе - сохраняем kp_id для обработки при оценке
             info = extract_movie_info(link)
             title = info.get('title', f'Фильм {kp_id}') if info else f'Фильм {kp_id}'
 
@@ -1125,13 +1127,10 @@ def rate_film_callback(call):
                 parse_mode='Markdown'
             )
 
-            film_id, _ = ensure_movie_in_database(chat_id, kp_id, link, info or {}, user_id)
-
-            if film_id:
-                rating_messages[msg.message_id] = film_id
-                logger.info(f"[RATE FILM] Добавлено в rating_messages: msg_id={msg.message_id} → film_id={film_id}")
-            else:
-                logger.warning(f"[RATE FILM] Не удалось добавить в базу kp_id={kp_id}")
+            # ВАЖНО: Сохраняем kp_id в формате "kp_id:123", а не film_id
+            # Это позволит handle_rating_internal правильно обработать фильм не в базе
+            rating_messages[msg.message_id] = f"kp_id:{kp_id}"
+            logger.info(f"[RATE FILM] Добавлено в rating_messages: msg_id={msg.message_id} → kp_id:{kp_id}")
             return
 
         with db_lock:

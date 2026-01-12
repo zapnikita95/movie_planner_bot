@@ -58,7 +58,11 @@ def set_scheduler_instance(new_scheduler):
 
 def hourly_stats():
     """Вызывается каждый час для вывода статистики"""
-    print_daily_stats()
+    try:
+        from moviebot.database.db_operations import print_daily_stats
+        print_daily_stats()
+    except Exception as e:
+        logger.warning(f"[HOURLY STATS] Ошибка вывода статистики: {e}", exc_info=True)
 
 
 
@@ -769,7 +773,7 @@ def clean_home_plans():
             sunday = yesterday
 
             cursor.execute('''
-                SELECT p.id, p.film_id, p.chat_id, m.title
+                SELECT p.id, p.film_id, p.chat_id, m.title, m.link
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.plan_type = 'home' 
@@ -783,13 +787,17 @@ def clean_home_plans():
                 film_id = row.get('film_id') if isinstance(row, dict) else row[1]
                 chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
                 title = row.get('title') if isinstance(row, dict) else row[3]
+                link = row.get('link') if isinstance(row, dict) else row[4]
                 
                 cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
                 deleted_count += 1
                 
                 if bot:
                     try:
-                        bot.send_message(chat_id, f"📅 План на фильм <b>{title}</b> удалён (выходные прошли).", parse_mode='HTML')
+                        message_text = f"📅 План на фильм <b>{title}</b> удалён (выходные прошли)."
+                        if link:
+                            message_text += f"\n\n{link}"
+                        bot.send_message(chat_id, message_text, parse_mode='HTML')
                     except:
                         pass
             
@@ -850,171 +858,7 @@ def clean_cinema_plans():
 
 
 
-# Голосование для фильмов "в кино"
-
-def start_cinema_votes():
-    """Каждый понедельник в 9:00 запускает голосование для фильмов в кино"""
-
-    now = datetime.now(plans_tz)
-
-    if now.weekday() != 0:  # только понедельник
-
-        return
-
-    
-
-    with db_lock:
-
-        cursor.execute('''
-
-            SELECT p.id, p.film_id, p.chat_id, m.title, m.link
-
-            FROM plans p
-
-            JOIN movies m ON p.film_id = m.id AND m.chat_id = p.chat_id
-
-            WHERE p.plan_type = 'cinema' AND p.plan_datetime < NOW()
-
-        ''')
-
-        rows = cursor.fetchall()
-
-        
-
-        for row in rows:
-
-            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
-
-            plan_id = row.get('id') if isinstance(row, dict) else row[0]
-
-            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
-
-            chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
-
-            title = row.get('title') if isinstance(row, dict) else row[3]
-
-            link = row.get('link') if isinstance(row, dict) else row[4]
-
-            # Проверяем, есть ли оценки
-
-            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-
-            count_row = cursor.fetchone()
-
-            count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
-
-            if count > 0:
-
-                continue  # оценки есть — не запускаем голосование
-
-            
-
-            # Запускаем голосование
-
-            deadline = (now.replace(hour=23, minute=59, second=59) + timedelta(days=1)).isoformat()  # конец понедельника
-
-            
-
-            try:
-
-                text = f"📊 Голосование: Оставить в расписании фильм <b>{title}</b> ещё на неделю%s\n{link}\n\nОтветьте \"да\" или \"нет\" (в ответ на это сообщение)."
-
-                msg = bot.send_message(chat_id, text, parse_mode='HTML')
-
-                
-
-                cursor.execute('''
-
-                    INSERT INTO cinema_votes (chat_id, film_id, message_id, deadline)
-
-                    VALUES (%s, %s, %s, %s)
-
-                ''', (chat_id, film_id, msg.message_id, deadline))
-
-                conn.commit()
-
-            except Exception as e:
-
-                logger.error(f"Ошибка при отправке сообщения голосования для фильма {film_id}: {e}")
-
-    
-
-    logger.info(f"Запущены голосования для фильмов в кино")
-
-
-
-def resolve_cinema_votes():
-    """Во вторник в 9:00 подводит итоги голосований"""
-
-    with db_lock:
-
-        cursor.execute('''
-
-            SELECT chat_id, film_id, yes_users, no_users, m.title
-
-            FROM cinema_votes v
-
-            JOIN movies m ON v.film_id = m.id AND m.chat_id = v.chat_id
-
-            WHERE deadline < NOW()
-
-        ''')
-
-        rows = cursor.fetchall()
-
-        
-
-        for row in rows:
-
-            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
-
-            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
-
-            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
-
-            yes_json = row.get('yes_votes') if isinstance(row, dict) else row[2]
-
-            no_json = row.get('no_votes') if isinstance(row, dict) else row[3]
-
-            title = row.get('title') if isinstance(row, dict) else row[4]
-
-            yes_count = len(json.loads(yes_json or '[]'))
-
-            no_count = len(json.loads(no_json or '[]'))
-
-            
-
-            if no_count > yes_count or (yes_count == no_count and no_count > 0):
-
-                cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-
-                try:
-
-                    bot.send_message(chat_id, f"📅 Фильм <b>{title}</b> удалён из расписания по результатам голосования.", parse_mode='HTML')
-
-                except:
-
-                    pass
-
-            else:
-
-                try:
-
-                    bot.send_message(chat_id, f"📅 Фильм <b>{title}</b> остался в расписании на следующую неделю.", parse_mode='HTML')
-
-                except:
-
-                    pass
-
-            
-
-            cursor.execute('DELETE FROM cinema_votes WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-
-        conn.commit()
-
-    
-
-    logger.info(f"Подведены итоги для {len(rows)} голосований")
+# Голосование для фильмов "в кино" - УДАЛЕНО
 
 
 

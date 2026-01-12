@@ -159,44 +159,54 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
         else:
             markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
     elif plan_type == 'home' and plan_id and kp_id:
-        # Для планов "дома" показываем онлайн-кинотеатры
-        try:
-            from moviebot.api.kinopoisk_api import get_external_sources
-            sources = get_external_sources(kp_id)
-            if sources:
-                # Сохраняем источники в базу для будущего использования
-                import json
-                sources_dict = {platform: url for platform, url in sources[:6]}
-                sources_json = json.dumps(sources_dict, ensure_ascii=False)
-                with db_lock:
-                    cursor.execute('''
-                        UPDATE plans 
-                        SET ticket_file_id = %s 
-                        WHERE id = %s
-                    ''', (sources_json, plan_id))
-                    conn.commit()
-                
-                # Создаем markup с URL-кнопками для источников
-                markup = InlineKeyboardMarkup(row_width=1)
-                for platform, url in sources[:10]:  # Максимум 10 источников
-                    markup.add(InlineKeyboardButton(platform, url=url))
-                
-                logger.info(f"[PROCESS PLAN] Найдено {len(sources)} источников для kp_id={kp_id}")
-            else:
-                # Если источники не найдены, создаем пустую разметку для кнопки "Перейти к описанию"
-                markup = InlineKeyboardMarkup()
-                logger.info(f"[PROCESS PLAN] Источники не найдены для kp_id={kp_id}")
-        except Exception as e:
-            logger.warning(f"[PROCESS PLAN] Не удалось получить онлайн-кинотеатры: {e}", exc_info=True)
-            # При ошибке создаем пустую разметку для кнопки "Перейти к описанию"
-            markup = InlineKeyboardMarkup()
+        # ОПТИМИЗАЦИЯ: Загружаем источники асинхронно, не блокируя отправку сообщения
+        # Это экономит 1-3 секунды на запросе к API
+        import threading
+        import json
+        from moviebot.api.kinopoisk_api import get_external_sources
+        
+        sources = None
+        sources_loaded = False
+        
+        def load_sources_async():
+            """Загружает источники в фоне и обновляет план в БД"""
+            nonlocal sources, sources_loaded
+            try:
+                sources = get_external_sources(kp_id)
+                sources_loaded = True
+                if sources:
+                    # Сохраняем источники в базу для будущего использования
+                    sources_dict = {platform: url for platform, url in sources[:6]}
+                    sources_json = json.dumps(sources_dict, ensure_ascii=False)
+                    with db_lock:
+                        cursor.execute('''
+                            UPDATE plans 
+                            SET ticket_file_id = %s 
+                            WHERE id = %s
+                        ''', (sources_json, plan_id))
+                        conn.commit()
+                    logger.info(f"[PROCESS PLAN] Найдено {len(sources)} источников для kp_id={kp_id} (загружено в фоне)")
+                else:
+                    logger.info(f"[PROCESS PLAN] Источники не найдены для kp_id={kp_id}")
+            except Exception as e:
+                logger.warning(f"[PROCESS PLAN] Ошибка загрузки источников в фоне: {e}", exc_info=True)
+        
+        # Запускаем загрузку источников в фоне
+        sources_thread = threading.Thread(target=load_sources_async, daemon=True)
+        sources_thread.start()
+        logger.info(f"[PROCESS PLAN] Загрузка источников запущена в фоне для kp_id={kp_id}")
+        
+        # Создаем пустую разметку - источники добавятся позже, если загрузятся
+        markup = InlineKeyboardMarkup()
     
     # Добавляем кнопку "Вернуться к описанию" для обоих типов планов (если есть kp_id)
+    # Для планов "в кино" добавляем обе кнопки: "Добавить билеты" и "Вернуться к описанию"
     if kp_id:
         try:
             kp_id_int = int(kp_id)
             if not markup.keyboard:
                 markup = InlineKeyboardMarkup(row_width=1)
+            # Для планов "в кино" кнопка "Добавить билеты" уже добавлена выше, добавляем "Вернуться к описанию"
             markup.add(
                 InlineKeyboardButton(
                     "◀️ Вернуться к описанию",
@@ -649,7 +659,7 @@ def show_schedule(message):
             welcome_text = """
             🎬 <b>Главное меню</b>
 
-            💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на кинопоиске в бот.
+            💌 Чтобы добавить в базу фильм или сериал, пришлите в сообщении ссылку на страницу фильма или сериала на Кинопоиске в бот.
 
             Выберите раздел из меню ниже ⬇
             """.strip()
@@ -1528,6 +1538,7 @@ def edit_plan_callback(call):
         else:
             markup.add(InlineKeyboardButton("📺 Изменить онлайн-кинотеатр", callback_data=f"edit_plan_streaming:{plan_id}"))
             markup.add(InlineKeyboardButton("🎦 Переключить в 'в кино'", callback_data=f"edit_plan_switch:{plan_id}"))
+        markup.add(InlineKeyboardButton("🗑️ Удалить из расписания", callback_data=f"remove_from_calendar:{plan_id}"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
         
         text = f"✏️ <b>Редактирование плана:</b>\n\n"

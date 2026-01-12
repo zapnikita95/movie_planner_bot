@@ -377,23 +377,6 @@ def handle_rating_internal(message, rating):
                         # Переходим к родительскому сообщению
                         current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
     
-    # Если film_id не найден, но есть kp_id, добавляем фильм в базу
-    if not film_id and kp_id:
-        # Пробуем сначала /film/, затем /series/ если нужно
-        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-        info = extract_movie_info(link)
-        # Если получена информация, проверяем is_series и корректируем ссылку
-        if info and info.get('is_series'):
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-        if info:
-            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-            if was_inserted:
-                logger.info(f"[RATE INTERNAL] Фильм добавлен в базу при оценке: kp_id={kp_id}, film_id={film_id}")
-        else:
-            logger.warning(f"[RATE INTERNAL] Не удалось получить информацию о фильме для kp_id={kp_id}")
-            bot.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
-            return
-    
     # Если film_id все еще не найден и нет реплая, пытаемся найти последнее сообщение бота с запросом на оценку
     if not film_id and not message.reply_to_message:
         logger.info(f"[RATE INTERNAL] Нет реплая, ищем последнее сообщение бота с запросом на оценку в rating_messages")
@@ -459,22 +442,26 @@ def handle_rating_internal(message, rating):
             reply_text = message.reply_to_message.text
             if 'kinopoisk.ru' in reply_text or 'kinopoisk.com' in reply_text:
                 kp_id = extract_kp_id_from_text(reply_text)
-        
-        if kp_id:
-            # Пробуем сначала /film/, затем /series/ если нужно
-            link = f"https://www.kinopoisk.ru/film/{kp_id}/"
-            info = extract_movie_info(link)
-            # Если получена информация, проверяем is_series и корректируем ссылку
-            if info and info.get('is_series'):
-                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            if info:
-                film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
-                if was_inserted:
-                    logger.info(f"[RATE INTERNAL] Фильм добавлен в базу при оценке: kp_id={kp_id}, film_id={film_id}")
-            else:
-                logger.warning(f"[RATE INTERNAL] Не удалось получить информацию о фильме для kp_id={kp_id}")
-                bot.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
-                return
+    
+    # ВАЖНО: Если film_id не найден, но есть kp_id, добавляем фильм в базу ПЕРЕД сохранением оценки
+    if not film_id and kp_id:
+        logger.info(f"[RATE INTERNAL] Фильм не в базе, добавляем перед оценкой: kp_id={kp_id}")
+        # Пробуем сначала /film/, затем /series/ если нужно
+        link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        info = extract_movie_info(link)
+        # Если получена информация, проверяем is_series и корректируем ссылку
+        if info and info.get('is_series'):
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+        if info:
+            film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+            if was_inserted:
+                logger.info(f"[RATE INTERNAL] Фильм добавлен в базу при оценке: kp_id={kp_id}, film_id={film_id}")
+            elif film_id:
+                logger.info(f"[RATE INTERNAL] Фильм уже был в базе: kp_id={kp_id}, film_id={film_id}")
+        else:
+            logger.warning(f"[RATE INTERNAL] Не удалось получить информацию о фильме для kp_id={kp_id}")
+            bot.reply_to(message, "❌ Не удалось получить информацию о фильме для оценки.")
+            return
     
     # Используем локальные соединение и курсор для сохранения оценки
     conn_local_rating = get_db_connection()
@@ -501,10 +488,16 @@ def handle_rating_internal(message, rating):
                     avg_row = cursor_local_rating.fetchone()
                     avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row and len(avg_row) > 0 else None)
                     
-                    # Получаем kp_id
+                    # Получаем kp_id (ВАЖНО: для похожих фильмов)
                     cursor_local_rating.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                     kp_row = cursor_local_rating.fetchone()
                     kp_id = kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None)
+                    # Преобразуем kp_id в строку для единообразия
+                    if kp_id:
+                        kp_id = str(kp_id)
+                        logger.info(f"[RATE INTERNAL] kp_id получен из БД: {kp_id}")
+                    else:
+                        logger.warning(f"[RATE INTERNAL] kp_id не найден в БД для film_id={film_id}")
                 except Exception as db_e:
                     logger.error(f"[RATE INTERNAL] Ошибка работы с БД: {db_e}", exc_info=True)
                     try:
@@ -630,7 +623,11 @@ def handle_rating_internal(message, rating):
                         from moviebot.utils.helpers import has_recommendations_access
                         if has_recommendations_access(chat_id, user_id):
                             # Определяем, является ли чат групповым
-                            is_group = chat_id < 0 or (hasattr(message.chat, 'type') and message.chat.type in ['group', 'supergroup'])
+                            # ВАЖНО: chat_id < 0 означает групповой чат (Telegram использует отрицательные ID для групп)
+                            is_group = chat_id < 0
+                            if not is_group and hasattr(message.chat, 'type'):
+                                is_group = message.chat.type in ['group', 'supergroup']
+                            logger.info(f"[RATE INTERNAL] Определение типа чата: chat_id={chat_id}, is_group={is_group}, chat_type={getattr(message.chat, 'type', 'unknown')}")
                             
                             should_send_similars = False
                             rec_text = ""
@@ -685,34 +682,44 @@ def handle_rating_internal(message, rating):
                                 else:
                                     logger.info(f"[RATE INTERNAL] Групповой чат: условия не выполнены (средняя={avg_rating}, активных={len(active_users)}, оценили={len(rated_users)})")
                             else:
-                                # Для личных чатов: если оценка >= 9
+                                # Для личных чатов: если оценка >= 9 или 10
                                 if rating >= 9:
                                     should_send_similars = True
                                     rec_text = f"🔥 Поскольку вы поставили {rating}/10, вот похожие фильмы, которые могут понравиться:\n\n"
-                                    logger.info(f"[RATE INTERNAL] Личный чат: оценка={rating}")
+                                    logger.info(f"[RATE INTERNAL] Личный чат: оценка={rating}, отправляем похожие фильмы")
+                                else:
+                                    logger.info(f"[RATE INTERNAL] Личный чат: оценка={rating} < 9, похожие фильмы не отправляем")
                             
                             if should_send_similars:
-                                from moviebot.api.kinopoisk_api import get_similars
-                                similars = get_similars(kp_id)
-                                if similars:
-                                    rec_markup = InlineKeyboardMarkup(row_width=1)
+                                try:
+                                    from moviebot.api.kinopoisk_api import get_similars
+                                    # Преобразуем kp_id в int для get_similars
+                                    kp_id_int = int(kp_id) if isinstance(kp_id, str) else kp_id
+                                    logger.info(f"[RATE INTERNAL] Запрашиваем похожие фильмы для kp_id={kp_id_int}")
+                                    similars = get_similars(kp_id_int)
+                                    logger.info(f"[RATE INTERNAL] Получено похожих фильмов: {len(similars) if similars else 0}")
+                                    
+                                    if similars:
+                                        rec_markup = InlineKeyboardMarkup(row_width=1)
 
-                                    for film_id_sim, name, is_series_sim in similars:
-                                        short_name = (name[:50] + '...') if len(name) > 50 else name
-                                        button_text = f"{'📺' if is_series_sim else '🎬'} {short_name}"
-                                        rec_markup.add(InlineKeyboardButton(button_text, callback_data=f"back_to_film:{film_id_sim}"))
+                                        for film_id_sim, name, is_series_sim in similars:
+                                            short_name = (name[:50] + '...') if len(name) > 50 else name
+                                            button_text = f"{'📺' if is_series_sim else '🎬'} {short_name}"
+                                            rec_markup.add(InlineKeyboardButton(button_text, callback_data=f"back_to_film:{film_id_sim}"))
 
-                                    rec_markup.add(InlineKeyboardButton("✅ Готово", callback_data="delete_this_message"))
+                                        rec_markup.add(InlineKeyboardButton("✅ Готово", callback_data="delete_this_message"))
 
-                                    bot.send_message(
-                                        chat_id,
-                                        rec_text,
-                                        reply_markup=rec_markup,
-                                        parse_mode='HTML'
-                                    )
-                                    logger.info(f"[RATE INTERNAL] Похожие фильмы отправлены для kp_id={kp_id}, is_group={is_group}")
-                                else:
-                                    logger.info("[RATE INTERNAL] Похожих фильмов не найдено")
+                                        bot.send_message(
+                                            chat_id,
+                                            rec_text,
+                                            reply_markup=rec_markup,
+                                            parse_mode='HTML'
+                                        )
+                                        logger.info(f"[RATE INTERNAL] ✅ Похожие фильмы отправлены для kp_id={kp_id_int}, is_group={is_group}, count={len(similars)}")
+                                    else:
+                                        logger.info(f"[RATE INTERNAL] Похожих фильмов не найдено для kp_id={kp_id_int}")
+                                except Exception as similars_e:
+                                    logger.error(f"[RATE INTERNAL] Ошибка при получении похожих фильмов: {similars_e}", exc_info=True)
                         else:
                             logger.info("[RATE INTERNAL] Нет доступа к рекомендациям")
                     except Exception as rec_e:

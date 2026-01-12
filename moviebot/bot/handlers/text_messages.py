@@ -1357,7 +1357,11 @@ def handle_rate_list_reply(message):
     
     user_id = message.from_user.id
     
-    # ВАЖНО: Пропускаем сообщения, если пользователь в любом состоянии
+    # ВАЖНО: Для оценок (чистые числа 1-10) НЕ пропускаем, даже если пользователь в других состояниях
+    # Это позволяет оценивать фильмы в любой момент
+    text_stripped = message.text.strip() if message.text else ""
+    is_rating = text_stripped in {'1', '2', '3', '4', '5', '6', '7', '8', '9', '10'}
+    
     from moviebot.states import (
         user_plan_state, user_promo_state, user_promo_admin_state,
         user_ticket_state, user_search_state, user_settings_state,
@@ -1366,42 +1370,45 @@ def handle_rate_list_reply(message):
         user_unsubscribe_state, user_add_admin_state
     )
     
-    logger.info(f"[HANDLE RATE LIST REPLY] Проверка состояний: user_search_state={user_id in user_search_state}, user_plan_state={user_id in user_plan_state}, user_ticket_state={user_id in user_ticket_state}")
+    logger.info(f"[HANDLE RATE LIST REPLY] Проверка состояний: user_search_state={user_id in user_search_state}, user_plan_state={user_id in user_plan_state}, user_ticket_state={user_id in user_ticket_state}, is_rating={is_rating}")
     
-    if user_id in user_promo_state or user_id in user_promo_admin_state:
-        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — промокод")
-        return
-    
-    if user_id in user_search_state:
-        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — поиск")
-        return
-    
-    # ФИКС: Если пользователь в планировании и на step=3 (ввод даты) — НЕ пропускаем
-    if user_id in user_plan_state:
-        state = user_plan_state[user_id]
-        if state.get('step') == 3:
-            logger.info(f"[HANDLE RATE LIST REPLY] НЕ пропускаем — пользователь на step=3 (ввод даты)")
-            # Сообщение идёт дальше в handle_plan_datetime_reply
-        else:
-            logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — пользователь в планировании, но не на step=3")
+    # Если это оценка (чистое число 1-10), обрабатываем ВСЕГДА, независимо от состояний
+    if is_rating:
+        logger.info(f"[HANDLE RATE LIST REPLY] Обнаружена оценка - обрабатываем независимо от состояний")
+    else:
+        # Для не-оценок проверяем состояния как обычно
+        if user_id in user_promo_state or user_id in user_promo_admin_state:
+            logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — промокод")
+            return
+        
+        if user_id in user_search_state:
+            logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — поиск")
+            return
+        
+        # ФИКС: Если пользователь в планировании и на step=3 (ввод даты) — НЕ пропускаем
+        if user_id in user_plan_state:
+            state = user_plan_state[user_id]
+            if state.get('step') == 3:
+                logger.info(f"[HANDLE RATE LIST REPLY] НЕ пропускаем — пользователь на step=3 (ввод даты)")
+                # Сообщение идёт дальше в handle_plan_datetime_reply
+            else:
+                logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — пользователь в планировании, но не на step=3")
+                return
+        
+        # Остальные состояния — пропускаем
+        if (user_id in user_ticket_state or
+            user_id in user_settings_state or
+            user_id in user_edit_state or
+            user_id in user_view_film_state or
+            user_id in user_import_state or
+            user_id in user_clean_state or
+            user_id in user_cancel_subscription_state):
+            logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — другое состояние")
             return
     
-    # Остальные состояния — пропускаем
-    if (user_id in user_ticket_state or
-        user_id in user_settings_state or
-        user_id in user_edit_state or
-        user_id in user_view_film_state or
-        user_id in user_import_state or
-        user_id in user_clean_state or
-        user_id in user_cancel_subscription_state):
-        logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — другое состояние")
-        return
-    
     # Обрабатываем сообщения с оценками (числа от 1 до 10)
-    text_stripped = message.text.strip() if message.text else ""
-    
     # Строгая проверка: только чистые оценки 1–10
-    if text_stripped in {'1', '2', '3', '4', '5', '6', '7', '8', '9', '10'}:
+    if is_rating:
         rating = int(text_stripped)
         logger.info(f"[HANDLE RATE LIST REPLY] Обнаружена чистая оценка: {rating}, обрабатываем")
         
@@ -1602,15 +1609,20 @@ def save_movie_message(message):
         logger.warning(f"[SAVE MOVIE] Ошибка при сохранении ссылки в bot_messages: {e}")
     
     # Пропускаем, если пользователь работает с билетами или планированием
-    if message.from_user.id in user_ticket_state:
-        state = user_ticket_state.get(message.from_user.id, {})
-        step = state.get('step')
-        logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_ticket_state, step={step}")
-        return
+    # НО: если это реплай на сообщение с оценкой (rating_messages), обрабатываем всегда
+    from moviebot.states import rating_messages
+    is_rating_reply = message.reply_to_message and message.reply_to_message.message_id in rating_messages
     
-    if message.from_user.id in user_plan_state:
-        logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_plan_state")
-        return
+    if not is_rating_reply:
+        if message.from_user.id in user_ticket_state:
+            state = user_ticket_state.get(message.from_user.id, {})
+            step = state.get('step')
+            logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_ticket_state, step={step}")
+            return
+        
+        if message.from_user.id in user_plan_state:
+            logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_plan_state")
+            return
     
     try:
         if links:
@@ -1729,11 +1741,7 @@ def main_text_handler(message):
         handle_plan_error_reply_internal(message)
         return
     
-    # Реплай на голосование "в кино"
-    if message.reply_to_message and text.lower() in ['да', 'нет']:
-        from moviebot.bot.handlers.plan import handle_cinema_vote_internal
-        handle_cinema_vote_internal(message, text.lower())
-        return
+    # Реплай на голосование "в кино" - УДАЛЕНО
     
     # Если сообщение не обработано ни одним handler, просто логируем
     logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано ни одним специализированным handler: text='{text[:100]}', user_id={user_id}, chat_id={chat_id}")
