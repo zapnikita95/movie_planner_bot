@@ -127,8 +127,6 @@ from moviebot.scheduler import (
     check_and_send_plan_notifications,
     clean_home_plans,
     clean_cinema_plans,
-    start_cinema_votes,
-    resolve_cinema_votes,
     check_subscription_payments,
     process_recurring_payments,
     check_weekend_schedule,
