@@ -937,17 +937,16 @@ def handle_settings_callback(call):
                 # Показываем меню регулярных напоминаний
                 conn_local_rem = get_db_connection()
                 cursor_local_rem = get_db_cursor()
-                try:
-                    with db_lock:
-                        # Проверяем статус каждого напоминания
-                        cursor_local_rem.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
-                        reminder_rows = cursor_local_rem.fetchall()
-                    
-                    reminders_status = {}
-                    for row in reminder_rows:
-                        key = row.get('key') if isinstance(row, dict) else row[0]
-                        value = row.get('value') if isinstance(row, dict) else row[1]
-                        reminders_status[key] = value
+                with db_lock:
+                    # Проверяем статус каждого напоминания
+                    cursor_local_rem.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
+                    reminder_rows = cursor_local_rem.fetchall()
+                
+                reminders_status = {}
+                for row in reminder_rows:
+                    key = row.get('key') if isinstance(row, dict) else row[0]
+                    value = row.get('value') if isinstance(row, dict) else row[1]
+                    reminders_status[key] = value
                 
                 markup = InlineKeyboardMarkup(row_width=1)
                 
