@@ -688,11 +688,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
 
     try:
         with db_lock:
-            cursor = conn.cursor()
-
-            # Сначала получаем все данные для правильной сортировки
-            # Количество посчитаем после получения всех элементов
-
+            # Используем глобальный курсор
             # Основной большой запрос
             cursor.execute("""
                 SELECT 
@@ -700,10 +696,10 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     m.kp_id,
                     m.title,
                     m.year,
-                    m.poster_url,
+                    COALESCE(m.poster_url, '') AS poster_url,
                     m.link,
-                    m.is_ongoing,
-                    m.seasons_count,
+                    COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
+                    COALESCE(m.seasons_count, 0) AS seasons_count,
                     m.next_episode,
                     m.last_api_update,
                     COUNT(st.id) AS watched_episodes_count,
@@ -713,19 +709,36 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     ON st.film_id = m.id 
                     AND st.chat_id = %s 
                     AND st.user_id = %s
+                    AND st.watched = TRUE
                 LEFT JOIN series_subscriptions ss 
                     ON ss.film_id = m.id 
                     AND ss.chat_id = %s 
                     AND ss.user_id = %s
+                    AND ss.subscribed = TRUE
                 WHERE m.chat_id = %s AND m.is_series = 1
                 GROUP BY m.id
-                ORDER BY m.added_date DESC
+                ORDER BY m.id DESC
             """, (chat_id, user_id, chat_id, user_id, chat_id))
 
             rows = cursor.fetchall()
 
             for row in rows:
-                next_episode = row[8]  # индекс 8 — next_episode
+                # Безопасное извлечение данных с учетом RealDictCursor
+                film_id = row.get('film_id') if isinstance(row, dict) else row[0]
+                kp_id = row.get('kp_id') if isinstance(row, dict) else row[1]
+                title = row.get('title') if isinstance(row, dict) else row[2]
+                year = row.get('year') if isinstance(row, dict) else row[3]
+                poster_url = row.get('poster_url') if isinstance(row, dict) else (row[4] if len(row) > 4 else '')
+                link = row.get('link') if isinstance(row, dict) else (row[5] if len(row) > 5 else None)
+                is_ongoing = bool(row.get('is_ongoing') if isinstance(row, dict) else (row[6] if len(row) > 6 else False))
+                seasons_count = row.get('seasons_count') if isinstance(row, dict) else (row[7] if len(row) > 7 else 0)
+                next_episode_raw = row.get('next_episode') if isinstance(row, dict) else (row[8] if len(row) > 8 else None)
+                last_api_update = row.get('last_api_update') if isinstance(row, dict) else (row[9] if len(row) > 9 else None)
+                watched_count = row.get('watched_episodes_count') if isinstance(row, dict) else (row[10] if len(row) > 10 else 0)
+                has_subscription = bool(row.get('has_subscription') if isinstance(row, dict) else (row[11] if len(row) > 11 else False))
+                
+                # Обработка next_episode
+                next_episode = next_episode_raw
                 if isinstance(next_episode, str):
                     try:
                         next_episode = json.loads(next_episode)
@@ -733,21 +746,19 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                         next_episode = None
 
                 items.append({
-                    'film_id': row[0],
-                    'kp_id': row[1],
-                    'title': row[2],
-                    'year': row[3],
-                    'poster_url': row[4],
-                    'link': row[5] or f"https://www.kinopoisk.ru/series/{row[1]}/",
-                    'is_ongoing': row[6],
-                    'seasons_count': row[7],
+                    'film_id': film_id,
+                    'kp_id': kp_id,
+                    'title': title,
+                    'year': year,
+                    'poster_url': poster_url or '',
+                    'link': link or f"https://www.kinopoisk.ru/series/{kp_id}/",
+                    'is_ongoing': is_ongoing,
+                    'seasons_count': seasons_count or 0,
                     'next_episode': next_episode,
-                    'last_api_update': row[9],
-                    'watched_count': row[10],
-                    'has_subscription': row[11],
+                    'last_api_update': last_api_update,
+                    'watched_count': watched_count or 0,
+                    'has_subscription': has_subscription,
                 })
-
-            cursor.close()
             
             # Сортировка по приоритету:
             # 1. 🟢 +🔔 +⏳ (is_ongoing=True, has_subscription=True, watched_count=0)
