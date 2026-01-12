@@ -1022,32 +1022,45 @@ def check_user_in_group(bot, user_id, group_username):
 
 def get_active_group_users(chat_id, bot_id=None):
     """Получает список активных пользователей группы (кто отправлял запросы или присоединился)"""
-    with db_lock:
-        # Получаем пользователей из stats (кто отправлял запросы)
-        if bot_id:
-            cursor.execute("""
-                SELECT DISTINCT user_id, username 
-                FROM stats 
-                WHERE chat_id = %s AND user_id IS NOT NULL AND user_id != %s
-            """, (chat_id, bot_id))
-        else:
-            cursor.execute("""
-                SELECT DISTINCT user_id, username 
-                FROM stats 
-                WHERE chat_id = %s AND user_id IS NOT NULL
-            """, (chat_id,))
-        users = {}
-        for row in cursor.fetchall():
-            if isinstance(row, dict):
-                user_id = row.get('user_id')
-                username = row.get('username')
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            # Получаем пользователей из stats (кто отправлял запросы)
+            if bot_id:
+                cursor_local.execute("""
+                    SELECT DISTINCT user_id, username 
+                    FROM stats 
+                    WHERE chat_id = %s AND user_id IS NOT NULL AND user_id != %s
+                """, (chat_id, bot_id))
             else:
-                user_id = row.get("user_id") if isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
-                username = row[1] if len(row) > 1 else None
-            if user_id:
-                users[user_id] = username or f"user_{user_id}"
-        
-        return users
+                cursor_local.execute("""
+                    SELECT DISTINCT user_id, username 
+                    FROM stats 
+                    WHERE chat_id = %s AND user_id IS NOT NULL
+                """, (chat_id,))
+            users = {}
+            for row in cursor_local.fetchall():
+                if isinstance(row, dict):
+                    user_id = row.get('user_id')
+                    username = row.get('username')
+                else:
+                    user_id = row.get("user_id") if isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
+                    username = row[1] if len(row) > 1 else None
+                if user_id:
+                    users[user_id] = username or f"user_{user_id}"
+            
+            return users
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
     """Получает список групп, где есть и пользователь, и бот"""
@@ -1126,18 +1139,31 @@ def get_subscription_by_id(subscription_id):
 
 def get_subscription_members(subscription_id):
     """Получает список участников подписки"""
-    with db_lock:
-        cursor.execute("""
-            SELECT user_id, username FROM subscription_members
-            WHERE subscription_id = %s
-        """, (subscription_id,))
-        members = {}
-        for row in cursor.fetchall():
-            # RealDictCursor возвращает словари с ключами-именами колонок
-            user_id = row.get('user_id') if isinstance(row, dict) else row[0]
-            username = row.get('username') if isinstance(row, dict) else row[1]
-            members[user_id] = username or f"user_{user_id}"
-        return members
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT user_id, username FROM subscription_members
+                WHERE subscription_id = %s
+            """, (subscription_id,))
+            members = {}
+            for row in cursor_local.fetchall():
+                # RealDictCursor возвращает словари с ключами-именами колонок
+                user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                username = row.get('username') if isinstance(row, dict) else row[1]
+                members[user_id] = username or f"user_{user_id}"
+            return members
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def add_subscription_member(subscription_id, user_id, username=None):

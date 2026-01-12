@@ -3,6 +3,7 @@ from moviebot.bot.bot_init import bot
 Обработчики команды /join - участие в боте
 """
 import logging
+from datetime import datetime
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 
@@ -39,17 +40,19 @@ def join_command(message):
         
         # Получаем список участников группы (только для групповых чатов)
         if chat_id < 0:  # Групповой чат
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
             try:
                 # Получаем всех участников бота из stats
                 from moviebot.bot.bot_init import BOT_ID
                 with db_lock:
-                    cursor.execute('''
+                    cursor_local.execute('''
                         SELECT DISTINCT user_id, username 
                         FROM stats 
                         WHERE chat_id = %s AND user_id != %s
                         ORDER BY username
                     ''', (chat_id, BOT_ID if BOT_ID else 0))
-                    bot_participants = cursor.fetchall()
+                    bot_participants = cursor_local.fetchall()
                 
                 bot_participant_ids = set()
                 bot_participants_dict = {}
@@ -115,7 +118,56 @@ def join_command(message):
                     except Exception as e:
                         logger.warning(f"[JOIN] Ошибка при получении информации о групповой подписке: {e}")
                     
-                    # Формируем ответ
+                    # Формируем ответ - если есть действующая подписка, показываем как в payment:active:group
+                    if group_subscription_info:
+                        # Есть действующая подписка - показываем информацию как в payment:active:group
+                        subscription_id = group_subscription_info.get('subscription_id')
+                        group_size = group_subscription_info.get('group_size')
+                        paid_count = group_subscription_info.get('paid_count', 0)
+                        
+                        # Получаем информацию о подписке для отображения
+                        from moviebot.database.db_operations import get_subscription_by_id
+                        sub = get_subscription_by_id(subscription_id) if subscription_id else None
+                        
+                        if sub:
+                            plan_type = sub.get('plan_type', 'all')
+                            period_type = sub.get('period_type', 'month')
+                            activated = sub.get('activated_at')
+                            next_payment = sub.get('next_payment_date')
+                            expires_at = sub.get('expires_at')
+                            
+                            plan_names = {
+                                'notifications': 'Уведомления о сериалах',
+                                'recommendations': 'Рекомендации',
+                                'tickets': 'Билеты',
+                                'all': 'Все режимы'
+                            }
+                            plan_name = plan_names.get(plan_type, plan_type)
+                            
+                            response_text = "👥 <b>Групповая подписка</b>\n\n"
+                            response_text += f"📋 <b>Название подписки:</b> {plan_name}\n"
+                            if group_size:
+                                response_text += f"👥 <b>Размер группы:</b> {group_size} участников\n"
+                            response_text += f"💰 <b>Платных участников:</b> {paid_count}/{total_participants_count}\n"
+                            if activated:
+                                response_text += f"📅 Дата активации: <b>{activated.strftime('%d.%m.%Y') if isinstance(activated, datetime) else activated}</b>\n"
+                            if next_payment:
+                                response_text += f"📅 Следующее списание: <b>{next_payment.strftime('%d.%m.%Y') if isinstance(next_payment, datetime) else next_payment}</b>\n"
+                            if expires_at:
+                                response_text += f"⏰ Действует до: <b>{expires_at.strftime('%d.%m.%Y') if isinstance(expires_at, datetime) else expires_at}</b>\n"
+                            else:
+                                response_text += f"⏰ Действует: <b>Навсегда</b>\n"
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            # Показываем кнопку списка участников только для реальных подписок (не виртуальных)
+                            if subscription_id and subscription_id > 0:
+                                markup.add(InlineKeyboardButton("👥 Список участников", callback_data=f"payment:group_members:{subscription_id}:0"))
+                            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                            
+                            bot.reply_to(message, response_text, parse_mode='HTML', reply_markup=markup)
+                            return
+                    
+                    # Если нет подписки или не удалось получить информацию, показываем стандартное сообщение
                     if not_added or bot_participants:
                         response_text += "\n\n"
                         
@@ -188,6 +240,15 @@ def join_command(message):
                             response_text += f"• {display_name}\n"
             except Exception as e:
                 logger.warning(f"[JOIN] Ошибка при получении участников: {e}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
         
         bot.reply_to(message, response_text, parse_mode='HTML')
         logger.info(f"✅ Команда /join обработана для пользователя {user_id}")
@@ -229,22 +290,25 @@ def join_add_callback(call):
             message_text = call.message.text or call.message.caption or ""
             
             # Получаем список недобавленных участников
-            with db_lock:
-                cursor.execute('''
-                    SELECT DISTINCT user_id, username 
-                    FROM stats 
-                    WHERE chat_id = %s
-                    ORDER BY username
-                ''', (chat_id,))
-                bot_participants = cursor.fetchall()
-            
-            bot_participant_ids = set()
-            for row in bot_participants:
-                p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
-                bot_participant_ids.add(p_user_id)
-            
-            # Получаем администраторов группы
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
             try:
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT DISTINCT user_id, username 
+                        FROM stats 
+                        WHERE chat_id = %s
+                        ORDER BY username
+                    ''', (chat_id,))
+                    bot_participants = cursor_local.fetchall()
+                
+                bot_participant_ids = set()
+                for row in bot_participants:
+                    p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                    bot_participant_ids.add(p_user_id)
+                
+                # Получаем администраторов группы
+                try:
                 admins = bot.get_chat_administrators(chat_id)
                 all_group_member_ids = set()
                 all_group_members = {}
@@ -397,8 +461,17 @@ def join_add_callback(call):
                         display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
                         response_text += f"• {display_name}\n"
                     bot.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
-            except Exception as e:
-                logger.warning(f"[JOIN ADD] Не удалось обновить сообщение: {e}")
+                except Exception as admin_e:
+                    logger.warning(f"[JOIN ADD] Не удалось получить администраторов: {admin_e}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
         except Exception as e:
             logger.error(f"[JOIN ADD] Ошибка при обновлении сообщения: {e}", exc_info=True)
     except Exception as e:

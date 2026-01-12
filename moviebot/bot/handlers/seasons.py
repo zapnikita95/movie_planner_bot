@@ -686,11 +686,14 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
     total_count = 0
     total_pages = 1
 
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+
     try:
         with db_lock:
-            # Используем глобальный курсор
+            # Используем локальное соединение
             # Основной большой запрос
-            cursor.execute("""
+            cursor_local.execute("""
                 SELECT 
                     m.id AS film_id,
                     m.kp_id,
@@ -720,7 +723,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                 ORDER BY m.id DESC
             """, (chat_id, user_id, chat_id, user_id, chat_id))
 
-            rows = cursor.fetchall()
+            rows = cursor_local.fetchall()
 
             for row in rows:
                 # Безопасное извлечение данных с учетом RealDictCursor
@@ -799,13 +802,28 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
 
     except psycopg2.InterfaceError as e:
         logger.error(f"[GET_USER_SERIES_PAGE] Cursor error: {e}")
-        conn.rollback()
+        try:
+            conn_local.rollback()
+        except:
+            pass
         return {'items': [], 'total_pages': 1, 'total_count': 0, 'current_page': page}
 
     except Exception as e:
         logger.error(f"[GET_USER_SERIES_PAGE] Ошибка: {e}", exc_info=True)
-        conn.rollback()
+        try:
+            conn_local.rollback()
+        except:
+            pass
         return {'items': [], 'total_pages': 1, 'total_count': 0, 'current_page': page}
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
     return {
         'items': items,

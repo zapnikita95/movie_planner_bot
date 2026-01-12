@@ -152,7 +152,9 @@ def handle_settings_callback(call):
             bot.answer_callback_query(call.id)
             
             # Показываем настройку случайных событий
-            with db_lock:
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
                 # Получаем ID бота динамически
                 bot_id = bot.get_me().id
                 
@@ -160,48 +162,59 @@ def handle_settings_callback(call):
                 threshold_time = (datetime.now(PLANS_TZ) - timedelta(days=30)).isoformat()
                 
                 # Считаем количество активных участников (исключая бота)
-                cursor.execute('''
-                    SELECT COUNT(DISTINCT user_id) AS count
-                    FROM stats 
-                    WHERE chat_id = %s 
-                    AND timestamp >= %s
-                    AND user_id != %s
-                ''', (chat_id, threshold_time, bot_id))
-            
-            # Получаем текущий статус случайных событий из базы (работает и с dict, и с tuple)
-            with db_lock:
-                cursor.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
-                row = cursor.fetchone()
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT COUNT(DISTINCT user_id) AS count
+                        FROM stats 
+                        WHERE chat_id = %s 
+                        AND timestamp >= %s
+                        AND user_id != %s
+                    ''', (chat_id, threshold_time, bot_id))
+                    count_row = cursor_local.fetchone()
+                    active_count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
                 
-                if row is None:
-                    is_enabled = True  # по умолчанию включено, если записи нет
-                else:
-                    # Универсальное получение значения
-                    value = row.get('value') if isinstance(row, dict) else (row[0] if row else default)
-                    is_enabled = str(value).lower() == 'true'
+                # Получаем текущий статус случайных событий из базы (работает и с dict, и с tuple)
+                with db_lock:
+                    cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
+                    row = cursor_local.fetchone()
+                    
+                    if row is None:
+                        is_enabled = True  # по умолчанию включено, если записи нет
+                    else:
+                        # Универсальное получение значения
+                        value = row.get('value') if isinstance(row, dict) else (row[0] if row else 'true')
+                        is_enabled = str(value).lower() == 'true'
 
-            markup = InlineKeyboardMarkup(row_width=1)
-            if is_enabled:
-                markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
-            else:
-                markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
-            markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
-            markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
-            
-            status_text = "включены" if is_enabled else "выключены"
-            status_text = "включены" if is_enabled else "выключены"
-            bot.edit_message_text(
-                f"🎲 <b>Случайные события</b>\n\n"
-                f"Текущий статус: <b>{status_text}</b>\n\n"
-                f"Случайные события включают:\n"
-                f"• Выбор броском кубика случайного участника для выбора фильма (раз в 2 недели)\n"
-                f"• Выбор случайного участника для выбора фильма ботом",
-                call.message.chat.id,
-                call.message.message_id,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
+                markup = InlineKeyboardMarkup(row_width=1)
+                if is_enabled:
+                    markup.add(InlineKeyboardButton("❌ Выключить", callback_data="settings:random_events:disable"))
+                else:
+                    markup.add(InlineKeyboardButton("✅ Включить", callback_data="settings:random_events:enable"))
+                markup.add(InlineKeyboardButton("📋 Пример события с участником", callback_data="settings:random_events:example:with_user"))
+                markup.add(InlineKeyboardButton("📋 Пример события без участника", callback_data="settings:random_events:example:without_user"))
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
+                
+                status_text = "включены" if is_enabled else "выключены"
+                bot.edit_message_text(
+                    f"🎲 <b>Случайные события</b>\n\n"
+                    f"Текущий статус: <b>{status_text}</b>\n\n"
+                    f"Случайные события включают:\n"
+                    f"• Выбор броском кубика случайного участника для выбора фильма (раз в 2 недели)\n"
+                    f"• Выбор случайного участника для выбора фильма ботом",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             return
         
         # Обработчик для примеров событий (должен быть ДО общего answer_callback_query)
@@ -231,23 +244,35 @@ def handle_settings_callback(call):
                 except Exception as e:
                     logger.warning(f"Не удалось получить информацию о боте: {e}")
 
-                with db_lock:
-                    if current_bot_id:
-                        cursor.execute('''
-                            SELECT DISTINCT user_id, username 
-                            FROM stats 
-                            WHERE chat_id = %s 
-                            AND user_id != %s
-                            LIMIT 10
-                        ''', (chat_id, current_bot_id))
-                    else:
-                        cursor.execute('''
-                            SELECT DISTINCT user_id, username 
-                            FROM stats 
-                            WHERE chat_id = %s 
-                            LIMIT 10
-                        ''', (chat_id,))
-                    participants = cursor.fetchall()
+                conn_local_ex = get_db_connection()
+                cursor_local_ex = get_db_cursor()
+                try:
+                    with db_lock:
+                        if current_bot_id:
+                            cursor_local_ex.execute('''
+                                SELECT DISTINCT user_id, username 
+                                FROM stats 
+                                WHERE chat_id = %s 
+                                AND user_id != %s
+                                LIMIT 10
+                            ''', (chat_id, current_bot_id))
+                        else:
+                            cursor_local_ex.execute('''
+                                SELECT DISTINCT user_id, username 
+                                FROM stats 
+                                WHERE chat_id = %s 
+                                LIMIT 10
+                            ''', (chat_id,))
+                        participants = cursor_local_ex.fetchall()
+                finally:
+                    try:
+                        cursor_local_ex.close()
+                    except:
+                        pass
+                    try:
+                        conn_local_ex.close()
+                    except:
+                        pass
                 
                 if current_bot_id:
                     filtered_participants = []
@@ -400,13 +425,25 @@ def handle_settings_callback(call):
             sub_action = action.split(":", 1)[1]
             new_value = 'true' if sub_action == 'enable' else 'false'
             
-            with db_lock:
-                cursor.execute('''
-                    INSERT INTO settings (chat_id, key, value)
-                    VALUES (%s, 'random_events_enabled', %s)
-                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-                ''', (chat_id, new_value))
-                conn.commit()
+            conn_local_re = get_db_connection()
+            cursor_local_re = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local_re.execute('''
+                        INSERT INTO settings (chat_id, key, value)
+                        VALUES (%s, 'random_events_enabled', %s)
+                        ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                    ''', (chat_id, new_value))
+                    conn_local_re.commit()
+            finally:
+                try:
+                    cursor_local_re.close()
+                except:
+                    pass
+                try:
+                    conn_local_re.close()
+                except:
+                    pass
             
             status_text = "включены" if new_value == 'true' else "выключены"
             bot.answer_callback_query(call.id, f"Случайные события {status_text}")
@@ -898,10 +935,13 @@ def handle_settings_callback(call):
             
             elif sub_action == "regular_reminders":
                 # Показываем меню регулярных напоминаний
-                with db_lock:
-                    # Проверяем статус каждого напоминания
-                    cursor.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
-                    reminder_rows = cursor.fetchall()
+                conn_local_rem = get_db_connection()
+                cursor_local_rem = get_db_cursor()
+                try:
+                    with db_lock:
+                        # Проверяем статус каждого напоминания
+                        cursor_local_rem.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
+                        reminder_rows = cursor_local_rem.fetchall()
                     
                     reminders_status = {}
                     for row in reminder_rows:
@@ -1000,20 +1040,32 @@ def handle_reminder_callback(call):
             return
         
         # Сохраняем настройку в БД
-        with db_lock:
-            cursor.execute("""
-                INSERT INTO settings (chat_id, key, value)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-            """, (chat_id, setting_key, new_value))
-            conn.commit()
-        
-        logger.info(f"[REMINDER CALLBACK] Настройка сохранена: {setting_key}={new_value}")
-        
-        # Обновляем меню регулярных напоминаний
-        with db_lock:
-            cursor.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
-            reminder_rows = cursor.fetchall()
+        conn_local_rem2 = get_db_connection()
+        cursor_local_rem2 = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_local_rem2.execute("""
+                    INSERT INTO settings (chat_id, key, value)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                """, (chat_id, setting_key, new_value))
+                conn_local_rem2.commit()
+            
+            logger.info(f"[REMINDER CALLBACK] Настройка сохранена: {setting_key}={new_value}")
+            
+            # Обновляем меню регулярных напоминаний
+            with db_lock:
+                cursor_local_rem2.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
+                reminder_rows = cursor_local_rem2.fetchall()
+        finally:
+            try:
+                cursor_local_rem2.close()
+            except:
+                pass
+            try:
+                conn_local_rem2.close()
+            except:
+                pass
             
             reminders_status = {}
             for row in reminder_rows:
