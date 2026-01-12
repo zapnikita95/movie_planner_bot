@@ -486,18 +486,17 @@ def show_schedule(message):
         conn_local = get_db_connection()
         cursor_local = get_db_cursor()
         
-        try:
-            with db_lock:
-                cursor_local.execute('''
-                    SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
-                           CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket,
-                           m.watched
-                    FROM plans p
-                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                    WHERE p.chat_id = %s AND m.watched = 0 AND p.film_id IS NOT NULL
-                    ORDER BY p.plan_type DESC, p.plan_datetime ASC
-                ''', (chat_id,))
-                rows = cursor_local.fetchall()
+        with db_lock:
+            cursor_local.execute('''
+                SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket,
+                       m.watched
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s AND m.watched = 0 AND p.film_id IS NOT NULL
+                ORDER BY p.plan_type DESC, p.plan_datetime ASC
+            ''', (chat_id,))
+            rows = cursor_local.fetchall()
         
         if not rows:
             empty_markup = InlineKeyboardMarkup(row_width=1)
@@ -619,19 +618,19 @@ def show_schedule(message):
                 home_msg = bot.reply_to(message, home_text, reply_markup=home_markup, parse_mode='HTML')
             home_message_id = home_msg.message_id
         
-            # Сохраняем message_id обоих сообщений для удаления при нажатии "Назад"
-            if cinema_message_id and home_message_id:
-                if not hasattr(show_schedule, '_schedule_messages'):
-                    show_schedule._schedule_messages = {}
-                show_schedule._schedule_messages[chat_id] = {
-                    'cinema_message_id': cinema_message_id,
-                    'home_message_id': home_message_id
-                }
-            elif cinema_message_id:
-                if not hasattr(show_schedule, '_schedule_messages'):
-                    show_schedule._schedule_messages = {}
-                show_schedule._schedule_messages[chat_id] = {
-                    'cinema_message_id': cinema_message_id,
+        # Сохраняем message_id обоих сообщений для удаления при нажатии "Назад"
+        if cinema_message_id and home_message_id:
+            if not hasattr(show_schedule, '_schedule_messages'):
+                show_schedule._schedule_messages = {}
+            show_schedule._schedule_messages[chat_id] = {
+                'cinema_message_id': cinema_message_id,
+                'home_message_id': home_message_id
+            }
+        elif cinema_message_id:
+            if not hasattr(show_schedule, '_schedule_messages'):
+                show_schedule._schedule_messages = {}
+            show_schedule._schedule_messages[chat_id] = {
+                'cinema_message_id': cinema_message_id,
                 'home_message_id': None
             }
         elif home_message_id:
@@ -641,27 +640,8 @@ def show_schedule(message):
                 'cinema_message_id': None,
                 'home_message_id': home_message_id
             }
-            
-            logger.info(f"✅ Ответ на /schedule отправлен пользователю {user_id}")
-        except Exception as e:
-            logger.error(f"❌ Ошибка в /schedule: {e}", exc_info=True)
-            try:
-                conn_local.rollback()
-            except:
-                pass
-            try:
-                bot.reply_to(message, "Произошла ошибка при загрузке расписания")
-            except:
-                pass
-        finally:
-            try:
-                cursor_local.close()
-            except:
-                pass
-            try:
-                conn_local.close()
-            except:
-                pass
+        
+        logger.info(f"✅ Ответ на /schedule отправлен пользователю {user_id}")
     except Exception as e:
         logger.error(f"❌ Ошибка в /schedule (внешний блок): {e}", exc_info=True)
         try:
