@@ -260,8 +260,9 @@ def build_tmdb_index():
     
     # Фильтруем только обязательные поля:
     # 1. imdb_id не NaN (обязательно должен быть)
-    # 2. overview и title не пустые
-    logger.info(f"Фильтрация: imdb_id not NaN, overview/title not NaN")
+    # 2. title ИЛИ original_title не пустые (хотя бы одно должно быть)
+    # 3. overview МОЖЕТ быть пустым (но будет учитываться при приоритизации поиска)
+    logger.info(f"Фильтрация: imdb_id not NaN, (title OR original_title) not NaN")
     initial_count = len(df)
     
     # Фильтруем NaN imdb_id (важно: проверяем до преобразования в строку)
@@ -272,8 +273,14 @@ def build_tmdb_index():
     df = df[df['imdb_id'].astype(str).str.lower() != 'nan']
     logger.info(f"После фильтра imdb_id != 'nan': {len(df)} фильмов")
     
-    df = df.dropna(subset=['overview', 'title'])
-    logger.info(f"После фильтра overview/title not NaN: {len(df)} фильмов")
+    # Фильтр: title ИЛИ original_title не пустые
+    df = df[df['title'].notna() | df['original_title'].notna()]
+    logger.info(f"После фильтра (title OR original_title) not NaN: {len(df)} фильмов")
+    
+    # Убираем пустые title (но original_title может остаться)
+    df = df[(df['title'].notna() & (df['title'].astype(str).str.strip() != '')) | 
+            (df['original_title'].notna() & (df['original_title'].astype(str).str.strip() != ''))]
+    logger.info(f"После фильтра (title OR original_title) not empty: {len(df)} фильмов")
     
     # Сортируем по популярности (vote_count, если есть) и берем топ фильмов
     if 'vote_count' in df.columns:
@@ -282,7 +289,7 @@ def build_tmdb_index():
         df = df.head(MAX_MOVIES)
     logger.info(f"После сортировки и ограничения до {MAX_MOVIES}: {len(df)} фильмов (изначально было {initial_count})")
     
-    logger.info("Keywords отсутствуют — используем только сюжет, жанры, актёров и режиссёра")
+    logger.info("Keywords отсутствуют — используем только сюжет, жанры, актёров, режиссёра и страны производства")
     
     df['genres_str'] = df['genres'].apply(lambda x: parse_json_list(x, 'name'))
     
@@ -295,12 +302,22 @@ def build_tmdb_index():
     # Продюсеры
     df['producers_str'] = df['producers'].fillna('')
     
+    # Страны производства
+    df['countries_str'] = df['production_countries'].apply(lambda x: parse_json_list(x, 'name'))
+    
+    # Сохраняем информацию о наличии overview для приоритизации при поиске
+    df['has_overview'] = df['overview'].notna() & (df['overview'].astype(str).str.strip() != '')
+    
+    # Используем title, если есть, иначе original_title
+    df['display_title'] = df['title'].fillna(df['original_title'])
+    
     df['description'] = df.apply(
-        lambda row: f"{row['title']} ({row['year']}) {row['genres_str']}. "
-                    f"Plot: {row['overview']}. "
+        lambda row: f"{row['display_title']} ({row['year']}) {row['genres_str']}. "
+                    f"{('Plot: ' + str(row['overview']) + '. ') if row.get('has_overview', False) else ''}"
                     f"Actors: {row['actors_str']}. "
                     f"Director: {row['director_str']}. "
-                    f"Producers: {row['producers_str']}",
+                    f"Producers: {row['producers_str']}. "
+                    f"Countries: {row['countries_str']}",
         axis=1
     )
     
@@ -315,7 +332,8 @@ def build_tmdb_index():
     df = df[df['imdb_id'].str.len() > 0]
     logger.info(f"После финальной очистки imdb_id: {len(df)} фильмов")
     
-    processed = df[['imdb_id', 'title', 'year', 'description']].copy()
+    # Сохраняем has_overview для приоритизации при поиске
+    processed = df[['imdb_id', 'title', 'year', 'description', 'has_overview']].copy()
     # Уже отсортировали и ограничили выше, не нужно еще раз .head()
     
     logger.info(f"Генерация эмбеддингов для {len(processed)} фильмов...")
