@@ -22,6 +22,8 @@ import threading
 
 # Глобальная блокировка для индекса
 _index_lock = threading.Lock()
+# Блокировка для загрузки модели
+_model_lock = threading.Lock()
 
 # Отключаем ненужный параллелизм, чтобы не было segmentation fault
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
@@ -69,10 +71,14 @@ def init_shazam_index():
 
 def get_model():
     global _model
+    # Двойная проверка с блокировкой для thread-safety
     if _model is None:
-        logger.info("Загрузка модели embeddings...")
-        _model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-        logger.info("Модель embeddings загружена")
+        with _model_lock:
+            # Проверяем еще раз внутри блокировки
+            if _model is None:
+                logger.info("Загрузка модели embeddings...")
+                _model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+                logger.info("Модель embeddings загружена")
     return _model
 
 
