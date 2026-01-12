@@ -759,7 +759,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     m.last_api_update,
                     COUNT(st.id) AS watched_episodes_count,
                     BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
-                    COALESCE(m.watched, FALSE) AS all_watched
+                    (COALESCE(m.watched, 0) = 1) AS all_watched
                 FROM movies m
                 LEFT JOIN series_tracking st 
                     ON st.film_id = m.id 

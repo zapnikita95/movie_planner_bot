@@ -40,12 +40,28 @@ def has_notifications_access(chat_id, user_id):
     
     # Проверяем групповую подписку (для групповых чатов)
     if chat_id < 0:  # группа
-        from moviebot.database.db_operations import get_active_group_subscription_by_chat_id
+        from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
         group_sub = get_active_group_subscription_by_chat_id(chat_id)
         if group_sub:
             plan_type = group_sub.get('plan_type')
+            group_size = group_sub.get('group_size')
+            subscription_id = group_sub.get('id')
+            
             if plan_type in ['notifications', 'all']:
-                return True
+                # Если есть ограничение по участникам (group_size), проверяем, является ли пользователь участником
+                if group_size is not None and subscription_id:
+                    try:
+                        members = get_subscription_members(subscription_id)
+                        if members and user_id in members:
+                            return True
+                        # Если пользователь не в списке участников, нет доступа
+                        return False
+                    except Exception as e:
+                        logger.error(f"[HELPERS] Ошибка проверки участников подписки: {e}", exc_info=True)
+                        return False
+                else:
+                    # Если нет ограничения по участникам, доступ есть для всех
+                    return True
     
     return False
 
