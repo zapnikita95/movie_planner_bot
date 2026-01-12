@@ -311,6 +311,13 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             except Exception as e:
                 logger.error(f"[SERIES_STATUS_CRASH] {e}", exc_info=True)
                 text += f"ℹ️ Не удалось загрузить статус новых серий\n"
+            
+            # Статус подписки для сериалов
+            if user_id:
+                if is_subscribed:
+                    text += f"\n🔔 <b>Статус подписки: ✅ Подписан</b>"
+                else:
+                    text += f"\n🔔 <b>Статус подписки: ❌ Не подписан</b>"
 
         text += f"\n<a href='{link}'>Кинопоиск</a>"
 
@@ -638,11 +645,15 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         logger.info(f"[SHOW FILM INFO] Обработка кнопок сериала: is_series={is_series}, user_id={user_id}, film_id={film_id}")
 
         if is_series:
-
-            # Проверяем доступ — функция умеет работать с user_id=None
-            has_access = has_notifications_access(chat_id, user_id)
-            logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям (группа/личка): has_access={has_access}")
-
+            # КРИТИЧЕСКАЯ ПРОВЕРКА: user_id должен быть указан для проверки доступа
+            if user_id is None:
+                logger.warning(f"[SHOW FILM INFO] user_id is None для сериала kp_id={kp_id}, показываем заблокированные кнопки")
+                has_access = False
+            else:
+                # Проверяем доступ — функция требует user_id
+                has_access = has_notifications_access(chat_id, user_id)
+                logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям: has_access={has_access}, chat_id={chat_id}, user_id={user_id}")
+            
             # Отметка серий
             if has_access:
                 markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{int(kp_id)}"))
