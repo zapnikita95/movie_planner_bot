@@ -262,11 +262,11 @@ def send_ticket_notification(chat_id, plan_id):
                 WHERE p.id = %s AND p.chat_id = %s
             ''', (plan_id, chat_id))
             ticket_row = cursor_local.fetchone()
-        
+
         if not ticket_row:
             logger.warning(f"[TICKET NOTIFICATION] План не найден для plan_id={plan_id}")
             return
-        
+
         if isinstance(ticket_row, dict):
             ticket_file_id = ticket_row.get('ticket_file_id')
             title = ticket_row.get('title')
@@ -275,25 +275,11 @@ def send_ticket_notification(chat_id, plan_id):
             ticket_file_id = ticket_row.get("ticket_file_id") if isinstance(ticket_row, dict) else (ticket_row[0] if ticket_row else None)
             title = ticket_row[1]
             plan_dt_value = ticket_row[2]
-        
+
         if not ticket_file_id:
             logger.warning(f"[TICKET NOTIFICATION] Билеты не найдены для plan_id={plan_id}")
             return
-    except Exception as e:
-        logger.error(f"[TICKET NOTIFICATION] Ошибка: {e}", exc_info=True)
-    finally:
-        # Закрываем локальные соединения
-        if 'cursor_local' in locals():
-            try:
-                cursor_local.close()
-            except:
-                pass
-        if 'conn_local' in locals():
-            try:
-                conn_local.close()
-            except:
-                pass
-        
+
         # Парсим билеты (может быть JSON массив или один file_id)
         ticket_files = []
         try:
@@ -303,9 +289,9 @@ def send_ticket_notification(chat_id, plan_id):
         except:
             # Старый формат - один file_id
             ticket_files = [ticket_file_id]
-        
+
         text = f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>\n\nВаши билеты ({len(ticket_files)} шт.):"
-        
+
         # Отправляем все билеты
         sent_count = 0
         for i, file_id in enumerate(ticket_files):
@@ -314,7 +300,7 @@ def send_ticket_notification(chat_id, plan_id):
                     caption = text
                 else:
                     caption = f"🎟️ Билет {i+1}/{len(ticket_files)}"
-                
+
                 bot.send_photo(chat_id, file_id, caption=caption, parse_mode='HTML')
                 sent_count += 1
             except:
@@ -323,11 +309,11 @@ def send_ticket_notification(chat_id, plan_id):
                     sent_count += 1
                 except Exception as e:
                     logger.error(f"[TICKET NOTIFICATION] Ошибка отправки билета {i+1}: {e}")
-        
+
         if sent_count == 0:
             # Если не удалось отправить ни одного билета, отправляем текстовое сообщение
             bot.send_message(chat_id, f"🎟️ <b>Напоминание: через 10 минут сеанс!</b>\n\n<b>{title}</b>", parse_mode='HTML')
-        
+
         # Отмечаем как отправленное в базе данных
         try:
             with db_lock:
@@ -340,10 +326,20 @@ def send_ticket_notification(chat_id, plan_id):
             logger.info(f"[TICKET NOTIFICATION] План {plan_id} отмечен как уведомление с билетами отправлено")
         except Exception as e:
             logger.warning(f"[TICKET NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}")
-        
+
         logger.info(f"[TICKET NOTIFICATION] Напоминание с билетами отправлено для {title} в чат {chat_id}")
     except Exception as e:
         logger.error(f"[TICKET NOTIFICATION] Ошибка отправки напоминания: {e}", exc_info=True)
+    finally:
+        # Закрываем локальные соединения
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def check_and_send_plan_notifications():
@@ -784,24 +780,21 @@ def check_and_send_plan_notifications():
 def clean_home_plans():
     """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок.
     Также удаляет все планы дома на прошедшие выходные (суббота и воскресенье) в понедельник."""
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
-    try:
-        now = datetime.now(plans_tz)
-        today = now.date()
-        yesterday = (now - timedelta(days=1)).date()
-        today_weekday = today.weekday()  # 0 = Monday, 6 = Sunday
+    now = datetime.now(plans_tz)
+    today = now.date()
+    yesterday = (now - timedelta(days=1)).date()
+    today_weekday = today.weekday()  # 0 = Monday, 6 = Sunday
 
-        deleted_count = 0
+    deleted_count = 0
 
-        with db_lock:
+    with db_lock:
         # Если сегодня понедельник, удаляем все планы дома на прошедшие выходные (суббота и воскресенье)
         if today_weekday == 0:  # Monday
             # Находим субботу и воскресенье прошлой недели
             saturday = yesterday - timedelta(days=1)  # Вчера было воскресенье, значит суббота - позавчера
             sunday = yesterday
 
-            cursor_local.execute('''
+            cursor.execute('''
                 SELECT p.id, p.film_id, p.chat_id, m.title, m.link
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
@@ -809,7 +802,7 @@ def clean_home_plans():
                 AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
             ''', (saturday, sunday))
 
-            weekend_rows = cursor_local.fetchall()
+            weekend_rows = cursor.fetchall()
 
             for row in weekend_rows:
                 plan_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -818,7 +811,7 @@ def clean_home_plans():
                 title = row.get('title') if isinstance(row, dict) else row[3]
                 link = row.get('link') if isinstance(row, dict) else row[4]
                 
-                cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
                 deleted_count += 1
                 
                 if bot:
@@ -833,13 +826,13 @@ def clean_home_plans():
             logger.info(f"Очищены планы дома на выходные: {len(weekend_rows)} планов")
         
         # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
-        cursor_local.execute('''
+        cursor.execute('''
             SELECT p.id, p.film_id, p.chat_id
             FROM plans p
             WHERE p.plan_type = 'home' AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') = %s
         ''', (yesterday,))
 
-        rows = cursor_local.fetchall()
+        rows = cursor.fetchall()
 
         for row in rows:
             # RealDictCursor возвращает словари, но поддерживает доступ по индексу
@@ -848,14 +841,14 @@ def clean_home_plans():
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
 
             # Проверяем, есть ли оценки по фильму
-            cursor_local.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
 
-            count_row = cursor_local.fetchone()
+            count_row = cursor.fetchone()
 
             count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
 
             if count == 0:
-                cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
                 deleted_count += 1
 
                 if bot:

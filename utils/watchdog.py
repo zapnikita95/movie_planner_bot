@@ -136,9 +136,18 @@ class BotWatchdog:
                 return False
                 
             # Пытаемся получить информацию о боте
-            bot_info = self.bot_instance.get_me()
-            if bot_info is None:
-                raise Exception("Не удалось получить информацию о боте")
+            try:
+                bot_info = self.bot_instance.get_me()
+                if bot_info is None:
+                    raise Exception("Не удалось получить информацию о боте")
+            except Exception as bot_error:
+                error_str = str(bot_error).lower()
+                if 'unauthorized' in error_str or '401' in error_str:
+                    # Критическая ошибка - токен неверный
+                    logger.error(f"[WATCHDOG] ❌ КРИТИЧЕСКАЯ ОШИБКА: BOT_TOKEN неверный или не обновлен! Ошибка: {bot_error}")
+                    logger.error("[WATCHDOG] ⚠️ Проверьте переменную окружения BOT_TOKEN в Railway")
+                    logger.error("[WATCHDOG] ⚠️ После обновления BOT_TOKEN необходимо ПЕРЕЗАПУСТИТЬ приложение!")
+                raise
                 
             self.health_status['bot'] = {
                 'status': 'running',
