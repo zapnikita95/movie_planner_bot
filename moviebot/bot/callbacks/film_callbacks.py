@@ -1273,13 +1273,16 @@ def back_to_film_description(call):
             link = f"https://www.kinopoisk.ru/series/{kp_id_int}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_int}/"
         
         # 3. Получаем актуальное состояние через get_film_current_state (ОДИН РАЗ!)
+        logger.info(f"[BACK TO FILM] Получение актуального состояния: chat_id={chat_id}, kp_id={kp_id_int}, user_id={user_id}")
         from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
         current_state = get_film_current_state(chat_id, kp_id_int, user_id)
         existing = current_state['existing']
+        logger.info(f"[BACK TO FILM] Состояние получено: existing={existing}, plan_info={current_state.get('plan_info')}")
         
         # 4. ОПТИМИЗАЦИЯ: Если фильм уже в базе, используем данные из БД вместо API
         # Это экономит 1-3 секунды на запросах к API
         if existing:
+            logger.info(f"[BACK TO FILM] Фильм в базе (existing={existing}), получаем данные из БД")
             # Фильм в базе - получаем данные из БД (быстро!)
             with db_lock:
                 try:
@@ -1327,9 +1330,10 @@ def back_to_film_description(call):
         # 5. Если фильм НЕ в базе или БД не дала данных, запрашиваем API
         # ВАЖНО: Это медленная операция (1-3 секунды), но необходима для фильмов не в базе
         if not info or not info.get('title'):
+            logger.info(f"[BACK TO FILM] Фильм не в базе или данных нет (info={info}), запрашиваем API")
             try:
                 from moviebot.api.kinopoisk_api import extract_movie_info
-                logger.info(f"[BACK TO FILM] Фильм не в базе или данных нет - запрашиваем API (может занять 1-3 сек)")
+                logger.info(f"[BACK TO FILM] Запрос к API для kp_id={kp_id_int}, link={link}")
                 info = extract_movie_info(link)
                 if info and info.get('title'):
                     logger.info(f"[BACK TO FILM] API успех: {info['title']}")
@@ -1341,8 +1345,11 @@ def back_to_film_description(call):
                             link = f"https://www.kinopoisk.ru/series/{kp_id_int}/"
                         else:
                             link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+                        logger.info(f"[BACK TO FILM] Обновлен link на основе API: {link}")
+                else:
+                    logger.warning(f"[BACK TO FILM] API вернул пустой результат: info={info}")
             except Exception as e:
-                logger.warning(f"[BACK TO FILM] API не сработал: {e}")
+                logger.error(f"[BACK TO FILM] API не сработал: {e}", exc_info=True)
         
         # 6. Если фильм в базе, но API не дал данных, получаем из БД (fallback)
         # Используем локальные соединение и курсор (уже определены выше)
@@ -1389,7 +1396,7 @@ def back_to_film_description(call):
                     logger.error(f"[BACK TO FILM] Ошибка чтения БД: {e}")
 
         if not info or not info.get('title'):
-            logger.warning(f"[BACK TO FILM] Нет данных для показа: info={info}")
+            logger.error(f"[BACK TO FILM] ❌ Нет данных для показа: info={info}, existing={existing}, kp_id={kp_id_int}")
             try:
                 if message_id and not callback_is_old:
                     bot.edit_message_text(
@@ -1403,8 +1410,10 @@ def back_to_film_description(call):
                         message_thread_id=message_thread_id
                     )
             except Exception as send_e:
-                logger.error(f"[BACK TO FILM] Ошибка отправки сообщения об ошибке: {send_e}")
+                logger.error(f"[BACK TO FILM] Ошибка отправки сообщения об ошибке: {send_e}", exc_info=True)
             return
+        
+        logger.info(f"[BACK TO FILM] ✅ Данные получены: title={info.get('title')}, is_series={is_series}, link={link}")
 
         # Убеждаемся, что is_series правильно установлен в info (приоритет у БД)
         info['is_series'] = is_series
@@ -1425,8 +1434,13 @@ def back_to_film_description(call):
         logger.info(f"[BACK TO FILM] Отправляем новое сообщение с описанием (оптимизировано)")
         
         # Главный вызов — передаем message_id=None чтобы всегда отправлялось новое сообщение
+        # Работает как отправка ссылки в чат - просто показывает описание фильма
         try:
-            logger.info(f"[BACK TO FILM] Вызов show_film_info_with_buttons: kp_id={kp_id_int}, message_id=None (новое сообщение)")
+            logger.info(f"[BACK TO FILM] ===== ВЫЗОВ show_film_info_with_buttons =====")
+            logger.info(f"[BACK TO FILM] Параметры: chat_id={chat_id}, user_id={user_id}, kp_id={kp_id_int}")
+            logger.info(f"[BACK TO FILM] Параметры: title={info.get('title')}, is_series={is_series}, existing={existing}")
+            logger.info(f"[BACK TO FILM] Параметры: message_id=None (новое сообщение), message_thread_id={message_thread_id}")
+            
             show_film_info_with_buttons(
                 chat_id=chat_id,
                 user_id=user_id,
@@ -1437,9 +1451,9 @@ def back_to_film_description(call):
                 message_id=None,  # Всегда новое сообщение (оптимизация)
                 message_thread_id=message_thread_id
             )
-            logger.info(f"[BACK TO FILM] show_film_info_with_buttons вызвана успешно")
+            logger.info(f"[BACK TO FILM] ✅ show_film_info_with_buttons завершена успешно")
         except Exception as show_e:
-            logger.error(f"[BACK TO FILM] Ошибка в show_film_info_with_buttons: {show_e}", exc_info=True)
+            logger.error(f"[BACK TO FILM] ❌ ОШИБКА в show_film_info_with_buttons: {show_e}", exc_info=True)
             # Пытаемся отправить сообщение об ошибке
             try:
                 if message_id and not callback_is_old:
@@ -1453,20 +1467,30 @@ def back_to_film_description(call):
                         f"❌ Ошибка при загрузке описания: {str(show_e)[:100]}",
                         message_thread_id=message_thread_id
                     )
-            except:
-                pass
-            raise
+            except Exception as send_err:
+                logger.error(f"[BACK TO FILM] Не удалось отправить сообщение об ошибке: {send_err}")
+            # НЕ делаем raise - продолжаем выполнение, чтобы не прерывать обработку
 
-        logger.info(f"[BACK TO FILM] Успешно, is_series={is_series}, existing={'есть' if existing else 'нет'}")
+        logger.info(f"[BACK TO FILM] ===== КОНЕЦ ОБРАБОТКИ ===== is_series={is_series}, existing={'есть' if existing else 'нет'}")
 
     except Exception as e:
-        logger.error(f"[BACK TO FILM] Критическая ошибка: {e}", exc_info=True)
+        logger.error(f"[BACK TO FILM] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
-            with db_lock:
-                conn.rollback()
-            bot.edit_message_text("❌ Ошибка при загрузке описания", chat_id, message_id, message_thread_id=message_thread_id)
-        except:
-            pass
+            from moviebot.database.db_connection import get_db_connection
+            conn_local_error = get_db_connection()
+            try:
+                conn_local_error.rollback()
+            except:
+                pass
+            if message_id:
+                try:
+                    bot.edit_message_text("❌ Ошибка при загрузке описания", chat_id, message_id, message_thread_id=message_thread_id)
+                except:
+                    bot.send_message(chat_id, "❌ Ошибка при загрузке описания", message_thread_id=message_thread_id)
+            else:
+                bot.send_message(chat_id, "❌ Ошибка при загрузке описания", message_thread_id=message_thread_id)
+        except Exception as final_err:
+            logger.error(f"[BACK TO FILM] Ошибка в блоке обработки ошибок: {final_err}", exc_info=True)
         
 @bot.callback_query_handler(func=lambda call: call.data == "delete_this_message")
 def delete_recommendations_message(call):

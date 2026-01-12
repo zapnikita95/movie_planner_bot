@@ -210,12 +210,14 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         else:
             # existing передан - получаем только plan_info и другие данные (быстрее!)
             # Это оптимизация - не делаем полный get_film_current_state, если existing уже есть
+            logger.info(f"[SHOW FILM INFO] existing передан ({existing}), получаем только plan_info и другие данные")
             try:
                 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
                 conn_local = get_db_connection()
                 cursor_local = get_db_cursor()
                 
                 film_id = existing[0] if existing and len(existing) > 0 else None
+                logger.info(f"[SHOW FILM INFO] film_id из existing: {film_id}")
                 plan_info = None
                 has_tickets = False
                 is_subscribed = False
@@ -300,12 +302,15 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         type_emoji = "📺" if is_series else "🎬"
         film_type_text = "Сериал" if is_series else "Фильм"
         logger.info(f"[SHOW FILM INFO] is_series={is_series}, type_emoji={type_emoji}, plan_info={plan_info}, has_tickets={has_tickets}")
+        logger.info(f"[SHOW FILM INFO] ===== ФОРМИРОВАНИЕ ТЕКСТА И КНОПОК =====")
         
         # Инициализируем markup заранее, чтобы избежать UnboundLocalError
         markup = InlineKeyboardMarkup()
+        logger.info(f"[SHOW FILM INFO] Markup инициализирован")
         
         # Формируем текст описания
         text = ""
+        logger.info(f"[SHOW FILM INFO] Начало формирования текста")
 
         if existing:
             # Защитная распаковка existing
@@ -448,8 +453,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     text += f"\n🔔 <b>Статус подписки: ❌ Не подписан</b>"
 
         text += f"\n<a href='{link}'>Кинопоиск</a>"
+        logger.info(f"[SHOW FILM INFO] Основной текст сформирован, длина={len(text)}")
 
         # Просмотрено / не просмотрено + оценки
+        logger.info(f"[SHOW FILM INFO] Проверка existing: {existing}")
         if existing:
             if watched:
                 text += "\n\n✅ <b>Просмотрено</b>"
@@ -524,6 +531,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                         logger.warning(f"[SHOW FILM INFO] Ошибка при запросе средней оценки для запланированного фильма: {avg_e}")
             logger.info(f"[SHOW FILM INFO] Обработка existing завершена")
         
+        logger.info(f"[SHOW FILM INFO] ===== ЗАГРУЗКА ИСТОЧНИКОВ =====")
         # ОПТИМИЗАЦИЯ: Загружаем источники с коротким таймаутом (500ms)
         # Если загрузились быстро - показываем кнопку, если нет - показываем без нее
         # Это экономит 1-3 секунды на запросе к API
@@ -533,6 +541,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         
         sources = None
         has_sources = False
+        logger.info(f"[SHOW FILM INFO] Запуск загрузки источников для kp_id={kp_id}")
         
         def load_sources_async():
             """Загружает источники в фоне"""
@@ -558,10 +567,11 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             logger.info("[SHOW FILM INFO] Источники еще загружаются, показываем описание без кнопки источников")
 
         # Создаем кнопки
-        logger.info(f"[SHOW FILM INFO] Создание кнопок...")
+        logger.info(f"[SHOW FILM INFO] ===== СОЗДАНИЕ КНОПОК =====")
         markup = InlineKeyboardMarkup(row_width=2)
         # Флаг для отслеживания, добавлены ли уже кнопки "Факты" и "Оценить"
         facts_and_rate_added = False
+        logger.info(f"[SHOW FILM INFO] Markup создан, facts_and_rate_added={facts_and_rate_added}")
         
         # Проверяем премьеру
         logger.info(f"[SHOW FILM INFO] Проверка премьеры...")
@@ -832,8 +842,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
 
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
+        logger.info(f"[SHOW FILM INFO] ===== ФИНАЛЬНАЯ ПОДГОТОВКА =====")
         # Проверяем длину текста перед отправкой
         logger.info(f"[SHOW FILM INFO] Текст сформирован, длина={len(text)}, message_id={message_id}")
+        logger.info(f"[SHOW FILM INFO] Количество кнопок в markup: {len(markup.keyboard) if markup and markup.keyboard else 0}")
         if len(text) > 4096:
             logger.warning(f"[SHOW FILM INFO] Текст слишком длинный ({len(text)} символов), обрезаю до 4096")
             text = text[:4093] + "..."
@@ -875,7 +887,8 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             logger.info(f"[SHOW FILM INFO] Финальный текст длиной {len(text)}, markup отсутствует")
 
         # === ОБНОВЛЕНИЕ ИЛИ ОТПРАВКА СООБЩЕНИЯ (единственный блок) ===
-        logger.info("[SHOW FILM INFO] Попытка обновления или отправки")
+        logger.info(f"[SHOW FILM INFO] ===== ОТПРАВКА СООБЩЕНИЯ =====")
+        logger.info(f"[SHOW FILM INFO] message_id={message_id}, message_thread_id={message_thread_id}, chat_id={chat_id}")
 
         send_kwargs = {
             'chat_id': chat_id,
@@ -889,11 +902,13 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if message_thread_id is not None:
             send_kwargs_for_send = send_kwargs.copy()
             send_kwargs_for_send['message_thread_id'] = message_thread_id
+            logger.info(f"[SHOW FILM INFO] message_thread_id добавлен: {message_thread_id}")
         else:
             send_kwargs_for_send = send_kwargs
 
         sent_new = False
         if message_id:
+            logger.info(f"[SHOW FILM INFO] Пытаемся редактировать сообщение message_id={message_id}")
             edit_kwargs = {
                 'chat_id': chat_id,
                 'message_id': message_id,
@@ -904,8 +919,9 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             }
             try:
                 bot.edit_message_text(**edit_kwargs)
-                logger.info(f"[SHOW FILM INFO] Обновлено успешно, message_id={message_id}")
+                logger.info(f"[SHOW FILM INFO] ✅ Обновлено успешно, message_id={message_id}")
             except Exception as e:  # ловим все ошибки, т.к. ApiTelegramException может быть не импортирован
+                logger.warning(f"[SHOW FILM INFO] Ошибка редактирования: {e}")
                 if "message is not modified" in str(e).lower():
                     if "exactly the same" in str(e):
                         logger.info("[SHOW FILM INFO] Ничего не изменилось — пропускаем")
@@ -928,24 +944,27 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                     logger.error(f"[SHOW FILM INFO] Ошибка edit: {e}")
                     sent_new = True
         else:
+            logger.info(f"[SHOW FILM INFO] message_id=None, отправляем новое сообщение")
             sent_new = True
 
         if sent_new:
+            logger.info(f"[SHOW FILM INFO] ===== ОТПРАВКА НОВОГО СООБЩЕНИЯ =====")
+            logger.info(f"[SHOW FILM INFO] send_kwargs_for_send: chat_id={send_kwargs_for_send.get('chat_id')}, text_length={len(send_kwargs_for_send.get('text', ''))}, has_markup={send_kwargs_for_send.get('reply_markup') is not None}")
             try:
                 sent = bot.send_message(**send_kwargs_for_send)
-                logger.info(f"[SHOW FILM INFO] Отправлено новое, message_id={sent.message_id}, title={info.get('title')}")
+                logger.info(f"[SHOW FILM INFO] ✅ Отправлено новое сообщение, message_id={sent.message_id}, title={info.get('title')}")
             except Exception as e:
-                logger.error(f"[SHOW FILM INFO] Не отправилось даже новое: {e}")
+                logger.error(f"[SHOW FILM INFO] ❌ Не отправилось даже новое: {e}", exc_info=True)
                 # Fallback: минимальное сообщение
                 bot.send_message(chat_id, f"🎬 {info.get('title','Фильм')}\n\n<a href='{link}'>Кинопоиск</a>", parse_mode='HTML')
 
-        logger.info("[SHOW FILM INFO] ===== END (успешно) =====")
+        logger.info(f"[SHOW FILM INFO] ===== END (успешно) ===== kp_id={kp_id}, title={info.get('title')}")
         
         
     except Exception as e:
         import traceback
         logger.critical(
-            f"[SHOW_FILM_CRASH] kp_id={kp_id} | chat_id={chat_id} | user_id={user_id} | "
+            f"[SHOW_FILM_CRASH] kp_id={kp_id} | chat_id={chat_id} | user_id={user_id} | message_id={message_id} | "
             f"ОШИБКА: {type(e).__name__}: {str(e)}\n"
             f"Полный traceback:\n{''.join(traceback.format_exception(type(e), e, e.__traceback__))}\n"
             f"info на момент краша: {info}",
