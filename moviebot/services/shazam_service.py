@@ -417,13 +417,13 @@ def search_movies(query, top_k=15):
         query_emb = model.encode([query_en])[0].astype('float32').reshape(1, -1)
         logger.info(f"[SEARCH MOVIES] Эмбеддинг создан, размер: {query_emb.shape}")
         
-        logger.info(f"[SEARCH MOVIES] Шаг 5: Поиск в индексе (top_k={top_k})...")
-        D, I = index.search(query_emb, k=top_k)
+        logger.info(f"[SEARCH MOVIES] Шаг 5: Поиск в индексе (top_k={top_k * 2}, затем приоритизация)...")
+        D, I = index.search(query_emb, k=top_k * 2)  # Берем больше, чтобы после приоритизации осталось нужное количество
         logger.info(f"[SEARCH MOVIES] Поиск завершен, найдено индексов: {len(I[0])}")
         
-        logger.info(f"[SEARCH MOVIES] Шаг 6: Формирование результатов...")
+        logger.info(f"[SEARCH MOVIES] Шаг 6: Формирование результатов с приоритизацией...")
         results = []
-        for idx in I[0]:
+        for i, idx in enumerate(I[0]):
             if idx < len(movies):
                 row = movies.iloc[idx]
                 imdb_id_raw = str(row['imdb_id']).strip()
@@ -432,20 +432,37 @@ def search_movies(query, top_k=15):
                 imdb_id_clean = imdb_id_raw.replace('.0', '').replace('.', '')  # Убираем .0 и другие точки
                 imdb_id_clean = imdb_id_clean.lstrip('t')  # Убираем все tt в начале
                 if imdb_id_clean and imdb_id_clean.isdigit():
-                    imdb_id_clean = f"tt{imdb_id_clean}"
+                    imdb_id_clean = f"tt{imdb_id_clean.zfill(7)}"
                 else:
                     imdb_id_clean = imdb_id_raw  # Если не получилось очистить, оставляем как есть
                 
                 if imdb_id_clean != imdb_id_raw:
                     logger.info(f"[SEARCH MOVIES] ID преобразован: '{imdb_id_raw}' → '{imdb_id_clean}'")
                 
+                distance = float(D[0][i])
+                
+                # Приоритизация: фильмы с overview получают бонус (уменьшаем расстояние)
+                # overview имеет наибольший вес, потом название/актеры, потом режиссеры
+                has_overview = row.get('has_overview', False) if 'has_overview' in row.index else False
+                if has_overview:
+                    # Уменьшаем расстояние на 20% для фильмов с overview (чем меньше distance, тем лучше)
+                    distance = distance * 0.8
+                    logger.debug(f"[SEARCH MOVIES] Фильм {imdb_id_clean} имеет overview, расстояние уменьшено")
+                
                 results.append({
                     'imdb_id': imdb_id_clean,
                     'title': row['title'],
                     'year': row['year'] if pd.notna(row['year']) else None,
-                    'description': row['description'][:500]
+                    'description': row['description'][:500] if 'description' in row.index else '',
+                    'distance': distance,
+                    'has_overview': has_overview
                 })
-        logger.info(f"[SEARCH MOVIES] Результаты сформированы, найдено: {len(results)} фильмов")
+        
+        # Сортируем по приоритизированному расстоянию (чем меньше, тем лучше)
+        results.sort(key=lambda x: x['distance'])
+        results = results[:top_k]
+        
+        logger.info(f"[SEARCH MOVIES] Результаты приоритизированы, возвращаем {len(results)} фильмов")
         return results
     except Exception as e:
         logger.error(f"[SEARCH MOVIES] Ошибка поиска фильмов: {e}", exc_info=True)
