@@ -1708,22 +1708,21 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
         conn_local = get_db_connection()
         cursor_local = get_db_cursor()
         
-        try:
-            with db_lock:
-                cursor_local.execute('''
-                    SELECT p.id, 
-                           COALESCE(m.title, 'Мероприятие') as title, 
-                           p.plan_datetime, 
-                           CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as ticket_count,
-                           p.film_id
-                    FROM plans p
-                    LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                    WHERE p.chat_id = %s AND p.plan_type = 'cinema'
-                      AND p.plan_datetime >= %s
-                    ORDER BY p.plan_datetime
-                    LIMIT 20
-                ''', (chat_id, today_start_utc))
-                sessions = cursor_local.fetchall()
+        with db_lock:
+            cursor_local.execute('''
+                SELECT p.id, 
+                       COALESCE(m.title, 'Мероприятие') as title, 
+                       p.plan_datetime, 
+                       CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as ticket_count,
+                       p.film_id
+                FROM plans p
+                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s AND p.plan_type = 'cinema'
+                  AND p.plan_datetime >= %s
+                ORDER BY p.plan_datetime
+                LIMIT 20
+            ''', (chat_id, today_start_utc))
+            sessions = cursor_local.fetchall()
         
         logger.info(f"[SHOW SESSIONS] Найдено сеансов: {len(sessions) if sessions else 0}")
         
@@ -1794,27 +1793,8 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
         else:
             text += "Выберите событие для просмотра билетов или добавления новых."
         
-            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-            logger.info(f"[SHOW SESSIONS] Сообщение с сеансами отправлено пользователю {user_id}")
-        except Exception as e:
-            logger.error(f"[SHOW SESSIONS] Ошибка: {e}", exc_info=True)
-            try:
-                conn_local.rollback()
-            except:
-                pass
-            try:
-                bot.send_message(chat_id, "❌ Произошла ошибка при загрузке событий.")
-            except:
-                pass
-        finally:
-            try:
-                cursor_local.close()
-            except:
-                pass
-            try:
-                conn_local.close()
-            except:
-                pass
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[SHOW SESSIONS] Сообщение с сеансами отправлено пользователю {user_id}")
     except Exception as e:
         logger.error(f"[SHOW SESSIONS] Ошибка (внешний блок): {e}", exc_info=True)
         try:
