@@ -309,130 +309,27 @@ def join_add_callback(call):
                 
                 # Получаем администраторов группы
                 try:
-                admins = bot.get_chat_administrators(chat_id)
-                all_group_member_ids = set()
-                all_group_members = {}
-                
-                for admin in admins:
-                    admin_user = admin.user
-                    # Исключаем бота из списка участников группы
-                    if BOT_ID and admin_user.id == BOT_ID:
-                        continue
-                    all_group_member_ids.add(admin_user.id)
-                    all_group_members[admin_user.id] = {
-                        'username': admin_user.username or f"user_{admin_user.id}",
-                        'first_name': admin_user.first_name or '',
-                        'is_premium': getattr(admin_user, 'is_premium', False)
-                    }
-                
-                # Получаем информацию о групповой подписке
-                paid_participants_count = 0
-                total_participants_count = len(all_group_member_ids)  # Уже без бота
-                group_subscription_info = None
-                try:
-                    from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
-                    group_sub = get_active_group_subscription_by_chat_id(chat_id)
-                    if group_sub:
-                        subscription_id = group_sub.get('id') if isinstance(group_sub, dict) else group_sub[0]
-                        if subscription_id:
-                            paid_members = get_subscription_members(subscription_id)
-                            paid_participants_count = len(paid_members) if paid_members else 0
-                            group_size = group_sub.get('group_size') if isinstance(group_sub, dict) else (group_sub[11] if len(group_sub) > 11 else None)
-                            group_subscription_info = {
-                                'subscription_id': subscription_id,
-                                'group_size': group_size,
-                                'paid_count': paid_participants_count
-                            }
-                except Exception as e:
-                    logger.warning(f"[JOIN ADD] Ошибка при получении информации о групповой подписке: {e}")
-                
-                # Находим недобавленных участников (исключая бота)
-                not_added = []
-                for member_id, member_info in all_group_members.items():
-                    # Пропускаем бота
-                    if BOT_ID and member_id == BOT_ID:
-                        continue
-                    if member_id not in bot_participant_ids:
-                        not_added.append({
-                            'user_id': member_id,
-                            'username': member_info['username'],
-                            'first_name': member_info['first_name'],
-                            'is_premium': member_info['is_premium']
-                        })
-                
-                # Если есть еще недобавленные участники, обновляем сообщение
-                not_added_filtered = [m for m in not_added if not (BOT_ID and m['user_id'] == BOT_ID)]
-                
-                if not_added_filtered:
-                    response_text = message_text.split("\n\n")[0] if "\n\n" in message_text else message_text
-                    response_text += "\n\n"
+                    admins = bot.get_chat_administrators(chat_id)
+                    all_group_member_ids = set()
+                    all_group_members = {}
                     
-                    # Показываем информацию о платных участниках (только для групповых чатов)
-                    if group_subscription_info:
-                        group_size = group_subscription_info.get('group_size')
-                        if group_size:
-                            response_text += f"💰 <b>Платных участников:</b> {paid_participants_count}/{total_participants_count}\n\n"
-                        else:
-                            response_text += f"💰 <b>Платных участников:</b> {paid_participants_count}/{total_participants_count}\n\n"
-                    else:
-                        response_text += f"💰 <b>Платных участников:</b> 0/0\n\n"
+                    for admin in admins:
+                        admin_user = admin.user
+                        # Исключаем бота из списка участников группы
+                        if BOT_ID and admin_user.id == BOT_ID:
+                            continue
+                        all_group_member_ids.add(admin_user.id)
+                        all_group_members[admin_user.id] = {
+                            'username': admin_user.username or f"user_{admin_user.id}",
+                            'first_name': admin_user.first_name or '',
+                            'is_premium': getattr(admin_user, 'is_premium', False)
+                        }
                     
-                    # Показываем участников бота (исключая бота)
-                    if bot_participants:
-                        response_text += "✅ <b>Участники бота:</b>\n"
-                        for row in bot_participants:
-                            p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
-                            p_username = row.get('username') if isinstance(row, dict) else row[1]
-                            
-                            # Пропускаем бота
-                            if BOT_ID and p_user_id == BOT_ID:
-                                continue
-                            
-                            has_premium = False
-                            try:
-                                user_info = all_group_members.get(p_user_id, {})
-                                has_premium = user_info.get('is_premium', False)
-                            except:
-                                pass
-                            
-                            premium_mark = "⭐" if has_premium else ""
-                            display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
-                            response_text += f"• {display_name} {premium_mark}\n"
-                    
-                    # Показываем недобавленных участников (исключая бота)
-                    not_added_filtered = [m for m in not_added if not (BOT_ID and m['user_id'] == BOT_ID)]
-                    
-                    if not_added_filtered:
-                        response_text += "\n❌ <b>Недобавленные участники:</b>\n"
-                        
-                        markup = InlineKeyboardMarkup(row_width=1)
-                        for member in not_added_filtered[:20]:  # Ограничиваем до 20 кнопок
-                            display_name = member['username'] if member['username'].startswith('user_') else f"@{member['username']}"
-                            premium_mark = "⭐" if member['is_premium'] else ""
-                            button_text = f"{display_name} {premium_mark}".strip()
-                            if len(button_text) > 50:
-                                button_text = button_text[:47] + "..."
-                            markup.add(InlineKeyboardButton(button_text, callback_data=f"join_add:{member['user_id']}"))
-                        
-                        bot.edit_message_text(response_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                    else:
-                        # Все участники добавлены, удаляем кнопки
-                        bot.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
-                else:
-                    # Все участники добавлены
                     # Получаем информацию о групповой подписке
                     paid_participants_count = 0
-                    total_participants_count = 0
+                    total_participants_count = len(all_group_member_ids)  # Уже без бота
+                    group_subscription_info = None
                     try:
-                        admins = bot.get_chat_administrators(chat_id)
-                        all_group_member_ids = set()
-                        for admin in admins:
-                            admin_user = admin.user
-                            if BOT_ID and admin_user.id == BOT_ID:
-                                continue
-                            all_group_member_ids.add(admin_user.id)
-                        total_participants_count = len(all_group_member_ids)
-                        
                         from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
                         group_sub = get_active_group_subscription_by_chat_id(chat_id)
                         if group_sub:
@@ -440,27 +337,130 @@ def join_add_callback(call):
                             if subscription_id:
                                 paid_members = get_subscription_members(subscription_id)
                                 paid_participants_count = len(paid_members) if paid_members else 0
+                                group_size = group_sub.get('group_size') if isinstance(group_sub, dict) else (group_sub[11] if len(group_sub) > 11 else None)
+                                group_subscription_info = {
+                                    'subscription_id': subscription_id,
+                                    'group_size': group_size,
+                                    'paid_count': paid_participants_count
+                                }
                     except Exception as e:
                         logger.warning(f"[JOIN ADD] Ошибка при получении информации о групповой подписке: {e}")
                     
-                    response_text = message_text.split("\n\n")[0] if "\n\n" in message_text else message_text
-                    response_text += "\n\n"
-                    
-                    # Показываем информацию о платных участниках
-                    response_text += f"💰 <b>Платных участников:</b> {paid_participants_count}/{total_participants_count}\n\n"
-                    
-                    response_text += "✅ <b>Участники бота:</b>\n"
-                    for row in bot_participants:
-                        p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
-                        p_username = row.get('username') if isinstance(row, dict) else row[1]
-                        
+                    # Находим недобавленных участников (исключая бота)
+                    not_added = []
+                    for member_id, member_info in all_group_members.items():
                         # Пропускаем бота
-                        if BOT_ID and p_user_id == BOT_ID:
+                        if BOT_ID and member_id == BOT_ID:
                             continue
+                        if member_id not in bot_participant_ids:
+                            not_added.append({
+                                'user_id': member_id,
+                                'username': member_info['username'],
+                                'first_name': member_info['first_name'],
+                                'is_premium': member_info['is_premium']
+                            })
+                    
+                    # Если есть еще недобавленные участники, обновляем сообщение
+                    not_added_filtered = [m for m in not_added if not (BOT_ID and m['user_id'] == BOT_ID)]
+                
+                    if not_added_filtered:
+                        response_text = message_text.split("\n\n")[0] if "\n\n" in message_text else message_text
+                        response_text += "\n\n"
+                    
+                        # Показываем информацию о платных участниках (только для групповых чатов)
+                        if group_subscription_info:
+                            group_size = group_subscription_info.get('group_size')
+                            if group_size:
+                                response_text += f"💰 <b>Платных участников:</b> {paid_participants_count}/{total_participants_count}\n\n"
+                            else:
+                                response_text += f"💰 <b>Платных участников:</b> {paid_participants_count}/{total_participants_count}\n\n"
+                        else:
+                            response_text += f"💰 <b>Платных участников:</b> 0/0\n\n"
+                    
+                        # Показываем участников бота (исключая бота)
+                        if bot_participants:
+                            response_text += "✅ <b>Участники бота:</b>\n"
+                            for row in bot_participants:
+                                p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                                p_username = row.get('username') if isinstance(row, dict) else row[1]
+                            
+                                # Пропускаем бота
+                                if BOT_ID and p_user_id == BOT_ID:
+                                    continue
+                            
+                                has_premium = False
+                                try:
+                                    user_info = all_group_members.get(p_user_id, {})
+                                    has_premium = user_info.get('is_premium', False)
+                                except:
+                                    pass
+                            
+                                premium_mark = "⭐" if has_premium else ""
+                                display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
+                                response_text += f"• {display_name} {premium_mark}\n"
+                    
+                        # Показываем недобавленных участников (исключая бота)
+                        not_added_filtered = [m for m in not_added if not (BOT_ID and m['user_id'] == BOT_ID)]
+                    
+                        if not_added_filtered:
+                            response_text += "\n❌ <b>Недобавленные участники:</b>\n"
                         
-                        display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
-                        response_text += f"• {display_name}\n"
-                    bot.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            for member in not_added_filtered[:20]:  # Ограничиваем до 20 кнопок
+                                display_name = member['username'] if member['username'].startswith('user_') else f"@{member['username']}"
+                                premium_mark = "⭐" if member['is_premium'] else ""
+                                button_text = f"{display_name} {premium_mark}".strip()
+                                if len(button_text) > 50:
+                                    button_text = button_text[:47] + "..."
+                                markup.add(InlineKeyboardButton(button_text, callback_data=f"join_add:{member['user_id']}"))
+                        
+                            bot.edit_message_text(response_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        else:
+                            # Все участники добавлены, удаляем кнопки
+                            bot.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
+                    else:
+                        # Все участники добавлены
+                        # Получаем информацию о групповой подписке
+                        paid_participants_count = 0
+                        total_participants_count = 0
+                        try:
+                            admins = bot.get_chat_administrators(chat_id)
+                            all_group_member_ids = set()
+                            for admin in admins:
+                                admin_user = admin.user
+                                if BOT_ID and admin_user.id == BOT_ID:
+                                    continue
+                                all_group_member_ids.add(admin_user.id)
+                            total_participants_count = len(all_group_member_ids)
+                        
+                            from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
+                            group_sub = get_active_group_subscription_by_chat_id(chat_id)
+                            if group_sub:
+                                subscription_id = group_sub.get('id') if isinstance(group_sub, dict) else group_sub[0]
+                                if subscription_id:
+                                    paid_members = get_subscription_members(subscription_id)
+                                    paid_participants_count = len(paid_members) if paid_members else 0
+                        except Exception as e:
+                            logger.warning(f"[JOIN ADD] Ошибка при получении информации о групповой подписке: {e}")
+                    
+                        response_text = message_text.split("\n\n")[0] if "\n\n" in message_text else message_text
+                        response_text += "\n\n"
+                    
+                        # Показываем информацию о платных участниках
+                        response_text += f"💰 <b>Платных участников:</b> {paid_participants_count}/{total_participants_count}\n\n"
+                    
+                        response_text += "✅ <b>Участники бота:</b>\n"
+                        for row in bot_participants:
+                            p_user_id = row.get('user_id') if isinstance(row, dict) else row[0]
+                            p_username = row.get('username') if isinstance(row, dict) else row[1]
+                        
+                            # Пропускаем бота
+                            if BOT_ID and p_user_id == BOT_ID:
+                                continue
+                        
+                            display_name = p_username if p_username.startswith('user_') else f"@{p_username}"
+                            response_text += f"• {display_name}\n"
+                        bot.edit_message_text(response_text, chat_id, call.message.message_id, parse_mode='HTML')
                 except Exception as admin_e:
                     logger.warning(f"[JOIN ADD] Не удалось получить администраторов: {admin_e}")
             finally:
