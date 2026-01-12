@@ -838,21 +838,42 @@ def plan_type_callback(call):
         """Обработчик отмены планирования из сообщения об ошибке"""
         user_id = call.from_user.id
         chat_id = call.message.chat.id
+        message_id = call.message.message_id
         
+        logger.info(f"[CANCEL PLAN] ===== START: user_id={user_id}, chat_id={chat_id}, message_id={message_id}")
+        
+        # Очищаем состояние планирования
         if user_id in user_plan_state:
+            state_info = user_plan_state[user_id]
+            logger.info(f"[CANCEL PLAN] Удаляем состояние планирования: {state_info}")
             del user_plan_state[user_id]
-            logger.info(f"[PLAN] Пользователь {user_id} отменил планирование")
+        else:
+            logger.info(f"[CANCEL PLAN] Состояние планирования не найдено для user_id={user_id}")
         
         try:
             bot.answer_callback_query(call.id, "Планирование отменено")
-            bot.edit_message_text("✅ Планирование отменено. Можете использовать другие команды.", 
-                                 chat_id, call.message.message_id)
+            logger.info(f"[CANCEL PLAN] Callback query ответ отправлен")
+            
+            # Удаляем сообщение с кнопкой отмены
+            try:
+                bot.delete_message(chat_id, message_id)
+                logger.info(f"[CANCEL PLAN] ✅ Сообщение {message_id} удалено")
+            except Exception as del_e:
+                logger.warning(f"[CANCEL PLAN] Не удалось удалить сообщение {message_id}: {del_e}, пробуем редактировать")
+                try:
+                    bot.edit_message_text("✅ Планирование отменено. Можете использовать другие команды.", 
+                                         chat_id, message_id)
+                    logger.info(f"[CANCEL PLAN] Сообщение отредактировано")
+                except Exception as edit_e:
+                    logger.warning(f"[CANCEL PLAN] Не удалось отредактировать сообщение: {edit_e}")
         except Exception as e:
-            logger.warning(f"[CANCEL PLAN] Ошибка редактирования сообщения: {e}")
+            logger.error(f"[CANCEL PLAN] Ошибка при обработке отмены: {e}", exc_info=True)
             try:
                 bot.send_message(chat_id, "✅ Планирование отменено. Можете использовать другие команды.")
             except:
                 pass
+        
+        logger.info(f"[CANCEL PLAN] ===== END: планирование отменено для user_id={user_id}")
 
 
     @bot.callback_query_handler(func=lambda call: call.data == "plan_from_list")

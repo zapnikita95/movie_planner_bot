@@ -1386,6 +1386,13 @@ def back_to_film_description(call):
     user_id = call.from_user.id
     message_id = call.message.message_id
     message_thread_id = getattr(call.message, 'message_thread_id', None)
+    
+    # Очищаем состояние планирования, если пользователь вернулся к описанию
+    from moviebot.states import user_plan_state
+    if user_id in user_plan_state:
+        state_info = user_plan_state[user_id]
+        logger.info(f"[BACK TO FILM] Очищаем состояние планирования при возврате к описанию: {state_info}")
+        del user_plan_state[user_id]
 
     # Проверяем, не устарел ли callback query, но продолжаем выполнение даже если устарел
     callback_is_old = False

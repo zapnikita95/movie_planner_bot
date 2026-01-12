@@ -470,43 +470,57 @@ def get_notification_settings(chat_id):
         'ticket_before_minutes': 10  # За 10 минут по умолчанию
     }
     
-    with db_lock:
-        cursor.execute("""
-            SELECT key, value FROM settings 
-            WHERE chat_id = %s AND key IN (
-                'notify_separate_weekdays', 'notify_home_weekday_hour', 'notify_home_weekday_minute',
-                'notify_home_weekend_hour', 'notify_home_weekend_minute',
-                'notify_cinema_weekday_hour', 'notify_cinema_weekday_minute',
-                'notify_cinema_weekend_hour', 'notify_cinema_weekend_minute',
-                'ticket_before_minutes'
-            )
-        """, (chat_id,))
-        rows = cursor.fetchall()
-        
-        for row in rows:
-            key = row.get('key') if isinstance(row, dict) else row[0]
-            value = row.get('value') if isinstance(row, dict) else row[1]
+    # Используем локальное соединение, чтобы не зависеть от глобального курсора
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT key, value FROM settings 
+                WHERE chat_id = %s AND key IN (
+                    'notify_separate_weekdays', 'notify_home_weekday_hour', 'notify_home_weekday_minute',
+                    'notify_home_weekend_hour', 'notify_home_weekend_minute',
+                    'notify_cinema_weekday_hour', 'notify_cinema_weekday_minute',
+                    'notify_cinema_weekend_hour', 'notify_cinema_weekend_minute',
+                    'ticket_before_minutes'
+                )
+            """, (chat_id,))
+            rows = cursor_local.fetchall()
             
-            if key == 'notify_separate_weekdays':
-                defaults['separate_weekdays'] = value
-            elif key == 'notify_home_weekday_hour':
-                defaults['home_weekday_hour'] = int(value) if value else defaults['home_weekday_hour']
-            elif key == 'notify_home_weekday_minute':
-                defaults['home_weekday_minute'] = int(value) if value else defaults['home_weekday_minute']
-            elif key == 'notify_home_weekend_hour':
-                defaults['home_weekend_hour'] = int(value) if value else defaults['home_weekend_hour']
-            elif key == 'notify_home_weekend_minute':
-                defaults['home_weekend_minute'] = int(value) if value else defaults['home_weekend_minute']
-            elif key == 'notify_cinema_weekday_hour':
-                defaults['cinema_weekday_hour'] = int(value) if value else defaults['cinema_weekday_hour']
-            elif key == 'notify_cinema_weekday_minute':
-                defaults['cinema_weekday_minute'] = int(value) if value else defaults['cinema_weekday_minute']
-            elif key == 'notify_cinema_weekend_hour':
-                defaults['cinema_weekend_hour'] = int(value) if value else defaults['cinema_weekend_hour']
-            elif key == 'notify_cinema_weekend_minute':
-                defaults['cinema_weekend_minute'] = int(value) if value else defaults['cinema_weekend_minute']
-            elif key == 'ticket_before_minutes':
-                defaults['ticket_before_minutes'] = int(value) if value else defaults['ticket_before_minutes']
+            for row in rows:
+                key = row.get('key') if isinstance(row, dict) else row[0]
+                value = row.get('value') if isinstance(row, dict) else row[1]
+                
+                if key == 'notify_separate_weekdays':
+                    defaults['separate_weekdays'] = value
+                elif key == 'notify_home_weekday_hour':
+                    defaults['home_weekday_hour'] = int(value) if value else defaults['home_weekday_hour']
+                elif key == 'notify_home_weekday_minute':
+                    defaults['home_weekday_minute'] = int(value) if value else defaults['home_weekday_minute']
+                elif key == 'notify_home_weekend_hour':
+                    defaults['home_weekend_hour'] = int(value) if value else defaults['home_weekend_hour']
+                elif key == 'notify_home_weekend_minute':
+                    defaults['home_weekend_minute'] = int(value) if value else defaults['home_weekend_minute']
+                elif key == 'notify_cinema_weekday_hour':
+                    defaults['cinema_weekday_hour'] = int(value) if value else defaults['cinema_weekday_hour']
+                elif key == 'notify_cinema_weekday_minute':
+                    defaults['cinema_weekday_minute'] = int(value) if value else defaults['cinema_weekday_minute']
+                elif key == 'notify_cinema_weekend_hour':
+                    defaults['cinema_weekend_hour'] = int(value) if value else defaults['cinema_weekend_hour']
+                elif key == 'notify_cinema_weekend_minute':
+                    defaults['cinema_weekend_minute'] = int(value) if value else defaults['cinema_weekend_minute']
+                elif key == 'ticket_before_minutes':
+                    defaults['ticket_before_minutes'] = int(value) if value else defaults['ticket_before_minutes']
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
     
     return defaults
 
