@@ -192,8 +192,23 @@ def parse_json_list(json_str, key='name', top_n=10):
 def build_tmdb_index():
     global _index, _movies_df
 
+    # Проверяем переменную окружения для принудительной пересборки
+    force_rebuild = os.getenv('FORCE_REBUILD_INDEX', '0').strip().lower() in ('1', 'true', 'yes', 'on')
+    if force_rebuild:
+        logger.warning("⚠️ FORCE_REBUILD_INDEX=1 - принудительная пересборка индекса!")
+        # Удаляем существующий индекс и данные
+        try:
+            if INDEX_PATH.exists():
+                INDEX_PATH.unlink()
+                logger.info("Удален существующий индекс для пересборки")
+            if DATA_PATH.exists():
+                DATA_PATH.unlink()
+                logger.info("Удалены существующие данные для пересборки")
+        except Exception as e:
+            logger.warning(f"Ошибка при удалении старого индекса: {e}")
+    
     # Проверяем, существует ли индекс - если да, загружаем его вместо пересборки
-    if INDEX_PATH.exists() and DATA_PATH.exists():
+    if not force_rebuild and INDEX_PATH.exists() and DATA_PATH.exists():
         logger.info(f"Индекс уже существует ({INDEX_PATH}), загружаем из файла...")
         try:
             _index = faiss.read_index(str(INDEX_PATH))
@@ -217,6 +232,12 @@ def build_tmdb_index():
                 except Exception as e:
                     logger.warning(f"Не удалось удалить старый индекс: {e}")
             else:
+                # Проверяем наличие actors_str и director_str в загруженном DataFrame
+                has_actors = 'actors_str' in _movies_df.columns
+                has_director = 'director_str' in _movies_df.columns
+                if not has_actors or not has_director:
+                    logger.warning(f"Индекс не содержит actors_str или director_str (has_actors={has_actors}, has_director={has_director})")
+                    logger.warning("Для максимальной эффективности keyword-матчинга рекомендуется пересобрать индекс с FORCE_REBUILD_INDEX=1")
                 logger.info(f"Индекс успешно загружен из файла, фильмов: {len(_movies_df)}, размерность: {actual_dim}")
                 return _index, _movies_df
         except Exception as e:
@@ -501,6 +522,24 @@ def get_index_and_movies():
     global _index, _movies_df
     
     logger.info("[GET INDEX] Проверка состояния индекса...")
+    
+    # Проверяем переменную окружения для принудительной пересборки
+    force_rebuild = os.getenv('FORCE_REBUILD_INDEX', '0').strip().lower() in ('1', 'true', 'yes', 'on')
+    if force_rebuild:
+        logger.warning("[GET INDEX] ⚠️ FORCE_REBUILD_INDEX=1 - принудительная пересборка индекса!")
+        # Удаляем существующий индекс и данные
+        try:
+            if INDEX_PATH.exists():
+                INDEX_PATH.unlink()
+                logger.info("[GET INDEX] Удален существующий индекс")
+            if DATA_PATH.exists():
+                DATA_PATH.unlink()
+                logger.info("[GET INDEX] Удалены существующие данные")
+        except Exception as e:
+            logger.warning(f"[GET INDEX] Ошибка при удалении старого индекса: {e}")
+        # Сбрасываем глобальные переменные
+        _index = None
+        _movies_df = None
     
     # Сначала проверяем без блокировки, если индекс уже загружен
     if _index is not None and _movies_df is not None:
