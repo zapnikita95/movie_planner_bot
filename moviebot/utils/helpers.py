@@ -133,13 +133,15 @@ def has_recommendations_access(chat_id, user_id):
 
     # Проверяем личную подписку
     personal_subs = get_user_personal_subscriptions(user_id)
+    logger.info(f"[HELPERS] has_recommendations_access: проверка для user_id={user_id}, chat_id={chat_id}, personal_subs={len(personal_subs) if personal_subs else 0}")
     if personal_subs:
         for sub in personal_subs:
             plan_type = sub.get('plan_type')
             expires_at = sub.get('expires_at')
+            logger.info(f"[HELPERS] has_recommendations_access: проверка подписки plan_type={plan_type}, expires_at={expires_at}")
             if plan_type in ['recommendations', 'all']:
                 if expires_at is None:  # lifetime
-                    logger.debug(f"[HELPERS] has_recommendations_access: найдена lifetime подписка {plan_type} для user_id={user_id}, chat_id={chat_id}")
+                    logger.info(f"[HELPERS] has_recommendations_access: ✅ найдена lifetime подписка {plan_type} для user_id={user_id}, chat_id={chat_id}")
                     return True
                 try:
                     now = datetime.now(pytz.UTC)
@@ -147,17 +149,21 @@ def has_recommendations_access(chat_id, user_id):
                         if expires_at.tzinfo is None:
                             expires_at = pytz.UTC.localize(expires_at)
                         if expires_at > now:
-                            logger.debug(f"[HELPERS] has_recommendations_access: найдена активная подписка {plan_type} для user_id={user_id}, chat_id={chat_id}, expires_at={expires_at}")
+                            logger.info(f"[HELPERS] has_recommendations_access: ✅ найдена активная подписка {plan_type} для user_id={user_id}, chat_id={chat_id}, expires_at={expires_at}")
                             return True
+                        else:
+                            logger.warning(f"[HELPERS] has_recommendations_access: ❌ подписка {plan_type} истекла для user_id={user_id}, chat_id={chat_id}, expires_at={expires_at}, now={now}")
                     elif isinstance(expires_at, str):
                         expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
                         if expires_dt.tzinfo is None:
                             expires_dt = pytz.UTC.localize(expires_dt)
                         if expires_dt > now:
-                            logger.debug(f"[HELPERS] has_recommendations_access: найдена активная подписка {plan_type} для user_id={user_id}, chat_id={chat_id}, expires_at={expires_dt}")
+                            logger.info(f"[HELPERS] has_recommendations_access: ✅ найдена активная подписка {plan_type} для user_id={user_id}, chat_id={chat_id}, expires_at={expires_dt}")
                             return True
+                        else:
+                            logger.warning(f"[HELPERS] has_recommendations_access: ❌ подписка {plan_type} истекла для user_id={user_id}, chat_id={chat_id}, expires_at={expires_dt}, now={now}")
                 except Exception as e:
-                    logger.warning(f"[HELPERS] has_recommendations_access: ошибка проверки expires_at для user_id={user_id}, chat_id={chat_id}, plan_type={plan_type}: {e}")
+                    logger.warning(f"[HELPERS] has_recommendations_access: ошибка проверки expires_at для user_id={user_id}, chat_id={chat_id}, plan_type={plan_type}: {e}", exc_info=True)
                     pass
     
     # Проверяем групповую подписку
