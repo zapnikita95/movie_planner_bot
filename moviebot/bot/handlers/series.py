@@ -2260,6 +2260,19 @@ def register_series_handlers(bot_param):
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
+            # ВАЖНО: Проверяем доступ ПЕРЕД показом сообщения о блокировке
+            # Если доступ появился (например, после оплаты), обрабатываем как обычный режим
+            if mode in ['kinopoisk', 'my_votes', 'group_votes']:
+                has_rec_access = has_recommendations_access(chat_id, user_id)
+                logger.info(f"[RANDOM CALLBACK] Locked mode {mode} - проверка доступа: {has_rec_access}")
+                
+                if has_rec_access:
+                    # Доступ появился - обрабатываем как обычный режим через handle_rand_mode
+                    logger.info(f"[RANDOM CALLBACK] Доступ появился для режима {mode}, вызываем handle_rand_mode")
+                    call.data = f"rand_mode:{mode}"
+                    handle_rand_mode(call)
+                    return
+            
             if mode == "kinopoisk":
                 message_text = "🎬 Рандом по Кинопоиску доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment"
             elif mode == "group_votes":
