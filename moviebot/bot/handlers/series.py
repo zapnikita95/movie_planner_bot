@@ -459,61 +459,54 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         if info.get('description'):
             text += f"\n<i>Кратко:</i> {info['description']}\n"
 
-        # Статус выхода серий — только если сериал
+        # Статус выхода серий — только если сериал И у пользователя есть отмеченные серии
         # ОПТИМИЗАЦИЯ: Загружаем статус асинхронно, не блокируя показ описания
         if is_series:
             logger.info(f"[SHOW_FILM] Сериал! kp_id={kp_id}")
-            text += "\n\n"
-            # Показываем заглушку, статус загрузится асинхронно
-            text += f"⏳ <b>Загрузка статуса серий...</b>\n"
             
-            def load_series_status_async():
-                """Загружает статус серий в фоне и обновляет сообщение"""
-                try:
-                    is_airing, next_episode = get_series_airing_status(kp_id)
-                    status_text = ""
-                    if is_airing and next_episode:
-                        status_text = f"🟢 <b>Сериал выходит</b>\n📅 След. серия: S{next_episode['season']} E{next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
-                    else:
-                        status_text = f"🔴 <b>Новых серий нет</b>\n"
-                    
-                    # Обновляем сообщение с актуальным статусом
-                    if message_id:
+            # Проверяем, есть ли у пользователя отмеченные серии по этому сериалу
+            has_watched_episodes = False
+            if existing and user_id:
+                film_id_for_check = existing[0] if existing and len(existing) > 0 else None
+                if film_id_for_check:
+                    try:
+                        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                        conn_check = get_db_connection()
+                        cursor_check = get_db_cursor()
                         try:
-                            # Получаем текущий текст сообщения
-                            current_text = text.replace("⏳ <b>Загрузка статуса серий...</b>\n", status_text)
-                            bot.edit_message_text(
-                                current_text,
-                                chat_id,
-                                message_id,
-                                reply_markup=markup,
-                                parse_mode='HTML',
-                                message_thread_id=message_thread_id
-                            )
-                            logger.info("[SHOW FILM INFO] Статус серий обновлен в сообщении")
-                        except Exception as update_e:
-                            logger.warning(f"[SHOW FILM INFO] Не удалось обновить статус серий: {update_e}")
-                except Exception as e:
-                    logger.error(f"[SERIES_STATUS_CRASH] {e}", exc_info=True)
-                    # Обновляем сообщение с ошибкой
-                    if message_id:
-                        try:
-                            error_text = text.replace("⏳ <b>Загрузка статуса серий...</b>\n", "ℹ️ Не удалось загрузить статус новых серий\n")
-                            bot.edit_message_text(
-                                error_text,
-                                chat_id,
-                                message_id,
-                                reply_markup=markup,
-                                parse_mode='HTML',
-                                message_thread_id=message_thread_id
-                            )
-                        except:
-                            pass
+                            with db_lock:
+                                cursor_check.execute("""
+                                    SELECT COUNT(*) as count
+                                    FROM series_tracking 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                    LIMIT 1
+                                """, (chat_id, film_id_for_check, user_id))
+                                row = cursor_check.fetchone()
+                                if row:
+                                    count = row.get('count') if isinstance(row, dict) else row[0]
+                                    has_watched_episodes = (count or 0) > 0
+                                    logger.info(f"[SHOW FILM INFO] Проверка отмеченных серий: film_id={film_id_for_check}, has_watched_episodes={has_watched_episodes}")
+                        finally:
+                            try:
+                                cursor_check.close()
+                            except:
+                                pass
+                            try:
+                                conn_check.close()
+                            except:
+                                pass
+                    except Exception as check_e:
+                        logger.warning(f"[SHOW FILM INFO] Ошибка проверки отмеченных серий: {check_e}", exc_info=True)
             
-            # Запускаем загрузку статуса в фоне
-            status_thread = threading.Thread(target=load_series_status_async, daemon=True)
-            status_thread.start()
-            logger.info("[SHOW FILM INFO] Загрузка статуса серий запущена в фоне")
+            # Показываем заглушку только если есть отмеченные серии
+            if has_watched_episodes:
+                text += "\n\n"
+                text += f"⏳ <b>Загрузка статуса серий...</b>\n"
+                # Функция load_series_status_async будет создана после формирования всех кнопок
+                should_load_status_async = True
+            else:
+                should_load_status_async = False
+                logger.info(f"[SHOW FILM INFO] У пользователя нет отмеченных серий по сериалу kp_id={kp_id}, статус не показываем")
             
             # Статус подписки для сериалов
             if user_id:
@@ -1117,6 +1110,66 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             error_text += f"<a href='{link}'>Кинопоиск</a>\n\n"
         error_text += "❌ Не удалось полностью загрузить информацию.\n"
         error_text += "Но вы всё равно можете добавить/запланировать 👇"
+
+        # === СОЗДАНИЕ ФУНКЦИИ ОБНОВЛЕНИЯ СТАТУСА СЕРИЙ (после формирования всех кнопок) ===
+        # Создаем функцию обновления статуса только если нужно и если есть отмеченные серии
+        if is_series and 'should_load_status_async' in locals() and should_load_status_async:
+            # Сохраняем финальный markup и text в замыкании
+            final_markup = markup
+            final_text = text
+            final_message_id = message_id if message_id else None
+            
+            def load_series_status_async():
+                """Загружает статус серий в фоне и обновляет сообщение (только текст, кнопки сохраняются)"""
+                try:
+                    is_airing, next_episode = get_series_airing_status(kp_id)
+                    status_text = ""
+                    if is_airing and next_episode:
+                        status_text = f"🟢 <b>Сериал выходит</b>\n📅 След. серия: S{next_episode['season']} E{next_episode['episode']} — {next_episode['date'].strftime('%d.%m.%Y')}\n"
+                    else:
+                        status_text = f"🔴 <b>Новых серий нет</b>\n"
+                    
+                    # Обновляем сообщение с актуальным статусом
+                    if final_message_id:
+                        try:
+                            # Заменяем заглушку на актуальный статус в тексте
+                            updated_text = final_text.replace("⏳ <b>Загрузка статуса серий...</b>\n", status_text)
+                            
+                            # Обновляем только текст, сохраняя кнопки из финального markup
+                            # Используем final_markup, чтобы сохранить кнопки такими, какими они были при отправке
+                            bot.edit_message_text(
+                                updated_text,
+                                chat_id,
+                                final_message_id,
+                                parse_mode='HTML',
+                                reply_markup=final_markup,  # Сохраняем кнопки
+                                message_thread_id=message_thread_id
+                            )
+                            logger.info("[SHOW FILM INFO] Статус серий обновлен в сообщении (текст обновлен, кнопки сохранены)")
+                        except Exception as update_e:
+                            logger.warning(f"[SHOW FILM INFO] Не удалось обновить статус серий: {update_e}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"[SERIES_STATUS_CRASH] {e}", exc_info=True)
+                    # Обновляем сообщение с ошибкой
+                    if final_message_id:
+                        try:
+                            error_text = final_text.replace("⏳ <b>Загрузка статуса серий...</b>\n", "ℹ️ Не удалось загрузить статус новых серий\n")
+                            # Обновляем только текст, сохраняя кнопки из финального markup
+                            bot.edit_message_text(
+                                error_text,
+                                chat_id,
+                                final_message_id,
+                                parse_mode='HTML',
+                                reply_markup=final_markup,  # Сохраняем кнопки
+                                message_thread_id=message_thread_id
+                            )
+                        except:
+                            pass
+            
+            # Запускаем загрузку статуса в фоне
+            status_thread = threading.Thread(target=load_series_status_async, daemon=True)
+            status_thread.start()
+            logger.info("[SHOW FILM INFO] Загрузка статуса серий запущена в фоне (после формирования кнопок)")
 
         # === ОТПРАВКА ОСНОВНОГО СООБЩЕНИЯ ===
         logger.info("[SHOW FILM INFO] Попытка отправки/обновления сообщения")
