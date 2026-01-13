@@ -3245,20 +3245,35 @@ def register_payment_callbacks(bot_instance):
                                     current_price = existing_price
                                     group_size_str = str(group_size) if group_size else '2'
                                     
-                                    # Вычисляем upgrade_price
-                                    if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                                    # Вычисляем upgrade_price (используем plan_type вместо new_plan_type)
+                                    if plan_type in ['notifications', 'recommendations', 'tickets']:
                                         # Отдельные функции - только месячная подписка
-                                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get('month', 0)
                                         current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
                                         upgrade_price = new_price - current_month_price
                                         upgrade_period_type = 'month'
                                     else:
-                                        # Для "all" используем текущий период подписки
+                                        # Для "all" используем текущий период подписки или выбранный период
                                         period_type_existing = existing_group_sub.get('period_type', 'month')
-                                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type_existing, 0)
-                                        current_price_db = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type_existing, 0)
-                                        upgrade_price = new_price - current_price_db
-                                        upgrade_period_type = period_type_existing
+                                        if period_type != 'month':
+                                            # Если выбран другой период для "all", используем его
+                                            new_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get(period_type, 0)
+                                            # Для расчета доплаты сравниваем с текущей ценой пакетного тарифа с тем же периодом
+                                            current_price_db = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type_existing, 0)
+                                            if current_plan_type == 'all':
+                                                # Если уже есть пакетный тариф, доплата = разница между новым и текущим пакетным
+                                                current_all_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get(period_type_existing, 0)
+                                                upgrade_price = new_price - current_all_price
+                                            else:
+                                                # Если индивидуальный тариф, доплата = разница до стоимости пакетного (не сумма!)
+                                                upgrade_price = new_price - current_price_db
+                                            upgrade_period_type = period_type
+                                        else:
+                                            # Для месячной подписки
+                                            new_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get('month', 0)
+                                            current_price_db = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
+                                            upgrade_price = new_price - current_price_db
+                                            upgrade_period_type = 'month'
                                     
                                     plan_names = {
                                         'notifications': '🔔 Уведомления о сериалах',
@@ -3281,8 +3296,11 @@ def register_payment_callbacks(bot_instance):
                                     text += f"• Сумма: {current_price}₽\n\n"
                                     
                                     text += f"📋 <b>Новая подписка:</b>\n"
-                                    text += f"• {plan_names.get(new_plan_type, new_plan_type)}\n"
-                                    text += f"• Сумма: {new_price}₽\n\n"
+                                    text += f"• {plan_names.get(plan_type, plan_type)}\n"
+                                    text += f"• Сумма: {new_price}₽"
+                                    if upgrade_period_type != 'month':
+                                        text += f" за {period_names.get(upgrade_period_type, upgrade_period_type)}"
+                                    text += "\n\n"
                                     
                                     next_payment_date = existing_group_sub.get('next_payment_date')
                                     if next_payment_date:
@@ -3301,17 +3319,24 @@ def register_payment_callbacks(bot_instance):
                                     
                                     # Если сумма увеличивается - предлагаем два варианта
                                     if upgrade_price > 0:
-                                        text += f"💰 <b>Доплата:</b> {upgrade_price}₽\n\n"
+                                        text += f"💰 <b>Доплата:</b> {upgrade_price}₽"
+                                        if upgrade_period_type != 'month':
+                                            text += f" за {period_names.get(upgrade_period_type, upgrade_period_type)}"
+                                        text += "\n\n"
                                         text += "Выберите вариант:\n"
-                                        text += f"1️⃣ <b>Оплатить сейчас и изменить сумму подписки</b> — доплатите {upgrade_price}₽, подписка изменится сразу\n"
-                                        text += "2️⃣ <b>Изменение суммы со следующего платежа</b> — подписка изменится без доплаты со следующего списания\n"
+                                        text += f"1️⃣ <b>Оплатить сейчас и перейти</b> — доплатите {upgrade_price}₽, подписка изменится сразу\n"
                                         
-                                        markup.add(InlineKeyboardButton("1️⃣ Оплатить сейчас", callback_data=f"payment:pay_upgrade_now:{subscription_id}:{new_plan_type}"))
-                                        markup.add(InlineKeyboardButton("2️⃣ Со следующего платежа", callback_data=f"payment:change_from_next:{subscription_id}:{new_plan_type}"))
+                                        markup.add(InlineKeyboardButton("1️⃣ Оплатить сейчас и перейти", callback_data=f"payment:pay_upgrade_now:{subscription_id}:{plan_type}"))
+                                        
+                                        # Предлагаем второй вариант, если есть next_payment_date и не lifetime
+                                        if upgrade_period_type != 'lifetime' and next_payment_date:
+                                            next_payment_str = next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else str(next_payment_date)
+                                            text += f"2️⃣ <b>Перейти со следующей даты списания</b> — подписка изменится без доплаты с {next_payment_str}\n"
+                                            markup.add(InlineKeyboardButton("2️⃣ Перейти со следующего списания", callback_data=f"payment:change_from_next:{subscription_id}:{plan_type}"))
                                     else:
                                         # Если сумма уменьшается или не меняется - только изменение со следующего платежа
                                         text += "Подписка будет изменена со следующего списания.\n"
-                                        markup.add(InlineKeyboardButton("✅ Подтвердить", callback_data=f"payment:change_from_next:{subscription_id}:{new_plan_type}"))
+                                        markup.add(InlineKeyboardButton("✅ Подтвердить", callback_data=f"payment:change_from_next:{subscription_id}:{plan_type}"))
                                     
                                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:select_group:{group_size}:{group_chat_id}"))
                                 

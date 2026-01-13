@@ -139,6 +139,7 @@ def has_recommendations_access(chat_id, user_id):
             expires_at = sub.get('expires_at')
             if plan_type in ['recommendations', 'all']:
                 if expires_at is None:  # lifetime
+                    logger.debug(f"[HELPERS] has_recommendations_access: найдена lifetime подписка {plan_type} для user_id={user_id}, chat_id={chat_id}")
                     return True
                 try:
                     now = datetime.now(pytz.UTC)
@@ -146,14 +147,17 @@ def has_recommendations_access(chat_id, user_id):
                         if expires_at.tzinfo is None:
                             expires_at = pytz.UTC.localize(expires_at)
                         if expires_at > now:
+                            logger.debug(f"[HELPERS] has_recommendations_access: найдена активная подписка {plan_type} для user_id={user_id}, chat_id={chat_id}, expires_at={expires_at}")
                             return True
                     elif isinstance(expires_at, str):
                         expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
                         if expires_dt.tzinfo is None:
                             expires_dt = pytz.UTC.localize(expires_dt)
                         if expires_dt > now:
+                            logger.debug(f"[HELPERS] has_recommendations_access: найдена активная подписка {plan_type} для user_id={user_id}, chat_id={chat_id}, expires_at={expires_dt}")
                             return True
-                except:
+                except Exception as e:
+                    logger.warning(f"[HELPERS] has_recommendations_access: ошибка проверки expires_at для user_id={user_id}, chat_id={chat_id}, plan_type={plan_type}: {e}")
                     pass
     
     # Проверяем групповую подписку
@@ -166,19 +170,24 @@ def has_recommendations_access(chat_id, user_id):
             subscription_id = group_sub.get('id')
             
             if plan_type in ['recommendations', 'all']:
+                logger.debug(f"[HELPERS] has_recommendations_access: найдена групповая подписка plan_type={plan_type}, group_size={group_size}, subscription_id={subscription_id} для chat_id={chat_id}, user_id={user_id}")
                 # Если есть ограничение по участникам (group_size), проверяем, является ли пользователь участником
                 if group_size is not None and subscription_id:
                     try:
                         members = get_subscription_members(subscription_id)
+                        logger.debug(f"[HELPERS] has_recommendations_access: участники подписки {subscription_id}: {members}, проверяем user_id={user_id} (тип: {type(user_id)})")
                         if members and user_id in members:
+                            logger.info(f"[HELPERS] has_recommendations_access: ✅ доступ разрешен для user_id={user_id} в группе chat_id={chat_id} (подписка {subscription_id}, plan_type={plan_type})")
                             return True
                         # Если пользователь не в списке участников, нет доступа
+                        logger.debug(f"[HELPERS] has_recommendations_access: ❌ доступ запрещен для user_id={user_id} в группе chat_id={chat_id} (подписка {subscription_id}, user_id не в списке участников)")
                         return False
                     except Exception as e:
                         logger.error(f"[HELPERS] Ошибка проверки участников подписки: {e}", exc_info=True)
                         return False
                 else:
                     # Если нет ограничения по участникам, доступ есть для всех
+                    logger.debug(f"[HELPERS] has_recommendations_access: доступ разрешен для всех в группе chat_id={chat_id} (нет ограничения по участникам, plan_type={plan_type})")
                     return True
     
     return False
