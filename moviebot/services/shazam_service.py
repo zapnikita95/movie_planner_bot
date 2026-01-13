@@ -618,14 +618,19 @@ def search_movies(query, top_k=15):
                 # Keyword-матчинг: считаем совпадения ключевых слов в actors_str и director_str
                 actor_boost = 0
                 if keywords:
-                    actors_str = str(row.get('actors_str', '') or '').lower()
-                    director_str = str(row.get('director_str', '') or '').lower()
+                    # Проверяем наличие полей для обратной совместимости (если индекс собран без них)
+                    actors_str = ''
+                    director_str = ''
+                    if 'actors_str' in row.index:
+                        actors_str = str(row.get('actors_str', '') or '').lower()
+                    if 'director_str' in row.index:
+                        director_str = str(row.get('director_str', '') or '').lower()
                     
                     for keyword in keywords:
-                        if keyword in actors_str:
+                        if actors_str and keyword in actors_str:
                             actor_boost += 1
                             logger.debug(f"[SEARCH MOVIES] Ключевое слово '{keyword}' найдено в актёрах для {imdb_id_clean}")
-                        if keyword in director_str:
+                        if director_str and keyword in director_str:
                             actor_boost += 1
                             logger.debug(f"[SEARCH MOVIES] Ключевое слово '{keyword}' найдено в режиссёре для {imdb_id_clean}")
                 
