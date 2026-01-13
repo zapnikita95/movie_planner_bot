@@ -203,7 +203,7 @@ def ticket_new_callback(call):
         
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("➕ Добавить фильм", callback_data=f"ticket_new_film:{file_id}" if file_id else "ticket_new_film"))
-        markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
+        #markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
