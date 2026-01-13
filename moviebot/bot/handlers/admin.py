@@ -697,46 +697,57 @@ def handle_admin_receipt_reply(message):
     try:
         from moviebot.states import user_check_receipt_state
         from moviebot.utils.admin import is_admin, is_owner
-        
+
+        # 🔧 FIX 1: обязательно должен быть reply
+        if not message.reply_to_message:
+            return
+
         user_id = message.from_user.id
-        
+
         # Проверяем права доступа
         if not (is_admin(user_id) or is_owner(user_id)):
             bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
-        
+
         reply_message_id = message.reply_to_message.message_id
-        
+
         # Получаем информацию о платеже
         if reply_message_id not in user_check_receipt_state:
             bot.reply_to(message, "❌ Сообщение не найдено в базе.")
             return
-        
+
         receipt_info = user_check_receipt_state[reply_message_id]
         target_chat_id = receipt_info['target_chat_id']
         target_name = receipt_info.get('target_name', f"ID: {target_chat_id}")
-        
+
+        # 🔧 FIX 2: удаляем state СРАЗУ (защита от рекурсии / дедлока)
+        del user_check_receipt_state[reply_message_id]
+
         # Получаем file_id
         file_id = message.photo[-1].file_id if message.photo else message.document.file_id
-        
+
         # Отправляем сообщение и файл в чат пользователя/группы
         try:
             text = "Спасибо за платёж!\n🧾 Вот ваш чек:"
             bot.send_message(target_chat_id, text)
-            
+
             # Отправляем файл
             if message.photo:
                 bot.send_photo(target_chat_id, file_id)
             else:
                 bot.send_document(target_chat_id, file_id)
-            
-            logger.info(f"[ADMIN RECEIPT] Чек отправлен: target_chat_id={target_chat_id}, target_name={target_name}, admin_id={user_id}")
-            
+
+            logger.info(
+                f"[ADMIN RECEIPT] Чек отправлен: target_chat_id={target_chat_id}, "
+                f"target_name={target_name}, admin_id={user_id}"
+            )
+
             # Обновляем исходное сообщение админу, добавляя пометку "✅ Чек отправлен"
             try:
                 original_message = message.reply_to_message
                 original_text = original_message.text or ""
                 updated_text = original_text + "\n\n✅ Чек отправлен"
+
                 bot.edit_message_text(
                     updated_text,
                     chat_id=original_message.chat.id,
@@ -744,15 +755,17 @@ def handle_admin_receipt_reply(message):
                     parse_mode='HTML'
                 )
             except Exception as edit_error:
-                logger.error(f"[ADMIN RECEIPT] Ошибка редактирования сообщения: {edit_error}", exc_info=True)
+                logger.error(
+                    f"[ADMIN RECEIPT] Ошибка редактирования сообщения: {edit_error}",
+                    exc_info=True
+                )
                 # Если не удалось отредактировать, просто отправляем ответ
                 bot.reply_to(message, f"✅ Чек отправлен для {target_name}")
-            
-            # Удаляем из состояния после успешной отправки
-            del user_check_receipt_state[reply_message_id]
+
         except Exception as e:
             logger.error(f"[ADMIN RECEIPT] Ошибка отправки чека: {e}", exc_info=True)
             bot.reply_to(message, f"❌ Ошибка отправки чека: {e}")
+
     except Exception as e:
         logger.error(f"[ADMIN RECEIPT] Ошибка обработки: {e}", exc_info=True)
         try:
@@ -902,67 +915,78 @@ def handle_check_receipt_reply(message):
     try:
         from moviebot.states import user_check_state
         from moviebot.utils.admin import is_admin, is_owner
-        
+
+        # 🔧 FIX 1: обязательно reply
+        if not message.reply_to_message:
+            return
+
         user_id = message.from_user.id
-        
+
         # Проверяем права доступа
         if not (is_admin(user_id) or is_owner(user_id)):
             bot.reply_to(message, "❌ У вас нет доступа к этой команде.")
             return
-        
+
         if user_id not in user_check_state:
             return
-        
+
         state = user_check_state[user_id]
+
+        if state.get('step') != 'waiting_receipt':
+            return
+
         target_id = state.get('target_id')
         target_name = state.get('target_name', f"ID: {target_id}")
-        
+
         if not target_id:
             bot.reply_to(message, "❌ Ошибка: ID не найден.")
             return
-        
+
+        # 🔧 FIX 2: УДАЛЯЕМ STATE СРАЗУ
+        del user_check_state[user_id]
+
         # Получаем file_id
         file_id = message.photo[-1].file_id if message.photo else message.document.file_id
-        
-        # Отправляем сообщение и файл в чат пользователя/группы
+
         try:
             text = "Спасибо за платёж!\n🧾 Вот ваш чек:"
             bot.send_message(target_id, text)
-            
-            # Отправляем файл
+
             if message.photo:
                 bot.send_photo(target_id, file_id)
             else:
                 bot.send_document(target_id, file_id)
-            
-            logger.info(f"[CHECK] Чек отправлен: target_id={target_id}, target_name={target_name}, admin_id={user_id}")
-            
-            # Обновляем исходное сообщение с просьбой отправить чек, добавляя пометку "✅ Чек отправлен"
+
+            logger.info(
+                f"[CHECK] Чек отправлен: target_id={target_id}, "
+                f"target_name={target_name}, admin_id={user_id}"
+            )
+
+            # Обновляем сообщение с просьбой отправить чек
             try:
                 prompt_message_id = state.get('prompt_message_id')
                 chat_id_state = state.get('chat_id', message.chat.id)
+
                 if prompt_message_id:
                     original_message = message.reply_to_message
                     original_text = original_message.text or ""
                     updated_text = original_text + "\n\n✅ Чек отправлен"
+
                     bot.edit_message_text(
                         updated_text,
                         chat_id=chat_id_state,
                         message_id=prompt_message_id,
-                        reply_markup=None,  # Убираем кнопку отмены
+                        reply_markup=None,
                         parse_mode='HTML'
                     )
             except Exception as edit_error:
                 logger.error(f"[CHECK] Ошибка редактирования сообщения: {edit_error}", exc_info=True)
-                # Если не удалось отредактировать, просто отправляем ответ
                 bot.reply_to(message, f"✅ Чек отправлен для {target_name}")
-            
-            # Очищаем состояние после успешной отправки
-            if user_id in user_check_state:
-                del user_check_state[user_id]
+
         except Exception as e:
             logger.error(f"[CHECK] Ошибка отправки чека: {e}", exc_info=True)
             bot.reply_to(message, f"❌ Ошибка отправки чека: {e}")
+
     except Exception as e:
         logger.error(f"[CHECK] Ошибка обработки чека: {e}", exc_info=True)
         try:
