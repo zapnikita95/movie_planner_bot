@@ -1572,11 +1572,15 @@ def get_admin_statistics():
     from datetime import datetime, timedelta
     import pytz
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
     stats = {}
     
+    conn_local = None
+    cursor_local = None
+    
     try:
+        conn_local = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cursor_local = conn_local.cursor()
+        
         with db_lock:
             # Активные пользователи (кто отправлял запросы за последние 30 дней)
             cursor_local.execute('''
@@ -1584,148 +1588,132 @@ def get_admin_statistics():
                 FROM stats
                 WHERE user_id > 0 AND timestamp >= NOW() - INTERVAL '30 days'
             ''')
-            row = cursor.fetchone()
-            stats['active_users_30d'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['active_users_30d'] = row['count'] if row else 0
             
             # Активные группы (группы, где были запросы за последние 30 дней)
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(DISTINCT chat_id) as count
                 FROM stats
                 WHERE chat_id < 0 AND timestamp >= NOW() - INTERVAL '30 days'
             ''')
-            row = cursor.fetchone()
-            stats['active_groups_30d'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['active_groups_30d'] = row['count'] if row else 0
             
             # Всего пользователей (кто когда-либо отправлял запросы)
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(DISTINCT user_id) as count
                 FROM stats
                 WHERE user_id > 0
             ''')
-            row = cursor.fetchone()
-            stats['total_users'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['total_users'] = row['count'] if row else 0
             
             # Всего групп
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(DISTINCT chat_id) as count
                 FROM stats
                 WHERE chat_id < 0
             ''')
-            row = cursor.fetchone()
-            stats['total_groups'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['total_groups'] = row['count'] if row else 0
             
             # Запросы к API Кинопоиска за день
-            try:
-                cursor.execute('''
-                    SELECT COUNT(*) as count
-                    FROM kinopoisk_api_logs
-                    WHERE timestamp >= CURRENT_DATE
-                ''')
-                row = cursor.fetchone()
-                stats['kp_api_requests_day'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
-            except Exception as e:
-                logger.warning(f"Ошибка получения статистики API за день: {e}")
-                stats['kp_api_requests_day'] = 0
+            cursor_local.execute('''
+                SELECT COUNT(*) as count
+                FROM kinopoisk_api_logs
+                WHERE timestamp >= CURRENT_DATE
+            ''')
+            row = cursor_local.fetchone()
+            stats['kp_api_requests_day'] = row['count'] if row else 0
             
             # Запросы к API Кинопоиска за неделю
-            try:
-                cursor.execute('''
-                    SELECT COUNT(*) as count
-                    FROM kinopoisk_api_logs
-                    WHERE timestamp >= NOW() - INTERVAL '7 days'
-                ''')
-                row = cursor.fetchone()
-                stats['kp_api_requests_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
-            except Exception as e:
-                logger.warning(f"Ошибка получения статистики API за неделю: {e}")
-                stats['kp_api_requests_week'] = 0
+            cursor_local.execute('''
+                SELECT COUNT(*) as count
+                FROM kinopoisk_api_logs
+                WHERE timestamp >= NOW() - INTERVAL '7 days'
+            ''')
+            row = cursor_local.fetchone()
+            stats['kp_api_requests_week'] = row['count'] if row else 0
             
             # Запросы к API Кинопоиска за месяц
-            try:
-                cursor.execute('''
-                    SELECT COUNT(*) as count
-                    FROM kinopoisk_api_logs
-                    WHERE timestamp >= NOW() - INTERVAL '30 days'
-                ''')
-                row = cursor.fetchone()
-                stats['kp_api_requests_month'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
-            except Exception as e:
-                logger.warning(f"Ошибка получения статистики API за месяц: {e}")
-                stats['kp_api_requests_month'] = 0
+            cursor_local.execute('''
+                SELECT COUNT(*) as count
+                FROM kinopoisk_api_logs
+                WHERE timestamp >= NOW() - INTERVAL '30 days'
+            ''')
+            row = cursor_local.fetchone()
+            stats['kp_api_requests_month'] = row['count'] if row else 0
             
             # Всего запросов к API Кинопоиска
-            try:
-                cursor.execute('SELECT COUNT(*) as count FROM kinopoisk_api_logs')
-                row = cursor.fetchone()
-                stats['kp_api_requests_total'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
-            except Exception as e:
-                logger.warning(f"Ошибка получения общей статистики API: {e}")
-                stats['kp_api_requests_total'] = 0
+            cursor_local.execute('SELECT COUNT(*) as count FROM kinopoisk_api_logs')
+            row = cursor_local.fetchone()
+            stats['kp_api_requests_total'] = row['count'] if row else 0
             
             # Платные пользователи (активные подписки personal)
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(DISTINCT user_id) as count
                 FROM subscriptions
                 WHERE subscription_type = 'personal' AND is_active = TRUE 
                 AND (expires_at IS NULL OR expires_at > NOW())
             ''')
-            row = cursor.fetchone()
-            stats['paid_users'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['paid_users'] = row['count'] if row else 0
             
             # Платные группы (активные подписки group)
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(DISTINCT chat_id) as count
                 FROM subscriptions
                 WHERE subscription_type = 'group' AND is_active = TRUE 
                 AND (expires_at IS NULL OR expires_at > NOW())
             ''')
-            row = cursor.fetchone()
-            stats['paid_groups'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['paid_groups'] = row['count'] if row else 0
             
             # Всего фильмов в базе
-            cursor.execute('SELECT COUNT(*) as count FROM movies')
-            row = cursor.fetchone()
-            stats['total_movies'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            cursor_local.execute('SELECT COUNT(*) as count FROM movies')
+            row = cursor_local.fetchone()
+            stats['total_movies'] = row['count'] if row else 0
             
             # Всего планов
-            cursor.execute('SELECT COUNT(*) as count FROM plans')
-            row = cursor.fetchone()
-            stats['total_plans'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            cursor_local.execute('SELECT COUNT(*) as count FROM plans')
+            row = cursor_local.fetchone()
+            stats['total_plans'] = row['count'] if row else 0
             
             # Всего оценок
-            cursor.execute('SELECT COUNT(*) as count FROM ratings')
-            row = cursor.fetchone()
-            stats['total_ratings'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            cursor_local.execute('SELECT COUNT(*) as count FROM ratings')
+            row = cursor_local.fetchone()
+            stats['total_ratings'] = row['count'] if row else 0
             
             # Запросы пользователей за день
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) as count
                 FROM stats
                 WHERE timestamp >= CURRENT_DATE
             ''')
-            row = cursor.fetchone()
-            stats['user_requests_day'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['user_requests_day'] = row['count'] if row else 0
             
             # Запросы пользователей за неделю
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) as count
                 FROM stats
                 WHERE timestamp >= NOW() - INTERVAL '7 days'
             ''')
-            row = cursor.fetchone()
-            stats['user_requests_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['user_requests_week'] = row['count'] if row else 0
             
             # Запросы пользователей за месяц
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) as count
                 FROM stats
                 WHERE timestamp >= NOW() - INTERVAL '30 days'
             ''')
-            row = cursor.fetchone()
-            stats['user_requests_month'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['user_requests_month'] = row['count'] if row else 0
             
             # Топ команд за день
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT command_or_action, COUNT(*) as count
                 FROM stats
                 WHERE timestamp >= CURRENT_DATE
@@ -1733,10 +1721,10 @@ def get_admin_statistics():
                 ORDER BY count DESC
                 LIMIT 5
             ''')
-            stats['top_commands_day'] = cursor.fetchall()
+            stats['top_commands_day'] = cursor_local.fetchall()
             
             # Топ команд за неделю
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT command_or_action, COUNT(*) as count
                 FROM stats
                 WHERE timestamp >= NOW() - INTERVAL '7 days'
@@ -1744,10 +1732,10 @@ def get_admin_statistics():
                 ORDER BY count DESC
                 LIMIT 5
             ''')
-            stats['top_commands_week'] = cursor.fetchall()
+            stats['top_commands_week'] = cursor_local.fetchall()
             
-            # Новые пользователи за день (кто впервые появился в stats за день)
-            cursor.execute('''
+            # Новые пользователи за день
+            cursor_local.execute('''
                 SELECT COUNT(DISTINCT user_id) as count
                 FROM stats s1
                 WHERE s1.user_id > 0 
@@ -1758,11 +1746,11 @@ def get_admin_statistics():
                     AND s2.timestamp < CURRENT_DATE
                 )
             ''')
-            row = cursor.fetchone()
-            stats['new_users_day'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['new_users_day'] = row['count'] if row else 0
             
-            # Новые пользователи за неделю (кто впервые появился в stats за неделю)
-            cursor.execute('''
+            # Новые пользователи за неделю
+            cursor_local.execute('''
                 SELECT COUNT(DISTINCT user_id) as count
                 FROM stats s1
                 WHERE s1.user_id > 0 
@@ -1773,53 +1761,57 @@ def get_admin_statistics():
                     AND s2.timestamp < NOW() - INTERVAL '7 days'
                 )
             ''')
-            row = cursor.fetchone()
-            stats['new_users_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['new_users_week'] = row['count'] if row else 0
             
             # Новые платные подписки за день
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) as count
                 FROM subscriptions
                 WHERE activated_at >= CURRENT_DATE
                 AND is_active = TRUE
             ''')
-            row = cursor.fetchone()
-            stats['new_subscriptions_day'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['new_subscriptions_day'] = row['count'] if row else 0
             
             # Новые платные подписки за неделю
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) as count
                 FROM subscriptions
                 WHERE activated_at >= NOW() - INTERVAL '7 days'
                 AND is_active = TRUE
             ''')
-            row = cursor.fetchone()
-            stats['new_subscriptions_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['new_subscriptions_week'] = row['count'] if row else 0
             
             # Отписавшиеся за неделю
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT COUNT(*) as count
                 FROM subscriptions
                 WHERE cancelled_at >= NOW() - INTERVAL '7 days'
                 AND cancelled_at IS NOT NULL
             ''')
-            row = cursor.fetchone()
-            stats['cancelled_subscriptions_week'] = row.get('count') if isinstance(row, dict) else (row[0] if row else 0)
+            row = cursor_local.fetchone()
+            stats['cancelled_subscriptions_week'] = row['count'] if row else 0
             
+        return stats
+        
     except Exception as e:
         logger.error(f"Ошибка получения статистики: {e}", exc_info=True)
         stats['error'] = str(e)
+        return stats
+        
     finally:
-        try:
-            cursor_local.close()
-        except:
-            pass
-        try:
-            conn_local.close()
-        except:
-            pass
-    
-    return stats
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if conn_local:
+            try:
+                conn_local.close()
+            except:
+                pass
 
 
 def is_bot_participant(chat_id, user_id):

@@ -1663,262 +1663,264 @@ def send_successful_payment_notification(
 
 def process_recurring_payments():
     """Выполняет безакцептные списания для подписок с payment_method_id"""
-    if not bot:
+    
+    if not bot:  # bot должен быть глобальным или импортированным
         return
     
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from config.settings import DATABASE_URL
+    from moviebot.database.db_connection import db_lock
+    import logging
+    from datetime import datetime, timedelta
+    import pytz
+    import uuid
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    
+    logger = logging.getLogger(__name__)
+    
+    from moviebot.api.yookassa_api import create_recurring_payment
+    from moviebot.database.db_operations import renew_subscription, save_payment, update_payment_status
+    from moviebot.services.nalog_service import create_check
+    
+    now = datetime.now(pytz.UTC)
+    
+    subscriptions = []
+    
+    # Основной SELECT подписок — короткий lock только на fetch
+    conn_main = None
+    cursor_main = None
     try:
-        from moviebot.api.yookassa_api import create_recurring_payment
-        from moviebot.database.db_operations import renew_subscription, save_payment, update_payment_status, create_subscription
-        from moviebot.database.db_connection import get_db_connection
-        import uuid as uuid_module
-        from moviebot.services.nalog_service import create_check  # Добавляем импорт
+        conn_main = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cursor_main = conn_main.cursor()
         
-        now = datetime.now(pytz.UTC)
-        
-        # ВАЖНО: Используем локальный курсор из локального соединения, а не глобальный
-        # Это предотвращает ошибку "cursor already closed" при параллельных вызовах
-        from moviebot.database.db_connection import get_db_connection, db_lock
-        from psycopg2.extras import RealDictCursor
-        conn_local = None
-        cursor_local = None
-        
-        # Находим подписки, у которых next_payment_date наступил и есть payment_method_id
-        # Проверяем раз в день (в 9:00 МСК)
-        subscriptions = []
-        try:
-            conn_local = get_db_connection()
-            # Создаем локальный курсор из локального соединения, а не используем глобальный
-            cursor_local = conn_local.cursor(cursor_factory=RealDictCursor)
+        with db_lock:  # Коротко: только execute + fetch
+            cursor_main.execute("""
+                SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
+                       next_payment_date, payment_method_id, telegram_username, group_username, group_size
+                FROM subscriptions
+                WHERE is_active = TRUE
+                AND next_payment_date IS NOT NULL
+                AND payment_method_id IS NOT NULL
+                AND period_type != 'lifetime'
+                AND DATE(next_payment_date AT TIME ZONE 'UTC') <= DATE(%s AT TIME ZONE 'UTC')
+            """, (now,))
+            subscriptions = cursor_main.fetchall()
             
-            with db_lock:
-                # Проверяем подписки, у которых next_payment_date наступил сегодня
-                # Проверка выполняется раз в день в 9:00 МСК
-                cursor_local.execute("""
-                    SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
-                           next_payment_date, payment_method_id, telegram_username, group_username, group_size
-                    FROM subscriptions
-                    WHERE is_active = TRUE
-                    AND next_payment_date IS NOT NULL
-                    AND payment_method_id IS NOT NULL
-                    AND period_type != 'lifetime'
-                    AND DATE(next_payment_date AT TIME ZONE 'UTC') <= DATE(%s AT TIME ZONE 'UTC')
-                """, (now,))
-                subscriptions = cursor_local.fetchall()
-        except Exception as db_e:
-            logger.error(f"[RECURRING PAYMENT] Ошибка при запросе подписок: {db_e}", exc_info=True)
+    except Exception as db_e:
+        logger.error(f"[RECURRING PAYMENT] Ошибка при запросе подписок: {db_e}", exc_info=True)
+        subscriptions = []
+    finally:
+        if cursor_main:
             try:
-                conn_local.rollback()
+                cursor_main.close()
             except:
                 pass
-            subscriptions = []
-        
-        for sub in subscriptions:
+        if conn_main:
             try:
-                subscription_id = sub.get('id') if isinstance(sub, dict) else sub[0]
-                chat_id = sub.get('chat_id') if isinstance(sub, dict) else sub[1]
-                user_id = sub.get('user_id') if isinstance(sub, dict) else sub[2]
-                subscription_type = sub.get('subscription_type') if isinstance(sub, dict) else sub[3]
-                plan_type = sub.get('plan_type') if isinstance(sub, dict) else sub[4]
-                period_type = sub.get('period_type') if isinstance(sub, dict) else sub[5]
-                # ВАЖНО: Используем цену из БД (сохраненную при создании подписки),
-                # а НЕ текущую цену из SUBSCRIPTION_PRICES.
-                # Это гарантирует, что изменение тарифов не повлияет на существующие подписки.
-                price = float(sub.get('price') if isinstance(sub, dict) else sub[6])
-                payment_method_id = sub.get('payment_method_id') if isinstance(sub, dict) else sub[8]
-                telegram_username = sub.get('telegram_username') if isinstance(sub, dict) else sub[9]
-                group_username = sub.get('group_username') if isinstance(sub, dict) else sub[10]
-                group_size = sub.get('group_size') if isinstance(sub, dict) else sub[11]
+                conn_main.close()
+            except:
+                pass
+    
+    # Обработка каждой подписки (всё вне lock — API, уведомления и т.д.)
+    for sub in subscriptions:
+        try:
+            subscription_id = sub['id']
+            chat_id = sub['chat_id']
+            user_id = sub['user_id']
+            subscription_type = sub['subscription_type']
+            plan_type = sub['plan_type']
+            period_type = sub['period_type']
+            price = float(sub['price'])
+            payment_method_id = sub['payment_method_id']
+            telegram_username = sub['telegram_username']
+            group_username = sub['group_username']
+            group_size = sub['group_size']
+            
+            logger.info(f"[RECURRING PAYMENT] Обработка подписки {subscription_id}, payment_method_id={payment_method_id}, сумма={price}")
+            
+            payment = create_recurring_payment(
+                user_id=user_id,
+                chat_id=chat_id,
+                subscription_type=subscription_type,
+                plan_type=plan_type,
+                period_type=period_type,
+                amount=price,
+                payment_method_id=payment_method_id,
+                group_size=group_size,
+                telegram_username=telegram_username,
+                group_username=group_username
+            )
+            
+            if not payment:
+                logger.error(f"[RECURRING PAYMENT] Не удалось создать платеж для подписки {subscription_id}")
+                continue
+            
+            payment_id = payment.metadata.get('payment_id') if hasattr(payment, 'metadata') and payment.metadata else str(uuid.uuid4())
+            
+            logger.info(f"[RECURRING PAYMENT] Платеж создан: {payment.id}, статус: {payment.status}")
+            
+            save_payment(
+                payment_id=payment_id,
+                yookassa_payment_id=payment.id,
+                user_id=user_id,
+                chat_id=chat_id,
+                subscription_type=subscription_type,
+                plan_type=plan_type,
+                period_type=period_type,
+                group_size=group_size,
+                amount=price,
+                status=payment.status
+            )
+            
+            if payment.status == 'succeeded':
+                renew_subscription(subscription_id, period_type)
+                update_payment_status(payment_id, 'succeeded', subscription_id)
                 
-                logger.info(f"[RECURRING PAYMENT] Обработка подписки {subscription_id}, payment_method_id={payment_method_id}, сумма={price} (из БД)")
+                description = f"Автопродление подписки \"{plan_type}\" на {period_type}"
+                user_name = telegram_username or f"user_{user_id}"
+                check_url, pdf_url = create_check(amount_rub=price, description=description, user_name=user_name)
                 
-                # Создаем безакцептный платеж используя сохраненный payment_method_id
-                # ВАЖНО: Используем price из БД, а не из SUBSCRIPTION_PRICES
-                payment = create_recurring_payment(
-                    user_id=user_id,
+                send_successful_payment_notification(
                     chat_id=chat_id,
+                    subscription_id=subscription_id,
                     subscription_type=subscription_type,
                     plan_type=plan_type,
                     period_type=period_type,
-                    amount=price,  # Цена из БД (сохраненная при создании подписки)
-                    payment_method_id=payment_method_id,
-                    group_size=group_size,
-                    telegram_username=telegram_username,
-                    group_username=group_username
+                    is_recurring=True,
+                    check_url=check_url,
+                    pdf_url=pdf_url
                 )
-                
-                if not payment:
-                    logger.error(f"[RECURRING PAYMENT] Не удалось создать платеж для подписки {subscription_id}")
-                    continue
-                
-                # Извлекаем payment_id из metadata платежа
-                payment_id = None
-                if hasattr(payment, 'metadata') and payment.metadata:
-                    payment_id = payment.metadata.get('payment_id')
-                if not payment_id:
-                    payment_id = str(uuid_module.uuid4())
-                
-                logger.info(f"[RECURRING PAYMENT] Платеж создан: {payment.id}, статус: {payment.status}")
-                
-                period_names = {
-                    'month': 'месяц',
-                    '3months': '3 месяца',
-                    'year': 'год',
-                    'test': 'тестовый (10 минут)'
-                }
-                period_name = period_names.get(period_type, period_type)
-                
-                # Сохраняем платеж в БД
-                save_payment(
-                    payment_id=payment_id,
-                    yookassa_payment_id=payment.id,
-                    user_id=user_id,
-                    chat_id=chat_id,
-                    subscription_type=subscription_type,
-                    plan_type=plan_type,
-                    period_type=period_type,
-                    group_size=group_size,
-                    amount=price,
-                    status=payment.status
-                )
-                
-                # Если платеж успешен, продлеваем подписку
-                if payment.status == 'succeeded':
-                    renew_subscription(subscription_id, period_type)
-                    update_payment_status(payment_id, 'succeeded', subscription_id)
-                    
-                    # === СОЗДАЁМ ЧЕК ДЛЯ РЕКУРРЕНТНОГО ПЛАТЕЖА ===
-                    check_url = None
-                    pdf_url = None
-                    description = f"Автопродление подписки \"{plan_type}\" на {period_type}"
-                    user_name = telegram_username or f"user_{user_id}"
-                    check_url, pdf_url = create_check(
-                        amount_rub=price,
-                        description=description,
-                        user_name=user_name
-                    )
-                    
-                    # Отправляем уведомление об успешном рекуррентном платеже
-                    # is_recurring=True для отображения специального текста
-                    send_successful_payment_notification(
-                        chat_id=chat_id,
-                        subscription_id=subscription_id,
-                        subscription_type=subscription_type,
-                        plan_type=plan_type,
-                        period_type=period_type,
-                        is_recurring=True,
-                        check_url=check_url,
-                        pdf_url=pdf_url
-                    )
-                else:
-                    # Платеж не успешен - проверяем причину
-                    has_cancellation_details = hasattr(payment, 'cancellation_details') and payment.cancellation_details
-                    cancellation_reason = None
-                    if has_cancellation_details:
-                        cancellation_reason = getattr(payment.cancellation_details, 'reason', None) or \
-                                             (payment.cancellation_details.get('reason') if isinstance(payment.cancellation_details, dict) else None)
-                    
-                    logger.warning(f"[RECURRING PAYMENT] Платеж {payment.id} не успешен, статус: {payment.status}, cancellation_details: {has_cancellation_details}, reason: {cancellation_reason}")
-                    
-                    # Подсчитываем количество неудачных попыток за последние 7 дней
-                    from moviebot.database.db_connection import get_db_connection, get_db_cursor
-                    conn_retry = get_db_connection()
+            else:
+                # Подсчёт retry_count — отдельный короткий conn + lock
+                retry_count = 0
+                conn_retry = None
+                cursor_retry = None
+                try:
+                    conn_retry = psycopg2.connect(DATABASE_URL)
                     cursor_retry = conn_retry.cursor()
-                    retry_count = 0
-                    try:
-                        seven_days_ago = now - timedelta(days=7)
-                        with db_lock:
-                            cursor_retry.execute("""
-                                SELECT COUNT(*) 
-                                FROM payments 
-                                WHERE subscription_id = %s 
-                                AND status IN ('canceled', 'pending', 'waiting_for_capture')
-                                AND created_at >= %s
-                            """, (subscription_id, seven_days_ago))
-                            retry_count_result = cursor_retry.fetchone()
-                            retry_count = retry_count_result[0] if retry_count_result and isinstance(retry_count_result, tuple) else \
-                                         (retry_count_result.get('count') if isinstance(retry_count_result, dict) else 0)
-                    except Exception as e:
-                        logger.error(f"[RECURRING PAYMENT] Ошибка подсчета попыток: {e}")
                     
-                    # Если есть cancellation_details или это одна из первых 5 попыток - планируем повтор
-                    if has_cancellation_details and retry_count < 5:
-                        # ПЛАНИРУЕМ ПОВТОРНУЮ ПОПЫТКУ ЧЕРЕЗ ДЕНЬ
-                        # Для неудачных рекуррентных платежей следующая попытка будет через день в 9:00 МСК
-                        tomorrow = now + timedelta(days=1)
-                        next_attempt = PLANS_TZ.localize(
-                            datetime.combine(tomorrow.date(), datetime.min.time().replace(hour=9, minute=0))
-                        ).astimezone(pytz.UTC)
-                        
-                        logger.info(f"[RECURRING PAYMENT] Планируется повторная попытка для подписки {subscription_id} через день: {next_attempt}")
-                        
-                        # Обновляем next_payment_date в БД
-                        from moviebot.database.db_operations import update_subscription_next_payment
-                        update_subscription_next_payment(subscription_id, next_attempt)
-                        
-                        # Отправляем уведомление об ошибке с кнопками
-                        text = "🚨 <b>Оплата не прошла!</b>\n\n"
-                        if retry_count < 4:
-                            text += f"Попытка {retry_count + 1} из 5. Следующая попытка списания будет через день. Пожалуйста, обеспечьте наличие средств на карте."
-                        else:
-                            text += f"Попытка {retry_count + 1} из 5. Это последняя автоматическая попытка. Если списание не пройдет, подписка будет приостановлена."
-                        text += "\n\nВы также можете инициировать списание по кнопке ниже."
-                        
-                        markup = InlineKeyboardMarkup(row_width=1)
-                        markup.add(InlineKeyboardButton("Провести платеж", callback_data=f"payment:retry_payment:{subscription_id}"))
-                        markup.add(InlineKeyboardButton("Изменить тариф", callback_data=f"payment:modify:{subscription_id}"))
-                        markup.add(InlineKeyboardButton("Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
-                        
-                        # Для личных подписок отправляем в личку, для групповых - в групповой чат
-                        target_chat_id = user_id if subscription_type == 'personal' else chat_id
+                    seven_days_ago = now - timedelta(days=7)
+                    with db_lock:  # Коротко
+                        cursor_retry.execute("""
+                            SELECT COUNT(*) 
+                            FROM payments 
+                            WHERE subscription_id = %s 
+                            AND status IN ('canceled', 'pending', 'waiting_for_capture')
+                            AND created_at >= %s
+                        """, (subscription_id, seven_days_ago))
+                        result = cursor_retry.fetchone()
+                        retry_count = result[0] if result else 0
+                except Exception as e:
+                    logger.error(f"[RECURRING PAYMENT] Ошибка подсчета попыток: {e}")
+                finally:
+                    if cursor_retry:
                         try:
-                            bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
-                            logger.info(f"[RECURRING PAYMENT] Уведомление об ошибке отправлено для подписки {subscription_id}, попытка {retry_count + 1}/5, следующая попытка: {next_attempt}")
-                        except Exception as e:
-                            logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления об ошибке: {e}")
+                            cursor_retry.close()
+                        except:
+                            pass
+                    if conn_retry:
+                        try:
+                            conn_retry.close()
+                        except:
+                            pass
+                
+                has_cancellation_details = hasattr(payment, 'cancellation_details') and payment.cancellation_details
+                
+                if has_cancellation_details and retry_count < 5:
+                    tomorrow = now + timedelta(days=1)
+                    next_attempt = PLANS_TZ.localize(datetime.combine(tomorrow.date(), datetime.min.time().replace(hour=9, minute=0))).astimezone(pytz.UTC)
+                    
+                    logger.info(f"[RECURRING PAYMENT] Планируется повторная попытка для подписки {subscription_id} на {next_attempt}")
+                    
+                    # Update next_payment_date — отдельный короткий conn + lock
+                    conn_update = None
+                    cursor_update = None
+                    try:
+                        conn_update = psycopg2.connect(DATABASE_URL)
+                        cursor_update = conn_update.cursor()
+                        with db_lock:  # Коротко
+                            cursor_update.execute("""
+                                UPDATE subscriptions 
+                                SET next_payment_date = %s
+                                WHERE id = %s
+                            """, (next_attempt, subscription_id))
+                        conn_update.commit()
+                    except Exception as e:
+                        logger.error(f"[RECURRING PAYMENT] Ошибка обновления next_payment_date: {e}")
+                    finally:
+                        if cursor_update:
+                            try:
+                                cursor_update.close()
+                            except:
+                                pass
+                        if conn_update:
+                            try:
+                                conn_update.close()
+                            except:
+                                pass
+                    
+                    text = "🚨 <b>Оплата не прошла!</b>\n\n"
+                    if retry_count < 4:
+                        text += f"Попытка {retry_count + 1} из 5. Следующая попытка через день."
                     else:
-                        # Превышен лимит попыток или нет cancellation_details - отключаем автоплатежи
-                        if retry_count >= 5:
-                            logger.warning(f"[RECURRING PAYMENT] Превышен лимит попыток (5) для подписки {subscription_id}, отключаем автоплатежи")
-                            # Обнуляем payment_method_id, чтобы прекратить автоплатежи
-                            with db_lock:
-                                cursor_retry.execute("""
+                        text += f"Попытка {retry_count + 1} из 5. Последняя автоматическая попытка."
+                    text += "\n\nМожете инициировать платеж вручную ниже."
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("Провести платеж", callback_data=f"payment:retry_payment:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("Изменить тариф", callback_data=f"payment:modify:{subscription_id}"))
+                    markup.add(InlineKeyboardButton("Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
+                    
+                    target_chat_id = user_id if subscription_type == 'personal' else chat_id
+                    try:
+                        bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
+                    except Exception as e:
+                        logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления: {e}")
+                else:
+                    if retry_count >= 5:
+                        logger.warning(f"[RECURRING PAYMENT] Превышен лимит попыток для подписки {subscription_id}")
+                        
+                        # Отключение автоплатежей — отдельный короткий conn + lock
+                        conn_disable = None
+                        cursor_disable = None
+                        try:
+                            conn_disable = psycopg2.connect(DATABASE_URL)
+                            cursor_disable = conn_disable.cursor()
+                            with db_lock:  # Коротко
+                                cursor_disable.execute("""
                                     UPDATE subscriptions 
                                     SET payment_method_id = NULL
                                     WHERE id = %s
                                 """, (subscription_id,))
-                                conn_retry.commit()
-                            
-                            # Отправляем уведомление о приостановке автоплатежей
-                            text = "⛔ <b>Автоплатежи приостановлены</b>\n\n"
-                            text += "После 5 неудачных попыток автоплатежи были приостановлены. Вы можете возобновить подписку, оплатив её вручную."
-                            
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            markup.add(InlineKeyboardButton("Оплатить подписку", callback_data="payment:tariffs"))
-                            markup.add(InlineKeyboardButton("Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
-                            
-                            target_chat_id = user_id if subscription_type == 'personal' else chat_id
-                            try:
-                                bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
-                            except Exception as e:
-                                logger.error(f"[RECURRING PAYMENT] Ошибка отправки уведомления о приостановке: {e}")
-                
-            except Exception as e:
-                logger.error(f"[RECURRING PAYMENT] Ошибка обработки подписки {subscription_id}: {e}", exc_info=True)
-    
-    except Exception as e:
-        logger.error(f"[RECURRING PAYMENT] Ошибка обработки рекуррентных платежей: {e}", exc_info=True)
-    finally:
-        # Закрываем локальные соединения
-        if cursor_local:
-            try:
-                cursor_local.close()
-            except:
-                pass
-        if conn_local:
-            try:
-                conn_local.close()
-            except:
-                pass
+                            conn_disable.commit()
+                        except Exception as e:
+                            logger.error(f"[RECURRING PAYMENT] Ошибка отключения автоплатежей: {e}")
+                        finally:
+                            if cursor_disable:
+                                try:
+                                    cursor_disable.close()
+                                except:
+                                    pass
+                            if conn_disable:
+                                try:
+                                    conn_disable.close()
+                                except:
+                                    pass
+                        
+                        text = "⛔ <b>Автоплатежи приостановлены</b>\n\nПосле 5 неудачных попыток автоплатежи отключены. Оплатите вручную."
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("Оплатить подписку", callback_data="payment:tariffs"))
+                        markup.add(InlineKeyboardButton("Отменить подписку", callback_data=f"payment:cancel:{subscription_id}"))
+                        
+                        target_chat_id = user_id if subscription_type == 'personal' else chat_id
+                        try:
+                            bot.send_message(target_chat_id, text, reply_markup=markup, parse_mode='HTML')
+                        except Exception as e:
+                            logger.error(f"[RECURRING PAYMENT] Ошибка уведомления о приостановке: {e}")
+        
+        except Exception as e:
+            logger.error(f"[RECURRING PAYMENT] Ошибка обработки подписки {subscription_id}: {e}", exc_info=True)
 
 
 def get_random_events_enabled(chat_id):
