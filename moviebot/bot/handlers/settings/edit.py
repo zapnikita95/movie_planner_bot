@@ -695,7 +695,7 @@ def edit_delete_rating_callback(call):
         from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
         if from_settings:
             try:
-                    from moviebot.bot.handlers.settings_main import settings_command
+                from moviebot.bot.handlers.settings_main import settings_command
                 class FakeMessage:
                     def __init__(self, call):
                         self.from_user = call.from_user
@@ -750,7 +750,7 @@ def edit_delete_plan_callback(call):
         from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
         if from_settings:
             try:
-                    from moviebot.bot.handlers.settings_main import settings_command
+                from moviebot.bot.handlers.settings_main import settings_command
                 class FakeMessage:
                     def __init__(self, call):
                         self.from_user = call.from_user
@@ -809,7 +809,7 @@ def edit_delete_movie_callback(call):
         from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
         if from_settings:
             try:
-                    from moviebot.bot.handlers.settings_main import settings_command
+                from moviebot.bot.handlers.settings_main import settings_command
                 class FakeMessage:
                     def __init__(self, call):
                         self.from_user = call.from_user
