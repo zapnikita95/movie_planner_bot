@@ -1491,7 +1491,7 @@ def send_successful_payment_notification(
         
         markup = InlineKeyboardMarkup()
         
-        # Для групповых подписок проверяем, есть ли участники группы, которых можно добавить
+        # Для групповых подписок показываем список участников и возможность добавления других
         # Только для обычных платежей (не рекуррентных)
         if subscription_type == 'group' and chat_id < 0 and not is_recurring:
             try:
@@ -1504,33 +1504,61 @@ def send_successful_payment_notification(
                     members = {uid: uname for uid, uname in members.items() if uid != BOT_ID}
                 
                 active_users = get_active_group_users(chat_id, BOT_ID)
+                if BOT_ID and BOT_ID in active_users:
+                    active_users = {uid: uname for uid, uname in active_users.items() if uid != BOT_ID}
+                
+                group_size = sub.get('group_size')
+                members_count = len(members) if members else 0
+                available_slots = (group_size - members_count) if group_size else 0
+                
+                # Добавляем информацию об участниках подписки
+                text += "\n\n"
+                text += "👥 <b>Участники подписки:</b>\n"
+                if members:
+                    for user_id_member, username_member in list(members.items())[:10]:
+                        display_name = username_member if username_member.startswith('user_') else f"@{username_member}"
+                        text += f"• {display_name}\n"
+                    if len(members) > 10:
+                        text += f"... и еще {len(members) - 10} участник(ов)\n"
+                else:
+                    text += "Пока нет участников\n"
+                
+                text += f"\n✅ Участников в подписке: <b>{members_count}</b>"
+                if group_size:
+                    text += f" из <b>{group_size}</b>"
                 
                 # Находим участников группы, которые не в подписке
                 not_in_subscription = []
-                for user_id, username in active_users.items():
-                    if user_id not in members:
+                for user_id_member, username_member in active_users.items():
+                    if user_id_member not in members:
                         not_in_subscription.append({
-                            'user_id': user_id,
-                            'username': username
+                            'user_id': user_id_member,
+                            'username': username_member
                         })
                 
-                # Если есть участники для добавления, предлагаем их добавить
-                if not_in_subscription:
+                # Если есть доступные места и участники для добавления, предлагаем их добавить
+                if available_slots > 0 and not_in_subscription:
                     text += "\n\n"
-                    text += "👥 <b>В вашей группе есть участники, которых можно добавить в подписку:</b>\n\n"
+                    text += f"➕ <b>Доступно мест: {available_slots}</b>\n"
+                    text += "Добавьте участников группы в подписку:\n\n"
                     
-                    # Добавляем кнопки для добавления участников (максимум 10)
-                    for member in not_in_subscription[:10]:
+                    # Добавляем кнопки для добавления участников (максимум доступных мест или 10, что меньше)
+                    max_buttons = min(available_slots, 10, len(not_in_subscription))
+                    for member in not_in_subscription[:max_buttons]:
                         display_name = member['username'] if member['username'].startswith('user_') else f"@{member['username']}"
                         button_text = f"➕ {display_name}"
                         if len(button_text) > 50:
                             button_text = button_text[:47] + "..."
                         markup.add(InlineKeyboardButton(button_text, callback_data=f"payment:add_member:{subscription_id}:{member['user_id']}"))
                     
-                    if len(not_in_subscription) > 10:
-                        text += f"\n... и еще {len(not_in_subscription) - 10} участник(ов)"
+                    # Если участников больше, чем доступных мест, показываем кнопку для выбора участников
+                    if len(not_in_subscription) > max_buttons or available_slots > max_buttons:
+                        markup.add(InlineKeyboardButton("👥 Выбрать участников", callback_data=f"payment:select_members:{subscription_id}"))
+                elif available_slots == 0 and group_size:
+                    text += "\n\n"
+                    text += "⚠️ Все места заняты. Для добавления новых участников расширьте подписку."
             except Exception as e:
-                logger.error(f"[SUCCESSFUL PAYMENT] Ошибка при получении участников для добавления: {e}")
+                logger.error(f"[SUCCESSFUL PAYMENT] Ошибка при получении участников для добавления: {e}", exc_info=True)
         
         markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))
         

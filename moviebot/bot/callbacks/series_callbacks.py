@@ -5,6 +5,7 @@ Callback handlers для работы с сериалами
 import logging
 import json
 import re
+import math
 from datetime import datetime, timedelta
 
 import pytz
@@ -28,6 +29,9 @@ from moviebot.api.kinopoisk_api import get_facts
 # show_film_info_with_buttons больше не используется - обновляем только кнопку подписки без API запросов
 
 logger = logging.getLogger(__name__)
+
+# Константа для пагинации сезонов
+SEASONS_PER_PAGE = 10
 
 def register_series_callbacks(bot):
     """Регистрирует callback handlers для сериалов"""
@@ -98,223 +102,8 @@ def register_series_callbacks(bot):
                 bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сезонах", show_alert=True)
                 return
 
-            # ── Дальше идёт твой оригинальный код построения клавиатуры ─────────────
-            now = datetime.now()
-            
-            # Используем локальные соединение и курсор (определяем один раз перед циклом)
-            from moviebot.database.db_connection import get_db_connection, get_db_cursor
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
-
-            markup = InlineKeyboardMarkup(row_width=1)
-            for season in seasons_data:
-                season_num = season.get('number', '')
-                episodes = season.get('episodes', [])
-                episodes_count = len(episodes)
-
-                # Проверяем, вышел ли сезон
-                season_released = True
-                if episodes:
-                    for ep in episodes:
-                        release_str = ep.get('releaseDate', '')
-                        if release_str and release_str != '—':
-                            try:
-                                release_date = None
-                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                    try:
-                                        release_date = datetime.strptime(release_str.split('T')[0], fmt)
-                                        break
-                                    except:
-                                        continue
-                                if release_date and release_date > now:
-                                    season_released = False
-                                    break
-                            except:
-                                pass
-
-                if not season_released:
-                    continue
-
-                watched_count = 0
-                
-                with db_lock:
-                    for ep in episodes:
-                        ep_num = ep.get('episodeNumber', '')
-                        cursor_local.execute('''
-                            SELECT watched FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                            AND season_number = %s AND episode_number = %s AND watched = TRUE
-                        ''', (chat_id, film_id, user_id, season_num, ep_num))
-                        watched_row = cursor_local.fetchone()
-                        if watched_row:
-                            watched_count += 1
-
-                if watched_count == episodes_count and episodes_count > 0:
-                    status_emoji = "✅"
-                elif watched_count > 0:
-                    status_emoji = "⏳"
-                else:
-                    status_emoji = "⬜"
-
-                button_text = f"{status_emoji} Сезон {season_num} ({episodes_count} эп.)"
-                if watched_count > 0 and watched_count < episodes_count:
-                    button_text += f" [{watched_count}/{episodes_count}]"
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"series_season:{kp_id}:{season_num}"))
-                
-                # Проверяем, все ли сезоны просмотрены
-                all_seasons_watched = True
-                for season in seasons_data:
-                    season_num = season.get('number', '')
-                    episodes = season.get('episodes', [])
-                    episodes_count = len(episodes)
-                    
-                    # Проверяем, вышел ли сезон
-                    season_released = True
-                    if episodes:
-                        for ep in episodes:
-                            release_str = ep.get('releaseDate', '')
-                            if release_str and release_str != '—':
-                                try:
-                                    release_date = None
-                                    for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                        try:
-                                            release_date = datetime.strptime(release_str.split('T')[0], fmt)
-                                            break
-                                        except:
-                                            continue
-                                    if release_date and release_date > now:
-                                        season_released = False
-                                        break
-                                except:
-                                    pass
-                    
-                    # Если сезон не вышел, пропускаем
-                    if not season_released:
-                        continue
-                    
-                    # Проверяем, все ли эпизоды сезона просмотрены
-                    watched_count = 0
-                    with db_lock:
-                        for ep in episodes:
-                            ep_num = ep.get('episodeNumber', '')
-                            cursor_local.execute('''
-                                SELECT watched FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                                AND season_number = %s AND episode_number = %s AND watched = TRUE
-                            ''', (chat_id, film_id, user_id, season_num, ep_num))
-                            watched_row = cursor_local.fetchone()
-                            if watched_row:
-                                watched_count += 1
-                    
-                    if watched_count < episodes_count or episodes_count == 0:
-                        all_seasons_watched = False
-                        break
-                
-                # Если все сезоны просмотрены, отмечаем сериал как просмотренный в БД
-                if all_seasons_watched:
-                    # Используем локальные соединение и курсор (уже определены выше)
-                    with db_lock:
-                        try:
-                            cursor_local.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                            conn_local.commit()
-                        except Exception as update_e:
-                            logger.error(f"[SERIES TRACK] Ошибка обновления watched: {update_e}", exc_info=True)
-                            try:
-                                conn_local.rollback()
-                            except:
-                                pass
-                
-                # Добавляем кнопку "Оценить" если все сезоны просмотрены
-                if all_seasons_watched:
-                    # Получаем информацию об оценках
-                    # Используем локальные соединение и курсор (уже определены выше)
-                    with db_lock:
-                        try:
-                            # Получаем среднюю оценку
-                            cursor_local.execute('''
-                                SELECT AVG(rating) as avg FROM ratings 
-                                WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                            ''', (chat_id, film_id))
-                            avg_result = cursor_local.fetchone()
-                            avg_rating = None
-                            if avg_result:
-                                avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                                avg_rating = float(avg) if avg is not None else None
-                            
-                            # Получаем активных пользователей
-                            cursor_local.execute('''
-                                SELECT DISTINCT user_id
-                                FROM stats
-                                WHERE chat_id = %s AND user_id IS NOT NULL
-                            ''', (chat_id,))
-                            active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local.fetchall()}
-                            
-                            # Получаем всех, кто оценил этот фильм
-                            cursor_local.execute('''
-                                SELECT DISTINCT user_id FROM ratings
-                                WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                            ''', (chat_id, film_id))
-                            rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local.fetchall()}
-                        except Exception as rating_e:
-                            logger.error(f"[SERIES TRACK] Ошибка получения информации об оценках: {rating_e}", exc_info=True)
-                            active_users = set()
-                            rated_users = set()
-                            avg_rating = None
-                        
-                        # Определяем текст и эмодзи кнопки
-                        if active_users and active_users.issubset(rated_users) and avg_rating is not None:
-                            # Все активные пользователи оценили - показываем среднюю оценку
-                            rating_int = int(round(avg_rating))
-                            if 1 <= rating_int <= 4:
-                                emoji = "💩"
-                            elif 5 <= rating_int <= 7:
-                                emoji = "💬"
-                            else:  # 8-10
-                                emoji = "🏆"
-                            rating_text = f"{emoji} {avg_rating:.0f}/10"
-                        else:
-                            rating_text = "💬 Оценить"
-                    
-                    markup.add(InlineKeyboardButton(rating_text, callback_data=f"rate_film:{int(kp_id)}"))
-                
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{int(kp_id)}"))
-                
-                # Формируем текст сообщения со списком сезонов (определяем ДО try-except)
-                text_msg = f"📺 <b>{title}</b>\n\n<b>Выберите сезон:</b>"
-                message_thread_id = getattr(call.message, 'message_thread_id', None)
-                
-                # Инициализируем send_kwargs заранее для fallback
-                send_kwargs = {
-                    'chat_id': chat_id,
-                    'text': text_msg,
-                    'reply_markup': markup,
-                    'parse_mode': 'HTML'
-                }
-                if message_thread_id is not None:
-                    send_kwargs['message_thread_id'] = message_thread_id
-                
-                logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
-                try:
-                    kwargs = {
-                        'chat_id': chat_id,
-                        'message_id': message_id,
-                        'text': text_msg,
-                        'reply_markup': markup,
-                        'parse_mode': 'HTML'
-                    }
-                    if message_thread_id is not None:
-                        kwargs['message_thread_id'] = message_thread_id
-
-                    bot.edit_message_text(**kwargs)
-                    logger.info(f"[SERIES TRACK] Сообщение обновлено успешно")
-                except Exception as e:
-                    logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
-                    # фолбэк — новое сообщение (send_kwargs уже определен выше)
-                    try:
-                        bot.send_message(**send_kwargs)
-                        logger.info(f"[SERIES TRACK] Отправлено новое сообщение как fallback")
-                    except Exception as send_e:
-                        logger.error(f"[SERIES TRACK] Фейл отправки: {send_e}", exc_info=True)
+            # Показываем первую страницу сезонов через вспомогательную функцию
+            show_seasons_page(chat_id, user_id, kp_id, film_id, title, seasons_data, page=1, message_id=message_id, call=call)
         except Exception as e:
             logger.error(f"[SERIES TRACK] Ошибка: {e}", exc_info=True)
             try:
