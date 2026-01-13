@@ -6307,7 +6307,7 @@ def register_series_handlers(bot_param):
         except Exception as e:
             logger.error(f"[DICE GAME] Критическая ошибка в handle_dice_result: {e}", exc_info=True)
 
-    # Обработчик settings: перенесен в handlers/settings.py
+    # Обработчик settings: перенесен в handlers/settings_main.py
 
     # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
     @bot.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)

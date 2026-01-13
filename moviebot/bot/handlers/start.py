@@ -221,13 +221,8 @@ def register_start_handlers(bot):
             from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
             from moviebot.bot.handlers.seasons import show_seasons_list
 
-            # Динамический импорт settings
-            import importlib.util
-            settings_path = "moviebot/bot/handlers/settings.py"
-            spec = importlib.util.spec_from_file_location("settings_module", settings_path)
-            settings_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(settings_module)
-            settings_command = settings_module.settings_command
+            # Обычный импорт settings_main
+            from moviebot.bot.handlers.settings_main import settings_command
 
             # Обработка locked билетов
             if action == 'tickets_locked':

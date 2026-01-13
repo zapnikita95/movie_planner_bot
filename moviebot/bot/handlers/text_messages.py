@@ -2070,7 +2070,7 @@ def handle_reaction(reaction):
     
     # Проверяем, не это ли реакция на сообщение settings
     if message_id in settings_messages:
-        # Обработка реакций на настройки уже реализована в settings.py
+        # Обработка реакций на настройки уже реализована в settings_main.py
         return
     
     # Получаем обычные эмодзи (как список символов) для этого чата
