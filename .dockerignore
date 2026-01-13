@@ -1,0 +1,25 @@
+# .dockerignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.env
+.git
+.gitignore
+.gitattributes
+README.md
+tests/
+moviebot/tests/
+*.log
+.DS_Store
+venv/
+.env
+*.sqlite3
+*.db
+debug_messages.json
+*.backup
+*.OLD_DO_NOT_USE
+moviebot_backup_*/
+*.md
+railpack.yaml
+Procfile
