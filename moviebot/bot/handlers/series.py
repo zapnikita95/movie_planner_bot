@@ -73,15 +73,18 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
     is_subscribed = False
     
     # ВАЖНО: Используем локальные соединения вместо глобальных
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+    from moviebot.database.db_connection import get_db_connection, db_lock
+    from psycopg2.extras import RealDictCursor
     conn_local = None
     cursor_local = None
     
     try:
         logger.info(f"[GET FILM STATE] Получение локального соединения...")
         conn_local = get_db_connection()
-        cursor_local = get_db_cursor()
-        logger.info(f"[GET FILM STATE] Локальное соединение получено")
+        # Создаем локальный курсор из локального соединения, а не используем глобальный
+        # Это предотвращает ошибку "cursor already closed" при параллельных вызовах
+        cursor_local = conn_local.cursor(cursor_factory=RealDictCursor)
+        logger.info(f"[GET FILM STATE] Локальное соединение и курсор получены")
         
         logger.info(f"[GET FILM STATE] Попытка получить db_lock...")
         with db_lock:
