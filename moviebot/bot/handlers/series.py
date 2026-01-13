@@ -78,6 +78,9 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
     conn_local = None
     cursor_local = None
     
+    # Инициализируем plan_data в начале функции, чтобы избежать UnboundLocalError
+    plan_data = None
+    
     try:
         logger.info(f"[GET FILM STATE] Получение локального соединения...")
         conn_local = get_db_connection()
@@ -804,11 +807,71 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             rating_text = "💬 Оценить"
 
             try:
-                # Используем свежий курсор через get_db_connection (или адаптируй под свой conn)
-                from moviebot.database.db_connection import get_db_connection  # добавь в начало файла, если ещё нет
-
-                with get_db_connection() as conn:
-                    with conn.cursor() as cur:
+                # Используем свежий курсор через get_db_connection
+                conn_ratings = get_db_connection()
+                cursor_ratings = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_ratings.execute('''
+                            SELECT AVG(rating) as avg FROM ratings 
+                            WHERE chat_id = %s AND film_id = %s 
+                            AND (is_imported = FALSE OR is_imported IS NULL)
+                        ''', (chat_id, film_id))
+                        avg_result = cursor_ratings.fetchone()
+                        if avg_result:
+                            avg_rating = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                            avg_rating = float(avg_rating) if avg_rating is not None else None
+                finally:
+                    try:
+                        cursor_ratings.close()
+                    except:
+                        pass
+                    try:
+                        conn_ratings.close()
+                    except:
+                        pass
+                
+                # Получаем активных пользователей и тех, кто оценил
+                conn_ratings2 = get_db_connection()
+                cursor_ratings2 = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_ratings2.execute('''
+                            SELECT DISTINCT user_id
+                            FROM stats
+                            WHERE chat_id = %s AND user_id IS NOT NULL
+                        ''', (chat_id,))
+                        active_users_rows = cursor_ratings2.fetchall()
+                        active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in active_users_rows if row}
+                        
+                        cursor_ratings2.execute('''
+                            SELECT DISTINCT user_id FROM ratings
+                            WHERE chat_id = %s AND film_id = %s 
+                            AND (is_imported = FALSE OR is_imported IS NULL)
+                        ''', (chat_id, film_id))
+                        rated_users_rows = cursor_ratings2.fetchall()
+                        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in rated_users_rows if row}
+                finally:
+                    try:
+                        cursor_ratings2.close()
+                    except:
+                        pass
+                    try:
+                        conn_ratings2.close()
+                    except:
+                        pass
+                
+                # Формируем текст кнопки
+                if avg_rating is not None:
+                    rating_int = int(round(avg_rating))
+                    emoji = "💩" if rating_int <= 4 else "💬" if rating_int <= 7 else "🏆"
+                    rating_text = f"{emoji} {avg_rating:.0f}/10"
+                
+                logger.info(f"[SHOW FILM INFO] Запрос оценок выполнен, avg_rating={avg_rating}, rating_text={rating_text}")
+                
+            except Exception as e:
+                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при запросе оценок: {e}", exc_info=True)
+                rating_text = "💬 Оценить"
                         # 1. Средняя оценка
                         cur.execute('''
                             SELECT AVG(rating) as avg FROM ratings 
