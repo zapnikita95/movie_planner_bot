@@ -1954,7 +1954,7 @@ def main_file_handler(message):
                 markup.add(InlineKeyboardButton("➕ Добавить еще билет к сеансу", callback_data=f"add_ticket:{plan_id}"))
                 markup.add(InlineKeyboardButton("🎟️ Вернуться к билетам", callback_data="ticket_new"))
                 
-                bot.reply_to(message, f"✅ Файл получен. (Всего билетов: {len(existing_tickets)}) Можете отправить ещё билеты или написать 'готово'. 🍿", reply_markup=markup)
+                bot.reply_to(message, f"✅ Файл получен. (Всего билетов: {len(existing_tickets)}) 🍿", reply_markup=markup)
                 # НЕ очищаем состояние - пользователь может добавить ещё билеты
                 logger.info(f"[TICKET FILE] Состояние пользователя {user_id} сохранено для добавления дополнительных билетов")
                 return
@@ -2025,7 +2025,7 @@ def main_file_handler(message):
                 is_private = message.chat.id > 0
             
             if is_private:
-                bot.send_message(message.chat.id, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
+                bot.send_message(message.chat.id, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})")
             else:
                 bot.reply_to(message, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
             return
