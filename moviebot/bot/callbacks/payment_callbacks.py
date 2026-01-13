@@ -81,6 +81,24 @@ SUBSCRIPTION_PRICES = {
     }
 }
 
+def safe_edit_message(bot, *, chat_id, message_id, text, reply_markup=None, parse_mode=None):
+    """
+    Безопасно редактирует сообщение в Telegram.
+    Не дергает API, если текст и клавиатура не изменились.
+    """
+    try:
+        bot.edit_message_text(
+            text,
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+    except Exception as e:
+        if "message is not modified" in str(e):
+            return
+        raise
+
 
 def calculate_discounted_price(user_id, subscription_type, plan_type, period_type, group_size=None):
     """Вычисляет цену с учетом скидок
@@ -410,11 +428,17 @@ def register_payment_callbacks(bot_instance):
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                         
                         try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            safe_edit_message(
+                                bot_instance,
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=text,
+                                reply_markup=markup,
+                                parse_mode='HTML'
+                            )
                         except Exception as e:
-                            if "message is not modified" not in str(e):
-                                logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                                bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                            bot_instance.send_message(call.message.chat.id, text, reply_markup=markup, parse_mode='HTML')
                     else:
                         logger.error(f"[PAYMENT] Платеж создан, но нет ссылки на оплату")
                         bot_instance.answer_callback_query(call.id, "❌ Ошибка: нет ссылки на оплату", show_alert=True)
@@ -444,11 +468,11 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
             
                 try:
-                    bot_instance.edit_message_text(
-                        text,
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
                         parse_mode='HTML'
                     )
                 except Exception as e:
@@ -571,7 +595,14 @@ def register_payment_callbacks(bot_instance):
                         
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                         try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            safe_edit_message(
+                                bot_instance,
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=text,
+                                reply_markup=markup,
+                                parse_mode='HTML'
+                            )
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -583,7 +614,14 @@ def register_payment_callbacks(bot_instance):
                         markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                         try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            safe_edit_message(
+                                bot_instance,
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=text,
+                                reply_markup=markup,
+                                parse_mode='HTML'
+                            )
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -702,7 +740,14 @@ def register_payment_callbacks(bot_instance):
                         
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -714,7 +759,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                     
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -912,7 +964,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1040,7 +1099,14 @@ def register_payment_callbacks(bot_instance):
                 
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1199,13 +1265,18 @@ def register_payment_callbacks(bot_instance):
                     
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                     
-                    bot_instance.edit_message_text(
-                        text,
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
+                    try:
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 except Exception as e:
                     logger.error(f"[PAYMENT ADD MEMBER] Ошибка обновления сообщения: {e}", exc_info=True)
                 return
@@ -1291,7 +1362,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1423,7 +1501,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Отмена", callback_data="payment:back"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1496,7 +1581,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1578,7 +1670,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1614,7 +1713,14 @@ def register_payment_callbacks(bot_instance):
                     del user_payment_state[user_id]
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1654,7 +1760,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1702,7 +1815,14 @@ def register_payment_callbacks(bot_instance):
                     del user_payment_state[user_id]
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1725,7 +1845,14 @@ def register_payment_callbacks(bot_instance):
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                     try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1762,7 +1889,14 @@ def register_payment_callbacks(bot_instance):
                     ))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -1920,7 +2054,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2213,7 +2354,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2246,7 +2394,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2370,7 +2525,14 @@ def register_payment_callbacks(bot_instance):
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
                     
                         try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            safe_edit_message(
+                                bot_instance,
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=text,
+                                reply_markup=markup,
+                                parse_mode='HTML'
+                            )
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2395,7 +2557,14 @@ def register_payment_callbacks(bot_instance):
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:group"))
                     try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2423,14 +2592,28 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:group"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2505,7 +2688,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2659,7 +2849,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                 
                     try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2799,7 +2996,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
                 
                     try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2842,7 +3046,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2940,7 +3151,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
                     
                     try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -2973,7 +3191,14 @@ def register_payment_callbacks(bot_instance):
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
                         
                         try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            safe_edit_message(
+                                bot_instance,
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=text,
+                                reply_markup=markup,
+                                parse_mode='HTML'
+                            )
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT MODIFY] Ошибка: {e}")
@@ -3072,7 +3297,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
                     
                     try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT MODIFY] Ошибка редактирования: {e}")
@@ -3158,7 +3390,14 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
                         
                             try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3341,7 +3580,14 @@ def register_payment_callbacks(bot_instance):
                                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:select_group:{group_size}:{group_chat_id}"))
                                 
                                     try:
-                                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                        safe_edit_message(
+                                            bot_instance,
+                                            chat_id=call.message.chat.id,
+                                            message_id=call.message.message_id,
+                                            text=text,
+                                            reply_markup=markup,
+                                            parse_mode='HTML'
+                                        )
                                     except Exception as e:
                                         if "message is not modified" not in str(e):
                                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3368,7 +3614,14 @@ def register_payment_callbacks(bot_instance):
                                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:select_group:{group_size}:{group_chat_id}"))
                                 
                                     try:
-                                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                        safe_edit_message(
+                                            bot_instance,
+                                            chat_id=call.message.chat.id,
+                                            message_id=call.message.message_id,
+                                            text=text,
+                                            reply_markup=markup,
+                                            parse_mode='HTML'
+                                        )
                                     except Exception as e:
                                         if "message is not modified" not in str(e):
                                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3418,7 +3671,14 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                         
                             try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3499,7 +3759,18 @@ def register_payment_callbacks(bot_instance):
                             text += "Вы можете отменить свою подписку и оформить ежемесячную подписку."
                             markup = InlineKeyboardMarkup(row_width=1)
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                             logger.info(f"[PAYMENT] Пользователь user_id={user_id} пытается подключить помесячную подписку при наличии подписки на 3 месяца/год")
                             return
                         
@@ -3538,7 +3809,18 @@ def register_payment_callbacks(bot_instance):
                             text += "Если хотите изменить — сначала отмените текущую."
                             markup = InlineKeyboardMarkup(row_width=1)
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                             return
                         
                         elif plan_type == 'all':
@@ -3576,7 +3858,18 @@ def register_payment_callbacks(bot_instance):
                             
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                             return
                         
                         elif len(existing_plan_types) == 2 and plan_type != 'all':
@@ -3596,7 +3889,18 @@ def register_payment_callbacks(bot_instance):
                                 markup.add(InlineKeyboardButton(f"Все режимы ({all_life}₽ навсегда)", callback_data="payment:subscribe:personal:all:lifetime"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                             return
                         
                         elif plan_type in existing_plan_types:
@@ -3677,7 +3981,18 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("📦 Все режимы", callback_data="payment:combine:upgrade_to_all:month"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                             return
                             
                 # Показываем подробное описание тарифа
@@ -3876,7 +4191,14 @@ def register_payment_callbacks(bot_instance):
                                 markup = InlineKeyboardMarkup(row_width=1)
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
                                 try:
-                                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                    safe_edit_message(
+                                        bot_instance,
+                                        chat_id=call.message.chat.id,
+                                        message_id=call.message.message_id,
+                                        text=text,
+                                        reply_markup=markup,
+                                        parse_mode='HTML'
+                                    )
                                 except Exception as e:
                                     if "message is not modified" not in str(e):
                                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -3903,7 +4225,14 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:group_size:{group_size}"))
                         
                             try:
-                                bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
                             except Exception as e:
                                 if "message is not modified" not in str(e):
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4138,7 +4467,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:tariffs:{sub_type}"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4398,7 +4734,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                 
                     try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -4764,7 +5107,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))
                     
                     try:
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
                     except Exception as e:
                         if "message is not modified" not in str(e):
                             logger.error(f"[YOOKASSA] Ошибка редактирования сообщения: {e}")
@@ -4936,7 +5286,14 @@ def register_payment_callbacks(bot_instance):
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -5082,7 +5439,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -5158,7 +5522,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -5330,7 +5701,14 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:modify:{subscription_id}"))
                 
                 try:
-                    bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
                 except Exception as e:
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -5536,7 +5914,14 @@ def register_payment_callbacks(bot_instance):
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current" if subscription_type_str == 'group' else "payment:active:personal"))
                         
                         try:
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            safe_edit_message(
+                                bot_instance,
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=text,
+                                reply_markup=markup,
+                                parse_mode='HTML'
+                            )
                         except Exception as e:
                             if "message is not modified" not in str(e):
                                 logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
@@ -5685,7 +6070,18 @@ def register_payment_callbacks(bot_instance):
                         markup.add(InlineKeyboardButton("💳 Оплатить", url=payment.confirmation.confirmation_url))
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                     
-                        bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                        try:
+                            safe_edit_message(
+                                bot_instance,
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                text=text,
+                                reply_markup=markup,
+                                parse_mode='HTML'
+                            )
+                        except Exception as e:
+                            if "message is not modified" not in str(e):
+                                logger.error(f"[PAYMENT ADD MEMBER] Ошибка обновления сообщения: {e}", exc_info=True)
                     else:
                         bot_instance.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
                     
@@ -5822,7 +6218,18 @@ def register_payment_callbacks(bot_instance):
                                 markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:personal"))
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active"))
                             
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                         elif subscription_type == 'group':
                             # Для групповых подписок получаем информацию о групповой подписке
                             from moviebot.database.db_operations import get_subscription_members, get_active_group_users, get_active_group_subscription_by_chat_id
@@ -5909,7 +6316,19 @@ def register_payment_callbacks(bot_instance):
                                 markup.add(InlineKeyboardButton("💰 Тарифы", callback_data="payment:tariffs:group"))
                                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group"))
                             
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                            try:
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+
                     except Exception as update_e:
                         logger.error(f"[PAYMENT CANCEL CONFIRM] Ошибка обновления информации о подписках: {update_e}", exc_info=True)
                         # Если не удалось обновить, показываем простое сообщение
@@ -5985,11 +6404,11 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:group:current"))
                         
                             try:
-                                bot_instance.edit_message_text(
-                                    text,
-                                    call.message.chat.id,
-                                    call.message.message_id,
-                                    reply_markup=markup,
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
                                     parse_mode='HTML'
                                 )
                             except Exception as e:
@@ -6035,11 +6454,11 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:{subscription_type}"))
                         
                             try:
-                                bot_instance.edit_message_text(
-                                    text,
-                                    call.message.chat.id,
-                                    call.message.message_id,
-                                    reply_markup=markup,
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
                                     parse_mode='HTML'
                                 )
                             except Exception as e:
@@ -6160,11 +6579,11 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
                 try:
-                    bot_instance.edit_message_text(
-                        text,
-                        call.message.chat.id,
-                        call.message.message_id,
-                        reply_markup=markup,
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
                         parse_mode='HTML'
                     )
                 except Exception as e:
