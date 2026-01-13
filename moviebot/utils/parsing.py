@@ -257,64 +257,22 @@ def detect_timezone_from_message(message_date_utc):
 def check_timezone_change(user_id, message_date_utc):
     """Проверяет, изменился ли часовой пояс пользователя.
 
-    Возвращает True если нужно уточнить часовой пояс, False если все ок"""
-
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    Возвращает True если нужно уточнить часовой пояс, False если все ок
     
-    try:
-        # ВАЖНО: Вызываем get_user_timezone ВНЕ db_lock, чтобы избежать дедлока
-        # так как get_user_timezone тоже использует db_lock
-        current_tz = get_user_timezone(user_id)
+    ВАЖНО: Если часовой пояс уже установлен, НЕ спрашиваем его снова"""
 
-        if not current_tz:
-            # Часовой пояс не установлен - нужно уточнить
-            return True
+    # ВАЖНО: Вызываем get_user_timezone ВНЕ db_lock, чтобы избежать дедлока
+    # так как get_user_timezone тоже использует db_lock
+    current_tz = get_user_timezone(user_id)
 
-        # Сохраняем время последнего сообщения для анализа
-        with db_lock:
-            # Получаем предыдущее время сообщения
-            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (user_id, 'prev_message_utc'))
-            prev_row = cursor_local.fetchone()
-            
-            if prev_row:
-                prev_utc_str = prev_row.get('value') if isinstance(prev_row, dict) else prev_row[0]
-                try:
-                    prev_utc = datetime.fromisoformat(prev_utc_str)
-                    if prev_utc.tzinfo is None:
-                        prev_utc = pytz.utc.localize(prev_utc)
-                    
-                    # Вычисляем разницу во времени между сообщениями
-                    time_diff = message_date_utc - prev_utc
-                    
-                    # Если разница больше 2 часов, возможно пользователь переехал
-                    # Но это не надежно, поэтому просто проверяем паттерн активности
-                    # Для простоты: если часовой пояс установлен, считаем что все ок
-                except:
-                    pass
-            
-            # Обновляем предыдущее время
-            cursor_local.execute("""
-                INSERT INTO settings (chat_id, key, value) 
-                VALUES (%s, %s, %s) 
-                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
-            """, (user_id, 'prev_message_utc', message_date_utc.isoformat()))
-            conn_local.commit()
-        
-        return False
-
-    except Exception as e:
-        logger.error(f"Ошибка проверки изменения часового пояса: {e}", exc_info=True)
-        return True  # В случае ошибки лучше уточнить
-    finally:
-        try:
-            cursor_local.close()
-        except:
-            pass
-        try:
-            conn_local.close()
-        except:
-            pass
+    if not current_tz:
+        # Часовой пояс не установлен - нужно уточнить
+        return True
+    
+    # Если часовой пояс установлен, НЕ спрашиваем его снова
+    # Просто обновляем время последнего сообщения (опционально, для статистики)
+    # НО не прерываем планирование
+    return False
 
 
 

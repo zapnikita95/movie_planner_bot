@@ -386,9 +386,6 @@ def handle_view_film_reply_internal(message, state):
         from moviebot.bot.handlers.series import get_film_current_state, show_film_info_with_buttons
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         
-        conn_local = get_db_connection()
-        cursor_local = get_db_cursor()
-        
         # Получаем актуальное состояние (быстро!)
         current_state = get_film_current_state(chat_id, kp_id, user_id)
         existing = current_state['existing']
@@ -398,21 +395,34 @@ def handle_view_film_reply_internal(message, state):
             link = text.strip()
         else:
             # Определяем is_series из БД или используем базовую ссылку
+            # ВАЖНО: Используем отдельное соединение для каждого блока
+            conn_local_1 = get_db_connection()
+            cursor_local_1 = get_db_cursor()
             is_series = False
             link_from_db = None
-            with db_lock:
+            try:
+                with db_lock:
+                    try:
+                        cursor_local_1.execute("""
+                            SELECT is_series, link
+                            FROM movies
+                            WHERE chat_id = %s AND kp_id = %s
+                        """, (chat_id, str(kp_id)))
+                        row = cursor_local_1.fetchone()
+                        if row:
+                            is_series = bool(row.get('is_series') if isinstance(row, dict) else row[0])
+                            link_from_db = row.get('link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                    except Exception as e:
+                        logger.warning(f"[VIEW FILM REPLY] Ошибка получения is_series из БД: {e}")
+            finally:
                 try:
-                    cursor_local.execute("""
-                        SELECT is_series, link
-                        FROM movies
-                        WHERE chat_id = %s AND kp_id = %s
-                    """, (chat_id, str(kp_id)))
-                    row = cursor_local.fetchone()
-                    if row:
-                        is_series = bool(row.get('is_series') if isinstance(row, dict) else row[0])
-                        link_from_db = row.get('link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
-                except Exception as e:
-                    logger.warning(f"[VIEW FILM REPLY] Ошибка получения is_series из БД: {e}")
+                    cursor_local_1.close()
+                except:
+                    pass
+                try:
+                    conn_local_1.close()
+                except:
+                    pass
             
             if link_from_db:
                 link = link_from_db
@@ -423,45 +433,58 @@ def handle_view_film_reply_internal(message, state):
         info = None
         if existing:
             # Фильм в базе - получаем данные из БД (быстро!)
-            with db_lock:
+            # ВАЖНО: Используем отдельное соединение для каждого блока
+            conn_local_2 = get_db_connection()
+            cursor_local_2 = get_db_cursor()
+            try:
+                with db_lock:
+                    try:
+                        cursor_local_2.execute("""
+                            SELECT title, year, genres, description, director, actors, is_series, link
+                            FROM movies
+                            WHERE chat_id = %s AND kp_id = %s
+                        """, (chat_id, str(kp_id)))
+                        row = cursor_local_2.fetchone()
+                        if row:
+                            info = {}
+                            if isinstance(row, dict):
+                                info = {
+                                    'title': row.get('title'),
+                                    'year': row.get('year'),
+                                    'genres': row.get('genres'),
+                                    'description': row.get('description'),
+                                    'director': row.get('director'),
+                                    'actors': row.get('actors'),
+                                    'is_series': bool(row.get('is_series', 0))
+                                }
+                                if not link_from_db:
+                                    link_from_db = row.get('link')
+                            else:
+                                info = {
+                                    'title': row[0] if len(row) > 0 else None,
+                                    'year': row[1] if len(row) > 1 else None,
+                                    'genres': row[2] if len(row) > 2 else None,
+                                    'description': row[3] if len(row) > 3 else None,
+                                    'director': row[4] if len(row) > 4 else None,
+                                    'actors': row[5] if len(row) > 5 else None,
+                                    'is_series': bool(row[6]) if len(row) > 6 else False
+                                }
+                                if not link_from_db and len(row) > 7:
+                                    link_from_db = row[7]
+                            if link_from_db:
+                                link = link_from_db
+                            logger.info(f"[VIEW FILM REPLY] Данные получены из БД (быстро!): {info.get('title')}")
+                    except Exception as e:
+                        logger.error(f"[VIEW FILM REPLY] Ошибка чтения БД: {e}", exc_info=True)
+            finally:
                 try:
-                    cursor_local.execute("""
-                        SELECT title, year, genres, description, director, actors, is_series, link
-                        FROM movies
-                        WHERE chat_id = %s AND kp_id = %s
-                    """, (chat_id, str(kp_id)))
-                    row = cursor_local.fetchone()
-                    if row:
-                        info = {}
-                        if isinstance(row, dict):
-                            info = {
-                                'title': row.get('title'),
-                                'year': row.get('year'),
-                                'genres': row.get('genres'),
-                                'description': row.get('description'),
-                                'director': row.get('director'),
-                                'actors': row.get('actors'),
-                                'is_series': bool(row.get('is_series', 0))
-                            }
-                            if not link_from_db:
-                                link_from_db = row.get('link')
-                        else:
-                            info = {
-                                'title': row[0] if len(row) > 0 else None,
-                                'year': row[1] if len(row) > 1 else None,
-                                'genres': row[2] if len(row) > 2 else None,
-                                'description': row[3] if len(row) > 3 else None,
-                                'director': row[4] if len(row) > 4 else None,
-                                'actors': row[5] if len(row) > 5 else None,
-                                'is_series': bool(row[6]) if len(row) > 6 else False
-                            }
-                            if not link_from_db and len(row) > 7:
-                                link_from_db = row[7]
-                        if link_from_db:
-                            link = link_from_db
-                        logger.info(f"[VIEW FILM REPLY] Данные получены из БД (быстро!): {info.get('title')}")
-                except Exception as e:
-                    logger.error(f"[VIEW FILM REPLY] Ошибка чтения БД: {e}", exc_info=True)
+                    cursor_local_2.close()
+                except:
+                    pass
+                try:
+                    conn_local_2.close()
+                except:
+                    pass
         
         # Если фильм НЕ в базе или БД не дала данных, запрашиваем API
         if not info or not info.get('title'):

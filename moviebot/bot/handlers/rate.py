@@ -727,6 +727,16 @@ def handle_rating_internal(message, rating):
         except Exception as e:
             logger.error(f"[RATE INTERNAL] Ошибка при сохранении оценки: {e}", exc_info=True)
             bot.reply_to(message, "❌ Произошла ошибка при сохранении оценки.")
+        finally:
+            # ВАЖНО: Закрываем курсор и соединение в finally, чтобы избежать утечек
+            try:
+                cursor_local_rating.close()
+            except:
+                pass
+            try:
+                conn_local_rating.close()
+            except:
+                pass
     else:
         logger.warning(f"[RATE INTERNAL] Не удалось найти film_id для сохранения оценки")
         bot.reply_to(message, "❌ Не удалось найти фильм для оценки. Убедитесь, что вы отвечаете на сообщение с фильмом.")
