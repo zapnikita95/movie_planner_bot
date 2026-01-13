@@ -491,7 +491,33 @@ def build_tmdb_index():
     processed = df[['imdb_id', 'title', 'year', 'description', 'has_overview', 'actors_str', 'director_str']].copy()
     # Уже отсортировали и ограничили выше, не нужно еще раз .head()
     
+    # КЭШИРОВАНИЕ: Проверяем, не были ли эмбеддинги уже сгенерированы
+    # Если индекс существует, значит эмбеддинги уже вычислены и сохранены
+    if INDEX_PATH.exists() and DATA_PATH.exists():
+        logger.info(f"✅ Индекс уже существует ({INDEX_PATH}) - эмбеддинги уже сгенерированы и сохранены")
+        logger.info("Загружаем индекс из файла вместо перегенерации эмбеддингов...")
+        try:
+            _index = faiss.read_index(str(INDEX_PATH))
+            _movies_df = pd.read_csv(DATA_PATH)
+            
+            # Проверяем совпадение размерности с текущей моделью
+            model = get_model()
+            expected_dim = model.get_sentence_embedding_dimension()
+            actual_dim = _index.d
+            
+            if expected_dim != actual_dim:
+                logger.warning(f"Размерность индекса ({actual_dim}) не совпадает с моделью ({expected_dim}) - пересобираем")
+                _index = None
+                _movies_df = None
+            else:
+                logger.info(f"✅ Индекс загружен из кэша, фильмов: {len(_movies_df)}, размерность: {actual_dim}")
+                return _index, _movies_df
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки кэшированного индекса: {e}, пересобираем...", exc_info=True)
+    
+    # Генерируем эмбеддинги только если индекс не существует или не загрузился
     logger.info(f"Генерация эмбеддингов для {len(processed)} фильмов...")
+    logger.info("⚠️ Это займет несколько минут. Эмбеддинги будут сохранены в кэш для следующего запуска.")
     
     model = get_model()
     descriptions = processed['description'].tolist()
@@ -509,8 +535,11 @@ def build_tmdb_index():
     index = faiss.IndexFlatL2(dimension)
     index.add(embeddings)
     
+    # Сохраняем индекс в кэш для следующего запуска
+    logger.info(f"Сохранение индекса в кэш: {INDEX_PATH}")
     faiss.write_index(index, str(INDEX_PATH))
     processed.to_csv(DATA_PATH, index=False)
+    logger.info("✅ Индекс и эмбеддинги сохранены в кэш")
     
     _index = index
     _movies_df = processed
