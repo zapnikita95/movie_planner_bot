@@ -4671,8 +4671,15 @@ def register_payment_callbacks(bot_instance):
                 
                     # Сохраняем информацию о платеже в БД
                     from moviebot.database.db_operations import save_payment
-                    # Для групповых подписок используем выбранный chat_id группы
-                    payment_chat_id_for_db = payment_chat_id if sub_type == 'group' and group_chat_id else chat_id
+
+                    # Безопасно получаем group_chat_id, если она существует
+                    group_chat_id_safe = locals().get('group_chat_id', None)
+
+                    # Для групповых подписок используем выбранный chat_id группы, иначе обычный chat_id
+                    if sub_type == 'group' and group_chat_id_safe:
+                        payment_chat_id_for_db = payment_chat_id
+                    else:
+                        payment_chat_id_for_db = chat_id
                     save_payment(
                         payment_id=payment_id,
                         yookassa_payment_id=payment.id,
