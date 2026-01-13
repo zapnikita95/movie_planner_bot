@@ -551,56 +551,55 @@ def handle_rating_internal(message, rating):
                         if film_message_id:
                             from moviebot.bot.handlers.series import show_film_info_with_buttons
                             
-                            # Используем локальные соединение и курсор (уже определены выше)
-                            with db_lock:
-                                try:
-                                    cursor_local_rating.execute('''
-                                        SELECT id, title, watched, link, year, genres, description, director, actors, is_series
-                                        FROM movies WHERE id = %s AND chat_id = %s
-                                    ''', (film_id, chat_id))
-                                    existing_row = cursor_local_rating.fetchone()
-                                except Exception as db_e:
-                                    logger.error(f"[RATE INTERNAL] Ошибка получения данных фильма: {db_e}", exc_info=True)
-                                    existing_row = None
-                                existing = None
-                                link = None
-                                info = None
+                            # Используем локальные соединение и курсор, db_lock уже удерживается выше
+                            try:
+                                cursor_local_rating.execute('''
+                                    SELECT id, title, watched, link, year, genres, description, director, actors, is_series
+                                    FROM movies WHERE id = %s AND chat_id = %s
+                                ''', (film_id, chat_id))
+                                existing_row = cursor_local_rating.fetchone()
+                            except Exception as db_e:
+                                logger.error(f"[RATE INTERNAL] Ошибка получения данных фильма: {db_e}", exc_info=True)
+                                existing_row = None
+                            existing = None
+                            link = None
+                            info = None
+                            
+                            if existing_row:
+                                if isinstance(existing_row, dict):
+                                    film_id_db = existing_row.get('id')
+                                    title = existing_row.get('title')
+                                    watched = existing_row.get('watched')
+                                    link = existing_row.get('link')
+                                    year = existing_row.get('year')
+                                    genres = existing_row.get('genres')
+                                    description = existing_row.get('description')
+                                    director = existing_row.get('director')
+                                    actors = existing_row.get('actors')
+                                    is_series = bool(existing_row.get('is_series', 0))
+                                else:
+                                    film_id_db = existing_row[0]
+                                    title = existing_row[1]
+                                    watched = existing_row[2]
+                                    link = existing_row[3]
+                                    year = existing_row[4] if len(existing_row) > 4 else None
+                                    genres = existing_row[5] if len(existing_row) > 5 else None
+                                    description = existing_row[6] if len(existing_row) > 6 else None
+                                    director = existing_row[7] if len(existing_row) > 7 else None
+                                    actors = existing_row[8] if len(existing_row) > 8 else None
+                                    is_series = bool(existing_row[9] if len(existing_row) > 9 else 0)
                                 
-                                if existing_row:
-                                    if isinstance(existing_row, dict):
-                                        film_id_db = existing_row.get('id')
-                                        title = existing_row.get('title')
-                                        watched = existing_row.get('watched')
-                                        link = existing_row.get('link')
-                                        year = existing_row.get('year')
-                                        genres = existing_row.get('genres')
-                                        description = existing_row.get('description')
-                                        director = existing_row.get('director')
-                                        actors = existing_row.get('actors')
-                                        is_series = bool(existing_row.get('is_series', 0))
-                                    else:
-                                        film_id_db = existing_row[0]
-                                        title = existing_row[1]
-                                        watched = existing_row[2]
-                                        link = existing_row[3]
-                                        year = existing_row[4] if len(existing_row) > 4 else None
-                                        genres = existing_row[5] if len(existing_row) > 5 else None
-                                        description = existing_row[6] if len(existing_row) > 6 else None
-                                        director = existing_row[7] if len(existing_row) > 7 else None
-                                        actors = existing_row[8] if len(existing_row) > 8 else None
-                                        is_series = bool(existing_row[9] if len(existing_row) > 9 else 0)
-                                    
-                                    existing = (film_id_db, title, watched)
-                                    
-                                    info = {
-                                        'title': title,
-                                        'year': year,
-                                        'genres': genres,
-                                        'description': description,
-                                        'director': director,
-                                        'actors': actors,
-                                        'is_series': is_series
-                                    }
+                                existing = (film_id_db, title, watched)
+                                
+                                info = {
+                                    'title': title,
+                                    'year': year,
+                                    'genres': genres,
+                                    'description': description,
+                                    'director': director,
+                                    'actors': actors,
+                                    'is_series': is_series
+                                }
                             
                             if not link:
                                 link = f"https://www.kinopoisk.ru/film/{kp_id}/"
@@ -635,43 +634,42 @@ def handle_rating_internal(message, rating):
                             
                             if is_group:
                                 # Для групповых чатов: проверяем среднюю оценку > 8.5 И хотя бы 65% активных участников оценили
-                                # Используем локальные соединение и курсор (уже определены выше)
-                                with db_lock:
-                                    try:
-                                        # Получаем среднюю оценку (уже рассчитана выше, но пересчитаем для ясности)
-                                        cursor_local_rating.execute('''
-                                            SELECT AVG(rating) as avg_rating 
-                                            FROM ratings 
-                                            WHERE chat_id = %s AND film_id = %s 
-                                            AND (is_imported = FALSE OR is_imported IS NULL)
-                                        ''', (chat_id, film_id))
-                                        avg_result = cursor_local_rating.fetchone()
-                                        avg_rating = None
-                                        if avg_result:
-                                            avg_val = avg_result.get('avg_rating') if isinstance(avg_result, dict) else avg_result[0]
-                                            avg_rating = float(avg_val) if avg_val is not None else None
-                                        
-                                        # Получаем активных участников группы
-                                        cursor_local_rating.execute('''
-                                            SELECT DISTINCT user_id
-                                            FROM stats
-                                            WHERE chat_id = %s AND user_id IS NOT NULL
-                                        ''', (chat_id,))
-                                        active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local_rating.fetchall()}
-                                        
-                                        # Получаем пользователей, которые оценили этот фильм
-                                        cursor_local_rating.execute('''
-                                            SELECT DISTINCT user_id 
-                                            FROM ratings
-                                            WHERE chat_id = %s AND film_id = %s 
-                                            AND (is_imported = FALSE OR is_imported IS NULL)
-                                        ''', (chat_id, film_id))
-                                        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local_rating.fetchall()}
-                                    except Exception as db_e:
-                                        logger.error(f"[RATE INTERNAL] Ошибка получения статистики для рекомендаций: {db_e}", exc_info=True)
-                                        active_users = set()
-                                        rated_users = set()
-                                        avg_rating = None
+                                # db_lock уже удерживается выше, используем тот же курсор
+                                try:
+                                    # Получаем среднюю оценку (уже рассчитана выше, но пересчитаем для ясности)
+                                    cursor_local_rating.execute('''
+                                        SELECT AVG(rating) as avg_rating 
+                                        FROM ratings 
+                                        WHERE chat_id = %s AND film_id = %s 
+                                        AND (is_imported = FALSE OR is_imported IS NULL)
+                                    ''', (chat_id, film_id))
+                                    avg_result = cursor_local_rating.fetchone()
+                                    avg_rating = None
+                                    if avg_result:
+                                        avg_val = avg_result.get('avg_rating') if isinstance(avg_result, dict) else avg_result[0]
+                                        avg_rating = float(avg_val) if avg_val is not None else None
+                                    
+                                    # Получаем активных участников группы
+                                    cursor_local_rating.execute('''
+                                        SELECT DISTINCT user_id
+                                        FROM stats
+                                        WHERE chat_id = %s AND user_id IS NOT NULL
+                                    ''', (chat_id,))
+                                    active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local_rating.fetchall()}
+                                    
+                                    # Получаем пользователей, которые оценили этот фильм
+                                    cursor_local_rating.execute('''
+                                        SELECT DISTINCT user_id 
+                                        FROM ratings
+                                        WHERE chat_id = %s AND film_id = %s 
+                                        AND (is_imported = FALSE OR is_imported IS NULL)
+                                    ''', (chat_id, film_id))
+                                    rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local_rating.fetchall()}
+                                except Exception as db_e:
+                                    logger.error(f"[RATE INTERNAL] Ошибка получения статистики для рекомендаций: {db_e}", exc_info=True)
+                                    active_users = set()
+                                    rated_users = set()
+                                    avg_rating = None
                                 
                                 if avg_rating is not None and avg_rating > 8.5 and active_users:
                                     # Вычисляем процент оценивших
