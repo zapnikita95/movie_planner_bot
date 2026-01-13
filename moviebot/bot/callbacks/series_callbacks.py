@@ -111,6 +111,292 @@ def register_series_callbacks(bot):
             except:
                 pass
     
+    def show_seasons_page(chat_id, user_id, kp_id, film_id, title, seasons_data, page=1, message_id=None, call=None):
+        """Показывает страницу сезонов с пагинацией"""
+        try:
+            message_thread_id = getattr(call.message, 'message_thread_id', None) if call else None
+            
+            # Фильтруем только вышедшие сезоны
+            now = datetime.now()
+            released_seasons = []
+            for season in seasons_data:
+                season_num = season.get('number', '')
+                episodes = season.get('episodes', [])
+                
+                season_released = True
+                if episodes:
+                    for ep in episodes:
+                        release_str = ep.get('releaseDate', '')
+                        if release_str and release_str != '—':
+                            try:
+                                release_date = None
+                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                                    try:
+                                        release_date = datetime.strptime(release_str.split('T')[0], fmt)
+                                        break
+                                    except:
+                                        continue
+                                if release_date and release_date > now:
+                                    season_released = False
+                                    break
+                            except:
+                                pass
+                
+                if season_released:
+                    released_seasons.append(season)
+            
+            # Пагинация
+            total_seasons = len(released_seasons)
+            total_pages = (total_seasons + SEASONS_PER_PAGE - 1) // SEASONS_PER_PAGE if total_seasons > 0 else 1
+            page = max(1, min(page, total_pages))
+            
+            start_idx = (page - 1) * SEASONS_PER_PAGE
+            end_idx = start_idx + SEASONS_PER_PAGE
+            seasons_page = released_seasons[start_idx:end_idx]
+            
+            # Используем локальные соединение и курсор
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            
+            try:
+                markup = InlineKeyboardMarkup(row_width=1)
+                
+                # Добавляем кнопки сезонов для текущей страницы
+                for season in seasons_page:
+                    season_num = season.get('number', '')
+                    episodes = season.get('episodes', [])
+                    episodes_count = len(episodes)
+                    
+                    watched_count = 0
+                    with db_lock:
+                        for ep in episodes:
+                            ep_num = ep.get('episodeNumber', '')
+                            cursor_local.execute('''
+                                SELECT watched FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                                AND season_number = %s AND episode_number = %s AND watched = TRUE
+                            ''', (chat_id, film_id, user_id, season_num, ep_num))
+                            watched_row = cursor_local.fetchone()
+                            if watched_row:
+                                watched_count += 1
+                    
+                    if watched_count == episodes_count and episodes_count > 0:
+                        status_emoji = "✅"
+                    elif watched_count > 0:
+                        status_emoji = "⏳"
+                    else:
+                        status_emoji = "⬜"
+                    
+                    button_text = f"{status_emoji} Сезон {season_num} ({episodes_count} эп.)"
+                    if watched_count > 0 and watched_count < episodes_count:
+                        button_text += f" [{watched_count}/{episodes_count}]"
+                    markup.add(InlineKeyboardButton(button_text, callback_data=f"series_season:{kp_id}:{season_num}"))
+                
+                # Проверяем, все ли сезоны просмотрены (один раз после цикла)
+                all_seasons_watched = True
+                for season in released_seasons:
+                    season_num = season.get('number', '')
+                    episodes = season.get('episodes', [])
+                    episodes_count = len(episodes)
+                    
+                    watched_count = 0
+                    with db_lock:
+                        for ep in episodes:
+                            ep_num = ep.get('episodeNumber', '')
+                            cursor_local.execute('''
+                                SELECT watched FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                                AND season_number = %s AND episode_number = %s AND watched = TRUE
+                            ''', (chat_id, film_id, user_id, season_num, ep_num))
+                            watched_row = cursor_local.fetchone()
+                            if watched_row:
+                                watched_count += 1
+                    
+                    if watched_count < episodes_count or episodes_count == 0:
+                        all_seasons_watched = False
+                        break
+                
+                # Если все сезоны просмотрены, отмечаем сериал как просмотренный в БД
+                if all_seasons_watched:
+                    with db_lock:
+                        try:
+                            cursor_local.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                            conn_local.commit()
+                        except Exception as update_e:
+                            logger.error(f"[SERIES TRACK] Ошибка обновления watched: {update_e}", exc_info=True)
+                            try:
+                                conn_local.rollback()
+                            except:
+                                pass
+                
+                # Добавляем кнопку "Оценить" если все сезоны просмотрены
+                if all_seasons_watched:
+                    with db_lock:
+                        try:
+                            # Получаем среднюю оценку
+                            cursor_local.execute('''
+                                SELECT AVG(rating) as avg FROM ratings 
+                                WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                            ''', (chat_id, film_id))
+                            avg_result = cursor_local.fetchone()
+                            avg_rating = None
+                            if avg_result:
+                                avg = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                                avg_rating = float(avg) if avg is not None else None
+                            
+                            # Получаем активных пользователей
+                            cursor_local.execute('''
+                                SELECT DISTINCT user_id
+                                FROM stats
+                                WHERE chat_id = %s AND user_id IS NOT NULL
+                            ''', (chat_id,))
+                            active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local.fetchall()}
+                            
+                            # Получаем всех, кто оценил этот фильм
+                            cursor_local.execute('''
+                                SELECT DISTINCT user_id FROM ratings
+                                WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                            ''', (chat_id, film_id))
+                            rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor_local.fetchall()}
+                        except Exception as rating_e:
+                            logger.error(f"[SERIES TRACK] Ошибка получения информации об оценках: {rating_e}", exc_info=True)
+                            active_users = set()
+                            rated_users = set()
+                            avg_rating = None
+                        
+                        # Определяем текст и эмодзи кнопки
+                        if active_users and active_users.issubset(rated_users) and avg_rating is not None:
+                            rating_int = int(round(avg_rating))
+                            if 1 <= rating_int <= 4:
+                                emoji = "💩"
+                            elif 5 <= rating_int <= 7:
+                                emoji = "💬"
+                            else:
+                                emoji = "🏆"
+                            rating_text = f"{emoji} {avg_rating:.0f}/10"
+                        else:
+                            rating_text = "💬 Оценить"
+                    
+                    markup.add(InlineKeyboardButton(rating_text, callback_data=f"rate_film:{int(kp_id)}"))
+                
+                # Пагинация
+                if total_pages > 1:
+                    nav_buttons = []
+                    if page > 1:
+                        nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"series_track_seasons_page:{kp_id}:{page-1}"))
+                    if page < total_pages:
+                        nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"series_track_seasons_page:{kp_id}:{page+1}"))
+                    if nav_buttons:
+                        markup.row(*nav_buttons)
+                
+                # Кнопка "Назад" - одна внизу
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{int(kp_id)}"))
+                
+                # Формируем текст сообщения
+                text_msg = f"📺 <b>{title}</b>\n\n<b>Выберите сезон:</b>"
+                if total_pages > 1:
+                    text_msg += f"\n<i>Страница {page}/{total_pages}</i>"
+                
+                # Отправляем/обновляем сообщение (только один раз!)
+                send_kwargs = {
+                    'chat_id': chat_id,
+                    'text': text_msg,
+                    'reply_markup': markup,
+                    'parse_mode': 'HTML'
+                }
+                if message_thread_id is not None:
+                    send_kwargs['message_thread_id'] = message_thread_id
+                
+                logger.info(f"[SERIES TRACK] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}, page={page}/{total_pages}")
+                try:
+                    if message_id:
+                        edit_kwargs = {
+                            'chat_id': chat_id,
+                            'message_id': message_id,
+                            'text': text_msg,
+                            'reply_markup': markup,
+                            'parse_mode': 'HTML'
+                        }
+                        bot.edit_message_text(**edit_kwargs)
+                        logger.info(f"[SERIES TRACK] Сообщение обновлено успешно")
+                    else:
+                        bot.send_message(**send_kwargs)
+                        logger.info(f"[SERIES TRACK] Сообщение отправлено успешно")
+                except Exception as e:
+                    logger.error(f"[SERIES TRACK] Ошибка обновления: {e}")
+                    # Fallback - новое сообщение
+                    try:
+                        bot.send_message(**send_kwargs)
+                        logger.info(f"[SERIES TRACK] Отправлено новое сообщение как fallback")
+                    except Exception as send_e:
+                        logger.error(f"[SERIES TRACK] Фейл отправки: {send_e}", exc_info=True)
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+        except Exception as e:
+            logger.error(f"[SHOW SEASONS PAGE] Ошибка: {e}", exc_info=True)
+    
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_track_seasons_page:"))
+    def series_track_seasons_page_callback(call):
+        """Обработчик пагинации сезонов"""
+        try:
+            bot.answer_callback_query(call.id)
+            
+            parts = call.data.split(":")
+            kp_id = parts[1]
+            page = int(parts[2])
+            
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            message_id = call.message.message_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
+            
+            # Получаем film_id и title
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                    row = cursor_local.fetchone()
+                    if not row:
+                        bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
+                        return
+                    
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title = row.get('title') if isinstance(row, dict) else row[1]
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+            
+            # Получаем сезоны из API
+            seasons_data = get_seasons_data(kp_id)
+            if not seasons_data:
+                bot.answer_callback_query(call.id, "❌ Не удалось получить сезоны", show_alert=True)
+                return
+            
+            # Показываем нужную страницу
+            show_seasons_page(chat_id, user_id, kp_id, film_id, title, seasons_data, page=page, message_id=message_id, call=call)
+        except Exception as e:
+            logger.error(f"[SERIES TRACK SEASONS PAGE] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            except:
+                pass
+    
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season:"))
     def series_season_callback(call):
         """Обработчик для выбора сезона и отметки эпизодов"""

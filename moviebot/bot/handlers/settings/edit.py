@@ -16,6 +16,91 @@ from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
 logger = logging.getLogger(__name__)
 
 
+def _render_edit_menu(chat_id, user_id, message_id=None):
+    """Отображает главное меню редактирования (/edit) с учетом флага from_settings"""
+    from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("📅 Изменить фильм в расписании", callback_data="edit:plan"))
+    markup.add(InlineKeyboardButton("⭐ Изменить оценку", callback_data="edit:rating"))
+    markup.add(InlineKeyboardButton("🗑️ Удалить оценку", callback_data="edit:delete_rating"))
+    markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="edit:delete_plan"))
+    markup.add(InlineKeyboardButton("🎬 Удалить фильм из базы", callback_data="edit:delete_movie"))
+    if from_settings:
+        markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
+
+    help_text = (
+        "✏️ <b>Что вы хотите изменить?</b>\n\n"
+        "<b>📅 Изменить фильм в расписании</b> — изменить дату/время или переключить между 'дома' и 'в кино'\n"
+        "<b>⭐ Изменить оценку</b> — изменить вашу оценку фильма\n\n"
+        "<b>Остальные опции:</b> удаление оценок, просмотров, планов и фильмов"
+    )
+
+    try:
+        if message_id:
+            bot.edit_message_text(help_text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+        else:
+            bot.send_message(chat_id, help_text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[EDIT MENU] Ошибка отображения меню: {e}", exc_info=True)
+
+
+def _render_delete_movie_list(chat_id, user_id, message_id):
+    """Показывает список фильмов для удаления с кнопкой Назад в главное меню /edit"""
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    movies = []
+    try:
+        with db_lock:
+            cursor_local.execute('''
+                SELECT id, title, year
+                FROM movies
+                WHERE chat_id = %s
+                ORDER BY title
+                LIMIT 30
+            ''', (chat_id,))
+            movies = cursor_local.fetchall()
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
+    if not movies:
+        _render_edit_menu(chat_id, user_id, message_id)
+        return
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for movie_row in movies:
+        film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
+        title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[1]
+        year = movie_row.get('year') if isinstance(movie_row, dict) else movie_row[2]
+
+        year_str = f" ({year})" if year else ""
+        button_text = f"🗑️ {title}{year_str}"
+        if len(button_text) > 60:
+            button_text = button_text[:57] + "..."
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_delete_movie:{film_id}"))
+
+    # Кнопка "Назад" возвращает в главное меню /edit
+    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="edit:back_to_menu"))
+
+    try:
+        bot.edit_message_text(
+            "🗑️ <b>Выберите фильм для удаления из базы:</b>",
+            chat_id,
+            message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"[EDIT DELETE MOVIE LIST] Ошибка обновления списка: {e}", exc_info=True)
+
+
 @bot.message_handler(commands=['edit'])
 def edit_command(message):
     """Команда /edit - редактирование расписания и оценок"""
@@ -27,34 +112,12 @@ def edit_command(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     
-    markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton("📅 Изменить фильм в расписании", callback_data="edit:plan"))
-    markup.add(InlineKeyboardButton("⭐ Изменить оценку", callback_data="edit:rating"))
-    markup.add(InlineKeyboardButton("🗑️ Удалить оценку", callback_data="edit:delete_rating"))
-    markup.add(InlineKeyboardButton("📅 Удалить задачу из планов", callback_data="edit:delete_plan"))
-    markup.add(InlineKeyboardButton("🎬 Удалить фильм из базы", callback_data="edit:delete_movie"))
-    
-    # Проверяем, вызван ли из настроек
-    from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
-    if from_settings:
-        markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
-    else:
-        # Если from_settings не установлен, устанавливаем False
-        if user_id not in user_edit_state:
-            user_edit_state[user_id] = {}
-        user_edit_state[user_id]['from_settings'] = False
-    
-    help_text = (
-        "✏️ <b>Что вы хотите изменить?</b>\n\n"
-        "<b>📅 Изменить фильм в расписании</b> — изменить дату/время или переключить между 'дома' и 'в кино'\n"
-        "<b>⭐ Изменить оценку</b> — изменить вашу оценку фильма\n\n"
-        "<b>Остальные опции:</b> удаление оценок, просмотров, планов и фильмов"
-    )
-    
-    try:
-        bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
-    except Exception as e:
-        logger.error(f"[EDIT COMMAND] ❌ Ошибка отправки меню: {e}", exc_info=True)
+    # Если from_settings не установлен, устанавливаем False по умолчанию
+    if user_id not in user_edit_state:
+        user_edit_state[user_id] = {}
+    user_edit_state[user_id].setdefault('from_settings', False)
+
+    _render_edit_menu(chat_id, user_id)
 
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("edit:"))
@@ -246,47 +309,13 @@ def edit_action_callback(call):
             bot.edit_message_text("🗑️ <b>Выберите план для удаления:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
         
         elif action == "delete_movie":
-            # Показываем список фильмов для удаления
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
-            try:
-                with db_lock:
-                    cursor_local.execute('''
-                        SELECT id, title, year
-                        FROM movies
-                        WHERE chat_id = %s
-                        ORDER BY title
-                        LIMIT 30
-                    ''', (chat_id,))
-                    movies = cursor_local.fetchall()
-            finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
-            
-            if not movies:
-                bot.edit_message_text("Нет фильмов в базе для удаления.", chat_id, call.message.message_id)
-                return
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            for movie_row in movies:
-                film_id = movie_row.get('id') if isinstance(movie_row, dict) else movie_row[0]
-                title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[1]
-                year = movie_row.get('year') if isinstance(movie_row, dict) else movie_row[2]
-                
-                year_str = f" ({year})" if year else ""
-                button_text = f"🗑️ {title}{year_str}"
-                if len(button_text) > 60:
-                    button_text = button_text[:57] + "..."
-                markup.add(InlineKeyboardButton(button_text, callback_data=f"edit_delete_movie:{film_id}"))
-            
-            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="edit:cancel"))
-            bot.edit_message_text("🗑️ <b>Выберите фильм для удаления из базы:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            _render_delete_movie_list(chat_id, user_id, call.message.message_id)
+
+        elif action == "back_to_menu":
+            if user_id not in user_edit_state:
+                user_edit_state[user_id] = {}
+            user_edit_state[user_id].setdefault('from_settings', False)
+            _render_edit_menu(chat_id, user_id, call.message.message_id)
         
         elif action == "cancel":
             from moviebot.bot.bot_init import safe_answer_callback_query
@@ -773,7 +802,8 @@ def edit_delete_movie_callback(call):
             except:
                 pass
         
-        bot.edit_message_text("✅ Фильм удален из базы.", chat_id, call.message.message_id)
+        # Обновляем список фильмов для удаления (или возвращаемся в меню, если их больше нет)
+        _render_delete_movie_list(chat_id, user_id, call.message.message_id)
         
         # Проверяем, нужно ли вернуться в настройки
         from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)

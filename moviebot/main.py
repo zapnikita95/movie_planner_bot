@@ -218,16 +218,14 @@ from moviebot.bot.handlers.stats import register_stats_handlers
 register_stats_handlers(bot)
 logger.info("✅ stats handlers зарегистрированы")
 
-# Settings (обход конфликта имен)
-import importlib.util
-import os
-base_dir = os.path.dirname(__file__)
-settings_file_path = os.path.join(base_dir, 'bot', 'handlers', 'settings.py')
-spec = importlib.util.spec_from_file_location("settings_module", settings_file_path)
-settings_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(settings_module)
-settings_module.register_settings_handlers(bot)
-logger.info("✅ settings handlers зарегистрированы")
+# Settings: обычный импорт отдельного модуля settings_handler
+try:
+    from moviebot.bot.handlers.settings_handler import register_settings_handlers
+    register_settings_handlers(bot)
+    logger.info("✅ settings_handler зарегистрирован (обычный импорт)")
+except Exception as e:
+    logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ РЕГИСТРАЦИИ settings_handler: {e}", exc_info=True)
+    sys.exit(1)
 
 from moviebot.bot.handlers.settings.edit import register_edit_handlers
 register_edit_handlers(bot)

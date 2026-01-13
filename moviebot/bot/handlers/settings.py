@@ -36,7 +36,15 @@ cursor = get_db_cursor()
 
 def settings_command(message):
     """Команда /settings - настройки"""
-    logger.info(f"[HANDLER] /settings вызван от {message.from_user.id}")
+    try:
+        user_id = message.from_user.id if message.from_user else None
+        chat_id = message.chat.id if message.chat else None
+    except Exception:
+        user_id = None
+        chat_id = None
+
+    logger.info(f"[SETTINGS COMMAND] START /settings: user_id={user_id}, chat_id={chat_id}")
+    logger.info(f"[HANDLER] /settings вызван от {user_id}")
     try:
         chat_id = message.chat.id
         user_id = message.from_user.id
@@ -89,6 +97,14 @@ def settings_command(message):
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("settings:"))
 def handle_settings_callback(call):
     """Обработчик callback для настроек"""
+    try:
+        raw_data = call.data
+        user_id = call.from_user.id if call.from_user else None
+        chat_id = call.message.chat.id if call.message and call.message.chat else None
+        logger.info(f"[SETTINGS CALLBACK DEBUG] raw callback_data={raw_data}, user_id={user_id}, chat_id={chat_id}")
+    except Exception:
+        logger.warning("[SETTINGS CALLBACK DEBUG] Не удалось залогировать raw callback_data/user_id/chat_id")
+
     logger.info(f"[SETTINGS CALLBACK] ===== НАЧАЛО ОБРАБОТКИ =====")
     logger.info(f"[SETTINGS CALLBACK] callback_id={call.id}, message_id={call.message.message_id if call.message else None}")
     try:
@@ -1300,15 +1316,4 @@ def settings_cancel_action_callback(call):
         except:
             pass
 
-
-def register_settings_handlers(bot_param):
-    """Регистрирует обработчики команды /settings"""
-    logger.info("Регистрация обработчиков команды /settings")
-    
-    @bot_param.message_handler(commands=['settings'])
-    def _settings_command_handler(message):
-        """Обертка для регистрации команды /settings"""
-        settings_command(message)
-    
-    logger.info("✅ Обработчики команды /settings зарегистрированы")
 
