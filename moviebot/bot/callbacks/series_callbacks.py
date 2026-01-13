@@ -290,8 +290,8 @@ def register_series_callbacks(bot):
                     if nav_buttons:
                         markup.row(*nav_buttons)
                 
-                # Кнопка "Назад" - одна внизу
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"seasons_kp:{int(kp_id)}"))
+                # Кнопка "К сериалам" - возвращает к списку всех сериалов
+                markup.add(InlineKeyboardButton("◀️ К сериалам", callback_data="back_to_seasons_list"))
                 
                 # Формируем текст сообщения
                 text_msg = f"📺 <b>{title}</b>\n\n<b>Выберите сезон:</b>"

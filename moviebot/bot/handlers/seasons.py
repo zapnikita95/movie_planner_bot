@@ -179,7 +179,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 watched_row = cursor_local.fetchone()
                 is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
             
-            mark = "Просмотрено" if is_watched else "Не просмотрено"
+            mark = "✅" if is_watched else "⬜"
             button_text = f"{mark} {ep_num}"
             if len(button_text) > 20:
                 button_text = button_text[:17] + "..."
@@ -246,9 +246,9 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         logger.info(f"[SHOW EPISODES PAGE] Все эпизоды просмотрены: {all_watched}, страница {page}/{total_pages}")
         
         if not all_watched:
-            markup.add(InlineKeyboardButton("Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
+            markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))
         
-        markup.add(InlineKeyboardButton("К сезонам", callback_data=f"series_track:{int(kp_id)}"))
+        markup.add(InlineKeyboardButton("◀️ К сезонам", callback_data=f"series_track:{int(kp_id)}"))
         
         user_episodes_state[user_id] = {
             'kp_id': kp_id,
