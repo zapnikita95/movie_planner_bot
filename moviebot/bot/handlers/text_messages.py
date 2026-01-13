@@ -2027,7 +2027,7 @@ def main_file_handler(message):
             if is_private:
                 bot.send_message(message.chat.id, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})")
             else:
-                bot.reply_to(message, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})\n\nМожете отправить ещё билеты или написать 'готово'.")
+                bot.reply_to(message, f"✅ Билет добавлен! (Всего билетов: {len(existing_tickets)})")
             return
         
         # Сохраняем file_id для последующей обработки

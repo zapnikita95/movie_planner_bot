@@ -1603,8 +1603,8 @@ def process_recurring_payments():
         # Для тестовых подписок проверяем по времени (если прошло 10 минут)
         # Для остальных - только в дневное время (9:00 МСК)
         subscriptions = []
-        with db_lock:
-            try:
+        try:
+            with db_lock:
                 # Для тестовых подписок проверяем, если next_payment_date <= now
                 # Для остальных - только если сегодня и в дневное время (9:00-18:00 МСК)
                 cursor_local.execute("""
@@ -1627,13 +1627,13 @@ def process_recurring_payments():
                     )
                 """, (now, now))
                 subscriptions = cursor_local.fetchall()
-            except Exception as db_e:
-                logger.error(f"[RECURRING PAYMENT] Ошибка при запросе подписок: {db_e}", exc_info=True)
-                try:
-                    conn_local.rollback()
-                except:
-                    pass
-                subscriptions = []
+        except Exception as db_e:
+            logger.error(f"[RECURRING PAYMENT] Ошибка при запросе подписок: {db_e}", exc_info=True)
+            try:
+                conn_local.rollback()
+            except:
+                pass
+            subscriptions = []
         
         for sub in subscriptions:
             try:

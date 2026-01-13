@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount, provider_token='', subscription_period=None):
-    """Создает инвойс для оплаты через Telegram Stars
+    """Создаёт инвойс для оплаты через Telegram Stars
     
     Args:
         bot: экземпляр TeleBot
@@ -17,7 +17,7 @@ def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount
         description: описание товара/услуги
         payload: уникальный идентификатор платежа
         stars_amount: количество звезд
-        provider_token: для Stars должен быть пустой строкой '' (не None!)
+        provider_token: для Stars должен быть пустой строкой '' (не None!) - игнорируется, всегда ''
         subscription_period: период подписки в секундах (30*24*60*60 для месячной подписки)
                            Если указан, создается подписка (recurring), иначе разовый платеж
     
@@ -25,22 +25,18 @@ def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount
         True если инвойс успешно отправлен, False в противном случае
     """
     try:
-        # Для Telegram Stars используем валюту XTR
-        # Согласно документации: https://core.telegram.org/bots/api#sendinvoice
-        # КРИТИЧНО: provider_token должен быть пустой строкой '', а не None
-        # Если None - Telegram может интерпретировать как обычный платеж и ждать pre_checkout
-        # Явно устанавливаем пустую строку для Stars
-        provider_token = ''  # КРИТИЧНО: для Stars всегда пустая строка
-        logger.info(f"[STARS] Создание инвойса: provider_token='{provider_token}' (пустая строка для Stars), currency=XTR, stars_amount={stars_amount}")
+        logger.info(f"[STARS INVOICE] Создание инвойса: chat_id={chat_id}, title={title}, stars_amount={stars_amount}, payload={payload}")
+        
+        prices = [telebot.types.LabeledPrice(label=description, amount=stars_amount)]
         
         invoice_params = {
             'chat_id': chat_id,
             'title': title,
             'description': description,
             'invoice_payload': payload,
-            'provider_token': provider_token,  # Для Stars всегда пустая строка ''
-            'currency': 'XTR',  # XTR - валюта Telegram Stars
-            'prices': [telebot.types.LabeledPrice(label=description, amount=stars_amount)],  # amount в звездах
+            'provider_token': '',  # ЯВНО пустая строка для Stars
+            'currency': 'XTR',
+            'prices': prices,
             'start_parameter': payload[:64] if len(payload) > 64 else payload  # start_parameter ограничен 64 символами
         }
         
@@ -48,13 +44,32 @@ def create_stars_invoice(bot, chat_id, title, description, payload, stars_amount
         # Для подписок через Stars подписки обрабатываются через scheduler на основе period_type из базы данных
         # Если указан subscription_period, логируем это, но не передаем в send_invoice
         if subscription_period:
-            logger.info(f"[STARS] Подписка будет обработана через scheduler (period={subscription_period} секунд, не передается в send_invoice)")
+            logger.info(f"[STARS INVOICE] Подписка будет обработана через scheduler (period={subscription_period} секунд, не передается в send_invoice)")
         
-        logger.info(f"[STARS] Вызов bot.send_invoice с параметрами: provider_token='{provider_token}', currency='XTR'")
+        logger.info(f"[STARS INVOICE] Параметры инвойса: provider_token='{invoice_params['provider_token']}', currency='{invoice_params['currency']}', stars_amount={stars_amount}, payload='{payload}'")
+        
         bot.send_invoice(**invoice_params)
-        logger.info(f"[STARS] bot.send_invoice успешно вызван")
+        
+        logger.info("[STARS INVOICE] Инвойс отправлен успешно")
         return True
+        
+    except telebot.apihelper.ApiTelegramException as tele_e:
+        logger.error(f"[STARS INVOICE] Telegram API ошибка: {tele_e}", exc_info=True)
+        error_code = getattr(tele_e, 'error_code', None)
+        result_json = getattr(tele_e, 'result_json', None)
+        description = result_json.get('description') if result_json and isinstance(result_json, dict) else 'N/A'
+        logger.error(f"[STARS INVOICE] error_code={error_code}, description={description}")
+        try:
+            bot.send_message(chat_id, "❌ Ошибка создания платежа (Telegram). Попробуйте позже.")
+        except:
+            pass
+        return False
+        
     except Exception as e:
-        logger.error(f"[STARS] Ошибка создания инвойса через Stars: {e}", exc_info=True)
+        logger.error(f"[STARS INVOICE] Критическая ошибка: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, "❌ Не удалось создать платёж. Попробуйте позже.")
+        except:
+            pass
         return False
 

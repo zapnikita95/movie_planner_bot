@@ -159,51 +159,47 @@ def is_watched_emoji(reaction_emoji, chat_id):
 def get_user_timezone(user_id):
     """Получает часовой пояс пользователя. Возвращает pytz.timezone объект или None"""
 
+    # Используем локальное подключение, чтобы не зависеть от глобального курсора
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+
     try:
+        with db_lock:
+            cursor_local.execute(
+                "SELECT value FROM settings WHERE chat_id = %s AND key = %s",
+                (user_id, 'user_timezone')
+            )
+            row = cursor_local.fetchone()
 
-        # Используем локальное подключение, чтобы не зависеть от глобального курсора
-        conn_local = get_db_connection()
-        cursor_local = get_db_cursor()
+        if row:
+            tz_name = row.get('value') if isinstance(row, dict) else row[0]
 
-        try:
-            with db_lock:
-                cursor_local.execute(
-                    "SELECT value FROM settings WHERE chat_id = %s AND key = %s",
-                    (user_id, 'user_timezone')
-                )
-                row = cursor_local.fetchone()
+            # Карта поддерживаемых идентификаторов часовых поясов
+            tz_map = {
+                'Moscow': 'Europe/Moscow',
+                'Serbia': 'Europe/Belgrade',
+                'Samara': 'Europe/Samara',                # +1 МСК
+                'Yekaterinburg': 'Asia/Yekaterinburg',    # +2 МСК
+                'Novosibirsk': 'Asia/Novosibirsk',        # +4 МСК
+            }
 
-            if row:
-                tz_name = row.get('value') if isinstance(row, dict) else row[0]
-
-                # Карта поддерживаемых идентификаторов часовых поясов
-                tz_map = {
-                    'Moscow': 'Europe/Moscow',
-                    'Serbia': 'Europe/Belgrade',
-                    'Samara': 'Europe/Samara',                # +1 МСК
-                    'Yekaterinburg': 'Asia/Yekaterinburg',    # +2 МСК
-                    'Novosibirsk': 'Asia/Novosibirsk',        # +4 МСК
-                }
-
-                if tz_name in tz_map:
-                    return pytz.timezone(tz_map[tz_name])
-
-            return None
-        finally:
-            try:
-                cursor_local.close()
-            except:
-                pass
-            try:
-                conn_local.close()
-            except:
-                pass
-
-    except Exception as e:
-
-        logger.error(f"Ошибка получения часового пояса для user_id={user_id}: {e}", exc_info=True)
+            if tz_name in tz_map:
+                return pytz.timezone(tz_map[tz_name])
 
         return None
+
+    except Exception as e:
+        logger.error(f"Ошибка получения часового пояса для user_id={user_id}: {e}", exc_info=True)
+        return None
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 
