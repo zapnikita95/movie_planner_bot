@@ -5722,7 +5722,7 @@ def register_series_handlers(bot_param):
             
             # Начинаем флоу добавления билета на мероприятие
             user_ticket_state[user_id] = {
-                'step': 'event_name',
+                'step': 'event_add_name',  # ← измени на это
                 'chat_id': chat_id,
                 'type': 'event'
             }
@@ -6933,6 +6933,8 @@ def add_film_from_search_callback(call):
         finally:
             logger.info(f"[ADD FILM FROM SEARCH] ===== END: callback_id={call.id}")
 
+
+
 def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
     """
     Добавляет фильм/сериал в базу, если его еще нет.
@@ -7561,7 +7563,7 @@ def handle_expected_text_in_private(message):
         process_search_query(message, query, reply_to_message=None)
     elif expected_for == 'random_plan':
         process_random_plan(message, query)
-    # ... другие elif если есть
+
 
 
 # Группа: reply на сообщение фильма или инструкцию
@@ -7574,3 +7576,125 @@ def handle_group_random_plan_reply(message):
     if not query:
         return
     process_random_plan(message, query)
+
+# === Вспомогательная функция для промпта (личка/группа) ===
+def send_event_prompt(bot, message_or_call, state, text, markup=None):
+    chat_id = state['chat_id']
+    if message_or_call.chat.type == 'private':
+        sent = bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+    else:
+        reply_to = getattr(message_or_call, 'reply_to_message', None) or message_or_call.message
+        sent = bot.reply_to(reply_to, text, parse_mode='HTML', reply_markup=markup)
+    state['prompt_message_id'] = sent.message_id
+    return sent
+
+# === Текст: название и дата ===
+def is_event_text(message):
+    user_id = message.from_user.id
+    state = user_ticket_state.get(user_id, {})
+    return (state.get('type') == 'event' and state.get('step') in ['event_add_name', 'event_add_date'])
+
+@bot.message_handler(content_types=['text'], func=is_event_text)
+def handle_event_text(message):
+    user_id = message.from_user.id
+    state = user_ticket_state[user_id]
+    step = state['step']
+
+    if step == 'event_add_name':
+        custom_title = message.text.strip()
+        if not custom_title:
+            send_event_prompt(bot, message, state, "❌ Название не может быть пустым. Попробуйте ещё раз.")
+            return
+
+        state['custom_title'] = custom_title
+        state['step'] = 'event_add_date'
+
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+        send_event_prompt(bot, message, state,
+                          "Отлично! Теперь укажите дату и время мероприятия.\n"
+                          "Примеры:\n• 15 января 19:30\n• завтра 20:00\n• послезавтра",
+                          markup)
+
+    elif step == 'event_add_date':
+        plan_dt = parse_plan_date_text(message.text, user_id)
+        if not plan_dt:
+            send_event_prompt(bot, message, state,
+                              "❌ Не понял дату/время. Попробуйте ещё раз.\n"
+                              "Примеры: 15 января 19:30 или «завтра 20:00»")
+            return
+
+        state['plan_datetime_utc'] = plan_dt.astimezone(pytz.UTC).replace(tzinfo=None)
+        state['step'] = 'event_add_ticket'  # один билет
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+
+        send_event_prompt(bot, message, state,
+                          "Теперь отправьте фото/файл для добавления билета.\n\n",
+                          markup)
+
+# === Фото/файл: один билет ===
+def is_event_file(message):
+    user_id = message.from_user.id
+    state = user_ticket_state.get(user_id, {})
+    if state.get('type') != 'event' or state.get('step') != 'event_add_ticket':
+        return False
+    
+    # В группе — только реплай на промпт
+    if message.chat.type != 'private':
+        prompt_id = state.get('prompt_message_id')
+        return (prompt_id and message.reply_to_message and
+                message.reply_to_message.message_id == prompt_id and
+                message.reply_to_message.from_user.id == bot.get_me().id)
+    return True
+
+@bot.message_handler(content_types=['photo', 'document'], func=is_event_file)
+def handle_event_file(message):
+    user_id = message.from_user.id
+    state = user_ticket_state[user_id]
+
+    file_id = None
+    if message.photo:
+        file_id = message.photo[-1].file_id
+    elif message.document:
+        file_id = message.document.file_id
+
+    if not file_id:
+        return
+
+    # Сохраняем как массив с одним элементом (для совместимости)
+    tickets_json = json.dumps([file_id])
+
+    conn = get_db_connection()
+    cursor = get_db_cursor()
+    try:
+        with db_lock:
+            cursor.execute("""
+                INSERT INTO plans 
+                (chat_id, user_id, film_id, custom_title, plan_type, plan_datetime, ticket_file_id)
+                VALUES (%s, %s, NULL, %s, 'cinema', %s, %s)
+                RETURNING id
+            """, (state['chat_id'], user_id, state['custom_title'],
+                  state['plan_datetime_utc'], tickets_json))
+            plan_id = cursor.fetchone()[0]
+            conn.commit()
+
+        # Успех
+        bot.edit_message_text("💾 Билет сохранён!", state['chat_id'], state['prompt_message_id'], parse_mode='HTML')
+
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🎟️ Билеты", callback_data=f"show_ticket:{plan_id}"))
+        markup.add(InlineKeyboardButton("➕ Добавить ещё билеты", callback_data=f"add_more_tickets:{plan_id}"))
+        markup.add(InlineKeyboardButton("🔄 Заменить билеты", callback_data=f"add_ticket:{plan_id}"))
+
+        bot.send_message(state['chat_id'], "Управление планом:", reply_markup=markup)
+
+    except Exception as e:
+        logger.error(f"[EVENT TICKET SAVE] Ошибка: {e}", exc_info=True)
+        conn.rollback()
+        send_event_prompt(bot, message, state, "❌ Ошибка сохранения билета. Попробуйте ещё раз.")
+    finally:
+        cursor.close()
+        conn.close()
+        del user_ticket_state[user_id]
