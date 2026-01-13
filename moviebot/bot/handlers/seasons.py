@@ -110,10 +110,23 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
 
 
 def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=None, message_thread_id=None, bot=None):
-    """Показывает страницу эпизодов сезона с пагинацией"""
+    """Показывает страницу эпизодов сезона с пагинацией.
+
+    ВАЖНО: bot может не быть передан из callback'ов (series_callbacks),
+    поэтому при необходимости пытаемся взять глобальный bot из bot_init.
+    """
     if bot is None:
-        logger.error("[SHOW_EPISODES_PAGE] bot is None! Cannot proceed.")
-        return False
+        try:
+            # Ленивая загрузка, чтобы избежать цикличных импортов при старте
+            from moviebot.bot.bot_init import bot as global_bot
+            bot = global_bot
+        except Exception as e:
+            logger.error(f"[SHOW_EPISODES_PAGE] bot is None и не удалось импортировать глобальный bot: {e}", exc_info=True)
+            return False
+
+        if bot is None:
+            logger.error("[SHOW_EPISODES_PAGE] Глобальный bot также None. Невозможно продолжить.")
+            return False
 
     conn_local = get_db_connection()
     cursor_local = get_db_cursor()

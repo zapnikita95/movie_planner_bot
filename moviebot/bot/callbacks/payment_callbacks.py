@@ -4047,8 +4047,10 @@ def register_payment_callbacks(bot_instance):
                     
                     # Кнопка "Изменить сейчас"
                     payment_id_short = payment_id[:8]
-                    callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
-                    markup.add(InlineKeyboardButton(f"1️⃣ Изменить сейчас ({final_price}₽)", callback_data=callback_data_stars))
+                    # Вариант оплаты через Stars показываем только владельцу бота (для отладки)
+                    if user_id == 301810276:
+                        callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
+                        markup.add(InlineKeyboardButton(f"1️⃣ Изменить сейчас ({final_price}₽)", callback_data=callback_data_stars))
                     
                     # Кнопка "Увеличить со следующего списания" (только для месячных подписок и если есть следующее списание)
                     if next_payment_date and next_sub_for_resub and period_type == 'month':
@@ -4066,11 +4068,12 @@ def register_payment_callbacks(bot_instance):
                         text += "\nℹ️ После оформления подписки, данные карты будут сохранены для проведения списаний по выбранному расписанию. В дальнейшем, подтверждать отдельно платежи не придется. Вы сможете отменить подписку в любой момент\n"
                 
                     markup = InlineKeyboardMarkup(row_width=1)
-                    # Кнопка оплаты звездами (без ЮKassa)
+                    # Кнопка оплаты звездами (без ЮKassa) - только для владельца бота
                     payment_id_short = payment_id[:8]
-                    # Используем формат payment:pay_stars:... для обработки в payment_callbacks.py
-                    callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
-                    markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                    if user_id == 301810276:
+                        # Используем формат payment:pay_stars:... для обработки в payment_callbacks.py
+                        callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
+                        markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
                 
                     # Кнопка оплаты через ЮKassa (только если доступна)
                     if YOOKASSA_AVAILABLE and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
@@ -4337,9 +4340,10 @@ def register_payment_callbacks(bot_instance):
                 
                     markup = InlineKeyboardMarkup(row_width=1)
                     markup.add(InlineKeyboardButton("💳 Оплатить", url=confirmation_url))
-                    # Добавляем кнопку оплаты звездами
-                    callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
-                    markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+                    # Добавляем кнопку оплаты звездами только для владельца бота
+                    if user_id == 301810276:
+                        callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id}"
+                        markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
                     # Добавляем кнопку промокода
                     # Сохраняем данные в состояние для использования короткого callback_data
                     user_id = call.from_user.id

@@ -155,8 +155,10 @@ def _process_promo_success(message, state, promo_code, discounted_price, message
         
         # Добавляем кнопки оплаты
         payment_id_short = payment_id[:8] if len(payment_id) > 8 else payment_id
-        callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
-        markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
+        # Кнопку оплаты через Stars показываем только владельцу бота (для отладки)
+        if user_id == 301810276:
+            callback_data_stars = f"payment:pay_stars:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}"
+            markup.add(InlineKeyboardButton(f"⭐ Оплатить звездами Telegram ({stars_amount}⭐)", callback_data=callback_data_stars))
         callback_data_promo = f"payment:promo:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}:{payment_id_short}:{discounted_price}"
         markup.add(InlineKeyboardButton("🏷️ Промокод", callback_data=callback_data_promo))
         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:subscribe:{sub_type}:{group_size if group_size else ''}:{plan_type}:{period_type}" if group_size else f"payment:subscribe:{sub_type}:{plan_type}:{period_type}"))

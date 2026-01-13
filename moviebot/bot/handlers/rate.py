@@ -270,7 +270,7 @@ def register_rate_handlers(bot):
             watched = row.get('watched') if isinstance(row, dict) else row[3]
             
             # Получаем информацию о фильме через API
-            from moviebot.api.kinopoisk_api import extract_movie_info
+            # ВАЖНО: extract_movie_info уже импортирован глобально в начале файла (строка 10)
             info = extract_movie_info(link)
             
             if not info:
@@ -448,6 +448,7 @@ def handle_rating_internal(message, rating):
         logger.info(f"[RATE INTERNAL] Фильм не в базе, добавляем перед оценкой: kp_id={kp_id}")
         # Пробуем сначала /film/, затем /series/ если нужно
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+        # ВАЖНО: extract_movie_info уже импортирован глобально в начале файла (строка 10)
         info = extract_movie_info(link)
         # Если получена информация, проверяем is_series и корректируем ссылку
         if info and info.get('is_series'):
@@ -609,7 +610,7 @@ def handle_rating_internal(message, rating):
                                 logger.info(f"[RATE INTERNAL] Сообщение с описанием фильма обновлено из БД: message_id={film_message_id}")
                             else:
                                 logger.warning(f"[RATE INTERNAL] Не удалось получить данные из БД, делаю API запрос")
-                                from moviebot.api.kinopoisk_api import extract_movie_info
+                                # ВАЖНО: extract_movie_info уже импортирован глобально в начале файла (строка 10)
                                 info = extract_movie_info(link)
                                 if info:
                                     show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
