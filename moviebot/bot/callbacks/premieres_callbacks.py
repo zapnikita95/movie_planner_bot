@@ -285,26 +285,26 @@ def premiere_detail_handler(call):
         title = data.get('nameRu') or data.get('nameOriginal') or "Без названия"
         year = data.get('year') or '—'
         poster_url = data.get('posterUrlPreview') or data.get('posterUrl')
-        trailer_url = None
+#        trailer_url = None
         
         # Получаем трейлер через отдельный запрос к API
-        try:
-            videos_url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/videos"
-            videos_headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
-            videos_response = requests.get(videos_url, headers=videos_headers, timeout=15)
-            if videos_response.status_code == 200:
-                videos_data = videos_response.json()
-                items = videos_data.get('items', [])
-                if items:
-                    trailer_url = items[0].get('url')
-                    logger.info(f"[PREMIERES DETAIL] Найден трейлер для {kp_id}: {trailer_url}")
-        except Exception as e:
-            logger.error(f"[PREMIERES DETAIL] Ошибка получения трейлера: {e}", exc_info=True)
+#        try:
+#            videos_url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/videos"
+#            videos_headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
+#            videos_response = requests.get(videos_url, headers=videos_headers, timeout=15)
+#            if videos_response.status_code == 200:
+#                videos_data = videos_response.json()
+#                items = videos_data.get('items', [])
+#                if items:
+#                    trailer_url = items[0].get('url')
+#                    logger.info(f"[PREMIERES DETAIL] Найден трейлер для {kp_id}: {trailer_url}")
+#        except Exception as e:
+#            logger.error(f"[PREMIERES DETAIL] Ошибка получения трейлера: {e}", exc_info=True)
         
-        if not trailer_url:
-            videos = data.get('videos', {}).get('trailers', [])
-            if videos:
-                trailer_url = videos[0].get('url')
+#        if not trailer_url:
+#            videos = data.get('videos', {}).get('trailers', [])
+#            if videos:
+#                trailer_url = videos[0].get('url')
         
         description = data.get('description') or data.get('shortDescription') or "Нет описания"
         genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
@@ -440,15 +440,15 @@ def premiere_detail_handler(call):
             )
         
         # Трейлер
-        if trailer_url:
-            try:
-                bot.send_video(chat_id, trailer_url, caption=f"📺 Трейлер: <b>{title}</b>", parse_mode='HTML')
-            except Exception as e:
-                logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как видео: {e}")
-                try:
-                    bot.send_message(chat_id, f"📺 <a href='{trailer_url}'>Смотреть трейлер: {title}</a>", parse_mode='HTML')
-                except Exception as e2:
-                    logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как ссылки: {e2}")
+#        if trailer_url:
+#            try:
+#                bot.send_video(chat_id, trailer_url, caption=f"📺 Трейлер: <b>{title}</b>", parse_mode='HTML')
+#            except Exception as e:
+#                logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как видео: {e}")
+#                try:
+#                    bot.send_message(chat_id, f"📺 <a href='{trailer_url}'>Смотреть трейлер: {title}</a>", parse_mode='HTML')
+#                except Exception as e2:
+#                    logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как ссылки: {e2}")
         
     except Exception as e:
         logger.error(f"[PREMIERES DETAIL] Ошибка: {e}", exc_info=True)
