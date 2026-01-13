@@ -219,6 +219,10 @@ register_stats_handlers(bot)
 logger.info("✅ stats handlers зарегистрированы")
 
 # Settings: обычный импорт отдельного модуля settings_handler
+# КРИТИЧНО: Сначала импортируем settings_main.py для регистрации декораторов @bot.callback_query_handler
+import moviebot.bot.handlers.settings_main  # noqa: F401 - импорт для регистрации декораторов
+logger.info("✅ settings_main импортирован (декораторы зарегистрированы)")
+
 try:
     from moviebot.bot.handlers.settings_handler import register_settings_handlers
     register_settings_handlers(bot)

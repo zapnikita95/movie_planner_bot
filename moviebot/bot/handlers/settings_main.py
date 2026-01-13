@@ -1293,7 +1293,7 @@ def settings_cancel_action_callback(call):
                 del state_dict[user_id]
         
         # Возвращаемся в настройки
-        from moviebot.bot.handlers.settings import settings_command
+        from moviebot.bot.handlers.settings_main import settings_command
         class FakeMessage:
             def __init__(self, call):
                 self.from_user = call.from_user

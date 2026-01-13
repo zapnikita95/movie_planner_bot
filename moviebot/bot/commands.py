@@ -50,7 +50,7 @@ def register_all_handlers(bot):
     register_stats_handlers(bot)
     logger.info("✅ stats handlers зарегистрированы")
     
-    from moviebot.bot.handlers.settings import register_settings_handlers
+    from moviebot.bot.handlers.settings_handler import register_settings_handlers
     register_settings_handlers(bot)
     logger.info("✅ settings handlers зарегистрированы")
     

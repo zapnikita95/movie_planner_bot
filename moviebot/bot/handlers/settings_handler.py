@@ -1,6 +1,6 @@
 import logging
 
-from moviebot.bot.handlers.settings import settings_command
+from moviebot.bot.handlers.settings_main import settings_command
 
 logger = logging.getLogger(__name__)
 
@@ -9,7 +9,7 @@ def register_settings_handlers(bot_param):
     """Регистрирует обработчики команды /settings через отдельный модуль.
 
     ВАЖНО: сами callback-хэндлеры для settings уже регистрируются в
-    moviebot.bot.handlers.settings на глобальном bot.
+    moviebot.bot.handlers.settings_main на глобальном bot (при импорте модуля).
     Здесь мы только вешаем команду /settings на текущий экземпляр bot_param.
     """
     logger.info("[SETTINGS_HANDLER] Регистрация обработчиков команды /settings")

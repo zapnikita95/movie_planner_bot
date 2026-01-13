@@ -1318,7 +1318,7 @@ def handle_settings(message):
                 settings_msg_id = state.get('settings_msg_id')
                 if settings_msg_id and message.reply_to_message.message_id == settings_msg_id:
                     if state.get('adding_reactions'):
-                        from moviebot.bot.handlers.settings import handle_settings_emojis
+                        from moviebot.bot.handlers.settings_main import handle_settings_emojis
                         handle_settings_emojis(message)
                         return
                         
