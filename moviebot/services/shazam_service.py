@@ -466,8 +466,8 @@ def build_tmdb_index():
     df = df[df['imdb_id'].str.len() > 0]
     logger.info(f"После финальной очистки imdb_id: {len(df)} фильмов")
     
-    # Сохраняем has_overview для приоритизации при поиске
-    processed = df[['imdb_id', 'title', 'year', 'description', 'has_overview']].copy()
+    # Сохраняем has_overview, actors_str и director_str для приоритизации и keyword-матчинга при поиске
+    processed = df[['imdb_id', 'title', 'year', 'description', 'has_overview', 'actors_str', 'director_str']].copy()
     # Уже отсортировали и ограничили выше, не нужно еще раз .head()
     
     logger.info(f"Генерация эмбеддингов для {len(processed)} фильмов...")
@@ -528,6 +528,26 @@ def get_index_and_movies():
             logger.error(f"[GET INDEX] Ошибка при загрузке индекса: {e}", exc_info=True)
             return None, None
 
+def _extract_keywords(query_en):
+    """Извлекает ключевые слова из запроса, убирая стоп-слова"""
+    # Стоп-слова на английском (игнорируем при keyword-матчинге)
+    stop_words = {
+        'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+        'from', 'up', 'about', 'into', 'through', 'during', 'including', 'against', 'among',
+        'throughout', 'despite', 'towards', 'upon', 'concerning', 'to', 'of', 'in', 'for',
+        'film', 'movie', 'films', 'movies', 'plays', 'playing', 'actor', 'actors', 'director',
+        'directors', 'starring', 'star', 'stars', 'cast', 'about', 'with', 'in', 'a', 'the'
+    }
+    
+    # Разбиваем на слова, убираем пунктуацию, приводим к нижнему регистру
+    import re
+    words = re.findall(r'\b\w+\b', query_en.lower())
+    # Фильтруем стоп-слова и короткие слова (меньше 2 символов)
+    keywords = [w for w in words if w not in stop_words and len(w) > 2]
+    logger.info(f"[SEARCH MOVIES] Извлечены ключевые слова из '{query_en}': {keywords}")
+    return keywords
+
+
 def search_movies(query, top_k=15):
     try:
         logger.info(f"[SEARCH MOVIES] Начало поиска для запроса: '{query}'")
@@ -535,6 +555,9 @@ def search_movies(query, top_k=15):
         logger.info(f"[SEARCH MOVIES] Шаг 1: Перевод запроса...")
         query_en = translate_to_english(query)
         logger.info(f"[SEARCH MOVIES] Переведено: '{query}' → '{query_en}'")
+        
+        # Извлекаем ключевые слова для keyword-матчинга
+        keywords = _extract_keywords(query_en)
         
         logger.info(f"[SEARCH MOVIES] Шаг 2: Получение индекса и данных...")
         index, movies = get_index_and_movies()
@@ -564,7 +587,7 @@ def search_movies(query, top_k=15):
         D, I = index.search(query_emb, k=top_k * 2)  # Берем больше, чтобы после приоритизации осталось нужное количество
         logger.info(f"[SEARCH MOVIES] Поиск завершен, найдено индексов: {len(I[0])}")
         
-        logger.info(f"[SEARCH MOVIES] Шаг 6: Формирование результатов с приоритизацией...")
+        logger.info(f"[SEARCH MOVIES] Шаг 6: Формирование результатов с приоритизацией и keyword-матчингом...")
         results = []
         for i, idx in enumerate(I[0]):
             if idx < len(movies):
@@ -592,20 +615,43 @@ def search_movies(query, top_k=15):
                     distance = distance * 0.8
                     logger.debug(f"[SEARCH MOVIES] Фильм {imdb_id_clean} имеет overview, расстояние уменьшено")
                 
+                # Keyword-матчинг: считаем совпадения ключевых слов в actors_str и director_str
+                actor_boost = 0
+                if keywords:
+                    actors_str = str(row.get('actors_str', '') or '').lower()
+                    director_str = str(row.get('director_str', '') or '').lower()
+                    
+                    for keyword in keywords:
+                        if keyword in actors_str:
+                            actor_boost += 1
+                            logger.debug(f"[SEARCH MOVIES] Ключевое слово '{keyword}' найдено в актёрах для {imdb_id_clean}")
+                        if keyword in director_str:
+                            actor_boost += 1
+                            logger.debug(f"[SEARCH MOVIES] Ключевое слово '{keyword}' найдено в режиссёре для {imdb_id_clean}")
+                
+                # Реранжируем: (1 - distance) для нормализации + boost * 10
+                # Чем меньше distance, тем лучше, поэтому используем (1 - distance)
+                # actor_boost умножаем на 10 для значимого влияния
+                score = (1.0 - distance) + (actor_boost * 10.0)
+                
                 results.append({
                     'imdb_id': imdb_id_clean,
                     'title': row['title'],
                     'year': row['year'] if pd.notna(row['year']) else None,
                     'description': row['description'][:500] if 'description' in row.index else '',
                     'distance': distance,
-                    'has_overview': has_overview
+                    'has_overview': has_overview,
+                    'actor_boost': actor_boost,
+                    'score': score  # Новый score для реранжирования
                 })
         
-        # Сортируем по приоритизированному расстоянию (чем меньше, тем лучше)
-        results.sort(key=lambda x: x['distance'])
+        # Сортируем по новому score (чем больше, тем лучше)
+        results.sort(key=lambda x: x['score'], reverse=True)
         results = results[:top_k]
         
-        logger.info(f"[SEARCH MOVIES] Результаты приоритизированы, возвращаем {len(results)} фильмов")
+        logger.info(f"[SEARCH MOVIES] Результаты приоритизированы и реранжированы, возвращаем {len(results)} фильмов")
+        if results:
+            logger.info(f"[SEARCH MOVIES] Топ-3 результатов: {[(r['title'], r['actor_boost'], r['score']) for r in results[:3]]}")
         return results
     except Exception as e:
         logger.error(f"[SEARCH MOVIES] Ошибка поиска фильмов: {e}", exc_info=True)
