@@ -198,8 +198,27 @@ def build_tmdb_index():
         try:
             _index = faiss.read_index(str(INDEX_PATH))
             _movies_df = pd.read_csv(DATA_PATH)
-            logger.info(f"Индекс успешно загружен из файла, фильмов: {len(_movies_df)}")
-            return _index, _movies_df
+            
+            # КРИТИЧНО: Проверяем совпадение размерности индекса и текущей модели
+            model = get_model()
+            expected_dim = model.get_sentence_embedding_dimension()
+            actual_dim = _index.d
+            
+            if expected_dim != actual_dim:
+                logger.warning(f"Размерность индекса ({actual_dim}) не совпадает с размерностью модели ({expected_dim})!")
+                logger.warning(f"Индекс был построен с другой моделью. Пересобираем индекс...")
+                _index = None
+                _movies_df = None
+                # Удаляем старый индекс, чтобы пересобрать
+                try:
+                    INDEX_PATH.unlink()
+                    DATA_PATH.unlink()
+                    logger.info("Старый индекс удален для пересборки")
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить старый индекс: {e}")
+            else:
+                logger.info(f"Индекс успешно загружен из файла, фильмов: {len(_movies_df)}, размерность: {actual_dim}")
+                return _index, _movies_df
         except Exception as e:
             logger.warning(f"Ошибка загрузки существующего индекса: {e}, пересобираем...", exc_info=True)
     
@@ -533,6 +552,15 @@ def search_movies(query, top_k=15):
         logger.info(f"[SEARCH MOVIES] Эмбеддинг создан, размер: {query_emb.shape}")
         
         logger.info(f"[SEARCH MOVIES] Шаг 5: Поиск в индексе (top_k={top_k * 2}, затем приоритизация)...")
+        
+        # Проверяем совпадение размерности перед поиском
+        query_dim = query_emb.shape[1]
+        index_dim = index.d
+        if query_dim != index_dim:
+            logger.error(f"[SEARCH MOVIES] КРИТИЧЕСКАЯ ОШИБКА: Размерность запроса ({query_dim}) не совпадает с размерностью индекса ({index_dim})!")
+            logger.error(f"[SEARCH MOVIES] Индекс был построен с другой моделью. Необходимо пересобрать индекс.")
+            return []
+        
         D, I = index.search(query_emb, k=top_k * 2)  # Берем больше, чтобы после приоритизации осталось нужное количество
         logger.info(f"[SEARCH MOVIES] Поиск завершен, найдено индексов: {len(I[0])}")
         
