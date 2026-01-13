@@ -3611,15 +3611,50 @@ def register_payment_callbacks(bot_instance):
                             all_month = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
                             all_3m = SUBSCRIPTION_PRICES['personal']['all'].get('3months', 0)
                             all_life = SUBSCRIPTION_PRICES['personal']['all'].get('lifetime', 0)
-                            markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_month}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
+
+                            markup.add(
+                                InlineKeyboardButton(
+                                    f"📦 Все режимы ({all_month}₽/мес)",
+                                    callback_data="payment:subscribe:personal:all:month"
+                                )
+                            )
                             if all_3m > 0:
-                                markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_3m}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
+                                markup.add(
+                                    InlineKeyboardButton(
+                                        f"📦 Все режимы ({all_3m}₽/3 мес)",
+                                        callback_data="payment:subscribe:personal:all:3months"
+                                    )
+                                )
                             if all_life > 0:
-                                markup.add(InlineKeyboardButton(f"📦 Все режимы ({all_life}₽ навсегда)", callback_data="payment:subscribe:personal:all:lifetime"))
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
-                            bot_instance.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                            logger.info(f"[PAYMENT] Пользователь user_id={user_id} пытается добавить уже существующую подписку plan_type={plan_type}, предлагаем 'Все режимы'")
+                                markup.add(
+                                    InlineKeyboardButton(
+                                        f"📦 Все режимы ({all_life}₽ навсегда)",
+                                        callback_data="payment:subscribe:personal:all:lifetime"
+                                    )
+                                )
+
+                            markup.add(
+                                InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal")
+                            )
+
+                            try:
+                                bot_instance.edit_message_text(
+                                    text,
+                                    call.message.chat.id,
+                                    call.message.message_id,
+                                    reply_markup=markup,
+                                    parse_mode='HTML'
+                                )
+                            except Exception as e:
+                                if "message is not modified" not in str(e):
+                                    raise
+
+                            logger.info(
+                                f"[PAYMENT] Пользователь user_id={user_id} пытается добавить уже существующую подписку "
+                                f"plan_type={plan_type}, предлагаем 'Все режимы'"
+                            )
                             return
+
                         
                         else:
                             # Обычное добавление — объединение
