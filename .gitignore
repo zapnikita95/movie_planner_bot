@@ -23,3 +23,11 @@ data/imdb_raw/*.tsv
 cache/
 cache/
 data/
+
+# Virtual environments
+venv/
+heavy_check_venv/
+__pycache__/
+*.pyc
+.env
+heavy_check_venv/
