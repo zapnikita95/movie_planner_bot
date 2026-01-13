@@ -872,47 +872,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             except Exception as e:
                 logger.error(f"[SHOW FILM INFO] ❌ Ошибка при запросе оценок: {e}", exc_info=True)
                 rating_text = "💬 Оценить"
-                        # 1. Средняя оценка
-                        cur.execute('''
-                            SELECT AVG(rating) as avg FROM ratings 
-                            WHERE chat_id = %s AND film_id = %s 
-                            AND (is_imported = FALSE OR is_imported IS NULL)
-                        ''', (chat_id, film_id))
-                        avg_result = cur.fetchone()
-                        if avg_result:
-                            avg = avg_result[0] if isinstance(avg_result, tuple) else avg_result.get('avg')
-                            if avg is not None:
-                                avg_rating = float(avg)
-
-                        # 2. Активные пользователи
-                        cur.execute('''
-                            SELECT DISTINCT user_id
-                            FROM stats
-                            WHERE chat_id = %s AND user_id IS NOT NULL
-                        ''', (chat_id,))
-                        active_users_rows = cur.fetchall()
-                        active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in active_users_rows if row}
-
-                        # 3. Кто оценил этот фильм
-                        cur.execute('''
-                            SELECT DISTINCT user_id FROM ratings
-                            WHERE chat_id = %s AND film_id = %s 
-                            AND (is_imported = FALSE OR is_imported IS NULL)
-                        ''', (chat_id, film_id))
-                        rated_users_rows = cur.fetchall()
-                        rated_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in rated_users_rows if row}
-
-                        # Формируем текст кнопки
-                        if avg_rating is not None:
-                            rating_int = int(round(avg_rating))
-                            emoji = "💩" if rating_int <= 4 else "💬" if rating_int <= 7 else "🏆"
-                            rating_text = f"{emoji} {avg_rating:.0f}/10"
-
-                        logger.info(f"[SHOW FILM INFO] Запрос оценок выполнен, avg_rating={avg_rating}, rating_text={rating_text}")
-
-            except Exception as e:
-                logger.error(f"[SHOW FILM INFO] ❌ Ошибка при запросе оценок: {e}", exc_info=True)
-                rating_text = "💬 Оценить"
 
             logger.info(f"[SHOW FILM INFO] Оценки получены, rating_text={rating_text}")
             
