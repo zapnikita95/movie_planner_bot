@@ -321,16 +321,25 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
             # Получаем данные из БД, но НЕ перезаписываем is_series!
             db_row = None
             try:
-                from moviebot.database.db_connection import get_db_connection
-
-                with get_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("""
+                conn_db = get_db_connection()
+                cursor_db = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_db.execute("""
                             SELECT title, year, genres, description, director, actors, is_series
                             FROM movies 
                             WHERE id = %s AND chat_id = %s
                         """, (film_id, chat_id))
-                        db_row = cur.fetchone()
+                        db_row = cursor_db.fetchone()
+                finally:
+                    try:
+                        cursor_db.close()
+                    except:
+                        pass
+                    try:
+                        conn_db.close()
+                    except:
+                        pass
             except Exception as db_err:
                 logger.warning(f"[DB_FETCH] Не удалось получить полные данные: {db_err}")
 
