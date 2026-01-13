@@ -152,7 +152,27 @@ def add_more_tickets_from_plan(call):
     logger.info(f"[TICKET] Перешли в режим add_more_tickets для plan_id={plan_id}")
 
 
-# 3. Кнопка "➕ Добавить новое событие" - показывает меню выбора типа события
+# 3. Кнопка "⬅️ Назад к событиям" - возвращает к списку событий
+@bot.callback_query_handler(func=lambda call: call.data == "ticket_back_to_list")
+def ticket_back_to_list_callback(call):
+    logger.info(f"[TICKET CALLBACK] ticket_back_to_list сработал, user_id={call.from_user.id}")
+    
+    bot.answer_callback_query(call.id)
+    
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    if user_id in user_ticket_state:
+        del user_ticket_state[user_id]
+        logger.info(f"[TICKET] Состояние очищено при возврате к списку")
+    
+    # Ленивый импорт — безопасно, без цикла
+    from moviebot.bot.handlers.series import show_cinema_sessions
+    
+    show_cinema_sessions(chat_id, user_id, None)
+
+
+# 4. Кнопка "➕ Добавить новое событие" - показывает меню выбора типа события
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
 def ticket_new_callback(call):
     """Обработчик кнопки 'Добавить новое событие' - показывает выбор типа билета"""

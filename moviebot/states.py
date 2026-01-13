@@ -61,6 +61,8 @@ user_promo_admin_state = {}  # user_id: {} - состояние ожидания
 # Состояния админских команд
 user_unsubscribe_state = {}  # user_id: {'message_id': int} - состояние ожидания ввода ID для /unsubscribe
 user_add_admin_state = {}  # user_id: {'message_id': int} - состояние ожидания ввода ID для /add_admin
+user_check_state = {}  # user_id: {'step': str, 'message_id': int, 'target_id': int, 'target_name': str} - состояние для команды /check
+user_check_receipt_state = {}  # message_id: {'target_chat_id': int, 'subscription_id': int, 'subscription_type': str} - состояние для обработки чека в реплае на сообщение об оплате
 
 # Состояния Шазам
 shazam_state = {}  # user_id: {'mode': 'text' or 'voice', 'chat_id': int} - состояние ожидания запроса для Шазам

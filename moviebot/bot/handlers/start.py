@@ -248,6 +248,12 @@ def register_start_handlers(bot):
                         message_thread_id=message_thread_id
                     )
                 return
+            
+            # Обработка билетов - показываем список событий
+            if action == 'tickets':
+                from moviebot.bot.handlers.series import show_cinema_sessions
+                show_cinema_sessions(chat_id, user_id, None)
+                return
 
             if action == 'seasons':
                 bot.answer_callback_query(call.id, "⏳ Загружаем сериалы и сезоны...")
@@ -302,9 +308,10 @@ def register_start_handlers(bot):
                         )
                     return
                 else:
-                    msg = call.message
-                    msg.text = '/ticket'
-                    ticket_command(msg)
+                    # Показываем список событий
+                    from moviebot.bot.handlers.series import show_cinema_sessions
+                    show_cinema_sessions(chat_id, user_id, None)
+                    return
 
             elif action == 'payment':
                 msg = call.message

@@ -685,8 +685,9 @@ def check_ticket_text_reply(message):
             return False
     
     else:
-        # В личке — принимаем следующее или reply на правильный промпт
+        # В личке — принимаем следующее сообщение или reply на правильный промпт
         if message.reply_to_message:
+            # Если это реплай, проверяем что на правильный промпт
             if message.reply_to_message.from_user.id != BOT_ID:
                 return False
             reply_text = message.reply_to_message.text or ""
@@ -698,7 +699,7 @@ def check_ticket_text_reply(message):
             prompt_message_id = state.get('prompt_message_id')
             if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
                 return False
-        # Если не reply — просто принимаем (следующее сообщение)
+        # Если не reply — принимаем следующее сообщение (в личке можно без реплая)
     
     return True
 
@@ -733,6 +734,9 @@ def handle_ticket_text_reply(message):
             })
             
             # Отправляем промпт и сохраняем message_id
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+            
             sent = bot.reply_to(
                 message,
                 f"🎤 <b>{text}</b>\n\n"
@@ -742,20 +746,74 @@ def handle_ticket_text_reply(message):
                 f"• 15.01 20:30\n"
                 f"• завтра 19:00\n"
                 f"• 20:00 (если сегодня)",
-                parse_mode='HTML'
+                parse_mode='HTML',
+                reply_markup=markup
             )
             state['prompt_message_id'] = sent.message_id
             return
         
         # ==================== ДАТА/ВРЕМЯ МЕРОПРИЯТИЯ ====================
         if step == 'event_datetime':
-            from moviebot.utils.parsing import parse_relative_or_absolute_time
+            # Используем тот же механизм, что и для планирования фильмов (get_plan_day_or_date_internal)
+            from moviebot.utils.parsing import parse_session_time
             from moviebot.database.db_operations import get_user_timezone_or_default
             import pytz
             from moviebot.database.db_connection import db_lock, cursor, connection
+            from datetime import datetime, timedelta
+            import re
             
             user_tz = get_user_timezone_or_default(user_id)
-            plan_dt = parse_relative_or_absolute_time(text, user_id)
+            now = datetime.now(user_tz)
+            
+            # Используем parse_session_time для более полной обработки дат (как в get_plan_day_or_date_internal)
+            plan_dt = parse_session_time(text, user_tz)
+            
+            if not plan_dt:
+                # Если parse_session_time не сработал, пробуем parse_relative_or_absolute_time
+                from moviebot.utils.parsing import parse_relative_or_absolute_time
+                plan_dt = parse_relative_or_absolute_time(text, user_id)
+            
+            # Если всё ещё не распознано, пробуем логику из get_plan_day_or_date_internal
+            if not plan_dt:
+                text_lower = text.lower().strip()
+                extracted_time = None
+                
+                # Ищем время в формате ЧЧ:ММ
+                time_match = re.search(r'\b(\d{1,2}):(\d{2})\b', text)
+                if time_match:
+                    hour = int(time_match.group(1))
+                    minute = int(time_match.group(2))
+                    if 0 <= hour <= 23 and 0 <= minute <= 59:
+                        extracted_time = (hour, minute)
+                
+                # Пробуем распознать "сегодня", "завтра"
+                if 'сегодня' in text_lower:
+                    plan_date = now.date()
+                    if extracted_time:
+                        hour, minute = extracted_time
+                    else:
+                        hour, minute = 20, 0  # По умолчанию 20:00 для мероприятий
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                    plan_dt = user_tz.localize(plan_dt)
+                elif 'завтра' in text_lower:
+                    plan_date = (now.date() + timedelta(days=1))
+                    if extracted_time:
+                        hour, minute = extracted_time
+                    else:
+                        hour, minute = 20, 0  # По умолчанию 20:00 для мероприятий
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                    plan_dt = user_tz.localize(plan_dt)
+                elif extracted_time:
+                    # Если есть только время без даты, используем сегодня
+                    hour, minute = extracted_time
+                    plan_date = now.date()
+                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                    plan_dt = user_tz.localize(plan_dt)
+                    # Если время уже прошло, используем завтра
+                    if plan_dt < now:
+                        plan_date = (now.date() + timedelta(days=1))
+                        plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                        plan_dt = user_tz.localize(plan_dt)
             
             if not plan_dt:
                 sent = bot.reply_to(
@@ -770,11 +828,11 @@ def handle_ticket_text_reply(message):
                 state['prompt_message_id'] = sent.message_id
                 return
             
-            # Создаём план
+            # Создаём план для мероприятия (film_id = NULL, custom_title = название мероприятия)
             with db_lock:
                 cursor.execute('''
-                    INSERT INTO plans (chat_id, user_id, plan_datetime, plan_type, custom_title)
-                    VALUES (%s, %s, %s, 'cinema', %s)
+                    INSERT INTO plans (chat_id, user_id, plan_datetime, plan_type, custom_title, film_id)
+                    VALUES (%s, %s, %s, 'cinema', %s, NULL)
                     RETURNING id
                 ''', (chat_id, user_id, plan_dt.astimezone(pytz.utc), state['event_name']))
                 plan_id = cursor.fetchone()[0]

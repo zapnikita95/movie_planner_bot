@@ -1371,6 +1371,7 @@ def search_retry_callback(call):
                 InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
             )
         markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="search:cancel"))
         
         # Отправляем новое сообщение с промптом
         prompt_text = f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик"
@@ -1464,7 +1465,9 @@ def handle_search(message):
                 InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
             )
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            reply_msg = bot.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup)
+            markup_search = InlineKeyboardMarkup()
+            markup_search.add(InlineKeyboardButton("❌ Отмена", callback_data="search:cancel"))
+            reply_msg = bot.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup_search)
             # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
             user_id = message.from_user.id
             chat_id = message.chat.id
@@ -1804,10 +1807,11 @@ def show_cinema_sessions(chat_id, user_id, file_id=None):
         with db_lock:
             cursor_local.execute('''
                 SELECT p.id, 
-                       COALESCE(m.title, 'Мероприятие') as title, 
+                       COALESCE(p.custom_title, m.title, 'Мероприятие') as title, 
                        p.plan_datetime, 
                        CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as ticket_count,
-                       p.film_id
+                       p.film_id,
+                       p.custom_title
                 FROM plans p
                 LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.chat_id = %s AND p.plan_type = 'cinema'
@@ -5673,7 +5677,7 @@ def register_series_handlers(bot_param):
                 }
                 text += "\n\n📎 Файл готов к добавлению. Нажмите '➕ Добавить билеты' для продолжения."
             
-            markup.add(InlineKeyboardButton("⬅️ Назад к событиям", callback_data="ticket_new"))
+            markup.add(InlineKeyboardButton("⬅️ Назад к событиям", callback_data="ticket_back_to_list"))
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
             
             # Показываем информацию о сеансе
@@ -5723,12 +5727,16 @@ def register_series_handlers(bot_param):
                 'type': 'event'
             }
             
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+            
             sent_msg = bot.edit_message_text(
                 "🎤 <b>Добавление билета на мероприятие</b>\n\n"
                 "Напишите название мероприятия в ответ на это сообщение:",
                 chat_id,
                 call.message.message_id,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                reply_markup=markup
             )
             # Сохраняем message_id для проверки реплая в групповом чате
             user_ticket_state[user_id]['prompt_message_id'] = call.message.message_id
@@ -5914,12 +5922,16 @@ def register_series_handlers(bot_param):
                 'chat_id': chat_id
             }
             
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+            
             bot.edit_message_text(
                 "📎 <b>Загрузка дополнительных билетов</b>\n\n"
                 "Отправьте файлы билетов. После загрузки всех билетов напишите 'готово'.",
                 chat_id,
                 call.message.message_id,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                reply_markup=markup
             )
         except Exception as e:
             logger.error(f"[ADD MORE TICKETS] Ошибка: {e}", exc_info=True)
@@ -6020,6 +6032,27 @@ def register_series_handlers(bot_param):
             bot.edit_message_text("❌ Операция отменена.", chat_id, call.message.message_id)
         except Exception as e:
             logger.error(f"[TICKET CANCEL] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
+    @bot.callback_query_handler(func=lambda call: call.data == "search:cancel")
+    def search_cancel_callback(call):
+        """Обработчик кнопки 'Отмена' для поиска"""
+        try:
+            from moviebot.states import user_search_state
+            
+            bot.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            if user_id in user_search_state:
+                del user_search_state[user_id]
+            
+            bot.edit_message_text("❌ Поиск отменен.", chat_id, call.message.message_id)
+        except Exception as e:
+            logger.error(f"[SEARCH CANCEL] Ошибка: {e}", exc_info=True)
             try:
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:

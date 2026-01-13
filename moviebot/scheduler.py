@@ -257,9 +257,9 @@ def send_ticket_notification(chat_id, plan_id):
     try:
         with db_lock:
             cursor_local.execute('''
-                SELECT p.ticket_file_id, m.title, p.plan_datetime
+                SELECT p.ticket_file_id, COALESCE(p.custom_title, m.title, 'Мероприятие') as title, p.plan_datetime
                 FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                 WHERE p.id = %s AND p.chat_id = %s
             ''', (plan_id, chat_id))
             ticket_row = cursor_local.fetchone()
@@ -380,11 +380,11 @@ def check_and_send_plan_notifications():
 
                     SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
 
-                           m.title, m.link, p.notification_sent, p.ticket_notification_sent, p.ticket_file_id
+                           COALESCE(p.custom_title, m.title, 'Мероприятие') as title, m.link, p.notification_sent, p.ticket_notification_sent, p.ticket_file_id
 
                     FROM plans p
 
-                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
 
                     WHERE p.plan_datetime >= %s 
 
@@ -885,15 +885,32 @@ def clean_home_plans():
 
 
 def clean_cinema_plans():
-    """Каждый понедельник удаляет все планы кино"""
+    """Каждый понедельник удаляет все планы кино (фильмы) и планы мероприятий, которые прошли более 1 дня назад"""
+    from datetime import datetime, timedelta
+    import pytz
+    
     conn_local = get_db_connection()
     cursor_local = get_db_cursor()
     try:
         with db_lock:
-            cursor_local.execute("DELETE FROM plans WHERE plan_type = 'cinema'")
-            deleted_count = cursor_local.rowcount
+            now_utc = datetime.now(pytz.utc)
+            yesterday_utc = now_utc - timedelta(days=1)
+            
+            # Удаляем все планы кино (фильмы) - как было раньше
+            cursor_local.execute("DELETE FROM plans WHERE plan_type = 'cinema' AND film_id IS NOT NULL")
+            deleted_films = cursor_local.rowcount
+            
+            # Удаляем мероприятия (film_id IS NULL), которые прошли более 1 дня назад
+            cursor_local.execute("""
+                DELETE FROM plans 
+                WHERE plan_type = 'cinema' 
+                AND film_id IS NULL 
+                AND plan_datetime < %s
+            """, (yesterday_utc,))
+            deleted_events = cursor_local.rowcount
+            
             conn_local.commit()
-        logger.info(f"Очищены все планы кино (понедельник): {deleted_count} планов")
+        logger.info(f"Очищены планы кино (понедельник): {deleted_films} фильмов, {deleted_events} мероприятий")
     except Exception as e:
         logger.error(f"[CLEAN CINEMA PLANS] Ошибка: {e}", exc_info=True)
     finally:
@@ -1576,6 +1593,70 @@ def send_successful_payment_notification(
             logger.info(f"[SUCCESSFUL PAYMENT] Уведомление отправлено: subscription_id={subscription_id}, user_id={user_id_log}, chat_id={chat_id_log}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type} (check={'ДА' if check_url else 'НЕТ'})")
         except Exception as e:
             logger.error(f"[SUCCESSFUL PAYMENT] Ошибка отправки уведомления: {e}")
+        
+        # === ОТПРАВКА СООБЩЕНИЙ АДМИНАМ И СОЗДАТЕЛЮ ===
+        try:
+            from moviebot.utils.admin import get_all_admins, is_owner
+            from moviebot.states import user_check_receipt_state
+            from moviebot.bot.handlers.admin import OWNER_ID
+            
+            # Получаем информацию о подписке для админов
+            sub_user_id = sub.get('user_id')
+            sub_chat_id = sub.get('chat_id')
+            sub_price = sub.get('price', 0)
+            
+            # Определяем ID получателя (для групповой подписки - chat_id, для личной - user_id)
+            target_id = sub_chat_id if subscription_type == 'group' else sub_user_id
+            
+            # Получаем название чата или пользователя
+            target_name = None
+            try:
+                if subscription_type == 'group':
+                    chat_info = bot.get_chat(target_id)
+                    target_name = chat_info.title if hasattr(chat_info, 'title') else f"Группа {target_id}"
+                else:
+                    user_info = bot.get_chat(target_id)
+                    target_name = user_info.first_name if hasattr(user_info, 'first_name') else f"Пользователь {target_id}"
+            except Exception as e:
+                logger.error(f"[SUCCESSFUL PAYMENT] Ошибка получения информации о чате/пользователе: {e}")
+                target_name = f"ID: {target_id}"
+            
+            # Формируем сообщение для админов
+            admin_text = "Привет!\n"
+            admin_text += f"Оформлен платеж на: <b>{plan_name}</b>\n"
+            if subscription_type == 'group':
+                admin_text += f"<b>ID чата группы: {target_id}</b>\n"
+            else:
+                admin_text += f"<b>ID пользователя: {target_id}</b>\n"
+            admin_text += f"Сумма: <b>{sub_price}₽</b>\n"
+            admin_text += "\nОтправьте чек в ответ на это сообщение."
+            
+            # Получаем всех админов
+            admins = get_all_admins()
+            admin_ids = [admin['user_id'] for admin in admins]
+            
+            # Добавляем создателя, если его нет в списке админов
+            if OWNER_ID not in admin_ids:
+                admin_ids.append(OWNER_ID)
+            
+            # Отправляем сообщение каждому админу
+            for admin_id in admin_ids:
+                try:
+                    sent_msg = bot.send_message(admin_id, admin_text, parse_mode='HTML')
+                    
+                    # Сохраняем информацию о сообщении для обработки реплая
+                    user_check_receipt_state[sent_msg.message_id] = {
+                        'target_chat_id': target_id,
+                        'subscription_id': subscription_id,
+                        'subscription_type': subscription_type,
+                        'target_name': target_name
+                    }
+                    
+                    logger.info(f"[SUCCESSFUL PAYMENT] Сообщение админу отправлено: admin_id={admin_id}, message_id={sent_msg.message_id}, target_id={target_id}")
+                except Exception as e:
+                    logger.error(f"[SUCCESSFUL PAYMENT] Ошибка отправки сообщения админу {admin_id}: {e}")
+        except Exception as e:
+            logger.error(f"[SUCCESSFUL PAYMENT] Ошибка отправки сообщений админам: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[SUCCESSFUL PAYMENT] Ошибка: {e}", exc_info=True)
 
@@ -1594,19 +1675,24 @@ def process_recurring_payments():
         
         now = datetime.now(pytz.UTC)
         
-        # Используем get_db_connection и get_db_cursor для получения свежих соединений и курсоров
-        from moviebot.database.db_connection import get_db_cursor
-        conn_local = get_db_connection()
-        cursor_local = get_db_cursor()
+        # ВАЖНО: Используем локальный курсор из локального соединения, а не глобальный
+        # Это предотвращает ошибку "cursor already closed" при параллельных вызовах
+        from moviebot.database.db_connection import get_db_connection, db_lock
+        from psycopg2.extras import RealDictCursor
+        conn_local = None
+        cursor_local = None
         
         # Находим подписки, у которых next_payment_date наступил и есть payment_method_id
-        # Для тестовых подписок проверяем по времени (если прошло 10 минут)
-        # Для остальных - только в дневное время (9:00 МСК)
+        # Проверяем раз в день (в 9:00 МСК)
         subscriptions = []
         try:
+            conn_local = get_db_connection()
+            # Создаем локальный курсор из локального соединения, а не используем глобальный
+            cursor_local = conn_local.cursor(cursor_factory=RealDictCursor)
+            
             with db_lock:
-                # Для тестовых подписок проверяем, если next_payment_date <= now
-                # Для остальных - только если сегодня и в дневное время (9:00-18:00 МСК)
+                # Проверяем подписки, у которых next_payment_date наступил сегодня
+                # Проверка выполняется раз в день в 9:00 МСК
                 cursor_local.execute("""
                     SELECT id, chat_id, user_id, subscription_type, plan_type, period_type, price, 
                            next_payment_date, payment_method_id, telegram_username, group_username, group_size
@@ -1615,17 +1701,8 @@ def process_recurring_payments():
                     AND next_payment_date IS NOT NULL
                     AND payment_method_id IS NOT NULL
                     AND period_type != 'lifetime'
-                    AND (
-                        -- Тестовые подписки: проверяем по времени (если прошло 10 минут)
-                        (period_type = 'test' AND next_payment_date <= %s)
-                        OR
-                        -- Остальные подписки: только в дневное время (9:00-18:00 МСК) и сегодня
-                        (period_type != 'test' 
-                         AND DATE(next_payment_date AT TIME ZONE 'UTC') = DATE(%s AT TIME ZONE 'UTC')
-                         AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) >= 9
-                         AND EXTRACT(HOUR FROM (now() AT TIME ZONE 'Europe/Moscow')) < 18)
-                    )
-                """, (now, now))
+                    AND DATE(next_payment_date AT TIME ZONE 'UTC') <= DATE(%s AT TIME ZONE 'UTC')
+                """, (now,))
                 subscriptions = cursor_local.fetchall()
         except Exception as db_e:
             logger.error(f"[RECURRING PAYMENT] Ошибка при запросе подписок: {db_e}", exc_info=True)
@@ -1830,6 +1907,18 @@ def process_recurring_payments():
     
     except Exception as e:
         logger.error(f"[RECURRING PAYMENT] Ошибка обработки рекуррентных платежей: {e}", exc_info=True)
+    finally:
+        # Закрываем локальные соединения
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if conn_local:
+            try:
+                conn_local.close()
+            except:
+                pass
 
 
 def get_random_events_enabled(chat_id):

@@ -498,12 +498,12 @@ def show_schedule(message):
         
         with db_lock:
             cursor_local.execute('''
-                SELECT p.id, m.title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
+                SELECT p.id, COALESCE(p.custom_title, m.title, 'Мероприятие') as title, m.kp_id, m.link, p.plan_datetime, p.plan_type,
                        CASE WHEN p.ticket_file_id IS NOT NULL THEN 1 ELSE 0 END as has_ticket,
-                       m.watched
+                       m.watched, p.film_id
                 FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.chat_id = %s AND m.watched = 0 AND p.film_id IS NOT NULL
+                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s AND (m.watched = 0 OR m.watched IS NULL) AND (p.film_id IS NOT NULL OR p.custom_title IS NOT NULL)
                 ORDER BY p.plan_type DESC, p.plan_datetime ASC
             ''', (chat_id,))
             rows = cursor_local.fetchall()
@@ -521,6 +521,7 @@ def show_schedule(message):
             return
         
         # Разделяем на секции: сначала кино, потом дома
+        # Исключаем мероприятия (film_id IS NULL) из премьер
         cinema_plans = []
         home_plans = []
         
@@ -533,6 +534,7 @@ def show_schedule(message):
                 plan_dt_value = row.get('plan_datetime')
                 plan_type = row.get('plan_type')
                 has_ticket = row.get('has_ticket', 0)
+                film_id = row.get('film_id')
             else:
                 plan_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
                 title = row[1]
@@ -541,6 +543,11 @@ def show_schedule(message):
                 plan_dt_value = row[4]
                 plan_type = row[5]
                 has_ticket = row[6] if len(row) > 6 else 0
+                film_id = row[8] if len(row) > 8 else None
+            
+            # Исключаем мероприятия (film_id IS NULL) из премьер в кино
+            if plan_type == 'cinema' and film_id is None:
+                continue  # Пропускаем мероприятия
             
             # Преобразуем TIMESTAMP в дату в часовом поясе пользователя
             try:
@@ -594,7 +601,12 @@ def show_schedule(message):
                 
                 if len(button_text) > 30:
                     button_text = button_text[:27] + "..."
-                cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"back_to_film:{int(kp_id)}"))
+                # Для мероприятий (kp_id может быть None) используем другой callback
+                if kp_id:
+                    cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"back_to_film:{int(kp_id)}"))
+                else:
+                    # Для мероприятий используем callback для просмотра плана
+                    cinema_markup.add(InlineKeyboardButton(button_text, callback_data=f"ticket_session:{plan_id}"))
             
             if not home_plans:
                 cinema_markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data=f"schedule_back:{chat_id}"))
@@ -934,7 +946,9 @@ def plan_type_callback(call):
             }
             
             bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
-            prompt_msg = bot.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!")
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Выйти", callback_data="plan:cancel"))
+            prompt_msg = bot.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
             # Сохраняем message_id промпта в состояние
             user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
             logger.info(f"[PLAN FROM LIST] Состояние установлено для пользователя {user_id}, prompt_message_id={prompt_msg.message_id}")
