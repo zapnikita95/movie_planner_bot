@@ -3739,6 +3739,13 @@ def register_payment_callbacks(bot_instance):
             if action.startswith("subscribe:"):
                 # Обработка подписки
                 logger.info(f"[PAYMENT SUBSCRIBE] Обработка subscribe: action={action}, user_id={user_id}")
+                
+                # Сразу отвечаем на callback query для обратной связи
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                except Exception as e:
+                    logger.warning(f"[PAYMENT SUBSCRIBE] Ошибка answer_callback_query: {e}")
+                
                 parts = action.split(":")
                 sub_type = parts[1]  # personal или group
             
@@ -4377,11 +4384,19 @@ def register_payment_callbacks(bot_instance):
                                 f"plan_type={plan_type}, предлагаем 'Все режимы'. Отправляем сообщение с кнопками."
                             )
                             
+                            # Сначала отвечаем на callback query, чтобы пользователь видел реакцию
                             try:
-                                bot_instance.edit_message_text(
-                                    text,
-                                    call.message.chat.id,
-                                    call.message.message_id,
+                                bot_instance.answer_callback_query(call.id)
+                            except Exception as e:
+                                logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
+                            
+                            # Затем редактируем сообщение
+                            try:
+                                safe_edit_message(
+                                    bot_instance,
+                                    chat_id=call.message.chat.id,
+                                    message_id=call.message.message_id,
+                                    text=text,
                                     reply_markup=markup,
                                     parse_mode='HTML'
                                 )
@@ -4398,12 +4413,6 @@ def register_payment_callbacks(bot_instance):
                                         )
                                     except Exception as e2:
                                         logger.error(f"[PAYMENT] Ошибка отправки нового сообщения: {e2}", exc_info=True)
-                            
-                            # Убеждаемся, что callback query обработан
-                            try:
-                                bot_instance.answer_callback_query(call.id)
-                            except Exception as e:
-                                logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
                             return
 
                         
