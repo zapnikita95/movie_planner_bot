@@ -1599,13 +1599,41 @@ def send_successful_payment_notification(
             from moviebot.utils.admin import get_all_admins, is_owner
             from moviebot.states import user_check_receipt_state
             from moviebot.bot.handlers.admin import OWNER_ID
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock  # Локальный импорт (как в других местах scheduler.py)
             
             # Получаем информацию о подписке для админов
             sub_user_id = sub.get('user_id')
             sub_chat_id = sub.get('chat_id')
-            sub_price = sub.get('price', 0)
+            sub_price = sub.get('price', 0)  # Полная цена подписки (fallback)
             
-            # Определяем ID получателя (для групповой подписки - chat_id, для личной - user_id)
+            # Получаем реальную сумму последнего платежа (для upgrade — доплата)
+            actual_amount = sub_price
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_local.execute("""
+                        SELECT amount FROM payments 
+                        WHERE subscription_id = %s 
+                        ORDER BY created_at DESC 
+                        LIMIT 1
+                    """, (subscription_id,))
+                    row = cursor_local.fetchone()
+                    if row:
+                        actual_amount = float(row['amount'])
+            except Exception as e:
+                logger.error(f"[SUCCESSFUL PAYMENT] Не удалось получить сумму платежа из БД: {e}")
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+            
+            # Определяем ID получателя
             target_id = sub_chat_id if subscription_type == 'group' else sub_user_id
             
             # Получаем название чата или пользователя
@@ -1628,7 +1656,13 @@ def send_successful_payment_notification(
                 admin_text += f"<b>ID чата группы: {target_id}</b>\n"
             else:
                 admin_text += f"<b>ID пользователя: {target_id}</b>\n"
-            admin_text += f"Сумма: <b>{sub_price}₽</b>\n"
+            
+            if actual_amount < sub_price:
+                admin_text += f"Доплата за upgrade: <b>{actual_amount:.2f}₽</b>\n"
+                admin_text += f"Новая полная сумма подписки: <b>{sub_price}₽</b>\n"
+            else:
+                admin_text += f"Сумма: <b>{actual_amount:.2f}₽</b>\n"
+            
             admin_text += "\nОтправьте чек в ответ на это сообщение."
             
             # Получаем всех админов

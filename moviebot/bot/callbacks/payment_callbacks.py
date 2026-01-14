@@ -5800,7 +5800,6 @@ def register_payment_callbacks(bot_instance):
                 
                 from yookassa import Configuration, Payment
                 import uuid as uuid_module
-                # os уже импортирован в начале файла, не нужно импортировать снова
                 
                 Configuration.account_id = YOOKASSA_SHOP_ID.strip()
                 Configuration.secret_key = YOOKASSA_SECRET_KEY.strip()
@@ -5826,30 +5825,11 @@ def register_payment_callbacks(bot_instance):
                 subscription_type_name = 'Личная подписка' if subscription_type_str == 'personal' else f'Групповая подписка (на {group_size} участников)'
                 description = f"Обновление {subscription_type_name}: {plan_name}, период: {period_name}"
                 
-                # Формируем metadata с upgrade информацией
-                metadata = {
-                    "user_id": str(user_id),
-                    "chat_id": str(chat_id),
-                    "subscription_type": subscription_type_str,
-                    "plan_type": new_plan_type,
-                    "period_type": upgrade_period_type,
-                    "payment_id": payment_id,
-                    "upgrade_subscription_id": str(subscription_id),
-                    "upgrade_from_plan": current_plan_type
-                }
+                # Защита от дублей: детерминированный idempotency_key
+                idempotency_key = f"recurring_upgrade:{user_id}:{chat_id}:{new_plan_type}:{upgrade_period_type}"
                 if group_size:
-                    metadata["group_size"] = str(group_size)
-                if call.from_user.username:
-                    metadata["telegram_username"] = call.from_user.username
-                if subscription_type_str == 'group' and chat_id:
-                    try:
-                        chat_info = bot_instance.get_chat(chat_id)
-                        if chat_info.username:
-                            metadata["group_username"] = chat_info.username
-                    except:
-                        pass
+                    idempotency_key += f":{group_size}"
                 
-                # Создаем безакцептный платеж
                 payment_data = {
                     "amount": {
                         "value": f"{upgrade_price:.2f}",
@@ -5862,8 +5842,8 @@ def register_payment_callbacks(bot_instance):
                 }
                 
                 try:
-                    payment = Payment.create(payment_data)
-                    logger.info(f"[RECURRING UPGRADE] Платеж создан: id={payment.id}, status={payment.status}")
+                    payment = Payment.create(payment_data, idempotency_key=idempotency_key)
+                    logger.info(f"[RECURRING UPGRADE] Платеж создан/возвращён: id={payment.id}, status={payment.status}, idempotency_key={idempotency_key}")
                 except Exception as e:
                     logger.error(f"[RECURRING UPGRADE] Ошибка создания платежа: {e}", exc_info=True)
                     bot_instance.answer_callback_query(call.id, "Ошибка создания платежа", show_alert=True)
@@ -5873,8 +5853,8 @@ def register_payment_callbacks(bot_instance):
                     bot_instance.answer_callback_query(call.id, "❌ Не удалось создать платеж", show_alert=True)
                     return
                 
-                # Сохраняем платеж в БД (payment_id уже создан выше)
-                from moviebot.database.db_operations import save_payment, update_payment_status, update_subscription_plan_type
+                # Сохраняем платеж в БД
+                from moviebot.database.db_operations import save_payment
                 
                 save_payment(
                     payment_id=payment_id,
