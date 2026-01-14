@@ -131,6 +131,26 @@ def handle_settings_callback(call):
         
         if action == "import_locked":
             # Заблокированная кнопка импорта базы
+            # Проверяем доступ еще раз для логирования
+            has_access = has_recommendations_access(chat_id, user_id)
+            logger.info(f"[SETTINGS] import_locked: user_id={user_id}, chat_id={chat_id}, has_access={has_access}")
+            if not has_access:
+                # Дополнительная диагностика для групповых чатов
+                if chat_id < 0:
+                    from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
+                    group_sub = get_active_group_subscription_by_chat_id(chat_id)
+                    if group_sub:
+                        subscription_id = group_sub.get('id')
+                        plan_type = group_sub.get('plan_type')
+                        group_size = group_sub.get('group_size')
+                        expires_at = group_sub.get('expires_at')
+                        logger.warning(f"[SETTINGS] import_locked: найдена групповая подписка subscription_id={subscription_id}, plan_type={plan_type}, group_size={group_size}, expires_at={expires_at}, но доступ не разрешен")
+                        if group_size is not None and subscription_id:
+                            try:
+                                members = get_subscription_members(subscription_id)
+                                logger.warning(f"[SETTINGS] import_locked: участники подписки {subscription_id}: {members}, user_id={user_id} в списке: {user_id in members if members else False}")
+                            except Exception as e:
+                                logger.error(f"[SETTINGS] import_locked: ошибка получения участников: {e}", exc_info=True)
             try:
                 bot.answer_callback_query(
                     call.id,

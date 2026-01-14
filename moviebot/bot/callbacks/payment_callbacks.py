@@ -100,6 +100,18 @@ def safe_edit_message(bot, *, chat_id, message_id, text, reply_markup=None, pars
         raise
 
 
+def get_base_price(subscription_type, plan_type, period_type, group_size=None):
+    """Получает базовую цену тарифа БЕЗ скидок (для рекуррентных платежей после промокодов)"""
+    if subscription_type == 'personal':
+        return SUBSCRIPTION_PRICES[subscription_type][plan_type].get(period_type, 0)
+    
+    # Для групповых подписок
+    if not group_size:
+        group_size = '2'
+    group_size_str = str(group_size) if isinstance(group_size, int) else group_size
+    return SUBSCRIPTION_PRICES[subscription_type][group_size_str][plan_type].get(period_type, 0)
+
+
 def calculate_discounted_price(user_id, subscription_type, plan_type, period_type, group_size=None):
     """Вычисляет цену с учетом скидок
     
@@ -381,6 +393,25 @@ def register_payment_callbacks(bot_instance):
                     "payment_id": payment_id,
                     "telegram_username": call.from_user.username or ""
                 }
+                
+                # Проверяем, был ли применен промокод
+                payment_state = user_payment_state.get(user_id, {})
+                if payment_state.get('promocode_id') and payment_state.get('price'):
+                    # Вычисляем базовую цену без промокода для сохранения в metadata
+                    from moviebot.bot.callbacks.payment_callbacks import get_base_price
+                    original_price = get_base_price(
+                        subscription_type=sub_type,
+                        plan_type=plan_type,
+                        period_type=period_type,
+                        group_size=None
+                    )
+                    promo_code = payment_state.get('promocode', '')
+                    is_first_month_only = payment_state.get('is_first_month_only', False)
+                    
+                    metadata["promocode"] = promo_code
+                    metadata["original_price"] = str(original_price)
+                    metadata["is_first_month_promo"] = "true" if is_first_month_only else "false"
+                    logger.info(f"[PAYMENT] Промокод применен: {promo_code}, original_price={original_price}₽, is_first_month_only={is_first_month_only}")
                 
                 # Создаем платеж через ЮKassa
                 try:
@@ -5000,6 +5031,24 @@ def register_payment_callbacks(bot_instance):
                 is_combined = payment_state.get('is_combined', False)
                 is_expansion = payment_state.get('is_expansion', False)
                 is_period_upgrade = payment_state.get('is_period_upgrade', False)
+                
+                # Проверяем, был ли применен промокод
+                if payment_state.get('promocode_id') and payment_state.get('price'):
+                    # Вычисляем базовую цену без промокода для сохранения в metadata
+                    from moviebot.bot.callbacks.payment_callbacks import get_base_price
+                    original_price = get_base_price(
+                        subscription_type=sub_type,
+                        plan_type=plan_type,
+                        period_type=period_type,
+                        group_size=group_size if sub_type == 'group' else None
+                    )
+                    promo_code = payment_state.get('promocode', '')
+                    is_first_month_only = payment_state.get('is_first_month_only', False)
+                    
+                    metadata["promocode"] = promo_code
+                    metadata["original_price"] = str(original_price)
+                    metadata["is_first_month_promo"] = "true" if is_first_month_only else "false"
+                    logger.info(f"[PAYMENT] Промокод применен: {promo_code}, original_price={original_price}₽, is_first_month_only={is_first_month_only}")
                 
                 if is_combined:
                     combine_type = payment_state.get('combine_type')

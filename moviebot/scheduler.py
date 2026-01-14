@@ -1818,7 +1818,92 @@ def process_recurring_payments():
             group_username = sub['group_username']
             group_size = sub['group_size']
             
-            logger.info(f"[RECURRING PAYMENT] Обработка подписки {subscription_id}, payment_method_id={payment_method_id}, сумма={price}")
+            # Проверяем, был ли первый платеж с промокодом только на первый месяц
+            # Если да, используем полную стоимость тарифа для рекуррентных платежей
+            recurring_amount = price  # По умолчанию используем цену из подписки
+            is_first_month_promo = False
+            
+            try:
+                conn_check = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+                cursor_check = conn_check.cursor()
+                try:
+                    with db_lock:
+                        # Получаем первый платеж для этой подписки (по yookassa_payment_id)
+                        cursor_check.execute("""
+                            SELECT yookassa_payment_id, amount
+                            FROM payments
+                            WHERE subscription_id = %s
+                            ORDER BY created_at ASC
+                            LIMIT 1
+                        """, (subscription_id,))
+                        first_payment = cursor_check.fetchone()
+                        
+                        if first_payment and first_payment.get('yookassa_payment_id'):
+                            # Получаем metadata из YooKassa для первого платежа
+                            yookassa_payment_id = first_payment.get('yookassa_payment_id')
+                            try:
+                                from moviebot.api.yookassa_api import get_payment_info
+                                first_payment_obj = get_payment_info(yookassa_payment_id)
+                                
+                                if first_payment_obj and hasattr(first_payment_obj, 'metadata') and first_payment_obj.metadata:
+                                    payment_metadata = first_payment_obj.metadata
+                                    
+                                    # Проверяем, был ли промокод только на первый месяц
+                                    if payment_metadata.get('is_first_month_promo', 'false').lower() == 'true':
+                                        is_first_month_promo = True
+                                        original_price_str = payment_metadata.get('original_price')
+                                        
+                                        if original_price_str:
+                                            try:
+                                                # Используем полную стоимость из metadata первого платежа
+                                                recurring_amount = float(original_price_str)
+                                                logger.info(f"[RECURRING PAYMENT] Промокод только на первый месяц обнаружен. Используем полную стоимость: {recurring_amount}₽ вместо {price}₽")
+                                            except (ValueError, TypeError):
+                                                # Если не удалось распарсить, используем базовую цену БЕЗ скидок
+                                                from moviebot.bot.callbacks.payment_callbacks import get_base_price
+                                                recurring_amount = get_base_price(
+                                                    subscription_type=subscription_type,
+                                                    plan_type=plan_type,
+                                                    period_type=period_type,
+                                                    group_size=group_size
+                                                )
+                                                logger.info(f"[RECURRING PAYMENT] Используем базовую стоимость (без скидок): {recurring_amount}₽")
+                                        else:
+                                            # Если original_price нет в metadata, используем базовую цену БЕЗ скидок
+                                            from moviebot.bot.callbacks.payment_callbacks import get_base_price
+                                            recurring_amount = get_base_price(
+                                                subscription_type=subscription_type,
+                                                plan_type=plan_type,
+                                                period_type=period_type,
+                                                group_size=group_size
+                                            )
+                                            logger.info(f"[RECURRING PAYMENT] Используем базовую стоимость (original_price отсутствует): {recurring_amount}₽")
+                            except Exception as yookassa_error:
+                                logger.warning(f"[RECURRING PAYMENT] Не удалось получить metadata из YooKassa для первого платежа {yookassa_payment_id}: {yookassa_error}")
+                                # Если не удалось получить metadata из YooKassa, используем базовую цену БЕЗ скидок
+                                # (на случай, если был промокод, но metadata недоступен)
+                                from moviebot.bot.callbacks.payment_callbacks import get_base_price
+                                recurring_amount = get_base_price(
+                                    subscription_type=subscription_type,
+                                    plan_type=plan_type,
+                                    period_type=period_type,
+                                    group_size=group_size
+                                )
+                                logger.info(f"[RECURRING PAYMENT] Используем базовую стоимость (metadata недоступен): {recurring_amount}₽")
+                finally:
+                    try:
+                        cursor_check.close()
+                    except:
+                        pass
+                    try:
+                        conn_check.close()
+                    except:
+                        pass
+            except Exception as check_error:
+                logger.error(f"[RECURRING PAYMENT] Ошибка проверки промокода: {check_error}", exc_info=True)
+                # В случае ошибки используем цену из подписки
+            
+            logger.info(f"[RECURRING PAYMENT] Обработка подписки {subscription_id}, payment_method_id={payment_method_id}, сумма={recurring_amount}₽ (is_first_month_promo={is_first_month_promo})")
             
             payment = create_recurring_payment(
                 user_id=user_id,
@@ -1826,7 +1911,7 @@ def process_recurring_payments():
                 subscription_type=subscription_type,
                 plan_type=plan_type,
                 period_type=period_type,
-                amount=price,
+                amount=recurring_amount,  # Используем полную стоимость для рекуррентных платежей
                 payment_method_id=payment_method_id,
                 group_size=group_size,
                 telegram_username=telegram_username,
@@ -1850,7 +1935,7 @@ def process_recurring_payments():
                 plan_type=plan_type,
                 period_type=period_type,
                 group_size=group_size,
-                amount=price,
+                amount=recurring_amount,  # Сохраняем полную стоимость для рекуррентных платежей
                 status=payment.status
             )
             

@@ -257,7 +257,7 @@ def apply_promocode(code, original_amount, user_id, chat_id):
         chat_id: ID чата
     
     Returns:
-        (success: bool, discounted_amount: float, message: str, promocode_id: int or None)
+        (success: bool, discounted_amount: float, message: str, promocode_id: int or None, is_first_month_only: bool)
     """
     try:
         # Приводим код к верхнему регистру для сравнения
@@ -268,13 +268,13 @@ def apply_promocode(code, original_amount, user_id, chat_id):
         
         if not promocode_info:
             logger.warning(f"[APPLY PROMOCODE] Промокод не найден: code_upper='{code_upper}'")
-            return False, original_amount, "Промокод не найден", None
+            return False, original_amount, "Промокод не найден", None, False
         
         if not promocode_info['is_active']:
-            return False, original_amount, "Промокод деактивирован", None
+            return False, original_amount, "Промокод деактивирован", None, False
         
         if promocode_info['used_count'] >= promocode_info['total_uses']:
-            return False, original_amount, "Лимит использований промокода исчерпан", None
+            return False, original_amount, "Лимит использований промокода исчерпан", None, False
         
         # Применяем скидку
         discount_type = promocode_info['discount_type']
@@ -284,20 +284,23 @@ def apply_promocode(code, original_amount, user_id, chat_id):
             # Процентная скидка
             discount_amount = original_amount * (discount_value / 100)
             discounted_amount = original_amount - discount_amount
+            is_first_month_only = False  # Процентные промокоды действуют всегда
         else:
-            # Фиксированная скидка
+            # Фиксированная скидка - действует только на первый месяц
             discounted_amount = original_amount - discount_value
+            is_first_month_only = True  # Фиксированные промокоды только на первый месяц
         
-        # Гарантируем, что итоговая сумма не меньше 0
-        if discounted_amount < 0:
-            discounted_amount = 0
+        # Гарантируем, что итоговая сумма не меньше 1₽ (для фиксированных промокодов)
+        # Если промокод снижает цену до нуля или ниже, оставляем 1₽
+        if discounted_amount < 1:
+            discounted_amount = 1.0
         
         # Округляем вниз до целого числа
         discounted_amount = float(Decimal(str(discounted_amount)).quantize(Decimal('1'), rounding=ROUND_DOWN))
         
         # Дополнительная проверка после округления
-        if discounted_amount < 0:
-            discounted_amount = 0
+        if discounted_amount < 1:
+            discounted_amount = 1.0
         
         # Увеличиваем счетчик использований
         conn_local = get_db_connection()
@@ -320,7 +323,7 @@ def apply_promocode(code, original_amount, user_id, chat_id):
                 conn_local.commit()
             
             discount_str = f"{discount_value}%" if discount_type == 'percent' else f"{int(discount_value)} руб/звезд"
-            return True, discounted_amount, f"Промокод применен! Скидка: {discount_str}", promocode_info['id']
+            return True, discounted_amount, f"Промокод применен! Скидка: {discount_str}", promocode_info['id'], is_first_month_only
         finally:
             try:
                 cursor_local.close()
@@ -333,7 +336,7 @@ def apply_promocode(code, original_amount, user_id, chat_id):
         
     except Exception as e:
         logger.error(f"Ошибка при применении промокода: {e}", exc_info=True)
-        return False, original_amount, f"Ошибка при применении промокода: {e}", None
+        return False, original_amount, f"Ошибка при применении промокода: {e}", None, False
 
 
 def deactivate_promocode(promocode_id):

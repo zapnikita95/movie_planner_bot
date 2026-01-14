@@ -603,6 +603,11 @@ def create_web_app(bot):
                                 # Для lifetime подписок payment_method_id должен быть NULL (отключаем автосписания)
                                 final_payment_method_id = None if period_type == 'lifetime' else payment_method_id
                                 
+                                # Проверяем, был ли промокод только на первый месяц
+                                # Если да, сохраняем discounted_price в подписку, но для рекуррентных платежей будем использовать полную стоимость
+                                is_first_month_promo = metadata.get('is_first_month_promo', 'false').lower() == 'true'
+                                subscription_price = amount  # Сохраняем фактически оплаченную сумму (со скидкой, если был промокод)
+                                
                                 try:
                                     subscription_id = create_subscription(
                                         chat_id=chat_id,
@@ -610,13 +615,13 @@ def create_web_app(bot):
                                         subscription_type=subscription_type,
                                         plan_type=plan_type,
                                         period_type=period_type,
-                                        price=amount,
+                                        price=subscription_price,  # Сохраняем discounted_price в подписку
                                         telegram_username=telegram_username,
                                         group_username=group_username,
                                         group_size=group_size,
                                         payment_method_id=final_payment_method_id
                                     )
-                                    logger.info(f"[YOOKASSA] Создана подписка: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}, price={amount}₽")
+                                    logger.info(f"[YOOKASSA] Создана подписка: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={plan_type}, period_type={period_type}, price={subscription_price}₽ (is_first_month_promo={is_first_month_promo})")
                                     
                                     # Автоматически добавляем оплатившего пользователя в групповую подписку
                                     if subscription_id and subscription_type == 'group':

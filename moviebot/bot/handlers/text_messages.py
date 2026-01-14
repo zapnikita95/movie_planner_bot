@@ -765,19 +765,19 @@ def handle_promo_reply_direct(message):
                 original_price = state.get('original_price', 0)
         
         from moviebot.utils.promo import apply_promocode
-        success, discounted_price, message_text, promocode_id = apply_promocode(
+        success, discounted_price, message_text, promocode_id, is_first_month_only = apply_promocode(
             promo_code,
             original_price,
             user_id,
             chat_id
         )
         
-        # Проверяем, что итоговая сумма не меньше 0
-        if discounted_price < 0:
-            discounted_price = 0
-            logger.warning(f"[PROMO REPLY DIRECT] Итоговая сумма после применения промокода меньше 0, установлена в 0")
+        # Проверяем, что итоговая сумма не меньше 1₽ (для фиксированных промокодов)
+        if discounted_price < 1:
+            discounted_price = 1.0
+            logger.warning(f"[PROMO REPLY DIRECT] Итоговая сумма после применения промокода меньше 1₽, установлена в 1₽")
         
-        logger.info(f"[PROMO REPLY DIRECT] Результат применения промокода: success={success}, discounted_price={discounted_price}, message='{message_text}'")
+        logger.info(f"[PROMO REPLY DIRECT] Результат применения промокода: success={success}, discounted_price={discounted_price}, message='{message_text}', is_first_month_only={is_first_month_only}")
         
         if success:
             # Промокод применен успешно - используем существующую логику из main_text_handler
@@ -857,7 +857,9 @@ def handle_promo_reply_direct(message):
                     "plan_type": plan_type,
                     "period_type": period_type,
                     "payment_id": new_payment_id,
-                    "promocode": promo_code
+                    "promocode": promo_code,
+                    "original_price": str(original_price),  # Сохраняем полную стоимость для рекуррентных платежей
+                    "is_first_month_promo": "true" if is_first_month_only else "false"  # Флаг промокода только на первый месяц
                 }
                 if group_size:
                     metadata["group_size"] = str(group_size)
@@ -950,6 +952,15 @@ def handle_promo_reply_direct(message):
                     logger.info(f"[PROMO REPLY DIRECT] ✅ Сообщение отправлено через send_message: message_id={sent_msg.message_id if sent_msg else 'None'}")
                 except Exception as send2_e:
                     logger.error(f"[PROMO REPLY DIRECT] ❌ Ошибка отправки через send_message: {send2_e}", exc_info=True)
+            
+            # Если промокод только на первый месяц, отправляем отдельное информационное сообщение
+            if is_first_month_only:
+                try:
+                    info_text = "ℹ️ Действие промокода распространяется только на 1 месяц оплаты. Начиная со следующего регулярного списания, будет идти полная стоимость тарифа."
+                    bot.send_message(chat_id, info_text, parse_mode='HTML')
+                    logger.info(f"[PROMO REPLY DIRECT] ✅ Информационное сообщение о промокоде отправлено: is_first_month_only=True")
+                except Exception as info_e:
+                    logger.error(f"[PROMO REPLY DIRECT] ❌ Ошибка отправки информационного сообщения: {info_e}", exc_info=True)
             
             # Удаляем состояние промокода
             del user_promo_state[user_id]
