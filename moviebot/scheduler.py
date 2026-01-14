@@ -40,8 +40,6 @@ from moviebot.utils.helpers import has_notifications_access
 
 logger = logging.getLogger(__name__)
 
-conn = get_db_connection()
-cursor = conn.cursor()
 plans_tz = PLANS_TZ  # Для обратной совместимости
 
 # bot и scheduler будут установлены из main.py
