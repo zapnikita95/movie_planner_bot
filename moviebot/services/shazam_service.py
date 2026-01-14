@@ -744,6 +744,9 @@ def search_movies(query, top_k=15):
                 
                 distance = float(D[0][i])
                 
+                # Проверяем наличие overview для обратной совместимости
+                has_overview = row.get('has_overview', False) if 'has_overview' in row.index else False
+                
                 # ===== УЛУЧШЕННОЕ РАНЖИРОВАНИЕ =====
                 # 1. Базовый семантический score (чем меньше distance, тем лучше)
                 base_score = 1.0 - distance
