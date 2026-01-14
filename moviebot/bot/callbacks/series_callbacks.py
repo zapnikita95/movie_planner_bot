@@ -964,33 +964,73 @@ def register_series_callbacks(bot):
                     auto_marked_episodes = []
                     
                     if is_watched:
-                        # ДВОЙНОЙ КЛИК: эпизод уже просмотрен - отмечаем все непросмотренные до этой серии
+                        # ДВОЙНОЙ КЛИК: эпизод уже просмотрен - отмечаем все непросмотренные до этой серии ВО ВСЕХ СЕЗОНАХ
                         ep_num_int = int(ep_num) if ep_num.isdigit() else 0
+                        season_num_int = int(season_num) if str(season_num).isdigit() else 0
                         
-                        # ВАЖНО: Получаем все просмотренные эпизоды ДО начала отметки новых
+                        # ВАЖНО: Получаем все просмотренные эпизоды ДО начала отметки новых (во всех сезонах)
                         cursor_local.execute('''
-                            SELECT episode_number FROM series_tracking 
+                            SELECT season_number, episode_number FROM series_tracking 
                             WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                            AND season_number = %s AND watched = TRUE
-                        ''', (chat_id, film_id, user_id, season_num))
+                            AND watched = TRUE
+                        ''', (chat_id, film_id, user_id))
                         watched_episodes_set_before = set()
                         for w_row in cursor_local.fetchall():
-                            watched_ep_num = w_row.get('episode_number') if isinstance(w_row, dict) else w_row[0]
-                            watched_episodes_set_before.add(int(watched_ep_num) if str(watched_ep_num).isdigit() else 0)
+                            watched_season = w_row.get('season_number') if isinstance(w_row, dict) else w_row[0]
+                            watched_ep_num = w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1]
+                            watched_season_int = int(watched_season) if str(watched_season).isdigit() else 0
+                            watched_ep_num_int = int(watched_ep_num) if str(watched_ep_num).isdigit() else 0
+                            watched_episodes_set_before.add((watched_season_int, watched_ep_num_int))
                         
-                        # Находим все непросмотренные эпизоды до текущего (включительно)
-                        # Включаем только те, которые были непросмотрены ДО начала автоотметки
-                        for ep in episodes_sorted:
-                            ep_current_num = int(ep.get('episodeNumber', 0)) if str(ep.get('episodeNumber', '')).isdigit() else 0
-                            if ep_current_num <= ep_num_int and ep_current_num not in watched_episodes_set_before:
-                                # Отмечаем эпизод
-                                cursor_local.execute('''
-                                    INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
-                                    VALUES (%s, %s, %s, %s, %s, TRUE)
-                                    ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
-                                    DO UPDATE SET watched = TRUE
-                                ''', (chat_id, film_id, user_id, season_num, str(ep_current_num)))
-                                auto_marked_episodes.append((season_num, str(ep_current_num)))
+                        # Получаем ВСЕ сезоны сериала и сортируем их
+                        all_seasons_sorted = sorted(seasons_data, key=lambda s: int(s.get('number', 0)) if str(s.get('number', '')).isdigit() else 0)
+                        
+                        # Проходим по всем сезонам до текущего (включительно)
+                        # Это работает для любого сезона, включая первый
+                        for current_season in all_seasons_sorted:
+                            current_season_num = current_season.get('number', '')
+                            current_season_num_int = int(current_season_num) if str(current_season_num).isdigit() else 0
+                            
+                            # Если это сезон раньше текущего - отмечаем все непросмотренные эпизоды этого сезона
+                            if current_season_num_int < season_num_int:
+                                current_episodes = current_season.get('episodes', [])
+                                current_episodes_sorted = sorted(current_episodes, key=lambda e: int(e.get('episodeNumber', 0)) if str(e.get('episodeNumber', '')).isdigit() else 0)
+                                
+                                for ep in current_episodes_sorted:
+                                    ep_current_num = int(ep.get('episodeNumber', 0)) if str(ep.get('episodeNumber', '')).isdigit() else 0
+                                    if (current_season_num_int, ep_current_num) not in watched_episodes_set_before:
+                                        # Отмечаем эпизод
+                                        cursor_local.execute('''
+                                            INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                                            VALUES (%s, %s, %s, %s, %s, TRUE)
+                                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
+                                            DO UPDATE SET watched = TRUE
+                                        ''', (chat_id, film_id, user_id, str(current_season_num), str(ep_current_num)))
+                                        auto_marked_episodes.append((str(current_season_num), str(ep_current_num)))
+                            
+                            # Если это текущий сезон (может быть любой, включая первый) - отмечаем все непросмотренные до выбранной серии
+                            elif current_season_num_int == season_num_int:
+                                current_episodes = current_season.get('episodes', [])
+                                current_episodes_sorted = sorted(current_episodes, key=lambda e: int(e.get('episodeNumber', 0)) if str(e.get('episodeNumber', '')).isdigit() else 0)
+                                
+                                # Отмечаем все непросмотренные эпизоды до выбранной серии включительно
+                                # Это работает даже если в сезоне 500+ серий
+                                for ep in current_episodes_sorted:
+                                    ep_current_num = int(ep.get('episodeNumber', 0)) if str(ep.get('episodeNumber', '')).isdigit() else 0
+                                    # Условие: номер эпизода <= выбранного И эпизод не был просмотрен до начала автоотметки
+                                    if ep_current_num <= ep_num_int and (current_season_num_int, ep_current_num) not in watched_episodes_set_before:
+                                        # Отмечаем эпизод
+                                        cursor_local.execute('''
+                                            INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                                            VALUES (%s, %s, %s, %s, %s, TRUE)
+                                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
+                                            DO UPDATE SET watched = TRUE
+                                        ''', (chat_id, film_id, user_id, str(current_season_num), str(ep_current_num)))
+                                        auto_marked_episodes.append((str(current_season_num), str(ep_current_num)))
+                            
+                            # Если сезон после текущего - не обрабатываем (выходим из цикла)
+                            else:
+                                break
                         
                         # ВАЖНО: Добавляем изначально просмотренную серию в список для отмены
                         # чтобы при отмене она тоже была удалена
