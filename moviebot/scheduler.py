@@ -147,46 +147,30 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                     if streaming_done:
                         logger.info(f"[PLAN NOTIFICATION] streaming_done=True для плана {plan_id}, кинотеатры не показываем")
                     elif streaming_service and streaming_url:
-                        text += f"\n\n📺 <b>Онлайн-кинотеатр:</b> <a href='{streaming_url}'>{streaming_service}</a>"
-                        logger.info(f"[PLAN NOTIFICATION] Показываем ссылку на кинотеатр {streaming_service} для плана {plan_id}")
-                    else:
-                        # ... (твой код с кнопками кинотеатров остаётся без изменений)
+                        # Показываем выбранный кинотеатр с кнопкой для перехода
+                        text += f"\n\n📺 <b>Выбранный онлайн-кинотеатр:</b> {streaming_service}"
+                        if not markup:
+                            markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton(streaming_service, url=streaming_url))
+                        
+                        # Добавляем кнопку "Перейти к описанию", если есть kp_id
                         cursor_local.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                         movie_row = cursor_local.fetchone()
                         kp_id = None
                         if movie_row:
                             kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
-                       
-                        sources_dict = {}
-                        if ticket_file_id:
+                        
+                        if kp_id:
                             try:
-                                sources_dict = json.loads(ticket_file_id)
+                                kp_id_int = int(kp_id)
+                                markup.add(InlineKeyboardButton("◀️ Перейти к описанию", callback_data=f"back_to_film:{kp_id_int}"))
                             except:
                                 pass
-                       
-                        if not sources_dict and kp_id:
-                            # Получаем sources из API
-                            try:
-                                sources = get_external_sources(kp_id)
-                                if sources:
-                                    sources_dict = {platform: url for platform, url in sources[:6]}
-                                    sources_json = json.dumps(sources_dict, ensure_ascii=False)
-                                    cursor_local.execute('''
-                                        UPDATE plans
-                                        SET ticket_file_id = %s
-                                        WHERE id = %s AND chat_id = %s
-                                    ''', (sources_json, plan_id, chat_id))
-                                    conn_local.commit()
-                            except Exception as e:
-                                logger.warning(f"[PLAN NOTIFICATION] Ошибка получения sources для kp_id={kp_id}: {e}")
-                       
-                        if sources_dict:
-                            if not markup:
-                                markup = InlineKeyboardMarkup(row_width=2)
-                            for platform, url in list(sources_dict.items())[:6]:
-                                markup.add(InlineKeyboardButton(platform, url=url))
-                            text += f"\n\n📺 <b>Выберите онлайн-кинотеатр для просмотра:</b>"
-                            logger.info(f"[PLAN NOTIFICATION] Показываем кнопки с кинотеатрами для плана {plan_id}")
+                        
+                        logger.info(f"[PLAN NOTIFICATION] Показываем выбранный кинотеатр {streaming_service} для плана {plan_id}")
+                    else:
+                        # Если кинотеатр не выбран, не показываем кнопки (пользователь может выбрать позже через сообщение планирования)
+                        logger.info(f"[PLAN NOTIFICATION] Кинотеатр не выбран для плана {plan_id}")
        
         # Новый блок для планов "в кино"
         elif plan_type == 'cinema' and plan_id:

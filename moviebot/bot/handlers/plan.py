@@ -5,6 +5,7 @@ from moviebot.bot.bot_init import bot
 import logging
 import re
 import pytz
+import json
 from datetime import datetime, timedelta
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -250,9 +251,83 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
         except (ValueError, TypeError) as e:
             logger.warning(f"[PROCESS PLAN] Не удалось преобразовать kp_id в int: {kp_id}, ошибка: {e}")
     
+    # Проверяем, есть ли уже выбранный кинотеатр
+    selected_streaming_service = None
+    selected_streaming_url = None
+    if plan_id:
+        conn_check = get_db_connection()
+        cursor_check = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_check.execute('SELECT streaming_service, streaming_url FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                row = cursor_check.fetchone()
+                if row:
+                    if isinstance(row, dict):
+                        selected_streaming_service = row.get('streaming_service')
+                        selected_streaming_url = row.get('streaming_url')
+                    else:
+                        selected_streaming_service = row[0] if len(row) > 0 else None
+                        selected_streaming_url = row[1] if len(row) > 1 else None
+        finally:
+            try:
+                cursor_check.close()
+            except:
+                pass
+            try:
+                conn_check.close()
+            except:
+                pass
+    
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
-    if plan_type == 'home' and sources:
-        text += f"\n\n📺 <b>Онлайн-кинотеатры для просмотра:</b>"
+    
+    # Для планов "дома" проверяем, есть ли источники (онлайн-кинотеатры)
+    if plan_type == 'home' and plan_id and kp_id:
+        # Если кинотеатр уже выбран, показываем его с галкой
+        if selected_streaming_service:
+            if not markup.keyboard:
+                markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton(f"✅ {selected_streaming_service}", callback_data=f"plan:show_streaming:{plan_id}"))
+        else:
+            # Проверяем, есть ли уже сохраненные источники в БД
+            conn_check = get_db_connection()
+            cursor_check = get_db_cursor()
+            has_sources = False
+            try:
+                with db_lock:
+                    cursor_check.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                    row = cursor_check.fetchone()
+                    if row:
+                        ticket_file_id = row.get('ticket_file_id') if isinstance(row, dict) else row[0]
+                        if ticket_file_id:
+                            try:
+                                sources_dict = json.loads(ticket_file_id)
+                                if sources_dict:
+                                    has_sources = True
+                            except:
+                                pass
+            finally:
+                try:
+                    cursor_check.close()
+                except:
+                    pass
+                try:
+                    conn_check.close()
+                except:
+                    pass
+            
+            # Показываем кнопку, если источники есть или загружаются в фоне (если есть kp_id, источники могут быть)
+            if has_sources or (sources is not None and len(sources) > 0):
+                text += "\n\nВы можете выбрать онлайн-кинотеатр для просмотра:"
+                if not markup.keyboard:
+                    markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"plan:show_streaming:{plan_id}"))
+            elif kp_id:
+                # Если kp_id есть, но источники еще не загружены, все равно показываем кнопку
+                # Источники загрузятся при нажатии на кнопку
+                text += "\n\nВы можете выбрать онлайн-кинотеатр для просмотра:"
+                if not markup.keyboard:
+                    markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"plan:show_streaming:{plan_id}"))
     
     bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
@@ -774,15 +849,15 @@ def show_schedule(message):
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
             
-            # Строка 2: Рандом
+            # Строка 2: Поиск
             markup.row(
-                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random")
+                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
             )
             
-            # Строка 3: Поиск / Шазам
+            # Строка 3: Рандом / Шазам
             elias_text = "🔮 Шазам" if has_shazam_access else "🔒 Шазам"
             markup.row(
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
+                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"),
                 InlineKeyboardButton(elias_text, callback_data="shazam:start")
             )
             
@@ -2400,26 +2475,59 @@ def stream_sel_callback(call):
         except:
             pass
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("select_streaming:"))
-def select_streaming_callback(call):
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan:show_streaming:"))
+def show_streaming_list_callback(call):
+    """Показывает список онлайн-кинотеатров для выбора"""
     try:
-        bot.answer_callback_query(call.id, "Выбрано!")
-
+        bot.answer_callback_query(call.id)
+        
         parts = call.data.split(":")
-        plan_id = int(parts[1])
-        platform = parts[2]
-        url = ':'.join(parts[3:])  # собираем url обратно (если были :)
-
+        plan_id = int(parts[2])
         chat_id = call.message.chat.id
         message_id = call.message.message_id
-
-        # Сохраняем выбор
+        
+        # Получаем источники из БД
         conn_local = get_db_connection()
         cursor_local = get_db_cursor()
+        sources_dict = {}
+        film_title = None
+        plan_datetime = None
+        kp_id = None
         try:
             with db_lock:
-                cursor_local.execute('UPDATE plans SET streaming_platform = %s, streaming_url = %s WHERE id = %s AND chat_id = %s', (platform, url, plan_id, chat_id))
-                conn_local.commit()
+                cursor_local.execute('''
+                    SELECT ticket_file_id, film_id, plan_datetime 
+                    FROM plans 
+                    WHERE id = %s AND chat_id = %s
+                ''', (plan_id, chat_id))
+                row = cursor_local.fetchone()
+                if row:
+                    if isinstance(row, dict):
+                        ticket_file_id = row.get('ticket_file_id')
+                        film_id = row.get('film_id')
+                        plan_datetime = row.get('plan_datetime')
+                    else:
+                        ticket_file_id = row[0] if len(row) > 0 else None
+                        film_id = row[1] if len(row) > 1 else None
+                        plan_datetime = row[2] if len(row) > 2 else None
+                    
+                    if ticket_file_id:
+                        try:
+                            sources_dict = json.loads(ticket_file_id)
+                        except:
+                            pass
+                    
+                    # Получаем название фильма и kp_id
+                    if film_id:
+                        cursor_local.execute('SELECT title, kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        movie_row = cursor_local.fetchone()
+                        if movie_row:
+                            if isinstance(movie_row, dict):
+                                film_title = movie_row.get('title')
+                                kp_id = movie_row.get('kp_id')
+                            else:
+                                film_title = movie_row[0] if len(movie_row) > 0 else None
+                                kp_id = movie_row[1] if len(movie_row) > 1 else None
         finally:
             try:
                 cursor_local.close()
@@ -2429,15 +2537,287 @@ def select_streaming_callback(call):
                 conn_local.close()
             except:
                 pass
+        
+        # Если источников нет в БД, пытаемся получить из API
+        if not sources_dict and kp_id:
+            try:
+                from moviebot.api.kinopoisk_api import get_external_sources
+                sources = get_external_sources(kp_id)
+                if sources:
+                    sources_dict = {platform: url for platform, url in sources[:6]}
+                    # Сохраняем в БД
+                    sources_json = json.dumps(sources_dict, ensure_ascii=False)
+                    conn_save = get_db_connection()
+                    cursor_save = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_save.execute('UPDATE plans SET ticket_file_id = %s WHERE id = %s AND chat_id = %s', (sources_json, plan_id, chat_id))
+                            conn_save.commit()
+                    finally:
+                        try:
+                            cursor_save.close()
+                        except:
+                            pass
+                        try:
+                            conn_save.close()
+                        except:
+                            pass
+            except Exception as e:
+                logger.warning(f"[SHOW STREAMING] Ошибка получения sources: {e}")
+        
+        if not sources_dict:
+            bot.answer_callback_query(call.id, "❌ Онлайн-кинотеатры не найдены", show_alert=True)
+            return
+        
+        # Формируем сообщение со списком кинотеатров
+        text = "Выберите онлайн-кинотеатр:"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Получаем уже выбранный кинотеатр
+        conn_check = get_db_connection()
+        cursor_check = get_db_cursor()
+        selected_service = None
+        try:
+            with db_lock:
+                cursor_check.execute('SELECT streaming_service FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                row = cursor_check.fetchone()
+                if row:
+                    selected_service = row.get('streaming_service') if isinstance(row, dict) else row[0]
+        finally:
+            try:
+                cursor_check.close()
+            except:
+                pass
+            try:
+                conn_check.close()
+            except:
+                pass
+        
+        # Добавляем кнопки с кинотеатрами
+        for platform, url in list(sources_dict.items())[:6]:
+            if selected_service == platform:
+                markup.add(InlineKeyboardButton(f"✅ {platform}", callback_data=f"plan:select_streaming:{plan_id}:{platform}:{url}"))
+            else:
+                markup.add(InlineKeyboardButton(platform, callback_data=f"plan:select_streaming:{plan_id}:{platform}:{url}"))
+        
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"plan:cancel_streaming:{plan_id}"))
+        
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
+        
+    except Exception as e:
+        logger.error(f"[SHOW STREAMING] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
 
-        bot.edit_message_text(
-            f"✅ Запомнили: {platform}\nСсылка: {url}\n\nВ день просмотра напомним!",
-            chat_id, message_id,
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton("◀️ Назад к плану", callback_data=f"back_to_plan:{plan_id}")
-            )
-        )
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan:select_streaming:"))
+def select_streaming_callback(call):
+    """Обработчик выбора онлайн-кинотеатра"""
+    try:
+        bot.answer_callback_query(call.id)
+        
+        parts = call.data.split(":")
+        plan_id = int(parts[2])
+        platform = parts[3]
+        url = ':'.join(parts[4:])  # собираем url обратно (если были :)
+        
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Сохраняем выбор в БД
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        film_title = None
+        plan_datetime = None
+        kp_id = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    UPDATE plans 
+                    SET streaming_service = %s, streaming_url = %s 
+                    WHERE id = %s AND chat_id = %s
+                ''', (platform, url, plan_id, chat_id))
+                conn_local.commit()
+                
+                # Получаем информацию о плане для обновления сообщения
+                cursor_local.execute('''
+                    SELECT film_id, plan_datetime 
+                    FROM plans 
+                    WHERE id = %s AND chat_id = %s
+                ''', (plan_id, chat_id))
+                row = cursor_local.fetchone()
+                if row:
+                    if isinstance(row, dict):
+                        film_id = row.get('film_id')
+                        plan_datetime = row.get('plan_datetime')
+                    else:
+                        film_id = row[0] if len(row) > 0 else None
+                        plan_datetime = row[1] if len(row) > 1 else None
+                    
+                    if film_id:
+                        cursor_local.execute('SELECT title, kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        movie_row = cursor_local.fetchone()
+                        if movie_row:
+                            if isinstance(movie_row, dict):
+                                film_title = movie_row.get('title')
+                                kp_id = movie_row.get('kp_id')
+                            else:
+                                film_title = movie_row[0] if len(movie_row) > 0 else None
+                                kp_id = movie_row[1] if len(movie_row) > 1 else None
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        # Формируем обновленное сообщение планирования
+        if plan_datetime:
+            from datetime import datetime
+            import pytz
+            if isinstance(plan_datetime, str):
+                from dateutil import parser
+                plan_datetime = parser.parse(plan_datetime)
+            if plan_datetime.tzinfo is None:
+                plan_datetime = pytz.UTC.localize(plan_datetime)
+            date_str = plan_datetime.strftime('%d.%m %H:%M')
+        else:
+            date_str = "N/A"
+        
+        text = f"✅ <b>{film_title or 'Фильм'}</b> запланирован на {date_str} дома"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton(f"✅ {platform}", callback_data=f"plan:show_streaming:{plan_id}"))
+        if kp_id:
+            try:
+                kp_id_int = int(kp_id)
+                markup.add(InlineKeyboardButton("📌 Вернуться к описанию", callback_data=f"back_to_film:{kp_id_int}"))
+            except:
+                pass
+        
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+        
     except Exception as e:
         logger.error(f"[SELECT STREAMING] Ошибка: {e}", exc_info=True)
-        bot.answer_callback_query(call.id, "Ошибка сохранения", show_alert=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка сохранения", show_alert=True)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("plan:cancel_streaming:"))
+def cancel_streaming_callback(call):
+    """Отмена выбора онлайн-кинотеатра - возврат к сообщению планирования"""
+    try:
+        bot.answer_callback_query(call.id)
+        
+        parts = call.data.split(":")
+        plan_id = int(parts[2])
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Получаем информацию о плане
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        film_title = None
+        plan_datetime = None
+        kp_id = None
+        selected_streaming_service = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT film_id, plan_datetime, streaming_service 
+                    FROM plans 
+                    WHERE id = %s AND chat_id = %s
+                ''', (plan_id, chat_id))
+                row = cursor_local.fetchone()
+                if row:
+                    if isinstance(row, dict):
+                        film_id = row.get('film_id')
+                        plan_datetime = row.get('plan_datetime')
+                        selected_streaming_service = row.get('streaming_service')
+                    else:
+                        film_id = row[0] if len(row) > 0 else None
+                        plan_datetime = row[1] if len(row) > 1 else None
+                        selected_streaming_service = row[2] if len(row) > 2 else None
+                    
+                    if film_id:
+                        cursor_local.execute('SELECT title, kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        movie_row = cursor_local.fetchone()
+                        if movie_row:
+                            if isinstance(movie_row, dict):
+                                film_title = movie_row.get('title')
+                                kp_id = movie_row.get('kp_id')
+                            else:
+                                film_title = movie_row[0] if len(movie_row) > 0 else None
+                                kp_id = movie_row[1] if len(movie_row) > 1 else None
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        # Формируем сообщение планирования
+        if plan_datetime:
+            from datetime import datetime
+            import pytz
+            if isinstance(plan_datetime, str):
+                from dateutil import parser
+                plan_datetime = parser.parse(plan_datetime)
+            if plan_datetime.tzinfo is None:
+                plan_datetime = pytz.UTC.localize(plan_datetime)
+            date_str = plan_datetime.strftime('%d.%m %H:%M')
+        else:
+            date_str = "N/A"
+        
+        text = f"✅ <b>{film_title or 'Фильм'}</b> запланирован на {date_str} дома"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        # Проверяем, есть ли источники для показа кнопки выбора
+        conn_check = get_db_connection()
+        cursor_check = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_check.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                row = cursor_check.fetchone()
+                sources_dict = {}
+                if row:
+                    ticket_file_id = row.get('ticket_file_id') if isinstance(row, dict) else row[0]
+                    if ticket_file_id:
+                        try:
+                            sources_dict = json.loads(ticket_file_id)
+                        except:
+                            pass
+                
+                if sources_dict or kp_id:
+                    if selected_streaming_service:
+                        markup.add(InlineKeyboardButton(f"✅ {selected_streaming_service}", callback_data=f"plan:show_streaming:{plan_id}"))
+                    else:
+                        text += "\n\nВы можете выбрать онлайн-кинотеатр для просмотра:"
+                        markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"plan:show_streaming:{plan_id}"))
+        finally:
+            try:
+                cursor_check.close()
+            except:
+                pass
+            try:
+                conn_check.close()
+            except:
+                pass
+        
+        if kp_id:
+            try:
+                kp_id_int = int(kp_id)
+                markup.add(InlineKeyboardButton("📌 Вернуться к описанию", callback_data=f"back_to_film:{kp_id_int}"))
+            except:
+                pass
+        
+        bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+        
+    except Exception as e:
+        logger.error(f"[CANCEL STREAMING] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)

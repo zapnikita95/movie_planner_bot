@@ -111,15 +111,15 @@ def register_start_handlers(bot):
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
 
-            # Строка 2: Рандом
+            # Строка 2: Поиск
             markup.row(
-                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random")
+                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
             )
 
-            # Строка 3: Поиск / Шазам
+            # Строка 3: Рандом / Шазам
             elias_text = "🔮 Шазам" if has_shazam_access else "🔒 Шазам"
             markup.row(
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
+                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"),
                 InlineKeyboardButton(elias_text, callback_data="shazam:start")
             )
 
@@ -416,15 +416,15 @@ def register_start_handlers(bot):
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
 
-            # Строка 2: Рандом
+            # Строка 2: Поиск
             markup.row(
-                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random")
+                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
             )
 
-            # Строка 3: Поиск / Шазам
+            # Строка 3: Рандом / Шазам
             elias_text = "🔮 Шазам" if has_shazam_access else "🔒 Шазам"
             markup.row(
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
+                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"),
                 InlineKeyboardButton(elias_text, callback_data="shazam:start")
             )
             
