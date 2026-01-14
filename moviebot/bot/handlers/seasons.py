@@ -15,7 +15,7 @@ from moviebot.database.db_operations import log_request
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.utils.helpers import has_notifications_access
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
-from moviebot.states import user_episodes_state
+from moviebot.states import user_episodes_state, user_episode_auto_mark_state
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
@@ -165,25 +165,61 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         if total_episodes > EPISODES_PER_PAGE:
             text += f"Страница {page}/{total_pages}\n\n"
         
-        markup = InlineKeyboardMarkup(row_width=2)
+        markup = InlineKeyboardMarkup()
         
-        for ep in page_episodes:
-            ep_num = ep.get('episodeNumber', '')
+        # Если страниц больше 5, используем сетку 4 столбца (4 кнопки в ряд)
+        # Иначе обычное расположение (2 колонки)
+        if total_pages > 5:
+            # Сетка 4 столбца: 4 кнопки в ряд, до 20 строк на странице
+            # Пример: ⬜ 1  ⬜ 6  ⬜ 11 ⬜ 16 (если на странице серии 1-20)
+            #         ⬜ 2  ⬜ 7  ⬜ 12 ⬜ 17
+            #         ⬜ 3  ⬜ 8  ⬜ 13 ⬜ 18
+            #         ...
             
-            with db_lock:
-                cursor_local.execute('''
-                    SELECT watched FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                    AND season_number = %s AND episode_number = %s
-                ''', (chat_id, film_id, user_id, season_num, ep_num))
-                watched_row = cursor_local.fetchone()
-                is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+            buttons_list = []
+            for ep in page_episodes:
+                ep_num = ep.get('episodeNumber', '')
+                
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT watched FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                        AND season_number = %s AND episode_number = %s
+                    ''', (chat_id, film_id, user_id, season_num, ep_num))
+                    watched_row = cursor_local.fetchone()
+                    is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                
+                mark = "✅" if is_watched else "⬜"
+                button_text = f"{mark} {ep_num}"
+                if len(button_text) > 20:
+                    button_text = button_text[:17] + "..."
+                button = InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}")
+                buttons_list.append(button)
             
-            mark = "✅" if is_watched else "⬜"
-            button_text = f"{mark} {ep_num}"
-            if len(button_text) > 20:
-                button_text = button_text[:17] + "..."
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}"))
+            # Разбиваем на ряды по 4 кнопки (4 столбца)
+            for i in range(0, len(buttons_list), 4):
+                row_buttons = buttons_list[i:i+4]
+                markup.row(*row_buttons)
+        else:
+            # Обычное расположение: 2 колонки
+            markup.row_width = 2
+            for ep in page_episodes:
+                ep_num = ep.get('episodeNumber', '')
+                
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT watched FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                        AND season_number = %s AND episode_number = %s
+                    ''', (chat_id, film_id, user_id, season_num, ep_num))
+                    watched_row = cursor_local.fetchone()
+                    is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                
+                mark = "✅" if is_watched else "⬜"
+                button_text = f"{mark} {ep_num}"
+                if len(button_text) > 20:
+                    button_text = button_text[:17] + "..."
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}"))
         
         if total_pages > 1:
             pagination_buttons = []
@@ -244,6 +280,16 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                     break
         
         logger.info(f"[SHOW EPISODES PAGE] Все эпизоды просмотрены: {all_watched}, страница {page}/{total_pages}")
+        
+        # Проверяем, есть ли состояние автоотметки для показа кнопки отмены
+        has_auto_mark = False
+        if user_id in user_episode_auto_mark_state:
+            auto_state = user_episode_auto_mark_state[user_id]
+            if auto_state.get('kp_id') == kp_id and auto_state.get('season_num') == season_num:
+                auto_episodes = auto_state.get('episodes', [])
+                if auto_episodes:
+                    has_auto_mark = True
+                    markup.add(InlineKeyboardButton("❌ Отмена автоотметки", callback_data=f"series_episode_cancel_auto:{kp_id}:{season_num}"))
         
         if not all_watched:
             markup.add(InlineKeyboardButton("✅ Все просмотрены", callback_data=f"series_season_all:{kp_id}:{season_num}"))

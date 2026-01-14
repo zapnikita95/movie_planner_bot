@@ -22,7 +22,7 @@ from moviebot.utils.helpers import has_notifications_access
 
 from moviebot.scheduler import send_series_notification, check_series_for_new_episodes
 
-from moviebot.states import user_episodes_state, rating_messages, user_plan_state
+from moviebot.states import user_episodes_state, rating_messages, user_plan_state, user_episode_auto_mark_state
 
 from moviebot.api.kinopoisk_api import get_facts
 
@@ -877,7 +877,7 @@ def register_series_callbacks(bot):
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:"))
     def handle_episode_toggle(call):
-        """Обработчик переключения статуса просмотра эпизода"""
+        """Обработчик переключения статуса просмотра эпизода с поддержкой двойного клика для автоотметки"""
         try:
             bot.answer_callback_query(call.id)
             # Формат: series_episode:{kp_id}:{season_num}:{ep_num}
@@ -927,9 +927,29 @@ def register_series_callbacks(bot):
                     bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
                     return
             
-            # Проверяем текущий статус и переключаем
-            with db_lock:
+            # Получаем данные о сезоне для автоотметки
+            seasons_data = get_seasons_data(kp_id)
+            season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
+            if not season:
+                logger.warning(f"[EPISODE TOGGLE] Сезон не найден: season={season_num}, kp_id={kp_id}")
+                bot.answer_callback_query(call.id, "❌ Сезон не найден", show_alert=True)
                 try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+                return
+            
+            episodes = season.get('episodes', [])
+            # Сортируем эпизоды по номеру
+            episodes_sorted = sorted(episodes, key=lambda e: int(e.get('episodeNumber', 0)))
+            
+            try:
+                # Проверяем текущий статус
+                with db_lock:
                     cursor_local.execute('''
                         SELECT watched FROM series_tracking 
                         WHERE chat_id = %s AND film_id = %s AND user_id = %s 
@@ -940,31 +960,83 @@ def register_series_callbacks(bot):
                     if watched_row:
                         is_watched = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
                     
-                    # Переключаем статус
+                    # Логика обработки
+                    auto_marked_episodes = []
+                    
                     if is_watched:
-                        # Убираем отметку
+                        # ДВОЙНОЙ КЛИК: эпизод уже просмотрен - отмечаем все непросмотренные до этой серии
+                        ep_num_int = int(ep_num) if ep_num.isdigit() else 0
+                        
+                        # ВАЖНО: Получаем все просмотренные эпизоды ДО начала отметки новых
                         cursor_local.execute('''
-                            DELETE FROM series_tracking 
+                            SELECT episode_number FROM series_tracking 
                             WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                            AND season_number = %s AND episode_number = %s
-                        ''', (chat_id, film_id, user_id, season_num, ep_num))
+                            AND season_number = %s AND watched = TRUE
+                        ''', (chat_id, film_id, user_id, season_num))
+                        watched_episodes_set_before = set()
+                        for w_row in cursor_local.fetchall():
+                            watched_ep_num = w_row.get('episode_number') if isinstance(w_row, dict) else w_row[0]
+                            watched_episodes_set_before.add(int(watched_ep_num) if str(watched_ep_num).isdigit() else 0)
+                        
+                        # Находим все непросмотренные эпизоды до текущего (включительно)
+                        # Включаем только те, которые были непросмотрены ДО начала автоотметки
+                        for ep in episodes_sorted:
+                            ep_current_num = int(ep.get('episodeNumber', 0)) if str(ep.get('episodeNumber', '')).isdigit() else 0
+                            if ep_current_num <= ep_num_int and ep_current_num not in watched_episodes_set_before:
+                                # Отмечаем эпизод
+                                cursor_local.execute('''
+                                    INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                                    VALUES (%s, %s, %s, %s, %s, TRUE)
+                                    ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
+                                    DO UPDATE SET watched = TRUE
+                                ''', (chat_id, film_id, user_id, season_num, str(ep_current_num)))
+                                auto_marked_episodes.append((season_num, str(ep_current_num)))
+                        
+                        # ВАЖНО: Добавляем изначально просмотренную серию в список для отмены
+                        # чтобы при отмене она тоже была удалена
+                        auto_marked_episodes.append((season_num, ep_num))
+                        
+                        # Сохраняем список автоматически отмеченных эпизодов для возможной отмены
+                        user_episode_auto_mark_state[user_id] = {
+                            'kp_id': kp_id,
+                            'season_num': season_num,
+                            'episodes': auto_marked_episodes
+                        }
+                        
+                        logger.info(f"[EPISODE TOGGLE] Автоотметка: отмечено {len(auto_marked_episodes)} эпизодов (включая изначальную {ep_num})")
+                        
                     else:
-                        # Добавляем отметку эпизода
+                        # ПЕРВЫЙ КЛИК: эпизод не просмотрен - отмечаем его как обычно
                         cursor_local.execute('''
                             INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
                             VALUES (%s, %s, %s, %s, %s, TRUE)
                             ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
                             DO UPDATE SET watched = TRUE
                         ''', (chat_id, film_id, user_id, season_num, ep_num))
+                        
+                        # Очищаем состояние автоотметки, так как это новая отметка
+                        if user_id in user_episode_auto_mark_state:
+                            auto_state = user_episode_auto_mark_state[user_id]
+                            if auto_state.get('kp_id') == kp_id and auto_state.get('season_num') == season_num:
+                                del user_episode_auto_mark_state[user_id]
                     
                     conn_local.commit()
-                except Exception as db_e:
-                    logger.error(f"[EPISODE TOGGLE] Ошибка работы с БД: {db_e}", exc_info=True)
-                    try:
-                        conn_local.rollback()
-                    except:
-                        pass
-                    raise
+            except Exception as db_e:
+                logger.error(f"[EPISODE TOGGLE] Ошибка работы с БД: {db_e}", exc_info=True)
+                try:
+                    conn_local.rollback()
+                except:
+                    pass
+                raise
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
             # Обновляем страницу эпизодов
             from moviebot.bot.handlers.seasons import show_episodes_page
@@ -981,6 +1053,100 @@ def register_series_callbacks(bot):
             show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
         except Exception as e:
             logger.error(f"[EPISODE TOGGLE] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_episode_cancel_auto:"))
+    def handle_episode_cancel_auto(call):
+        """Обработчик отмены автоотметки эпизодов"""
+        try:
+            bot.answer_callback_query(call.id)
+            parts = call.data.split(":")
+            if len(parts) < 4:
+                logger.error(f"[EPISODE CANCEL AUTO] Неверный формат callback_data: {call.data}")
+                return
+            
+            kp_id = parts[2]
+            season_num = parts[3]
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            
+            logger.info(f"[EPISODE CANCEL AUTO] Отмена автоотметки: kp_id={kp_id}, season={season_num}, user_id={user_id}")
+            
+            # Получаем список автоматически отмеченных эпизодов
+            if user_id not in user_episode_auto_mark_state:
+                bot.answer_callback_query(call.id, "❌ Нет автоотметки для отмены", show_alert=True)
+                return
+            
+            auto_state = user_episode_auto_mark_state[user_id]
+            if auto_state.get('kp_id') != kp_id or auto_state.get('season_num') != season_num:
+                bot.answer_callback_query(call.id, "❌ Нет автоотметки для этого сезона", show_alert=True)
+                return
+            
+            auto_marked = auto_state.get('episodes', [])
+            if not auto_marked:
+                bot.answer_callback_query(call.id, "❌ Нет эпизодов для отмены", show_alert=True)
+                return
+            
+            # Получаем film_id
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            
+            try:
+                with db_lock:
+                    cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                    row = cursor_local.fetchone()
+                    if not row:
+                        bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
+                        return
+                    
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    
+                    # Удаляем все автоматически отмеченные эпизоды
+                    for season_num_mark, ep_num_mark in auto_marked:
+                        cursor_local.execute('''
+                            DELETE FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                            AND season_number = %s AND episode_number = %s
+                        ''', (chat_id, film_id, user_id, season_num_mark, ep_num_mark))
+                    
+                    conn_local.commit()
+                    logger.info(f"[EPISODE CANCEL AUTO] Отменено {len(auto_marked)} эпизодов")
+                
+                # Удаляем состояние автоотметки
+                del user_episode_auto_mark_state[user_id]
+                
+                # Обновляем страницу эпизодов
+                from moviebot.bot.handlers.seasons import show_episodes_page
+                message_id = call.message.message_id if call.message else None
+                message_thread_id = getattr(call.message, 'message_thread_id', None)
+                
+                # Получаем текущую страницу из состояния
+                current_page = 1
+                if user_id in user_episodes_state:
+                    state = user_episodes_state[user_id]
+                    if state.get('kp_id') == kp_id and state.get('season_num') == season_num:
+                        current_page = state.get('page', 1)
+                
+                show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
+                
+                bot.answer_callback_query(call.id, f"✅ Отменено {len(auto_marked)} эпизодов")
+                
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"[EPISODE CANCEL AUTO] Ошибка: {e}", exc_info=True)
             try:
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:

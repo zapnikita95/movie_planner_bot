@@ -44,6 +44,7 @@ user_cancel_subscription_state = {}  # user_id: {'subscription_id': int, 'subscr
 
 # Состояния работы с сериалами
 user_episodes_state = {}  # user_id: {'kp_id': str, 'season_num': int, 'episodes': list, ...}
+user_episode_auto_mark_state = {}  # user_id: {'kp_id': str, 'season_num': int, 'episodes': list of (season_num, episode_num)} - последние автоматически отмеченные серии
 
 # Сообщения для обработки оценок
 rating_messages = {}  # message_id: film_id (для обработки реплаев с оценками)
