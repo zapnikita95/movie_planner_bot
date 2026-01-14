@@ -635,21 +635,23 @@ def search_movies(query, top_k=15):
         # Извлекаем ключевые слова для обычного keyword-матчинга
         keywords = _extract_keywords(query_en)
         
-        # Проверяем, упомянуто ли полное имя актёра
+        # Полные имена актёров/режиссёров (храним на английском, как в датасете)
         known_full_names = [
-            'киану ривз', 'keanu reeves',
-            'леонардо дикаприо', 'leonardo dicaprio',
-            'пол томас андерсон', 'paul thomas anderson',
-            'квентин тарантино', 'quentin tarantino',
-            'мартин скорсезе', 'martin scorsese',
-            # Добавляй по мере необходимости
+            'keanu reeves',
+            'leonardo dicaprio',
+            'paul thomas anderson',
+            'quentin tarantino',
+            'martin scorsese',
+            # Добавь других
         ]
+        
+        # Проверяем, упомянуто ли полное имя (ищем как в запросе, так и в переводе)
+        mentioned_actor = None
         query_lower = query.lower()
         query_en_lower = query_en.lower()
-        mentioned_actor = None
         for name in known_full_names:
             if name in query_lower or name in query_en_lower:
-                mentioned_actor = name
+                mentioned_actor = name  # Используем английское имя для фильтрации
                 break
         
         logger.info(f"[SEARCH MOVIES] Упомянут актёр? {bool(mentioned_actor)}, имя: {mentioned_actor}")
