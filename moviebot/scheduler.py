@@ -1625,6 +1625,7 @@ def send_successful_payment_notification(
                 logger.error(f"[SUCCESSFUL PAYMENT] Ошибка при получении участников для добавления: {e}", exc_info=True)
         
         markup.add(InlineKeyboardButton("✅ Готово", callback_data="payment:success_ok"))
+        markup.add(InlineKeyboardButton("◀️ Главное меню", callback_data="back_to_start_menu"))
         
         # Для личных подписок отправляем в личку пользователя, для групповых - в групповой чат
         if subscription_type == 'personal':

@@ -340,6 +340,10 @@ def register_payment_callbacks(bot_instance):
                         bot_instance.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=None)
                     except:
                         pass
+                    # Очищаем состояние промокода после успешной оплаты
+                    if user_id in user_promo_state:
+                        del user_promo_state[user_id]
+                        logger.info(f"[PAYMENT SUCCESS] Очищено состояние промокода для user_id={user_id}")
                 except Exception as e:
                     logger.error(f"[PAYMENT SUCCESS] Ошибка обработки подтверждения: {e}")
                 return
@@ -1387,6 +1391,10 @@ def register_payment_callbacks(bot_instance):
                 except Exception as e:
                     logger.warning(f"[PAYMENT] Не удалось удалить сообщение: {e}")
                 bot_instance.answer_callback_query(call.id)
+                # Очищаем состояние промокода после успешной оплаты
+                if user_id in user_promo_state:
+                    del user_promo_state[user_id]
+                    logger.info(f"[PAYMENT SUCCESS] Очищено состояние промокода для user_id={user_id}")
                 return
         
             if action.startswith("expand:"):
@@ -3730,6 +3738,7 @@ def register_payment_callbacks(bot_instance):
 
             if action.startswith("subscribe:"):
                 # Обработка подписки
+                logger.info(f"[PAYMENT SUBSCRIBE] Обработка subscribe: action={action}, user_id={user_id}")
                 parts = action.split(":")
                 sub_type = parts[1]  # personal или group
             
@@ -4363,6 +4372,11 @@ def register_payment_callbacks(bot_instance):
                                 InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal")
                             )
 
+                            logger.info(
+                                f"[PAYMENT] Пользователь user_id={user_id} пытается добавить уже существующую подписку "
+                                f"plan_type={plan_type}, предлагаем 'Все режимы'. Отправляем сообщение с кнопками."
+                            )
+                            
                             try:
                                 bot_instance.edit_message_text(
                                     text,
@@ -4373,12 +4387,23 @@ def register_payment_callbacks(bot_instance):
                                 )
                             except Exception as e:
                                 if "message is not modified" not in str(e):
-                                    raise
-
-                            logger.info(
-                                f"[PAYMENT] Пользователь user_id={user_id} пытается добавить уже существующую подписку "
-                                f"plan_type={plan_type}, предлагаем 'Все режимы'"
-                            )
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}", exc_info=True)
+                                    # Пробуем отправить новое сообщение
+                                    try:
+                                        bot_instance.send_message(
+                                            call.message.chat.id,
+                                            text,
+                                            reply_markup=markup,
+                                            parse_mode='HTML'
+                                        )
+                                    except Exception as e2:
+                                        logger.error(f"[PAYMENT] Ошибка отправки нового сообщения: {e2}", exc_info=True)
+                            
+                            # Убеждаемся, что callback query обработан
+                            try:
+                                bot_instance.answer_callback_query(call.id)
+                            except Exception as e:
+                                logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
                             return
 
                         
@@ -7198,21 +7223,48 @@ def register_payment_callbacks(bot_instance):
                     user_id = call.from_user.id
                     chat_id = call.message.chat.id
                     
-                    # Получаем данные из состояния промокода (вместо парсинга из callback_data)
-                    if user_id not in user_promo_state:
-                        bot_instance.answer_callback_query(call.id, "❌ Состояние не найдено", show_alert=True)
+                    # Удаляем сообщение с ошибкой о применённом промокоде
+                    try:
+                        bot_instance.delete_message(chat_id, call.message.message_id)
+                    except Exception as e:
+                        logger.warning(f"[PROMO] Не удалось удалить сообщение: {e}")
+                    
+                    # Получаем данные из состояния промокода или из состояния платежа
+                    sub_type = None
+                    group_size = None
+                    plan_type = None
+                    period_type = None
+                    payment_id = ''
+                    original_price = 0
+                    
+                    # Сначала пробуем получить из состояния промокода
+                    if user_id in user_promo_state:
+                        promo_state = user_promo_state[user_id]
+                        sub_type = promo_state.get('sub_type')
+                        group_size = promo_state.get('group_size')
+                        plan_type = promo_state.get('plan_type')
+                        period_type = promo_state.get('period_type')
+                        payment_id = promo_state.get('payment_id', '')
+                        original_price = promo_state.get('original_price', 0)
+                        # Удаляем состояние промокода
+                        del user_promo_state[user_id]
+                    # Если нет в состоянии промокода, пробуем получить из состояния платежа
+                    elif user_id in user_payment_state:
+                        payment_state = user_payment_state[user_id]
+                        sub_type = payment_state.get('subscription_type')
+                        group_size = payment_state.get('group_size')
+                        plan_type = payment_state.get('plan_type')
+                        period_type = payment_state.get('period_type')
+                        payment_id = payment_state.get('payment_id', '')
+                        original_price = payment_state.get('original_price', payment_state.get('price', 0))
+                        # Если есть промокод в состоянии платежа, используем оригинальную цену
+                        if payment_state.get('promocode'):
+                            original_price = payment_state.get('original_price', original_price)
+                    
+                    # Если всё ещё нет данных, показываем ошибку
+                    if not sub_type or not plan_type or not period_type:
+                        bot_instance.send_message(chat_id, "❌ Не удалось восстановить данные. Пожалуйста, выберите тариф заново.")
                         return
-                    
-                    promo_state = user_promo_state[user_id]
-                    sub_type = promo_state.get('sub_type')
-                    group_size = promo_state.get('group_size')
-                    plan_type = promo_state.get('plan_type')
-                    period_type = promo_state.get('period_type')
-                    payment_id = promo_state.get('payment_id', '')
-                    original_price = promo_state.get('original_price', 0)
-                    
-                    # Удаляем состояние промокода
-                    del user_promo_state[user_id]
                     
                     # Восстанавливаем сообщение с кнопками оплаты
                     period_names = {

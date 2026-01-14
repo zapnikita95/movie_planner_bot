@@ -1011,10 +1011,12 @@ def process_search_query(message, query, reply_to_message=None):
         
         if not films:
             reply_text = f"❌ Ничего не найдено по запросу '{query}'"
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
             if reply_to_message:
-                bot.reply_to(message, reply_text)
+                bot.reply_to(message, reply_text, reply_markup=markup)
             else:
-                bot.send_message(chat_id, reply_text)
+                bot.send_message(chat_id, reply_text, reply_markup=markup)
             return
         
         # Формируем текст и кнопки
@@ -1044,11 +1046,22 @@ def process_search_query(message, query, reply_to_message=None):
                 logger.error(f"[SEARCH] Ошибка обработки фильма {idx+1}: {film_e}", exc_info=True)
                 continue
         
+        markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         results_text += "\n\n🎬 - фильм\n📺 - сериал"
         
         if len(results_text) > 4096:
             results_text = results_text[:4000] + "\n\n... (показаны не все результаты)"
+        
+        # Удаляем сообщение "Укажите запрос для поиска", если оно есть
+        if user_id in user_search_state:
+            prompt_message_id = user_search_state[user_id].get('message_id')
+            if prompt_message_id:
+                try:
+                    bot.delete_message(chat_id, prompt_message_id)
+                    logger.info(f"[SEARCH] Удалено сообщение с промптом поиска: message_id={prompt_message_id}")
+                except Exception as del_e:
+                    logger.warning(f"[SEARCH] Не удалось удалить сообщение с промптом: {del_e}")
         
         if reply_to_message:
             sent_message = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
@@ -1270,7 +1283,9 @@ def handle_search_reply_direct(message):
         
         if not films:
             logger.warning(f"[SEARCH REPLY DIRECT] Ничего не найдено по запросу '{query}'")
-            bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'")
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+            bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
             return
         
         # Формируем сообщение с результатами
@@ -1301,11 +1316,22 @@ def handle_search_reply_direct(message):
                 logger.error(f"[SEARCH REPLY DIRECT] Ошибка обработки фильма {idx+1}: {film_e}", exc_info=True)
                 continue
         
+        markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         results_text += "\n\n🎬 - фильм\n📺 - сериал"
         
         if len(results_text) > 4096:
             results_text = results_text[:4000] + "\n\n... (показаны не все результаты)"
+        
+        # Удаляем сообщение "Укажите запрос для поиска", если оно есть
+        if user_id in user_search_state:
+            prompt_message_id = user_search_state[user_id].get('message_id')
+            if prompt_message_id:
+                try:
+                    bot.delete_message(chat_id, prompt_message_id)
+                    logger.info(f"[SEARCH REPLY DIRECT] Удалено сообщение с промптом поиска: message_id={prompt_message_id}")
+                except Exception as del_e:
+                    logger.warning(f"[SEARCH REPLY DIRECT] Не удалось удалить сообщение с промптом: {del_e}")
         
         try:
             sent_message = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
@@ -1756,7 +1782,25 @@ def main_text_handler(message):
     # Если сообщение не обработано ни одним handler, просто логируем
     logger.info(f"[MAIN TEXT HANDLER] Сообщение не обработано ни одним специализированным handler: text='{text[:100]}', user_id={user_id}, chat_id={chat_id}")
     return
-@bot.message_handler(content_types=['photo', 'document'])
+def check_not_admin_receipt_reply(message):
+    """Проверяет, что сообщение НЕ является реплаем на сообщение админу о платеже"""
+    from moviebot.states import user_check_receipt_state
+    from moviebot.utils.admin import is_admin, is_owner
+    
+    user_id = message.from_user.id
+    
+    # Если это админ и это реплай, проверяем, не является ли это реплаем на сообщение о платеже
+    if (is_admin(user_id) or is_owner(user_id)) and message.reply_to_message:
+        reply_message_id = message.reply_to_message.message_id
+        if reply_message_id in user_check_receipt_state:
+            # Это реплай на сообщение о платеже - не обрабатываем здесь
+            logger.info(f"[MAIN FILE HANDLER] Пропускаем сообщение - это реплай админа {user_id} на сообщение о платеже (message_id={reply_message_id})")
+            return False
+    
+    return True
+
+
+@bot.message_handler(content_types=['photo', 'document'], func=check_not_admin_receipt_reply)
 def main_file_handler(message):
     """Единый хэндлер для всех фото и документов"""
     user_id = message.from_user.id

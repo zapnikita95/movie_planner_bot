@@ -270,7 +270,9 @@ def register_start_handlers(bot):
                 premieres_command(msg)
 
             elif action == 'random':
+                # Исправляем user_id в сообщении - используем call.from_user вместо call.message.from_user
                 msg = call.message
+                msg.from_user = call.from_user  # Используем правильный user_id из callback
                 msg.text = '/random'
                 random_start(msg)
 

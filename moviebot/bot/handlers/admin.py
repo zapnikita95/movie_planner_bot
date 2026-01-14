@@ -667,27 +667,34 @@ def check_admin_receipt_reply(message):
     """Проверяет, является ли сообщение реплаем на сообщение админу о платеже с файлом"""
     from moviebot.states import user_check_receipt_state
     from moviebot.utils.admin import is_admin, is_owner
+    import logging
     
+    logger = logging.getLogger(__name__)
     user_id = message.from_user.id
     
     # Проверяем права доступа
     if not (is_admin(user_id) or is_owner(user_id)):
+        logger.debug(f"[ADMIN RECEIPT CHECK] Пользователь {user_id} не является админом")
         return False
     
     # Проверяем, что это реплай
     if not message.reply_to_message:
+        logger.debug(f"[ADMIN RECEIPT CHECK] Сообщение от {user_id} не является реплаем")
         return False
     
     reply_message_id = message.reply_to_message.message_id
     
     # Проверяем, что это реплай на сообщение из user_check_receipt_state
     if reply_message_id not in user_check_receipt_state:
+        logger.debug(f"[ADMIN RECEIPT CHECK] Реплай на message_id={reply_message_id} не найден в user_check_receipt_state")
         return False
     
     # Проверяем, что это файл или фото
     if not (message.photo or message.document):
+        logger.debug(f"[ADMIN RECEIPT CHECK] Сообщение от {user_id} не содержит фото или документа")
         return False
     
+    logger.info(f"[ADMIN RECEIPT CHECK] ✅ Сообщение от {user_id} является реплаем на сообщение о платеже (message_id={reply_message_id})")
     return True
 
 
