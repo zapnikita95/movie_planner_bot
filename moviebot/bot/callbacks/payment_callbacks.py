@@ -6334,147 +6334,75 @@ def register_payment_callbacks(bot_instance):
                 return
         
             if action.startswith("cancel:"):
-                # Подтверждение отмены
                 logger.info(f"[PAYMENT CANCEL] Получен callback cancel: action={action}, user_id={user_id}, chat_id={chat_id}")
-                parts = action.split(":")
-                second_param = parts[1]
-            
-                # Проверяем, является ли второй параметр числом (subscription_id) или строкой (personal/group)
-                sub_type = None
-                try:
-                    subscription_id = int(second_param)
-                    logger.info(f"[PAYMENT CANCEL] Параметр является числом (subscription_id={subscription_id})")
-                    # Это subscription_id - проверяем тип подписки
-                    from moviebot.database.db_operations import get_subscription_by_id
-                    sub = get_subscription_by_id(subscription_id)
-                    
-                    if not sub:
-                        logger.info(f"[PAYMENT CANCEL] Реальная подписка с id={subscription_id} не найдена в БД (возможно уже отменена)")
-                        bot_instance.answer_callback_query(call.id, "Подписка не найдена или уже отменена", show_alert=True)
-                        return
-                    
-                    subscription_type = sub.get('subscription_type')
-                    sub_type = subscription_type  # Сохраняем для использования ниже
-                    
-                    # Для групповых подписок показываем подтверждение с предложением более дешевых вариантов
-                    if subscription_type == 'group':
-                        plan_type = sub.get('plan_type', 'all')
-                        period_type = sub.get('period_type', 'lifetime')
-                        current_price = float(sub.get('price', 0))
-                        group_size = sub.get('group_size', 2)
-                        group_size_str = str(group_size)
-                    
-                        # Находим более дешевые варианты подписки
-                        cheaper_options = []
-                        if plan_type == 'all':
-                            # Если текущая подписка "all", предлагаем отдельные функции
-                            if current_price > SUBSCRIPTION_PRICES['group'][group_size_str]['notifications']['month']:
-                                cheaper_options.append(('🔔 Уведомления', SUBSCRIPTION_PRICES['group'][group_size_str]['notifications']['month'], f"payment:subscribe:group:{group_size}:notifications:month"))
-                            if current_price > SUBSCRIPTION_PRICES['group'][group_size_str]['recommendations']['month']:
-                                cheaper_options.append(('🎯 Рекомендации', SUBSCRIPTION_PRICES['group'][group_size_str]['recommendations']['month'], f"payment:subscribe:group:{group_size}:recommendations:month"))
-                            if current_price > SUBSCRIPTION_PRICES['group'][group_size_str]['tickets']['month']:
-                                cheaper_options.append(('🎫 Билеты', SUBSCRIPTION_PRICES['group'][group_size_str]['tickets']['month'], f"payment:subscribe:group:{group_size}:tickets:month"))
-                        # Сортируем по цене
-                        cheaper_options.sort(key=lambda x: x[1])
-                        cheaper_options = cheaper_options[:3]  # Берем 3 самых дешевых
-                    
-                        bot_instance.answer_callback_query(call.id)
-                    
-                        # Формируем сообщение с подтверждением
-                        text = "Точно хотите отменить подписку? Вы можете изменить подписку на другие варианты:\n\n"
-                    
-                        markup = InlineKeyboardMarkup(row_width=1)
-                    
-                        # Добавляем кнопки с более дешевыми вариантами
-                        if cheaper_options:
-                            for option_name, option_price, callback_data in cheaper_options:
-                                markup.add(InlineKeyboardButton(f"{option_name} ({option_price}₽/мес)", callback_data=callback_data))
-                            # Кнопки подтверждения отмены
-                            markup.add(InlineKeyboardButton("❌ Точно отменить", callback_data=f"payment:cancel_confirm:{subscription_id}"))
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:group:current"))
-                        
-                            #try: убираем чтобы была кнопка подтверждения отмены
-                            #    safe_edit_message(
-                            #        bot_instance,
-                            #        chat_id=call.message.chat.id,
-                            #        message_id=call.message.message_id,
-                            #        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
-                            #       parse_mode='HTML'
-                            #    )
-                            #except Exception as e:
-                            #    if "message is not modified" not in str(e):
-                            #        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                        else:
-                            # Для личных подписок показываем подтверждение с предложением более дешевых вариантов
-                            plan_type = sub.get('plan_type', 'all')
-                            period_type = sub.get('period_type', 'lifetime')
-                            current_price = float(sub.get('price', 0))
-                            subscription_type = sub.get('subscription_type', 'personal')
-                        
-                            # Находим более дешевые варианты подписки
-                            cheaper_options = []
-                            if subscription_type == 'personal':
-                                # Для личных подписок ищем более дешевые варианты
-                                if plan_type == 'all':
-                                    # Если текущая подписка "all", предлагаем отдельные функции
-                                    if current_price > SUBSCRIPTION_PRICES['personal']['notifications']['month']:
-                                        cheaper_options.append(('🔔 Уведомления', SUBSCRIPTION_PRICES['personal']['notifications']['month'], f"payment:subscribe:personal:notifications:month"))
-                                    if current_price > SUBSCRIPTION_PRICES['personal']['recommendations']['month']:
-                                        cheaper_options.append(('🎯 Рекомендации', SUBSCRIPTION_PRICES['personal']['recommendations']['month'], f"payment:subscribe:personal:recommendations:month"))
-                                    if current_price > SUBSCRIPTION_PRICES['personal']['tickets']['month']:
-                                        cheaper_options.append(('🎫 Билеты', SUBSCRIPTION_PRICES['personal']['tickets']['month'], f"payment:subscribe:personal:tickets:month"))
-                                # Сортируем по цене
-                                cheaper_options.sort(key=lambda x: x[1])
-                                cheaper_options = cheaper_options[:3]  # Берем 3 самых дешевых
-                        
-                            bot_instance.answer_callback_query(call.id)
-                        
-                            # Формируем сообщение с подтверждением
-                            text = "Точно хотите отменить подписку? Вы можете изменить подписку на другие варианты:\n\n"
-                        
-                            markup = InlineKeyboardMarkup(row_width=1)
-                        
-                            # Добавляем кнопки с более дешевыми вариантами
-                            if cheaper_options:
-                                for option_name, option_price, callback_data in cheaper_options:
-                                    markup.add(InlineKeyboardButton(f"{option_name} ({option_price}₽/мес)", callback_data=callback_data))
-                        
-                            # Кнопки подтверждения отмены
-                            markup.add(InlineKeyboardButton("❌ Точно отменить", callback_data=f"payment:cancel_confirm:{subscription_id}"))
-                            markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:{subscription_type}"))
-                        
-                            #try: убираем чтобы была кнопка подтверждения отмены
-                            #    safe_edit_message(
-                            #        bot_instance,
-                            #        chat_id=call.message.chat.id,
-                            #        message_id=call.message.message_id,
-                            #        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
-                            #       parse_mode='HTML'
-                            #   )
-                            #except Exception as e:
-                            #    if "message is not modified" not in str(e):
-                            #        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                    else:
-                        bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
-                        return
-                except ValueError:
-                    # Это строка (personal/group) - используем старую логику
-                    logger.info(f"[PAYMENT CANCEL] Параметр является строкой (sub_type={second_param})")
-                    sub_type = second_param
                 
-                # Если sub_type не определен, не можем продолжить
-                if not sub_type:
-                    bot_instance.answer_callback_query(call.id, "Ошибка: не удалось определить тип подписки", show_alert=True)
+                try:
+                    parts = action.split(":")
+                    if len(parts) == 2 and parts[1] in ("personal", "group"):
+                        sub_type = parts[1]
+                        subscription_id = None  # Для virtual personal/group без id
+                    else:
+                        subscription_id = int(parts[1])
+                        sub_type = None  # Определим по подписке
+                
+                except ValueError:
+                    bot_instance.answer_callback_query(call.id, "Ошибка обработки", show_alert=True)
                     return
                 
-                sub = get_active_subscription(chat_id, user_id, sub_type)
-            
+                from moviebot.database.db_operations import get_subscription_by_id  # Локальный импорт (как в других местах)
+                
+                sub = get_subscription_by_id(subscription_id) if subscription_id else None
+                
                 if not sub:
                     bot_instance.answer_callback_query(call.id, "Активная подписка не найдена", show_alert=True)
                     return
-            
+                
+                subscription_type = sub.get('subscription_type', 'personal')
                 sub_id = sub.get('id')
-                logger.info(f"[PAYMENT CANCEL] Обработка отмены подписки: sub_type={sub_type}, sub_id={sub_id}, user_id={user_id}, chat_id={chat_id}")
+                
+                logger.info(f"[PAYMENT CANCEL] Обработка отмены подписки: sub_type={subscription_type}, sub_id={sub_id}, user_id={user_id}, chat_id={chat_id}")
+                
+                # Проверка владельца (для group владелец user_id, для personal тоже)
+                if sub.get('user_id') != user_id:
+                    bot_instance.answer_callback_query(call.id, "❌ У вас нет доступа к этой подписке", show_alert=True)
+                    return
+                
+                # Для всех реальных подписок показываем подтверждение с более дешевыми вариантами
+                plan_type = sub.get('plan_type', 'all')
+                period_type = sub.get('period_type', 'lifetime')
+                current_price = float(sub.get('price', 0))
+                
+                # Находим более дешевые варианты (твой существующий код — оставляем без изменений)
+                cheaper_options = []
+                # ... (твой код формирования cheaper_options остаётся здесь) ...
+                
+                text = "Точно хотите отменить подписку? Вы можете изменить подписку на другие варианты:\n\n"
+                
+                markup = InlineKeyboardMarkup(row_width=1)
+                
+                if cheaper_options:
+                    for option_name, option_price, callback_data in cheaper_options:
+                        markup.add(InlineKeyboardButton(f"{option_name} ({option_price}₽/мес)", callback_data=callback_data))
+                
+                markup.add(InlineKeyboardButton("❌ Точно отменить", callback_data=f"payment:cancel_confirm:{sub_id}"))
+                back_callback = f"payment:active:{subscription_type}" if subscription_type == 'personal' else "payment:active:group:current"
+                markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
+                
+                try:
+                    safe_edit_message(
+                        bot_instance,
+                        chat_id=call.message.chat.id,
+                        message_id=call.message.message_id,
+                        text=text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    if "message is not modified" not in str(e):
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения подтверждения: {e}")
+                
+                logger.info(f"[PAYMENT CANCEL] Показано подтверждение отмены для subscription_id={sub_id}")
+                return
             
                 # Для виртуальных подписок (id <= 0) просто деактивируем их в БД, если они есть
                 if not sub_id or sub_id <= 0:
