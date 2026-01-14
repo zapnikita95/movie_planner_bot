@@ -1462,21 +1462,24 @@ def handle_search(message):
         log_request(message.from_user.id, username, '/search', message.chat.id)
         
         query = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
+
         if not query:
-            # Создаем кнопки для выбора типа поиска
+            # Создаем кнопки для выбора типа поиска (default mixed — обе без ✅)
             markup = InlineKeyboardMarkup(row_width=2)
             markup.add(
                 InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
                 InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
             )
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            markup_search = InlineKeyboardMarkup()
-            markup_search.add(InlineKeyboardButton("❌ Отмена", callback_data="search:cancel"))
-            reply_msg = bot.reply_to(message, "🔍 Укажите запрос для поиска в ответном сообщении, например: джон уик", reply_markup=markup_search)
-            # Сохраняем состояние для получения запроса (по умолчанию смешанный поиск)
+
+            # Текст для mixed
+            prompt_text = "🔍 Укажите запрос для поиска 🎬📺 фильмов и сериалов в ответном сообщении, например: джон уик"
+
+            reply_msg = bot.reply_to(message, prompt_text, reply_markup=markup)
+
+            # Сохраняем состояние (mixed по умолчанию)
             user_id = message.from_user.id
             chat_id = message.chat.id
-            is_private = message.chat.type == 'private'
             user_search_state[user_id] = {
                 'chat_id': chat_id, 
                 'message_id': reply_msg.message_id, 
@@ -1485,7 +1488,7 @@ def handle_search(message):
             logger.info(f"[SEARCH] Состояние поиска установлено для user_id={user_id}: {user_search_state[user_id]}")
             
             # Для ЛС устанавливаем ожидание текста
-            if is_private and reply_msg:
+            if message.chat.type == 'private':
                 expect_text_from_user(user_id, chat_id, expected_for='search', message_id=reply_msg.message_id)
             return
         
