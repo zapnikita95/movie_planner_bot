@@ -133,7 +133,6 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
     
     try:
         logger.info(f"[SHOW EPISODES PAGE] Начало: kp_id={kp_id}, season={season_num}, chat_id={chat_id}, user_id={user_id}, page={page}, message_id={message_id}, message_thread_id={message_thread_id}")
-        EPISODES_PER_PAGE = 20
         
         with db_lock:
             cursor_local.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
@@ -154,6 +153,16 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         
         episodes = season.get('episodes', [])
         total_episodes = len(episodes)
+        
+        # Определяем количество серий на странице: если страниц больше 5, используем 80, иначе 20
+        EPISODES_PER_PAGE_BASE = 20
+        total_pages_base = (total_episodes + EPISODES_PER_PAGE_BASE - 1) // EPISODES_PER_PAGE_BASE
+        
+        if total_pages_base > 5:
+            EPISODES_PER_PAGE = 80  # 20 строк × 4 столбца
+        else:
+            EPISODES_PER_PAGE = 20
+        
         total_pages = (total_episodes + EPISODES_PER_PAGE - 1) // EPISODES_PER_PAGE
         page = max(1, min(page, total_pages))
         
@@ -167,9 +176,10 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         
         markup = InlineKeyboardMarkup()
         
-        # Если страниц больше 5, используем сетку 4 столбца (4 кнопки в ряд)
-        # Иначе обычное расположение (2 колонки)
-        if total_pages > 5:
+        # Если страниц больше 5 (при расчете с 20 сериями на странице), используем сетку 4 столбца (4 кнопки в ряд, 80 серий на странице)
+        # Иначе обычное расположение (2 колонки, 20 серий на странице)
+        use_4_columns = total_pages_base > 5
+        if use_4_columns:
             # Сетка 4 столбца: 4 кнопки в ряд, до 20 строк на странице
             # Пример: ⬜ 1  ⬜ 6  ⬜ 11 ⬜ 16 (если на странице серии 1-20)
             #         ⬜ 2  ⬜ 7  ⬜ 12 ⬜ 17
@@ -262,7 +272,9 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 if nav_buttons:
                     markup.row(*nav_buttons)
         
-        text += "Нажмите на эпизод, чтобы отметить как просмотренный"
+        text += "Нажмите на эпизод, чтобы отметить как просмотренный\n\n"
+        text += "• одно нажатие на серию — отметка серии как просмотренной\n"
+        text += "• повторное нажатие на отмеченную просмотренной серию — отметка всех серий до выбранной просмотренными"
         
         all_watched = True
         with db_lock:
