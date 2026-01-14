@@ -16,6 +16,10 @@ import telebot
 from telebot.apihelper import ApiTelegramException
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from config.settings import DATABASE_URL
+
 # 3. APScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -23,13 +27,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 # 4. Твои локальные импорты (отсортируй по алфавиту внутри группы)
 from moviebot.bot.bot_init import bot, BOT_ID
-from moviebot.database.db_connection import db_lock
+from moviebot.database.db_connection import db_lock  # Только db_lock, get_db_connection убрали
 from moviebot.config import PLANS_TZ
 from moviebot.api.kinopoisk_api import get_seasons_data
 from moviebot.api.kinopoisk_api import get_external_sources
-
-# Импортируем ТОЛЬКО функцию, а не глобальные conn/cursor/db_lock
-from moviebot.database.db_connection import get_db_connection
 
 # Импорт helpers отключён полностью — все нужные функции определены в этом же файле (scheduler.py)
 # from moviebot.utils.helpers import (...)
@@ -2190,87 +2191,82 @@ def check_premiere_reminder():
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = None
+    cursor_local = None
     
     try:
+        conn_local = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cursor_local = conn_local.cursor()
+        
         now = datetime.now(PLANS_TZ)
         current_weekday = now.weekday()
         
-        # Проверяем только в пятницу (4 = пятница)
-        if current_weekday != 4:
+        if current_weekday != 4:  # пятница
             return
         
-        # Получаем все групповые чаты
         with db_lock:
             cursor_local.execute("SELECT DISTINCT chat_id FROM movies")
             chat_rows = cursor_local.fetchall()
         
         for row in chat_rows:
-            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            chat_id = row['chat_id']
             
-            # Проверяем, что это групповой чат (не личный)
             try:
                 chat_info = bot.get_chat(chat_id)
                 if chat_info.type == 'private':
-                    continue  # Пропускаем личные чаты
+                    continue
             except Exception as e:
                 logger.warning(f"[PREMIERE REMINDER] Не удалось получить информацию о чате {chat_id}: {e}")
                 continue
             
-            # Проверяем, включены ли случайные события
             if not get_random_events_enabled(chat_id):
                 continue
             
-            # Проверяем, было ли уже отправлено какое-то событие/уведомление сегодня
             if was_event_sent_today(chat_id, 'random_event') or was_event_sent_today(chat_id, 'weekend_reminder') or was_event_sent_today(chat_id, 'premiere_reminder'):
                 logger.info(f"[PREMIERE REMINDER] Пропуск чата {chat_id} - уже было отправлено событие сегодня")
                 continue
             
-            # Проверяем, отключено ли это напоминание
-            cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_cinema_premieres_disabled'", (chat_id,))
-            reminder_disabled_row = cursor_local.fetchone()
-            if reminder_disabled_row:
-                is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
-                if is_disabled == 'true':
-                    continue
+            with db_lock:
+                cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'reminder_cinema_premieres_disabled'", (chat_id,))
+                reminder_disabled_row = cursor_local.fetchone()
+            if reminder_disabled_row and reminder_disabled_row['value'] == 'true':
+                continue
             
-            # Проверяем, когда последний раз добавляли фильм в кино (plan_type='cinema')
-            cursor_local.execute('''
-                SELECT MAX(plan_datetime) FROM plans
-                WHERE chat_id = %s AND plan_type = 'cinema'
-            ''', (chat_id,))
-            last_cinema_row = cursor_local.fetchone()
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT MAX(plan_datetime) FROM plans
+                    WHERE chat_id = %s AND plan_type = 'cinema'
+                ''', (chat_id,))
+                last_cinema_row = cursor_local.fetchone()
             
             has_recent_cinema_plan = False
-            if last_cinema_row:
-                last_cinema = last_cinema_row.get('max') if isinstance(last_cinema_row, dict) else last_cinema_row[0]
-                if last_cinema:
-                    if isinstance(last_cinema, str):
-                        last_cinema = datetime.fromisoformat(last_cinema.replace('Z', '+00:00'))
-                    if last_cinema.tzinfo is None:
-                        last_cinema = pytz.utc.localize(last_cinema)
-                    last_cinema = last_cinema.astimezone(PLANS_TZ)
-                    
-                    if (now - last_cinema).days < 14:
-                        has_recent_cinema_plan = True
+            if last_cinema_row and last_cinema_row['max']:
+                last_cinema = last_cinema_row['max']
+                if isinstance(last_cinema, str):
+                    last_cinema = datetime.fromisoformat(last_cinema.replace('Z', '+00:00'))
+                if last_cinema.tzinfo is None:
+                    last_cinema = pytz.utc.localize(last_cinema)
+                last_cinema = last_cinema.astimezone(PLANS_TZ)
+                if (now - last_cinema).days < 14:
+                    has_recent_cinema_plan = True
             
-            # Если давно не добавляли фильмы в кино (14+ дней), отправляем напоминание
-            if not has_recent_cinema_plan:
-                # Проверяем, когда последний раз отправляли напоминание
+            if has_recent_cinema_plan:
+                continue
+            
+            with db_lock:
                 cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'last_cinema_reminder_date'", (chat_id,))
                 last_reminder_row = cursor_local.fetchone()
-                
-                should_send = True
-                if last_reminder_row:
-                    last_reminder_str = last_reminder_row.get('value') if isinstance(last_reminder_row, dict) else last_reminder_row[0]
-                    try:
-                        last_reminder = datetime.strptime(last_reminder_str, '%Y-%m-%d').date()
-                        days_passed = (now.date() - last_reminder).days
-                        # Если нет планов вообще (ни дома, ни в кино), отправляем раз в неделю
-                        # Проверяем планы домашнего просмотра
-                        friday = now.replace(hour=0, minute=0, second=0, microsecond=0)
-                        sunday = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=2)
+            
+            should_send = True
+            if last_reminder_row:
+                last_reminder_str = last_reminder_row['value']
+                try:
+                    last_reminder = datetime.strptime(last_reminder_str, '%Y-%m-%d').date()
+                    days_passed = (now.date() - last_reminder).days
+                    
+                    friday = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                    sunday = now.replace(hour=23, minute=59, second=59, microsecond=0) + timedelta(days=2)
+                    with db_lock:
                         cursor_local.execute('''
                             SELECT COUNT(*) FROM plans
                             WHERE chat_id = %s 
@@ -2279,80 +2275,78 @@ def check_premiere_reminder():
                             AND plan_datetime <= %s
                         ''', (chat_id, friday, sunday))
                         home_plans_count = cursor_local.fetchone()
-                        home_count = home_plans_count.get('count') if isinstance(home_plans_count, dict) else home_plans_count[0] if home_plans_count else 0
+                    home_count = home_plans_count['count'] if home_plans_count else 0
+                    
+                    if home_count == 0 and days_passed < 7:
+                        should_send = False
+                except:
+                    pass
+            
+            if should_send:
+                try:
+                    from moviebot.api.kinopoisk_api import get_premieres_for_period
+                    
+                    premieres = get_premieres_for_period('current_month')
+                    
+                    if premieres:
+                        text = "🎬 Вы давно ничего не добавляли к просмотру в кинотеатре! Посмотрите, что сейчас идет в кино:\n\n"
+                        for i, p in enumerate(premieres[:10], 1):
+                            title = p.get('nameRu') or p.get('nameOriginal') or 'Без названия'
+                            year = p.get('year') or ''
+                            text += f"{i}. {title}"
+                            if year:
+                                text += f" ({year})"
+                            text += "\n"
+                        if len(premieres) > 10:
+                            text += f"\n... и еще {len(premieres) - 10} премьер"
+                        text += "\n\nИспользуйте /premieres для просмотра всех премьер"
                         
-                        if home_count == 0 and days_passed < 7:
-                            should_send = False
-                    except:
-                        pass
-                
-                if should_send:
-                    try:
-                        from moviebot.api.kinopoisk_api import get_premieres_for_period
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+                        markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
+                        markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:cinema_premieres"))
                         
-                        # Получаем премьеры текущего месяца
-                        premieres = get_premieres_for_period('current_month')
+                        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                         
-                        if premieres:
-                            text = "🎬 Вы давно ничего не добавляли к просмотру в кинотеатре! Посмотрите, что сейчас идет в кино:\n\n"
-                            
-                            # Формируем список премьер (первые 10)
-                            for i, p in enumerate(premieres[:10], 1):
-                                title = p.get('nameRu') or p.get('nameOriginal') or 'Без названия'
-                                year = p.get('year') or ''
-                                text += f"{i}. {title}"
-                                if year:
-                                    text += f" ({year})"
-                                text += "\n"
-                            
-                            if len(premieres) > 10:
-                                text += f"\n... и еще {len(premieres) - 10} премьер"
-                            
-                            text += "\n\nИспользуйте /premieres для просмотра всех премьер"
-                            
-                            markup = InlineKeyboardMarkup(row_width=1)
-                            markup.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
-                            markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
-                            markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:cinema_premieres"))
-                            
-                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-                            
-                            # Отмечаем, что событие отправлено
-                            mark_event_sent(chat_id, 'premiere_reminder')
-                            
-                            # Сохраняем дату последнего напоминания
+                        mark_event_sent(chat_id, 'premiere_reminder')
+                        
+                        with db_lock:
                             cursor_local.execute('''
                                 INSERT INTO settings (chat_id, key, value)
                                 VALUES (%s, 'last_cinema_reminder_date', %s)
                                 ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
                             ''', (chat_id, now.date().isoformat()))
                             conn_local.commit()
-                            
-                            logger.info(f"[PREMIERE REMINDER] Отправлено напоминание о премьерах для чата {chat_id}")
-                    except Exception as e:
-                        logger.error(f"[PREMIERE REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
+                        
+                        logger.info(f"[PREMIERE REMINDER] Отправлено напоминание о премьерах для чата {chat_id}")
+                except Exception as e:
+                    logger.error(f"[PREMIERE REMINDER] Ошибка при отправке напоминания: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"[PREMIERE REMINDER] Ошибка в check_premiere_reminder: {e}", exc_info=True)
     finally:
-        try:
-            cursor_local.close()
-        except:
-            pass
-        try:
-            conn_local.close()
-        except:
-            pass
-
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if conn_local:
+            try:
+                conn_local.close()
+            except:
+                pass
 
 def choose_random_participant():
     """Раз в две недели выбирает случайного участника для выбора фильма"""
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = None
+    cursor_local = None
     
     try:
+        conn_local = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cursor_local = conn_local.cursor()
+        
         now = datetime.now(PLANS_TZ)
         
         # Получаем все групповые чаты
@@ -2361,7 +2355,7 @@ def choose_random_participant():
             chat_rows = cursor_local.fetchall()
         
         for row in chat_rows:
-            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            chat_id = row['chat_id']  # RealDictCursor возвращает dict
             
             # Проверяем, что это групповой чат
             try:
@@ -2383,14 +2377,15 @@ def choose_random_participant():
                 continue
             
             # Проверяем, когда последний раз выбирали участника
-            cursor_local.execute(
-                "SELECT value FROM settings WHERE chat_id = %s AND key = 'last_random_participant_date'",
-                (chat_id,)
-            )
-            last_date_row = cursor_local.fetchone()
+            with db_lock:
+                cursor_local.execute(
+                    "SELECT value FROM settings WHERE chat_id = %s AND key = 'last_random_participant_date'",
+                    (chat_id,)
+                )
+                last_date_row = cursor_local.fetchone()
             
             if last_date_row:
-                last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
+                last_date_str = last_date_row['value']
                 try:
                     last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
                     if (now.date() - last_date).days < 14:
@@ -2419,29 +2414,30 @@ def choose_random_participant():
                 query += " AND user_id != %s"
                 params += (current_bot_id,)
                 
-            cursor_local.execute(query, params)
-            participants = cursor_local.fetchall()
+            with db_lock:
+                cursor_local.execute(query, params)
+                participants = cursor_local.fetchall()
             
             if not participants:
                 continue
             
             # Проверка недели участия
-            cursor_local.execute('''
-                SELECT user_id, MIN(timestamp) as first_participation
-                FROM stats
-                WHERE chat_id = %s
-                GROUP BY user_id
-            ''', (chat_id,))
-            first_participations = {
-                row.get('user_id') if isinstance(row, dict) else row[0]:
-                row.get('first_participation') if isinstance(row, dict) else row[1]
-                for row in cursor_local.fetchall()
-            }
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT user_id, MIN(timestamp) as first_participation
+                    FROM stats
+                    WHERE chat_id = %s
+                    GROUP BY user_id
+                ''', (chat_id,))
+                first_participations = {
+                    row['user_id']: row['first_participation']
+                    for row in cursor_local.fetchall()
+                }
             
             week_ago = now - timedelta(days=7)
             all_participated_week_ago = True
             for participant in participants:
-                user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+                user_id = participant['user_id']
                 fp = first_participations.get(user_id)
                 if fp:
                     if isinstance(fp, str):
@@ -2456,8 +2452,8 @@ def choose_random_participant():
             
             # Выбираем участника
             participant = random.choice(participants)
-            user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
-            username = participant.get('username') if isinstance(participant, dict) else participant[1]
+            user_id = participant['user_id']
+            username = participant['username']
             
             # Формируем имя
             if username:
@@ -2509,15 +2505,13 @@ def choose_random_participant():
                                         WHERE chat_id = %s
                                     """, (new_chat_id, original_chat_id))
                                 
-                                # Также можно обновить другие таблицы, если они есть
                                 conn_local.commit()
                             
-                            logger.info(f"[RANDOM PARTICIPANT] Обновлено {cursor_local.rowcount} записей chat_id")
+                            logger.info(f"[RANDOM PARTICIPANT] Обновлено записей chat_id")
                             
                             # Меняем chat_id для повторной попытки
                             chat_id = new_chat_id
                             
-                            # Даём Telegram секунду на обработку миграции
                             import time
                             time.sleep(1.5)
                             
@@ -2551,25 +2545,29 @@ def choose_random_participant():
     except Exception as e:
         logger.error(f"[RANDOM PARTICIPANT] Глобальная ошибка в choose_random_participant: {e}", exc_info=True)
     finally:
-        try:
-            cursor_local.close()
-        except:
-            pass
-        try:
-            conn_local.close()
-        except:
-            pass
-
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if conn_local:
+            try:
+                conn_local.close()
+            except:
+                pass
 
 def start_dice_game():
     """Раз в две недели запускает игру в кубик для выбора фильма - использует общую функцию send_dice_game_event"""
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = None
+    cursor_local = None
     
     try:
+        conn_local = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cursor_local = conn_local.cursor()
+        
         now = datetime.now(PLANS_TZ)
         
         # Получаем все групповые чаты
@@ -2578,7 +2576,7 @@ def start_dice_game():
             chat_rows = cursor_local.fetchall()
         
         for row in chat_rows:
-            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            chat_id = row['chat_id']  # RealDictCursor возвращает dict
             
             # Проверяем, было ли уже отправлено какое-то событие сегодня
             if was_event_sent_today(chat_id, 'random_event') or \
@@ -2594,27 +2592,29 @@ def start_dice_game():
     except Exception as e:
         logger.error(f"[DICE GAME] Критическая ошибка в start_dice_game: {e}", exc_info=True)
     finally:
-        try:
-            cursor_local.close()
-        except:
-            pass
-        try:
-            conn_local.close()
-        except:
-            pass
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if conn_local:
+            try:
+                conn_local.close()
+            except:
+                pass
 
 def update_series_status_cache():
     """Фоновая задача: обновляет статусы сериалов раз в день"""
     logger.info("[CACHE] Запуск обновления кэша сериалов")
     
-    # Используем локальное соединение вместо глобального для избежания проблем с закрытыми соединениями
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    conn_local = None
+    cursor_local = None
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
-    
-    with db_lock:
-        try:
+    try:
+        conn_local = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cursor_local = conn_local.cursor()
+        
+        with db_lock:
             cursor_local.execute("""
                 SELECT DISTINCT kp_id, chat_id
                 FROM movies
@@ -2623,81 +2623,73 @@ def update_series_status_cache():
                 LIMIT 30
             """)
             rows = cursor_local.fetchall()
-        except Exception as db_e:
-            logger.error(f"[CACHE] Ошибка при запросе сериалов: {db_e}", exc_info=True)
-            try:
-                conn_local.rollback()
-            except:
-                pass
-            rows = []
+        
+        if not rows:
+            logger.info("[CACHE] Нет сериалов для обновления кэша")
+            return
 
-    if not rows:
-        logger.info("[CACHE] Нет сериалов для обновления кэша")
-        return
-
-    for row in rows:
-        # Универсальная обработка: row может быть tuple или dict
-        if isinstance(row, dict):
-            kp_id = row.get('kp_id')
-            chat_id = row.get('chat_id')
-        else:
-            # Предполагаем порядок из SELECT: kp_id, chat_id
-            if len(row) < 2:
-                logger.warning(f"[CACHE] Пропущена битая запись (слишком короткая): {row}")
+        for row in rows:
+            kp_id = row['kp_id']
+            chat_id = row['chat_id']
+            
+            if kp_id is None:
+                logger.warning(f"[CACHE] Пропущена запись с kp_id=None: {row}")
                 continue
-            kp_id = row[0]
-            chat_id = row[1]
-        
-        if kp_id is None:
-            logger.warning(f"[CACHE] Пропущена запись с kp_id=None: {row}")
-            continue
-        
-        try:
-            # Основная логика: получаем актуальные данные из Kinopoisk API
-            is_airing, next_ep = get_series_airing_status(kp_id)
-            seasons_data = get_seasons_data(kp_id)
-            seasons_count = len(seasons_data) if seasons_data else 0
-            next_ep_json = json.dumps(next_ep) if next_ep else None
+            
+            try:
+                # Основная логика: получаем актуальные данные из Kinopoisk API
+                is_airing, next_ep = get_series_airing_status(kp_id)
+                seasons_data = get_seasons_data(kp_id)
+                seasons_count = len(seasons_data) if seasons_data else 0
+                next_ep_json = json.dumps(next_ep) if next_ep else None
 
-            # Обновляем только нужные колонки
-            # Получаем новый курсор для каждой итерации, так как курсор может закрыться
-            with db_lock:
+                # Обновляем — отдельный короткий conn + lock
+                conn_update = psycopg2.connect(DATABASE_URL)
+                cursor_update = conn_update.cursor()
                 try:
-                    # Проверяем состояние курсора и соединения, пересоздаем при необходимости
-                    try:
-                        if cursor_local.closed or conn_local.closed:
-                            raise Exception("Cursor or connection closed")
-                        # Проверяем, что курсор еще валиден
-                        cursor_local.execute("SELECT 1")
-                    except:
-                        # Пересоздаем курсор и соединение
-                        try:
-                            if cursor_local and not cursor_local.closed:
-                                cursor_local.close()
-                        except:
-                            pass
-                        conn_local = get_db_connection()
-                        cursor_local = get_db_cursor()
-                    
-                    cursor_local.execute("""
-                        UPDATE movies
-                        SET is_ongoing = %s, 
-                            seasons_count = %s, 
-                            next_episode = %s, 
-                            last_api_update = NOW()
-                        WHERE chat_id = %s AND kp_id = %s
-                    """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
-                    conn_local.commit()
+                    with db_lock:
+                        cursor_update.execute("""
+                            UPDATE movies
+                            SET is_ongoing = %s, 
+                                seasons_count = %s, 
+                                next_episode = %s, 
+                                last_api_update = NOW()
+                            WHERE chat_id = %s AND kp_id = %s
+                        """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
+                    conn_update.commit()
                 except Exception as db_e:
                     logger.error(f"[CACHE] Ошибка при обновлении сериала {kp_id}: {db_e}", exc_info=True)
                     try:
-                        conn_local.rollback()
+                        conn_update.rollback()
                     except:
                         pass
-            
-            logger.info(f"[CACHE] Обновлён кэш для kp_id={kp_id} (chat_id={chat_id}), seasons={seasons_count}, ongoing={is_airing}")
+                finally:
+                    try:
+                        cursor_update.close()
+                    except:
+                        pass
+                    try:
+                        conn_update.close()
+                    except:
+                        pass
+                
+                logger.info(f"[CACHE] Обновлён кэш для kp_id={kp_id} (chat_id={chat_id}), seasons={seasons_count}, ongoing={is_airing}")
 
-        except Exception as e:
-            logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id} (chat_id={chat_id}): {e}", exc_info=True)
-
-    logger.info("[CACHE] Обновление кэша сериалов завершено")
+            except Exception as e:
+                logger.error(f"[CACHE] Ошибка обновления kp_id={kp_id} (chat_id={chat_id}): {e}", exc_info=True)
+        
+        logger.info("[CACHE] Обновление кэша сериалов завершено")
+        
+    except Exception as e:
+        logger.error(f"[CACHE] Глобальная ошибка в update_series_status_cache: {e}", exc_info=True)
+    finally:
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
+        if conn_local:
+            try:
+                conn_local.close()
+            except:
+                pass
