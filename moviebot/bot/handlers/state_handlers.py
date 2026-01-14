@@ -1655,9 +1655,40 @@ def handle_admin(message):
                 
                 if target_id_str:
                     try:
-                        # Unsubscribe может быть отрицательным числом (для групп)
+                        # Unsubscribe может быть отрицательным числом (для групп) или положительным chat_id группы
                         target_id = int(target_id_str)
+                        
+                        # Проверяем, является ли это группой
+                        # 1. Если отрицательное число - это точно группа
+                        # 2. Если положительное - проверяем в БД, есть ли подписка с таким chat_id и subscription_type='group'
                         is_group = target_id < 0
+                        
+                        if not is_group and target_id > 0:
+                            # Проверяем в БД, есть ли групповая подписка с таким chat_id
+                            from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                            conn_check = get_db_connection()
+                            cursor_check = get_db_cursor()
+                            try:
+                                with db_lock:
+                                    cursor_check.execute("""
+                                        SELECT id FROM subscriptions 
+                                        WHERE chat_id = %s AND subscription_type = 'group' AND is_active = TRUE
+                                        LIMIT 1
+                                    """, (target_id,))
+                                    group_sub = cursor_check.fetchone()
+                                    if group_sub:
+                                        is_group = True
+                                        logger.info(f"[UNSUBSCRIBE] Найдена групповая подписка для chat_id={target_id}, определяем как группу")
+                            finally:
+                                try:
+                                    cursor_check.close()
+                                except:
+                                    pass
+                                try:
+                                    conn_check.close()
+                                except:
+                                    pass
+                        
                         logger.info(f"[UNSUBSCRIBE] Парсинг: target_id={target_id}, is_group={is_group}")
                         
                         # Если это группа, отменяем сразу (как раньше)

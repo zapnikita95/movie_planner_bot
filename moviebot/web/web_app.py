@@ -207,6 +207,9 @@ def create_web_app(bot):
                     telegram_username = metadata.get('telegram_username')
                     group_username = metadata.get('group_username')
                     
+                    # Инициализируем флаг рекуррентности в начале обработки
+                    is_recurring_payment = False
+                    
                     # === ОПРЕДЕЛЯЕМ payment_method_id СРАЗУ ===
                     payment_method_id = None
                     if full_payment and hasattr(full_payment, 'payment_method') and full_payment.payment_method:
@@ -226,6 +229,11 @@ def create_web_app(bot):
                     is_combined = metadata.get('is_combined', 'false').lower() == 'true'
                     combine_type = metadata.get('combine_type')
                     is_expansion = metadata.get('is_expansion', 'false').lower() == 'true'
+                    
+                    # Проверяем, является ли это изменением периода подписки
+                    is_period_upgrade = metadata.get('is_period_upgrade', 'false').lower() == 'true'
+                    period_upgrade_subscription_id = metadata.get('subscription_id')  # ID подписки для обновления периода
+                    period_upgrade_type = metadata.get('upgrade_type')  # 'now' или 'next'
                     
                     # Инициализируем subscription_id
                     subscription_id = None
@@ -417,6 +425,10 @@ def create_web_app(bot):
                         except Exception as expansion_error:
                             logger.error(f"[YOOKASSA] Ошибка при расширении подписки: {expansion_error}", exc_info=True)
                             subscription_id = None
+                    elif is_period_upgrade and period_upgrade_subscription_id:
+                        # Изменение периода подписки (оплатить сейчас) - уже обработано выше
+                        # subscription_id уже установлен в блоке is_period_upgrade
+                        pass
                     elif upgrade_subscription_id:
                         # Обновление существующей подписки (оплата доплаты)
                         try:
@@ -453,6 +465,75 @@ def create_web_app(bot):
                         except Exception as upgrade_error:
                             logger.error(f"[YOOKASSA] Ошибка при обновлении подписки: {upgrade_error}", exc_info=True)
                             subscription_id = None
+                    elif is_period_upgrade and period_upgrade_subscription_id:
+                        # Изменение периода подписки (оплатить сейчас)
+                        try:
+                            period_sub_id = int(period_upgrade_subscription_id)
+                            from moviebot.database.db_operations import get_subscription_by_id
+                            from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                            from datetime import datetime, timedelta
+                            from dateutil.relativedelta import relativedelta
+                            import pytz
+                            
+                            # Получаем информацию о подписке
+                            period_sub = get_subscription_by_id(period_sub_id)
+                            if not period_sub or period_sub.get('user_id') != user_id:
+                                logger.error(f"[YOOKASSA] Подписка {period_sub_id} не найдена или не принадлежит пользователю {user_id}")
+                                subscription_id = None
+                            else:
+                                # Обновляем период и цену подписки
+                                # amount - это доплата, нужно обновить на полную цену новой подписки
+                                new_period_type = period_type  # Новый период из metadata
+                                new_full_price = float(metadata.get('new_price', amount))  # Полная цена новой подписки
+                                
+                                conn_period = get_db_connection()
+                                cursor_period = get_db_cursor()
+                                try:
+                                    with db_lock:
+                                        # Обновляем period_type, price и сдвигаем даты на сегодня
+                                        now = datetime.now(pytz.UTC)
+                                        
+                                        # Вычисляем новую дату следующего платежа в зависимости от периода
+                                        if new_period_type == 'month':
+                                            next_payment = now + relativedelta(months=1)
+                                            expires_at = next_payment
+                                        elif new_period_type == '3months':
+                                            next_payment = now + relativedelta(months=3)
+                                            expires_at = next_payment
+                                        elif new_period_type == 'year':
+                                            next_payment = now + relativedelta(years=1)
+                                            expires_at = next_payment
+                                        elif new_period_type == 'lifetime':
+                                            next_payment = None
+                                            expires_at = None
+                                        else:
+                                            next_payment = now + timedelta(days=30)
+                                            expires_at = next_payment
+                                        
+                                        cursor_period.execute("""
+                                            UPDATE subscriptions 
+                                            SET period_type = %s, price = %s, 
+                                                next_payment_date = %s, expires_at = %s,
+                                                activated_at = %s
+                                            WHERE id = %s
+                                        """, (new_period_type, new_full_price, next_payment, expires_at, now, period_sub_id))
+                                        conn_period.commit()
+                                        
+                                        logger.info(f"[YOOKASSA PERIOD UPGRADE] Обновлена подписка {period_sub_id}: period_type={new_period_type}, price={new_full_price}₽, next_payment={next_payment}")
+                                        
+                                        subscription_id = period_sub_id
+                                finally:
+                                    try:
+                                        cursor_period.close()
+                                    except:
+                                        pass
+                                    try:
+                                        conn_period.close()
+                                    except:
+                                        pass
+                        except Exception as period_error:
+                            logger.error(f"[YOOKASSA] Ошибка при обновлении периода подписки: {period_error}", exc_info=True)
+                            subscription_id = None
                     else:
                         # Обычная логика (без объединения и без обновления)
                         # Проверяем, есть ли уже активная подписка с такими же параметрами
@@ -475,6 +556,9 @@ def create_web_app(bot):
                                 logger.info(f"[YOOKASSA] Подписка продлена: subscription_id={subscription_id}, user_id={user_id}, chat_id={chat_id}, subscription_type={subscription_type}, plan_type={existing_plan}, period_type={period_type}")
                                 
                                 # payment_method_id будет обновлен позже, если карта сохранена
+                                
+                                # Помечаем как рекуррентный платеж для уведомления
+                                is_recurring_payment = True
                                 
                             else:
                                 # Параметры не совпадают - создаем новую подписку
@@ -735,14 +819,18 @@ def create_web_app(bot):
                 # === ОТПРАВЛЯЕМ УВЕДОМЛЕНИЕ ТОЛЬКО ОДИН РАЗ ===
                 if subscription_id:
                     from moviebot.scheduler import send_successful_payment_notification
+                    # Используем флаг рекуррентности, определенный выше
                     send_successful_payment_notification(
                         chat_id=chat_id,
                         subscription_id=subscription_id,
                         subscription_type=subscription_type,
                         plan_type=plan_type,
-                        period_type=period_type
+                        period_type=period_type,
+                        is_recurring=is_recurring_payment,
+                        check_url=check_url,
+                        pdf_url=pdf_url
                     )
-                    logger.info(f"[YOOKASSA] Уведомление отправлено один раз для подписки {subscription_id}")
+                    logger.info(f"[YOOKASSA] Уведомление отправлено один раз для подписки {subscription_id}, is_recurring={is_recurring_payment}")
 
 
                             
@@ -992,30 +1080,9 @@ def create_web_app(bot):
                                 
                                 group_text += "\nПриятного просмотра!"
                                 
+                                # Для групповых подписок отправляем только в группу, не в личку
                                 bot.send_message(chat_id, group_text, parse_mode='HTML')
-                                
-                                # Отправляем в личку
-                                private_text = "Спасибо за покупку! 🎉\n\n"
-                                private_text += f"Ваша новая подписка: <b>{tariff_name}</b>\n\n"
-                                private_text += "Вот какой функционал вам теперь доступен:\n\n"
-                                private_text += features_text
-                                
-                                if group_size:
-                                    private_text += f"\n\n👥 Участников в подписке: <b>{members_count if members_count > 0 else active_count}</b> из {group_size}"
-                                
-                                private_text += "\n"
-                                
-                                # Добавляем информацию о чеке, если он был создан
-                                if check_url:
-                                    private_text += f"📄 <b>Чек от самозанятого:</b>\n"
-                                    private_text += f"{check_url}\n"
-                                    if pdf_url:
-                                        private_text += f"\n📥 <a href=\"{pdf_url}\">Скачать PDF</a>\n"
-                                
-                                private_text += "\nПриятного просмотра!"
-                                
-                                bot.send_message(user_id, private_text, parse_mode='HTML')
-                                logger.info(f"[YOOKASSA] ✅ Сообщения отправлены для группы {chat_id}, user_id {user_id}, subscription_id {subscription_id}")
+                                logger.info(f"[YOOKASSA] ✅ Сообщение отправлено в группу {chat_id} для user_id {user_id}, subscription_id {subscription_id}")
                         except Exception as e:
                             logger.error(f"[YOOKASSA] Ошибка отправки сообщения для уже обработанного платежа: {e}", exc_info=True)
                     else:

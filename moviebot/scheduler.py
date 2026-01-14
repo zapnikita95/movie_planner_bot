@@ -1476,27 +1476,75 @@ def send_successful_payment_notification(
             for feature in features_list:
                 text += f"• {feature}\n"
         else:
-            # Уведомление для обычных платежей (старый формат)
-            text = "✅ <b>Спасибо, оплата успешно проведена!</b>\n\n"
-            text += f"Ваша подписка: {plan_name}\n"
-            
-            # Если подписка навсегда, показываем "Действует неограниченно"
-            if period_type == 'lifetime' or expires_at is None:
-                text += "Действует неограниченно"
+            # Уведомление для первичных платежей
+            if subscription_type == 'group':
+                # Для групповых подписок - полное сообщение со списком функций
+                plan_names_full = {
+                    'notifications': 'Уведомления о сериалах',
+                    'recommendations': 'Рекомендации',
+                    'tickets': 'Билеты',
+                    'all': 'Все режимы'
+                }
+                tariff_name = plan_names_full.get(plan_type, plan_type)
+                
+                text = "Спасибо за покупку! 🎉\n\n"
+                text += f"Ваша новая подписка: <b>{tariff_name}</b>\n\n"
+                text += "Вот какой функционал вам теперь доступен:\n\n"
+                
+                # Формируем описание функций
+                if plan_type == 'all':
+                    text += "📦 <b>Все режимы:</b>\n\n"
+                    text += "🔔 <b>Уведомления о сериалах:</b>\n"
+                    text += "• Автоматические уведомления о выходе новых серий\n"
+                    text += "• Настройка времени уведомлений (будни/выходные)\n"
+                    text += "• Персонализированные напоминания для каждого сериала\n"
+                    text += "• Отслеживание прогресса просмотра сезонов\n\n"
+                    text += "🎯 <b>Персональные рекомендации:</b>\n"
+                    text += "• Режим \"По оценкам в базе\" — рекомендации по оценкам фильмов, добавленных в базу чата или группы\n"
+                    text += "• Режим \"Рандом по Кинопоиску\" — случайный фильм из Кинопоиска по фильтрам\n"
+                    text += "• Режим рандомайзера \"По моим оценкам\" — рекомендации по оценкам из Кинопоиска\n"
+                    text += "• Импорт базы из Кинопоиска\n\n"
+                    text += "🎫 <b>Билеты в кино:</b>\n"
+                    text += "• Добавление билетов на сеансы и мероприятия\n"
+                    text += "• Настраиваемые уведомления с билетами перед мероприятием\n"
+                elif plan_type == 'notifications':
+                    text += "🔔 <b>Уведомления о сериалах:</b>\n"
+                    text += "• Автоматические уведомления о выходе новых серий\n"
+                    text += "• Настройка времени уведомлений (будни/выходные)\n"
+                    text += "• Персонализированные напоминания для каждого сериала\n"
+                    text += "• Отслеживание прогресса просмотра сезонов\n"
+                elif plan_type == 'recommendations':
+                    text += "🎯 <b>Персональные рекомендации:</b>\n"
+                    text += "• Режим \"По оценкам в базе\" — рекомендации по оценкам фильмов, добавленных в базу чата или группы\n"
+                    text += "• Режим \"Рандом по Кинопоиску\" — случайный фильм из Кинопоиска по фильтрам\n"
+                    text += "• Режим рандомайзера \"По моим оценкам\" — рекомендации по оценкам из Кинопоиска\n"
+                    text += "• Импорт базы из Кинопоиска\n"
+                elif plan_type == 'tickets':
+                    text += "🎫 <b>Билеты в кино:</b>\n"
+                    text += "• Добавление билетов на сеансы и мероприятия\n"
+                    text += "• Настраиваемые уведомления с билетами перед мероприятием\n"
             else:
-                # Показываем дату окончания действия подписки
-                if isinstance(expires_at, datetime):
-                    expires_at_local = expires_at.astimezone(PLANS_TZ) if expires_at.tzinfo else PLANS_TZ.localize(expires_at)
-                    text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
+                # Для личных подписок - краткое сообщение
+                text = "✅ <b>Спасибо, оплата успешно проведена!</b>\n\n"
+                text += f"Ваша подписка: {plan_name}\n"
+                
+                # Если подписка навсегда, показываем "Действует неограниченно"
+                if period_type == 'lifetime' or expires_at is None:
+                    text += "Действует неограниченно"
                 else:
-                    # Если expires_at - строка, пытаемся распарсить
-                    try:
-                        from dateutil import parser
-                        expires_at_dt = parser.parse(str(expires_at))
-                        expires_at_local = expires_at_dt.astimezone(PLANS_TZ) if expires_at_dt.tzinfo else PLANS_TZ.localize(expires_at_dt)
+                    # Показываем дату окончания действия подписки
+                    if isinstance(expires_at, datetime):
+                        expires_at_local = expires_at.astimezone(PLANS_TZ) if expires_at.tzinfo else PLANS_TZ.localize(expires_at)
                         text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
-                    except:
-                        text += f"Действует до: {expires_at}"
+                    else:
+                        # Если expires_at - строка, пытаемся распарсить
+                        try:
+                            from dateutil import parser
+                            expires_at_dt = parser.parse(str(expires_at))
+                            expires_at_local = expires_at_dt.astimezone(PLANS_TZ) if expires_at_dt.tzinfo else PLANS_TZ.localize(expires_at_dt)
+                            text += f"Действует до: {expires_at_local.strftime('%d.%m.%Y')}"
+                        except:
+                            text += f"Действует до: {expires_at}"
         
         # === ДОБАВЛЯЕМ ЧЕК ОТ САМОЗАНЯТОГО ===
         if check_url:
@@ -1807,7 +1855,98 @@ def process_recurring_payments():
             )
             
             if payment.status == 'succeeded':
-                renew_subscription(subscription_id, period_type)
+                # Проверяем, есть ли будущая подписка с activated_at = next_payment_date
+                # Если есть, отменяем текущую и активируем будущую
+                conn_future = None
+                cursor_future = None
+                future_subscription_id = None
+                try:
+                    conn_future = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+                    cursor_future = conn_future.cursor()
+                    
+                    with db_lock:
+                        # Ищем будущую подписку с activated_at = next_payment_date для этого пользователя/чата
+                        next_payment_date = sub.get('next_payment_date')
+                        if next_payment_date:
+                            cursor_future.execute("""
+                                SELECT id, plan_type, period_type, price
+                                FROM subscriptions
+                                WHERE user_id = %s AND chat_id = %s 
+                                AND subscription_type = %s
+                                AND is_active = TRUE
+                                AND activated_at = %s
+                                AND id != %s
+                                LIMIT 1
+                            """, (user_id, chat_id, subscription_type, next_payment_date, subscription_id))
+                            future_sub = cursor_future.fetchone()
+                            
+                            if future_sub:
+                                future_subscription_id = future_sub['id']
+                                future_plan_type = future_sub['plan_type']
+                                future_period_type = future_sub['period_type']
+                                future_price = float(future_sub['price'])
+                                
+                                logger.info(f"[RECURRING PAYMENT] Найдена будущая подписка {future_subscription_id} для активации")
+                                
+                                # Отменяем текущую подписку
+                                cursor_future.execute("""
+                                    UPDATE subscriptions 
+                                    SET is_active = FALSE, cancelled_at = %s
+                                    WHERE id = %s
+                                """, (now, subscription_id))
+                                
+                                # Активируем будущую подписку (устанавливаем activated_at = now)
+                                from dateutil.relativedelta import relativedelta
+                                if future_period_type == 'month':
+                                    new_expires_at = now + relativedelta(months=1)
+                                    new_next_payment = now + relativedelta(months=1)
+                                elif future_period_type == '3months':
+                                    new_expires_at = now + relativedelta(months=3)
+                                    new_next_payment = now + relativedelta(months=3)
+                                elif future_period_type == 'year':
+                                    new_expires_at = now + relativedelta(years=1)
+                                    new_next_payment = now + relativedelta(years=1)
+                                elif future_period_type == 'lifetime':
+                                    new_expires_at = None
+                                    new_next_payment = None
+                                else:
+                                    new_expires_at = now + timedelta(days=30)
+                                    new_next_payment = now + timedelta(days=30)
+                                
+                                cursor_future.execute("""
+                                    UPDATE subscriptions 
+                                    SET activated_at = %s, expires_at = %s, next_payment_date = %s
+                                    WHERE id = %s
+                                """, (now, new_expires_at, new_next_payment, future_subscription_id))
+                                
+                                conn_future.commit()
+                                
+                                logger.info(f"[RECURRING PAYMENT] Отменена старая подписка {subscription_id}, активирована новая {future_subscription_id}")
+                                
+                                # Используем параметры будущей подписки для уведомления
+                                subscription_id = future_subscription_id
+                                plan_type = future_plan_type
+                                period_type = future_period_type
+                                price = future_price
+                            else:
+                                # Нет будущей подписки - обычное продление
+                                renew_subscription(subscription_id, period_type)
+                except Exception as future_error:
+                    logger.error(f"[RECURRING PAYMENT] Ошибка проверки будущей подписки: {future_error}", exc_info=True)
+                    # Fallback на обычное продление
+                    renew_subscription(subscription_id, period_type)
+                finally:
+                    if cursor_future:
+                        try:
+                            cursor_future.close()
+                        except:
+                            pass
+                    if conn_future:
+                        try:
+                            conn_future.close()
+                        except:
+                            pass
+                
                 update_payment_status(payment_id, 'succeeded', subscription_id)
                 
                 description = f"Автопродление подписки \"{plan_type}\" на {period_type}"

@@ -788,7 +788,9 @@ def get_user_personal_subscriptions(user_id):
             cursor_local.execute("""
                 SELECT * FROM subscriptions 
                 WHERE user_id = %s AND subscription_type = 'personal' 
-                AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW())
+                AND is_active = TRUE 
+                AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY activated_at ASC NULLS LAST
             """, (user_id,))
             return cursor_local.fetchall()
     finally:
